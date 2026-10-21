@@ -154,8 +154,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,131 passed / 0 skipped / 0 xfail, 3,131 collected** — re-derived
-2026-10-21 on the worktree making a record with no aligned base no location (three gates added, two deleted; 3,130
+**The standing baseline: 0 failed / 3,139 passed / 0 skipped / 0 xfail, 3,139 collected** — re-derived
+2026-10-21 on the tree adding the ladder's STAR rung (eight gates added; 3,131 after making a record with no aligned
+base no location, three gates added, two deleted; 3,130
 after checking the annotation pass against the scan, three gates added; 3,127 after stamping each
 record's status, six gates added; 3,121 after counting one outcome per read
 pair, fourteen gates added; 3,107 after recording the
@@ -189,10 +190,10 @@ order. `tests/test_scripts_index.py` holds the `design/` rows against the disk i
 | `design/ruler_vs_truth.py` | Is the EM's capture-contracted length right against the simulator's own yield? `--scale`: every class on one scale, and the within-gene spread; `--module` runs prototype rulers. ⛔ Read the probed and unprobed classes apart |
 | `design/calibration_oracle.py` | What is the certified per-object truth? Refused unless its named gates pass; `--build` makes the oracle caches |
 | `design/prior_vs_oracle.py` | Is `LocusPriors`' gDNA count right? `P − O` is calibration's error, `O − S` the pooled share's (`ISSUES: the-pooled-q-in-the-gdna-count`) |
-| `design/quant_accuracy.py` | How accurate is the tool end to end, and what is a perfect prior worth? Read in a pinned A/B pair; `--report … --markdown` renders the per-scenario release report |
+| `design/quant_accuracy.py` | How accurate is the tool end to end, and what is a perfect prior worth? Read in a pinned A/B pair; `--report … --markdown` renders the per-scenario release report; `--bam`: on an aligner's input (the STAR rung) |
 | `design/build_scan_cache.py` | Scan once, calibrate many times. ⛔ The key hashes the deposit rule, not `resolve.cpp`: after a change to which fragments are offered, `--force` |
 | `design/rename_identity.py` | Is a rename, refactor or speed-up numerically a no-op? `--freeze` once, `--check` after every stage, `--bam` on a real library; the reference is frozen, never rolling |
-| `sim/panel.py` | Build, simulate, cache, score and report a panel from one YAML; `status` names the next stage. ⛔ `cache` builds both caches; the oracle one is the truth every scorer reads |
+| `sim/panel.py` | Build, simulate, cache, score and report a panel from one YAML; `status` names the next stage. `align` + `score --bam`: the ladder's STAR rung. ⛔ `cache` builds both caches; the oracle one is the truth every scorer reads |
 | `sim/build_test_reference.py` | Renders the test chromosome from its one hand-edited YAML, `test_chr.yaml` (`docs/TESTING.md` §0a) |
 | `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | The panel's substrate; `panel.py build` drives the probe design, `panel.py simulate` the reads, and the reference carve is manual |
 | `sim/configs/gdna_ladder.yaml` | The 16-condition panel the tool is ranked on (`docs/TESTING.md` §0) |

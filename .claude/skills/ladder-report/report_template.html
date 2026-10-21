@@ -3,13 +3,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <style>
+/* Layout: a single reading column of stratum-grouped report sections — summary tiles, then pools, tables, side
+   panels, calibration and real data — each section a self-contained card grid or a horizontally scrolling table. */
 :root{
   color-scheme: light;
   --page:#f9f9f7; --surface:#fcfcfb; --surface-2:#f2f2ee;
   --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
   --grid:#e1e0d9; --rule:#c3c2b7; --ring:rgba(11,11,11,.10);
-  --gdna:#2a78d6; --nascent:#eb6834; --annot:#1baf7a;
-  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --gdna:#2a78d6; --nascent:#eb6834; --annot:#1baf7a; --base:#8a8577;
+  --good:#0c8a0c; --warn:#b97f00; --serious:#c9622f; --critical:#c62f2f;
   --shadow:0 1px 2px rgba(11,11,11,.05);
   --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -19,7 +21,8 @@
   --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321;
   --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
   --grid:#2c2c2a; --rule:#383835; --ring:rgba(255,255,255,.10);
-  --gdna:#3987e5; --nascent:#d95926; --annot:#199e70;
+  --gdna:#3987e5; --nascent:#d95926; --annot:#199e70; --base:#a39e90;
+  --good:#3fbf3f; --warn:#e0a63a; --serious:#e07e52; --critical:#ef5b5b;
   --shadow:0 1px 2px rgba(0,0,0,.4);
 }}
 :root[data-theme="dark"]{
@@ -27,7 +30,8 @@
   --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321;
   --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
   --grid:#2c2c2a; --rule:#383835; --ring:rgba(255,255,255,.10);
-  --gdna:#3987e5; --nascent:#d95926; --annot:#199e70;
+  --gdna:#3987e5; --nascent:#d95926; --annot:#199e70; --base:#a39e90;
+  --good:#3fbf3f; --warn:#e0a63a; --serious:#e07e52; --critical:#ef5b5b;
   --shadow:0 1px 2px rgba(0,0,0,.4);
 }
 *{box-sizing:border-box}
@@ -53,19 +57,25 @@ header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;
   background:var(--surface-2);border:1px solid var(--ring);
   border-radius:4px;padding:2px 7px;white-space:nowrap}
 
-.lede{margin-block:26px 22px;max-width:66ch;color:var(--ink-2);font-size:15px}
+.lede{margin-block:26px 22px;max-width:70ch;color:var(--ink-2);font-size:15px}
 .lede strong{color:var(--ink);font-weight:600}
 
 /* ── stat tiles ─────────────────────────────────────────── */
-.tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(212px,1fr));margin-bottom:12px}
+.tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-bottom:12px}
 .tile{background:var(--surface);border:1px solid var(--ring);border-radius:8px;
-  padding:14px 15px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:7px}
+  padding:14px 15px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:7px;min-width:0}
 .tile.def{border-style:dashed;opacity:.86}
-.tile-l{font-size:12px;color:var(--ink-2);font-weight:500;display:flex;align-items:center;gap:6px}
-.tile-v{font-size:27px;font-weight:600;letter-spacing:-.02em;line-height:1}
-.tile-s{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+.tile-l{font-size:12px;color:var(--ink-2);font-weight:500;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tile-v{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.tile-big{font-size:27px;font-weight:600;letter-spacing:-.02em;line-height:1}
+.tile-big small{font-size:15px;color:var(--ink-2);font-weight:500}
+.tile-was{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.tile-s{font-size:11.5px;color:var(--muted);font-family:var(--mono);display:flex;flex-direction:column;gap:2px}
+.tile-star{color:var(--ink-2);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .flag{font-size:9.5px;font-family:var(--mono);letter-spacing:.06em;
   border:1px solid currentColor;border-radius:3px;padding:1px 4px;color:var(--critical)}
+.delta{font-family:var(--mono);font-size:11px;border-radius:3px;padding:1px 5px;border:1px solid currentColor}
+.delta.better{color:var(--good)} .delta.worse{color:var(--critical)} .delta.flat{color:var(--muted)}
 
 /* ── rules ───────────────────────────────────────────────── */
 .rules{background:var(--surface);border:1px solid var(--ring);border-left:3px solid var(--rule);
@@ -81,7 +91,7 @@ section{margin-block:38px 0;scroll-margin-top:72px}
 .sec-h{display:flex;align-items:baseline;gap:11px;flex-wrap:wrap;
   padding-bottom:9px;border-bottom:1px solid var(--rule);margin-bottom:8px}
 .sec-n{font-family:var(--mono);font-size:12px;color:var(--muted)}
-.sec-sub{margin-block:11px 20px;color:var(--ink-2);max-width:74ch;font-size:13.5px}
+.sec-sub{margin-block:11px 20px;color:var(--ink-2);max-width:76ch;font-size:13.5px}
 
 /* ── legend ──────────────────────────────────────────────── */
 .legend{display:flex;flex-wrap:wrap;gap:7px 18px;align-items:center;margin-bottom:18px}
@@ -95,9 +105,9 @@ section{margin-block:38px 0;scroll-margin-top:72px}
 .grp-r{flex:1;height:1px;background:var(--grid);min-width:20px}
 
 /* ── scenario cards ──────────────────────────────────────── */
-.cards{display:grid;gap:11px;grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+.cards{display:grid;gap:11px;grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr))}
 .card{background:var(--surface);border:1px solid var(--ring);border-radius:8px;
-  padding:14px 15px 12px;box-shadow:var(--shadow)}
+  padding:14px 15px 12px;box-shadow:var(--shadow);min-width:0}
 .card.def{border-style:dashed}
 .card-h{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
 .lvl{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink);
@@ -105,41 +115,49 @@ section{margin-block:38px 0;scroll-margin-top:72px}
 .cid{font-family:var(--mono);font-size:11px;color:var(--ink-2);word-break:break-all;line-height:1.35}
 
 .bars{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
-.barrow{display:grid;grid-template-columns:38px 1fr;align-items:center;gap:8px}
+.barrow{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:8px}
 .barlab{font-family:var(--mono);font-size:10px;color:var(--muted);text-align:right;letter-spacing:.03em}
 .bar{display:flex;gap:2px;height:16px;border-radius:4px;overflow:hidden;background:var(--surface-2)}
+.bar.thin{height:9px;opacity:.75}
 .seg{height:100%;min-width:0}
-.seg:first-child{border-radius:4px 0 0 4px}
-.seg:last-child{border-radius:0 4px 4px 0}
-.seg:only-child{border-radius:4px}
 
 table{border-collapse:collapse;width:100%;font-size:12.5px}
 .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 th{font-weight:500;color:var(--muted);text-align:right;font-size:10.5px;
-  letter-spacing:.05em;text-transform:uppercase;padding:0 0 5px;white-space:nowrap}
-th:first-child{text-align:left}
-td{padding:4px 0;border-top:1px solid var(--grid);text-align:right;
+  letter-spacing:.05em;text-transform:uppercase;padding:0 0 5px 10px;white-space:nowrap}
+th:first-child{text-align:left;padding-left:0}
+td{padding:4px 0 4px 10px;border-top:1px solid var(--grid);text-align:right;
   font-variant-numeric:tabular-nums;white-space:nowrap}
-td:first-child{text-align:left;font-variant-numeric:normal}
+td:first-child{text-align:left;font-variant-numeric:normal;padding-left:0}
 .pool{display:flex;align-items:center;gap:6px;color:var(--ink-2)}
-.d-pos{color:var(--ink-2)} .d-neg{color:var(--ink-2)}
 .pct{font-weight:600}
 .p-ok{color:var(--ink-2)} .p-warn{color:var(--serious)} .p-bad{color:var(--critical)}
 .na{color:var(--muted);font-variant-numeric:normal}
+.was{color:var(--muted)}
 
 /* ── wide metric tables ──────────────────────────────────── */
-.mt{min-width:760px}
+.mt{min-width:860px}
 .mt td:first-child{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
 .mt tr.grp-row td{border-top:1px solid var(--rule);padding-top:11px;
   font-weight:600;font-family:var(--sans);font-size:12px;color:var(--ink)}
+.mt tr.ctl td{color:var(--muted)}
 .meter{display:inline-flex;align-items:center;gap:7px;width:100%;justify-content:flex-end}
 .meter-t{height:7px;width:62px;background:var(--surface-2);border-radius:4px;overflow:hidden;flex:none}
 .meter-f{height:100%;border-radius:4px;background:var(--annot)}
 .meter-f.warn{background:var(--serious)} .meter-f.bad{background:var(--critical)}
 
+/* ── real data strip ─────────────────────────────────────── */
+.strip{background:var(--surface);border:1px solid var(--ring);border-radius:8px;padding:16px;box-shadow:var(--shadow)}
+.axis{position:relative;height:66px;margin:8px 6px 0}
+.axis-line{position:absolute;left:0;right:0;top:30px;height:2px;background:var(--grid)}
+.tick{position:absolute;top:24px;width:2px;height:14px;border-radius:1px}
+.tick-l{position:absolute;font-family:var(--mono);font-size:11px;white-space:nowrap;transform:translateX(-50%)}
+.tick-l.up{top:0}.tick-l.down{top:42px}
+.ax-end{position:absolute;top:42px;font-family:var(--mono);font-size:10px;color:var(--muted)}
+
 footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--grid);
   color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:6px}
-footer code{background:none;padding:0}
+footer code{background:none;padding:0;word-break:break-all}
 
 #tip{position:fixed;z-index:60;pointer-events:none;opacity:0;transition:opacity .09s;
   background:var(--ink);color:var(--page);font-size:11.5px;font-family:var(--mono);
@@ -147,23 +165,29 @@ footer code{background:none;padding:0}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 @media (max-width:560px){
   .top-in{padding:10px 16px}.chips{margin-left:0;width:100%}
-  .cards{grid-template-columns:1fr}
 }
 </style>
 
 <header class="top"><div class="top-in">
-  <span class="eyebrow">Rigel · gDNA ladder benchmark</span>
+  <span class="eyebrow">Rigel · 0.8.0 release candidate</span>
   <div class="chips" id="chips"></div>
 </div></header>
 
 <div class="wrap">
   <div class="lede">
-    <h1>End-to-end accuracy on the ladder</h1>
+    <h1>End-to-end accuracy, release candidate against 0.7.1</h1>
     <p style="margin-top:10px">Sixteen simulated libraries of <strong>10,000,000 fragments</strong> each,
-    spanning 0–98&nbsp;% genomic-DNA contamination × two strand specificities × capture on and off.
-    Every figure is scored against the simulator&rsquo;s own <strong>realised per-fragment truth</strong> —
-    each fragment counted exactly once, never a pre-capture molar abundance — so a difference is a
-    fragment the tool put somewhere the simulator did not.</p>
+    spanning 0–98&nbsp;% genomic-DNA contamination × two strand specificities × capture on and off, then the
+    two fragment-length gap panels, calibration against an oracle calibration, and one real cell-line mix with
+    per-fragment truth. Every simulated figure is scored against the simulator&rsquo;s own <strong>realised
+    per-fragment truth</strong>, and the 0.7.1 column is the tagged release scored the same way on the same
+    libraries.</p>
+    <p style="margin-top:10px">Re-run on 2026-10-21 after the scan&rsquo;s repair: every alignment Rigel uses is now
+    one molecule of both mates with a fragment length, chimeric and off-index alignments are withheld, and every read
+    pair is accounted for. The simulator&rsquo;s own alignments carry neither secondary alignments nor broken pairs,
+    so the repair barely moves them (transcript error within &plusmn;0.54&nbsp;% per condition of the 2026-10-14
+    card); it shows on STAR alignments of the same reads.</p>
+    <p style="margin-top:10px" id="star-lede"></p>
   </div>
 
   <div class="tiles" id="tiles"></div>
@@ -171,44 +195,56 @@ footer code{background:none;padding:0}
   <div class="rules">
     <h3>How to read this</h3>
     <ul>
-      <li><b>Three pools, three different questions.</b> <b>gDNA</b> is contamination the deconvolution
-        must remove. <b>Nascent RNA</b> is the <em>synthetic</em> entity the index manufactures for each
-        multi-exon gene. <b>Annotated RNA</b> is the transcript table a user reads. The split is on
-        <code>is_synthetic</code>, never <code>is_single_exon</code> — a single-exon annotated transcript is
-        <em>annotated</em> RNA, not nascent.</li>
-      <li><b>The gDNA estimate includes intergenic fragments.</b> They reach no locus and never enter
-        the EM, but they are gDNA and the truth counts them. Off capture they are more than half of it.</li>
-      <li><b>Percent error is undefined where the truth is zero</b> and is shown <code>n/a</code>. At the
-        0&nbsp;% rung there is no gDNA at all; the raw count beside it is the whole of the answer.</li>
+      <li><b>Each stratum's headline is its three contaminated rungs</b> (5, 50 and 98&nbsp;% gDNA): summed
+        <code>|estimate − truth|</code> over the transcript table, against the summed true annotated mass. The
+        0&nbsp;% rung is a <b>control</b> and is shown beside it, never folded in.</li>
       <li><b>Read per stratum, never pooled.</b> Three strata are in scope. <b>Unstranded × capture ON is
-        deferred</b> — reported everywhere, never a development target — and it carries most of the
-        error, so a pooled total would mostly be its total.</li>
-      <li><b>An effect is judged by its size, with genes and pools read beside the transcript table.</b>
-        An A/B pair runs with the scan pinned (<code>--set scan.total_threads=1</code>) and is exactly
-        reproducible.</li>
-      <li><b><code>expressed</code> and <code>detected</code> are the scored sets.</b> The truth table
-        is larger than either: it carries a row per synthetic nascent entity too (6,919 of 15,669),
-        and those are zero on <em>both</em> sides, so they enter no figure here. A raw row count would
-        read as thousands of transcripts scored perfectly. Likewise only 2,466 of the 9,385 gene-level
-        rows are real genes.</li>
-      <li><b>There is no false-negative column, because it cannot fire.</b> A false negative needs an
-        estimate of exactly zero, and a fractional posterior never is — it reads 0 on all 16
-        conditions. <b>Under-assigned</b> is the live quantity and is shown instead.</li>
-      <li><b>MARD is symmetric</b> — <code>|est−true| / (|est|+|true|)</code> over the expressed set,
-        bounded in [0,1]. 0.5 means a 3× error, not 50 %. Both it and the median relative error are
-        unweighted by mass: a 1-fragment transcript counts as much as a 25,000-fragment one.</li>
-      <li><b>One asymmetry in the pool rows.</b> The estimate splits on <code>is_synthetic</code> (the
-        entity); the truth splits on the simulator's template kind. A few annotated single-exon
-        transcripts serve as their own nascent entity, so ~300 of ~1.9 M fragments count as nascent
-        truth while the tool's counts for them land in annotated. Recorded, not removable.</li>
+        deferred</b>: reported everywhere, not a 0.8.0 release requirement, and it carries most of the error.</li>
+      <li><b>Three pools, three questions.</b> <b>gDNA</b> is contamination to remove; <b>nascent RNA</b> is
+        the synthetic entity the index makes per merged span; <b>annotated RNA</b> is the transcript table a
+        user reads. The split is on <code>is_synthetic</code>.</li>
+      <li><b>The ceiling arm</b> runs the same pipeline with the EM handed a perfect gDNA prior
+        (<code>oracle</code>); its distance below the release candidate prices what the prior still costs. The
+        capture-length ceiling (<code>oracle_ruler</code>) is withheld: its anchor predates the shipped capture
+        reader and it reads 476&nbsp;% on the g98 stranded capture-ON row, an instrument defect filed for
+        repair.</li>
+      <li><b>An effect is judged by its size</b>, genes and pools read beside the transcript table. Every arm
+        runs with the scan pinned (<code>scan.total_threads=1</code>) under fractional assignment, and the locus EM
+        gives one answer at any thread count, so it is exactly reproducible.</li>
+      <li><b>Two inputs, one truth.</b> Each simulated library is read twice: from the simulator&rsquo;s own
+        alignments, which place every read where it was drawn, and from <b>STAR alignments</b> of the same
+        reads, the input a real library gives Rigel. Both are scored against the same per-fragment truth, so
+        the columns compare directly. An aligner places only part of what was simulated, most of the rest
+        gDNA drawn over the reference&rsquo;s N runs; those fragments are counted apart (<b>unaligned</b>),
+        and the gDNA fraction&rsquo;s truth is read over what reached Rigel.</li>
+      <li><b>MARD is symmetric</b>, <code>|est−true| / (|est|+|true|)</code>, bounded in [0,1]; 0.5 means a
+        3× error. It and the median relative error weight a 1-fragment transcript as much as a 25,000-fragment
+        one.</li>
     </ul>
   </div>
 
+  <section id="roll">
+    <div class="sec-h"><span class="sec-n">01</span><h2>Per stratum</h2></div>
+    <p class="sec-sub">The headline table. Contaminated rungs summed within a stratum, the 0&nbsp;% control on
+      its own line, and the perfect-prior ceiling beside the release candidate.</p>
+    <div class="scroll"><table class="mt" id="roll-table"></table></div>
+  </section>
+
+  <section id="star">
+    <div class="sec-h"><span class="sec-n">02</span><h2>STAR alignments — the same reads, aligned as a real library is</h2></div>
+    <p class="sec-sub" id="star-sub"></p>
+    <div class="scroll"><table class="mt" id="star-roll"></table></div>
+    <p class="sec-sub" style="margin-top:22px">Per scenario. <b>Σ|Δ|</b> as a share of the true annotated mass on
+      each input; the gDNA fraction on STAR alignments against its truth over the read pairs the aligner placed;
+      and what the aligner left unplaced, by true origin.</p>
+    <div class="scroll"><table class="mt" id="star-table"></table></div>
+  </section>
+
   <section id="pools">
-    <div class="sec-h"><span class="sec-n">01</span><h2>Pool level — where the fragments went</h2></div>
-    <p class="sec-sub">For each scenario, the library&rsquo;s 10&nbsp;M fragments split three ways. The upper
-      bar is the truth, the lower is Rigel&rsquo;s estimate, both to the same scale — so mass moving between
-      pools is visible directly.</p>
+    <div class="sec-h"><span class="sec-n">03</span><h2>Pool level — where the fragments went</h2></div>
+    <p class="sec-sub">For each ladder library, its 10&nbsp;M fragments split three ways: the truth, the
+      release candidate, and 0.7.1 (the thin bar), all to one scale, so mass moving between pools is visible
+      directly.</p>
     <div class="legend">
       <span class="lg"><span class="sw" style="background:var(--gdna)"></span>gDNA <span style="color:var(--muted)">(EM + intergenic)</span></span>
       <span class="lg"><span class="sw" style="background:var(--nascent)"></span>Nascent RNA <span style="color:var(--muted)">(synthetic entities)</span></span>
@@ -218,32 +254,48 @@ footer code{background:none;padding:0}
   </section>
 
   <section id="tx">
-    <div class="sec-h"><span class="sec-n">02</span><h2>Transcript level</h2></div>
-    <p class="sec-sub">Inside the annotated pool alone — gDNA and the synthetic nascent entities are
-      excluded, so what is left is how well Rigel splits the RNA it kept.
-      <b>Σ|Δ|</b> sums <code>|estimate − truth|</code> over every transcript in the truth table, silent
-      ones included; the percentage is that sum against the true annotated mass.</p>
+    <div class="sec-h"><span class="sec-n">04</span><h2>Transcript level</h2></div>
+    <p class="sec-sub">Inside the annotated pool alone. <b>Σ|Δ|</b> sums <code>|estimate − truth|</code> over every
+      transcript in the truth table, silent ones included; the percentage is that sum against the true
+      annotated mass, with 0.7.1&rsquo;s beside it.</p>
     <div class="scroll"><table class="mt" id="tx-table"></table></div>
   </section>
 
   <section id="gene">
-    <div class="sec-h"><span class="sec-n">03</span><h2>Gene level</h2></div>
-    <p class="sec-sub">The same scorer over genes, and the difference from the transcript row is the
-      point: summing a gene&rsquo;s isoforms collapses exactly the error that comes from not knowing
-      <em>which</em> isoform a fragment came from. What survives is error in deciding whether the fragment
-      was RNA from this gene at all — the question Rigel exists to answer.</p>
+    <div class="sec-h"><span class="sec-n">05</span><h2>Gene level</h2></div>
+    <p class="sec-sub">The same scorer over genes. Summing a gene&rsquo;s isoforms removes the error of not
+      knowing which isoform a fragment came from; what survives is error in deciding whether the fragment was
+      RNA from this gene at all.</p>
     <div class="scroll"><table class="mt" id="gene-table"></table></div>
   </section>
 
-  <section id="roll">
-    <div class="sec-h"><span class="sec-n">04</span><h2>Per stratum</h2></div>
-    <p class="sec-sub">Summed within a stratum over its four gDNA levels. The four strata are never
-      added together.</p>
-    <div class="scroll"><table class="mt" id="roll-table" style="min-width:680px"></table></div>
+  <section id="flgap">
+    <div class="sec-h"><span class="sec-n">06</span><h2>Fragment-length gap panels</h2></div>
+    <p class="sec-sub">The ladder gives gDNA and RNA equal fragment lengths on purpose. These two side panels
+      re-simulate the 50&nbsp;% rung with RNA fragments longer, or shorter, than gDNA&rsquo;s, so a length
+      mechanism is judged in both directions. Never a ladder rung; read beside it.</p>
+    <div class="scroll"><table class="mt" id="flgap-table"></table></div>
+  </section>
+
+  <section id="calib">
+    <div class="sec-h"><span class="sec-n">07</span><h2>Calibration against oracle calibration</h2></div>
+    <p class="sec-sub">The number that ranks a calibration mechanism, upstream of the EM. <b>f<sub>gDNA</sub></b> is
+      the library gDNA fraction calibration reads (P) against the origin-split truth (O). <b>MWAE</b> is the
+      mass-weighted absolute error of the per-object gDNA split, on regions and on boundaries. It calibrates each
+      condition's cached scan, built 2026-10-16/17, before the scan's repair; the panels are re-cached once the scan
+      is final.</p>
+    <div class="scroll"><table class="mt" id="calib-table"></table></div>
+  </section>
+
+  <section id="real">
+    <div class="sec-h"><span class="sec-n">08</span><h2>Real data — the VCaP mix</h2></div>
+    <p class="sec-sub">An in-silico blend of two real VCaP libraries, exome DNA and transcriptome, whose read
+      names carry each fragment&rsquo;s origin. The library gDNA fraction from <code>summary.json</code>.</p>
+    <div class="strip" id="vcap"></div>
   </section>
 
   <footer>
-    <span>Generated from <code id="f-arm"></code> by <code>scripts/design/quant_accuracy.py</code>.</span>
+    <span id="f-src"></span>
     <span>Pool colours are the data-viz reference palette&rsquo;s categorical slots 1–3, in fixed order.</span>
   </footer>
 </div>
@@ -261,31 +313,151 @@ const pct = (e,t) => t<=0 ? null : 100*(e-t)/t;
 const pctS = v => v===null ? "n/a" : (v>=0?"+":"−")+Math.abs(v).toFixed(1)+" %";
 const cls = v => v===null ? "na" : Math.abs(v)<5 ? "p-ok" : Math.abs(v)<25 ? "p-warn" : "p-bad";
 const el = (t,c,h) => { const n=document.createElement(t); if(c)n.className=c; if(h!==undefined)n.innerHTML=h; return n; };
+const byLevel = (a,b) => a.level.localeCompare(b.level);
+const inStratum = (rows,strand,cap) => rows.filter(s=>s.strand===strand && s.capture===cap).sort(byLevel);
+const ratio = (rows,num,den) => { const d=rows.reduce((a,r)=>a+den(r),0); return d>0 ? 100*rows.reduce((a,r)=>a+num(r),0)/d : null; };
+const has = (rows,k) => rows.length>0 && rows.every(r=>r[k]);
+const fmtP = (v,dp=2) => v===null||v===undefined ? `<span class="na">—</span>` : `${v.toFixed(dp)} %`;
+function deltaChip(now, was){
+  if (now===null || was===null || was===undefined) return "";
+  const d = now - was, rel = was>0 ? Math.abs(d)/was : 0;
+  const k = rel < 0.02 ? "flat" : d < 0 ? "better" : "worse";
+  return `<span class="delta ${k}">${d<0?"−":"+"}${Math.abs(d).toFixed(2)} pt</span>`;
+}
 
 document.getElementById("chips").innerHTML =
-  [`arm ${M.arm}`, `${M.n} conditions`, `${n0(M.depth)} fragments each`,
-   `assignment ${M.assignment}`, `policy ${M.policy}`, M.scored]
+  [`commit ${M.head}`, `${M.n} ladder conditions`, `${n0(M.depth)} fragments each`,
+   `assignment ${M.assignment}`, `policy ${M.policy}`, `scored ${M.scored}`, `baseline ${M.baseline}`]
   .map(t=>`<span class="chip">${t}</span>`).join("");
-document.getElementById("f-arm").textContent = M.arm + ".jsonl";
+document.getElementById("f-src").innerHTML = "Built from " + M.sources.map(s=>`<code>${M.root ? s.replace(M.root, "$RIGEL_RUNS") : s}</code>`).join(", ") +
+  " by <code>scripts/design/quant_accuracy.py</code> and <code>calibration_vs_oracle.py</code>.";
 
 /* tiles */
 const tiles = document.getElementById("tiles");
 for (const [strand,cap] of STRATA){
-  const rows = S.filter(s=>s.strand===strand && s.capture===cap).sort((a,b)=>a.level.localeCompare(b.level));
-  const p = rows.map(r=>100*r.tx.count_abs_err/r.tx.count_true);
+  const rows = inStratum(S,strand,cap), cont = rows.filter(r=>r.level!=="g00"), ctl = rows.find(r=>r.level==="g00");
+  const now = ratio(cont, r=>r.tx.count_abs_err, r=>r.tx.count_true);
+  const was = has(cont,"v071") ? ratio(cont, r=>r.v071.tx_abs_err, r=>r.v071.tx_true) : null;
+  const gNow = ratio(cont, r=>r.gene.count_abs_err, r=>r.gene.count_true);
+  const gWas = has(cont,"v071") ? ratio(cont, r=>r.v071.gene_abs_err, r=>r.v071.gene_true) : null;
   const def = rows[0].deferred;
   const t = el("div","tile"+(def?" def":""));
   t.append(el("div","tile-l", `${strand} × capture ${cap}` + (def?` <span class="flag">DEFERRED</span>`:"")));
-  t.append(el("div","tile-v",
-    `<span class="num">${p[0].toFixed(1)}–${p[3].toFixed(1)}</span><span style="font-size:15px;color:var(--ink-2)"> %</span>`));
-  t.append(el("div","tile-s", `transcript Σ|Δ| · ${rows.map(r=>LEVEL[r.level]).join(" / ")} gDNA`));
+  t.append(el("div","tile-v", `<span class="tile-big num">${now.toFixed(2)}<small> %</small></span>`
+    + (was!==null?`<span class="tile-was num">0.7.1 ${was.toFixed(2)} %</span>${deltaChip(now,was)}`:"")));
+  const ctlNow = ctl ? 100*ctl.tx.count_abs_err/ctl.tx.count_true : null;
+  const ctlWas = ctl && ctl.v071 ? 100*ctl.v071.tx_abs_err/ctl.v071.tx_true : null;
+  const st = (DATA.star || []).filter(r=>r.strand===strand && r.capture===cap && r.level!=="g00");
+  const sNow = st.length===cont.length && st.length ? ratio(st, r=>r.tx.count_abs_err, r=>r.tx.count_true) : null;
+  t.append(el("div","tile-s",
+    (sNow!==null?`<span class="tile-star">on STAR alignments ${sNow.toFixed(2)} % ${deltaChip(sNow,now)}</span>`:"")
+    + `<span>transcript Σ|Δ| over 5 / 50 / 98 % gDNA</span>`
+    + `<span>genes ${gNow.toFixed(2)} %${gWas!==null?` · 0.7.1 ${gWas.toFixed(2)} %`:""}</span>`
+    + (ctl?`<span>0 % control ${ctlNow.toFixed(2)} %${ctlWas!==null?` · 0.7.1 ${ctlWas.toFixed(2)} %`:""}</span>`:"")));
   tiles.append(t);
 }
+
+/* rollup */
+(function(){
+  const cols = ["stratum","rows","annotated truth","release Σ|Δ| %","0.7.1 %","Δ","oracle prior %",
+                "genes %","0.7.1 genes %","nascent est / truth","gDNA est / truth"];
+  let h = "<thead><tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
+  for (const [strand,cap] of STRATA){
+    const rows = inStratum(S,strand,cap);
+    const def = rows[0].deferred;
+    h += `<tr class="grp-row"><td colspan="${cols.length}">${strand} × capture ${cap}`
+       + (def?` <span class="flag">DEFERRED</span>`:"") + `</td></tr>`;
+    for (const [label, sub, ctl] of [["5–98 % gDNA", rows.filter(r=>r.level!=="g00"), false],
+                                       ["0 % control", rows.filter(r=>r.level==="g00"), true]]){
+      if (!sub.length) continue;
+      const tt = sub.reduce((a,r)=>a+r.tx.count_true,0);
+      const now = ratio(sub, r=>r.tx.count_abs_err, r=>r.tx.count_true);
+      const was = has(sub,"v071") ? ratio(sub, r=>r.v071.tx_abs_err, r=>r.v071.tx_true) : null;
+      const orc = has(sub,"oracle") ? ratio(sub, r=>r.oracle.tx_abs_err, r=>r.tx.count_true) : null;
+      const gn = ratio(sub, r=>r.gene.count_abs_err, r=>r.gene.count_true);
+      const gw = has(sub,"v071") ? ratio(sub, r=>r.v071.gene_abs_err, r=>r.v071.gene_true) : null;
+      const sum = f => sub.reduce((a,r)=>a+f(r),0);
+      h += `<tr class="${ctl?"ctl":""}"><td>${label}</td><td class="num">${sub.length}</td><td class="num">${n0(tt)}</td>`
+        + `<td class="num pct">${fmtP(now)}</td><td class="num was">${fmtP(was)}</td><td>${deltaChip(now,was)}</td>`
+        + `<td class="num">${fmtP(orc)}</td>`
+        + `<td class="num">${fmtP(gn)}</td><td class="num was">${fmtP(gw)}</td>`
+        + `<td class="num">${n0(sum(r=>r.pools.nascent.est))} / <span class="was">${n0(sum(r=>r.pools.nascent.true))}</span></td>`
+        + `<td class="num">${n0(sum(r=>r.pools.gdna.est))} / <span class="was">${n0(sum(r=>r.pools.gdna.true))}</span></td></tr>`;
+    }
+  }
+  document.getElementById("roll-table").innerHTML = h + "</tbody>";
+})();
+
+/* the STAR rung */
+(function(){
+  const T = DATA.star || [], A = (M.star || {});
+  const sec = document.getElementById("star");
+  if (!T.length){ sec.querySelector("#star-sub").textContent = "No STAR rung recorded."; return; }
+  const byId = Object.fromEntries(S.map(r=>[r.id, r]));
+  document.getElementById("star-sub").innerHTML =
+    `Every condition&rsquo;s reads aligned by <code>${A.version || A.aligner || "the aligner"}</code> with the MANUAL&rsquo;s `
+    + `recommended STAR settings (<code>${A.params || ""}</code>; <code>panel.py align</code>), then the same pipeline and `
+    + `scorer as above (<code>quant_accuracy.py --bam ${A.name}.bam</code>). The simulator&rsquo;s alignments are the `
+    + `regression check; these are what a user&rsquo;s library looks like to Rigel.`;
+  document.getElementById("star-lede").innerHTML =
+    `<b>The STAR rung</b> (section 02) reads the same libraries from STAR alignments: `
+    + `${T.length} of ${S.length} conditions aligned.`;
+  const cols = ["stratum","rows","transcript % · simulator","transcript % · STAR","Δ","genes % · simulator",
+                "genes % · STAR","gDNA est / truth · STAR","unaligned gDNA","nascent est / truth · STAR"];
+  let h = "<thead><tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
+  for (const [strand,cap] of STRATA){
+    const rows = inStratum(T,strand,cap);
+    if (!rows.length) continue;
+    h += `<tr class="grp-row"><td colspan="${cols.length}">${strand} × capture ${cap}`
+       + (rows[0].deferred?` <span class="flag">DEFERRED</span>`:"") + `</td></tr>`;
+    for (const [label, sub, ctl] of [["5–98 % gDNA", rows.filter(r=>r.level!=="g00"), false],
+                                       ["0 % control", rows.filter(r=>r.level==="g00"), true]]){
+      if (!sub.length) continue;
+      const sim = sub.map(r=>byId[r.id]).filter(Boolean);
+      const both = sim.length===sub.length;
+      const now = ratio(sub, r=>r.tx.count_abs_err, r=>r.tx.count_true);
+      const was = both ? ratio(sim, r=>r.tx.count_abs_err, r=>r.tx.count_true) : null;
+      const gn = ratio(sub, r=>r.gene.count_abs_err, r=>r.gene.count_true);
+      const gw = both ? ratio(sim, r=>r.gene.count_abs_err, r=>r.gene.count_true) : null;
+      const sum = f => sub.reduce((a,r)=>a+f(r),0);
+      h += `<tr class="${ctl?"ctl":""}"><td>${label}</td><td class="num">${sub.length}</td>`
+        + `<td class="num was">${fmtP(was)}</td><td class="num pct">${fmtP(now)}</td><td>${deltaChip(now,was)}</td>`
+        + `<td class="num was">${fmtP(gw)}</td><td class="num">${fmtP(gn)}</td>`
+        + `<td class="num">${n0(sum(r=>r.pools.gdna.est))} / <span class="was">${n0(sum(r=>r.pools.gdna.true))}</span></td>`
+        + `<td class="num">${n0(sum(r=>r.unaligned.gdna))}</td>`
+        + `<td class="num">${n0(sum(r=>r.pools.nascent.est))} / <span class="was">${n0(sum(r=>r.pools.nascent.true))}</span></td></tr>`;
+    }
+  }
+  document.getElementById("star-roll").innerHTML = h + "</tbody>";
+
+  const c2 = ["scenario","transcript % · simulator","transcript % · STAR","Δ","genes % · simulator","genes % · STAR",
+              "gDNA fraction · STAR","truth over placed","error","unaligned gDNA","unaligned RNA"];
+  let t = "<thead><tr>" + c2.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
+  for (const [strand,cap] of STRATA){
+    const rows = inStratum(T,strand,cap);
+    if (!rows.length) continue;
+    t += `<tr class="grp-row"><td colspan="${c2.length}">${strand} × capture ${cap}`
+       + (rows[0].deferred?` <span class="flag">DEFERRED</span>`:"") + `</td></tr>`;
+    for (const r of rows){
+      const o = byId[r.id];
+      const now = 100*r.tx.count_abs_err/r.tx.count_true, was = o ? 100*o.tx.count_abs_err/o.tx.count_true : null;
+      const g = 100*r.gene.count_abs_err/r.gene.count_true, gw = o ? 100*o.gene.count_abs_err/o.gene.count_true : null;
+      const f = r.gdna_frac, d = f.est - f.true_aligned;
+      t += `<tr class="${r.level==="g00"?"ctl":""}"><td>${r.id}</td>`
+        + `<td class="num was">${fmtP(was)}</td><td class="num pct">${fmtP(now)}</td><td>${deltaChip(now,was)}</td>`
+        + `<td class="num was">${fmtP(gw)}</td><td class="num">${fmtP(g)}</td>`
+        + `<td class="num">${f.est.toFixed(4)}</td><td class="num was">${f.true_aligned.toFixed(4)}</td>`
+        + `<td class="num">${(d>=0?"+":"−")+Math.abs(d).toFixed(4)}</td>`
+        + `<td class="num">${n0(r.unaligned.gdna)}</td><td class="num">${n0(r.unaligned.mrna + r.unaligned.nrna)}</td></tr>`;
+    }
+  }
+  document.getElementById("star-table").innerHTML = t + "</tbody>";
+})();
 
 /* pool cards */
 const pg = document.getElementById("pool-groups");
 for (const [strand,cap] of STRATA){
-  const rows = S.filter(s=>s.strand===strand && s.capture===cap).sort((a,b)=>a.level.localeCompare(b.level));
+  const rows = inStratum(S,strand,cap);
   const g = el("div","grp"), h = el("div","grp-h");
   h.append(el("span","grp-t",`${strand} × capture ${cap}`));
   if (rows[0].deferred) h.append(el("span","flag","DEFERRED"));
@@ -294,12 +466,12 @@ for (const [strand,cap] of STRATA){
   const cards = el("div","cards");
   for (const r of rows){
     const tot = M.depth;
-    const bar = (which,label) => {
+    const bar = (vals,label,thin) => {
       const b = el("div","barrow");
       b.append(el("div","barlab",label));
-      const bb = el("div","bar");
+      const bb = el("div","bar"+(thin?" thin":""));
       for (const [k,name,v] of POOLS){
-        const val = r.pools[k][which];
+        const val = vals[k];
         const seg = el("div","seg");
         seg.style.flex = `0 0 ${(100*val/tot).toFixed(3)}%`;
         seg.style.background = `var(${v})`;
@@ -314,21 +486,25 @@ for (const [strand,cap] of STRATA){
     ch.append(el("span","cid",r.id));
     c.append(ch);
     const bars = el("div","bars");
-    bars.append(bar("true","truth"), bar("est","Rigel"));
+    const pick = w => Object.fromEntries(POOLS.map(([k])=>[k, r.pools[k][w]]));
+    bars.append(bar(pick("true"),"truth"), bar(pick("est"),"0.8.0"));
+    if (r.v071) bars.append(bar(r.v071.pools,"0.7.1",true));
     c.append(bars);
     let body = "";
     for (const [k,name,v] of POOLS){
       const e=r.pools[k].est, t=r.pools[k].true, p=pct(e,t);
+      const w = r.v071 ? r.v071.pools[k] : null, pw = w===null ? null : pct(w,t);
       body += `<tr><td><span class="pool"><span class="sw" style="background:var(${v})"></span>${name}</span></td>`
-        + `<td class="num">${n0(e)}</td><td class="num" style="color:var(--muted)">${n0(t)}</td>`
-        + `<td class="num">${sgn(e-t)}</td><td class="num pct ${cls(p)}">${pctS(p)}</td></tr>`;
+        + `<td class="num">${n0(e)}</td><td class="num was">${n0(t)}</td>`
+        + `<td class="num pct ${cls(p)}">${pctS(p)}</td><td class="num was">${pctS(pw)}</td></tr>`;
     }
     const gf = r.gdna_frac;
     body += `<tr><td style="color:var(--muted)">gDNA fraction</td><td class="num">${gf.est.toFixed(4)}</td>`
-      + `<td class="num" style="color:var(--muted)">${gf.true.toFixed(4)}</td>`
-      + `<td class="num">${(gf.est-gf.true>=0?"+":"−")+Math.abs(gf.est-gf.true).toFixed(4)}</td><td></td></tr>`;
+      + `<td class="num was">${gf.true.toFixed(4)}</td>`
+      + `<td class="num">${(gf.est-gf.true>=0?"+":"−")+Math.abs(gf.est-gf.true).toFixed(4)}</td>`
+      + `<td class="num was">${r.v071?r.v071.gdna_frac.toFixed(4):""}</td></tr>`;
     c.append(el("div","scroll",
-      `<table><thead><tr><th>pool</th><th>Rigel</th><th>truth</th><th>Δ</th><th>% error</th></tr></thead><tbody>${body}</tbody></table>`));
+      `<table><thead><tr><th>pool</th><th>0.8.0</th><th>truth</th><th>error</th><th>0.7.1</th></tr></thead><tbody>${body}</tbody></table>`));
     cards.append(c);
   }
   g.append(cards); pg.append(g);
@@ -337,25 +513,27 @@ for (const [strand,cap] of STRATA){
 /* metric tables */
 function metricTable(id, axis){
   const isTx = axis==="tx";
-  const cols = ["scenario", isTx?"expressed":"expressed genes","detected","Σ|Δ|","% of true",
+  const cols = ["scenario", isTx?"expressed":"expressed genes","detected","Σ|Δ|","% of true","0.7.1 %",
                 "net Δ","over-assigned","under-assigned",
                 "false pos.","on n", isTx?"med. rel err":null,"MARD","Spearman"].filter(Boolean);
   let h = "<thead><tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
   for (const [strand,cap] of STRATA){
-    const rows = S.filter(s=>s.strand===strand && s.capture===cap).sort((a,b)=>a.level.localeCompare(b.level));
+    const rows = inStratum(S,strand,cap);
     h += `<tr class="grp-row"><td colspan="${cols.length}">${strand} × capture ${cap}`
        + (rows[0].deferred?` <span class="flag">DEFERRED</span>`:"") + `</td></tr>`;
     for (const r of rows){
       const d = r[axis];
       const share = 100*d.count_abs_err/d.count_true;
+      const was = r.v071 ? 100*(isTx ? r.v071.tx_abs_err/r.v071.tx_true : r.v071.gene_abs_err/r.v071.gene_true) : null;
       const mc = share<5?"":share<20?"warn":"bad";
-      h += `<tr><td>${r.id}</td><td class="num">${n0(d.n_expressed)}</td><td class="num">${n0(d.n_detected)}</td>`
+      h += `<tr class="${r.level==="g00"?"ctl":""}"><td>${r.id}</td><td class="num">${n0(d.n_expressed)}</td><td class="num">${n0(d.n_detected)}</td>`
         + `<td class="num">${n0(d.count_abs_err)}</td>`
         + `<td><span class="meter"><span class="num">${share.toFixed(2)} %</span>`
         + `<span class="meter-t"><span class="meter-f ${mc}" style="width:${Math.min(100,share*3).toFixed(1)}%"></span></span></span></td>`
+        + `<td class="num was">${fmtP(was)}</td>`
         + `<td class="num">${sgn(d.count_net_err)}</td>`
         + `<td class="num">${n0(d.count_over)}</td><td class="num">${n0(d.count_under)}</td>`
-        + `<td class="num">${n0(d.fp_mass)}</td><td class="num" style="color:var(--muted)">${n0(d.fp_n)}</td>`
+        + `<td class="num">${n0(d.fp_mass)}</td><td class="num was">${n0(d.fp_n)}</td>`
         + (isTx?`<td class="num">${d.median_rel_err.toFixed(3)}</td>`:"")
         + `<td class="num">${d.mard.toFixed(3)}</td><td class="num">${d.spearman.toFixed(4)}</td></tr>`;
     }
@@ -365,26 +543,73 @@ function metricTable(id, axis){
 metricTable("tx-table","tx");
 metricTable("gene-table","gene");
 
-/* rollup */
+/* fl-gap panels */
 (function(){
-  let h = `<thead><tr><th>stratum</th><th>annotated truth</th><th>transcript Σ|Δ|</th><th>%</th>`
-        + `<th>gene Σ|Δ|</th><th>%</th><th>nascent est</th><th>nascent truth</th>`
-        + `<th>gDNA est</th><th>gDNA truth</th></tr></thead><tbody>`;
-  for (const [strand,cap] of STRATA){
-    const rows = S.filter(s=>s.strand===strand && s.capture===cap);
-    const sum = f => rows.reduce((a,r)=>a+f(r),0);
-    const tt = sum(r=>r.tx.count_true), tx = sum(r=>r.tx.count_abs_err), gn = sum(r=>r.gene.count_abs_err);
-    h += `<tr><td style="font-family:var(--sans);font-size:12px">${strand} × capture ${cap}`
-      + (rows[0].deferred?` <span class="flag">DEFERRED</span>`:"") + `</td>`
-      + `<td class="num">${n0(tt)}</td><td class="num">${n0(tx)}</td>`
-      + `<td class="num pct ${cls(100*tx/tt)}">${(100*tx/tt).toFixed(2)} %</td>`
-      + `<td class="num">${n0(gn)}</td><td class="num pct ${cls(100*gn/tt)}">${(100*gn/tt).toFixed(2)} %</td>`
-      + `<td class="num">${n0(sum(r=>r.pools.nascent.est))}</td>`
-      + `<td class="num" style="color:var(--muted)">${n0(sum(r=>r.pools.nascent.true))}</td>`
-      + `<td class="num">${n0(sum(r=>r.pools.gdna.est))}</td>`
-      + `<td class="num" style="color:var(--muted)">${n0(sum(r=>r.pools.gdna.true))}</td></tr>`;
+  const F = DATA.flgap || [];
+  const cols = ["condition","transcript %","0.7.1 %","Δ","genes %","0.7.1 genes %","gDNA est / truth","nascent est / truth"];
+  let h = "<thead><tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
+  for (const [panel,label] of [["rna_long","RNA longer than gDNA"],["rna_short","RNA shorter than gDNA"]]){
+    const rows = F.filter(r=>r.panel===panel)
+      .sort((a,b)=>(a.strand+a.capture).localeCompare(b.strand+b.capture));
+    if (!rows.length) continue;
+    h += `<tr class="grp-row"><td colspan="${cols.length}">${label} <span style="color:var(--muted);font-weight:400">· flgap_${panel}</span></td></tr>`;
+    for (const r of rows){
+      const now = 100*r.tx.count_abs_err/r.tx.count_true;
+      const was = r.v071 ? 100*r.v071.tx_abs_err/r.v071.tx_true : null;
+      const g = 100*r.gene.count_abs_err/r.gene.count_true;
+      const gw = r.v071 ? 100*r.v071.gene_abs_err/r.v071.gene_true : null;
+      h += `<tr><td>${r.strand} × ${r.capture}${r.deferred?` <span class="flag">DEFERRED</span>`:""}</td>`
+        + `<td class="num pct">${fmtP(now)}</td><td class="num was">${fmtP(was)}</td><td>${deltaChip(now,was)}</td>`
+        + `<td class="num">${fmtP(g)}</td><td class="num was">${fmtP(gw)}</td>`
+        + `<td class="num">${n0(r.pools.gdna.est)} / <span class="was">${n0(r.pools.gdna.true)}</span></td>`
+        + `<td class="num">${n0(r.pools.nascent.est)} / <span class="was">${n0(r.pools.nascent.true)}</span></td></tr>`;
+    }
   }
-  document.getElementById("roll-table").innerHTML = h + "</tbody>";
+  document.getElementById("flgap-table").innerHTML = h + "</tbody>";
+})();
+
+/* calibration */
+(function(){
+  const C = DATA.calibration || {};
+  const cols = ["condition","f gDNA (P)","truth (O)","Δ","region MWAE","boundary MWAE","region net","boundary net"];
+  let h = "<thead><tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
+  for (const [panel,label] of [["ladder","Ladder"],["flgap_rna_long","RNA longer than gDNA"],["flgap_rna_short","RNA shorter than gDNA"]]){
+    const rows = C[panel] || [];
+    if (!rows.length) continue;
+    for (const [strand,cap] of STRATA){
+      const sub = rows.filter(r=>r.strand===strand && r.capture===cap).sort(byLevel);
+      if (!sub.length) continue;
+      h += `<tr class="grp-row"><td colspan="${cols.length}">${label} · ${strand} × capture ${cap}`
+         + (sub[0].deferred?` <span class="flag">DEFERRED</span>`:"") + `</td></tr>`;
+      for (const r of sub){
+        const d = r.f_P - r.f_O;
+        h += `<tr class="${r.level==="g00"?"ctl":""}"><td>${LEVEL[r.level]} gDNA</td><td class="num">${r.f_P.toFixed(4)}</td>`
+          + `<td class="num was">${r.f_O.toFixed(4)}</td><td class="num">${(d>=0?"+":"−")+Math.abs(d).toFixed(4)}</td>`
+          + `<td class="num">${r.region_mwae.toFixed(4)}</td><td class="num">${r.boundary_mwae.toFixed(4)}</td>`
+          + `<td class="num">${sgn(r.region_net)}</td><td class="num">${sgn(r.boundary_net)}</td></tr>`;
+      }
+    }
+  }
+  document.getElementById("calib-table").innerHTML = h + "</tbody>";
+})();
+
+/* VCaP */
+(function(){
+  const V = DATA.vcap || {}, box = document.getElementById("vcap");
+  const pts = [["truth", V.truth, "var(--ink)"], ["0.8.0", V.rc, "var(--gdna)"], ["0.7.1", V.v071, "var(--base)"]]
+    .filter(p=>p[1]!==undefined && p[1]!==null);
+  if (!pts.length){ box.textContent = "No VCaP run recorded."; return; }
+  const lo = 0.22, hi = 0.28, x = v => 100*(v-lo)/(hi-lo);
+  let ax = `<div class="axis"><div class="axis-line"></div>`;
+  pts.forEach(([name,v,col],i)=>{
+    ax += `<div class="tick" style="left:calc(${x(v).toFixed(2)}% - 1px);background:${col}"></div>`
+       + `<div class="tick-l ${i%2?"down":"up"}" style="left:${x(v).toFixed(2)}%;color:${col}">${name} ${v.toFixed(4)}</div>`;
+  });
+  ax += `<span class="ax-end" style="left:0">${lo.toFixed(2)}</span><span class="ax-end" style="right:0">${hi.toFixed(2)}</span></div>`;
+  const err = (v)=> v===undefined||v===null ? "—" : ((v-V.truth>=0?"+":"−")+Math.abs(v-V.truth).toFixed(4));
+  box.innerHTML = ax + `<div class="scroll" style="margin-top:14px"><table><thead><tr><th>build</th><th>gDNA fraction</th><th>error vs truth</th></tr></thead><tbody>`
+    + pts.map(([name,v])=>`<tr><td>${name}</td><td class="num">${v.toFixed(4)}</td><td class="num">${name==="truth"?"":err(v)}</td></tr>`).join("")
+    + `</tbody></table></div>`;
 })();
 
 /* hover layer */

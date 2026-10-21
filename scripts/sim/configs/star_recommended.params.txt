@@ -1,0 +1,29 @@
+# The ladder's STAR rung: the STAR options every condition's simulated reads are aligned with (`panel.py align`, which
+# passes each line as `--<option> <values>`, as STAR's own --parametersFiles reads it; rustar takes none). A standard
+# paired-end setup with chimeric detection, as the lab's production pipeline runs STAR, and the two settings the MANUAL
+# recommends, so the benchmark's input is the one a user is told to make. The same options aligned the STAR panel.
+
+genomeLoad NoSharedMemory
+outSAMtype BAM Unsorted
+outSAMstrandField intronMotif
+outSAMattributes NH HI AS NM MD MC
+outSAMunmapped Within KeepPairs
+outFilterMultimapNmax 50
+
+# The MANUAL's two: no bonus for an annotated junction, and every alignment within 2 points of the best reported, so an
+# unspliced reading competes with an annotated splice and Rigel weighs them
+sjdbScore 0
+outFilterMultimapScoreRange 2
+
+peOverlapNbasesMin 10
+alignSplicedMateMapLminOverLmate 0.5
+alignSJstitchMismatchNmax 5 -1 5 5
+chimSegmentMin 10
+chimOutType WithinBAM HardClip
+chimJunctionOverhangMin 10
+chimScoreDropMax 30
+chimScoreJunctionNonGTAG 0
+chimScoreSeparation 1
+chimSegmentReadGapMax 3
+chimMultimapNmax 50
+quantMode GeneCounts

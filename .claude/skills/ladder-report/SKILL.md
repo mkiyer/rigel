@@ -1,51 +1,50 @@
 ---
 name: ladder-report
-description: Build and publish Rigel's end-to-end accuracy report for the 16-condition gDNA ladder — per-scenario pool error (gDNA / synthetic nascent RNA / annotated RNA), then transcript- and gene-level error inside the annotated pool — as a markdown file and as an Artifact page that updates in place. Use after any change to Rigel that could move a number, when the owner asks how the tool is doing end to end, or when the release report needs refreshing.
+description: Build and publish Rigel's report card for the 16-condition gDNA ladder — per-scenario pool error (gDNA / synthetic nascent RNA / annotated RNA), transcript- and gene-level error, each on the simulator's own alignments AND on STAR alignments of the same reads (the STAR rung), beside the tagged 0.7.1 release; the fragment-length gap panels, calibration against the oracle and the VCaP mix — as one Artifact page that updates in place, and a markdown file. Use after any change to Rigel that could move a number, when the owner asks how the tool is doing end to end, or when the release report needs refreshing.
 ---
 
-# The ladder accuracy report
+# The ladder report card
 
-This is how progress toward a production release is assessed. It renders the arm files
-`quant_accuracy.py` writes; **it runs nothing and measures nothing.**
+This is how progress toward a production release is assessed. It renders files the instruments already wrote;
+**it runs nothing and measures nothing.**
 
-⛔⛔ **THE REPORT IS A RENDERING, NOT A MEASUREMENT.** If Rigel changed since the arms were scored, the
-report will render stale numbers and look perfectly current. Re-score first — step 1 is not optional
-after a code change.
+⛔⛔ **THE REPORT IS A RENDERING, NOT A MEASUREMENT.** If Rigel changed since its inputs were written, the card will
+render stale numbers and look perfectly current. Re-score first — step 1 is not optional after a code change.
 
-## 1. Are the arms current?
+## 1. Bring every input up to date
 
-The arms live in `$RIGEL_RUNS/suite/ladder/arms/` (the data root, `RUNS` in `scripts/design/_shared.py`;
-export it in the shell these commands run in). They are current only if they were
-written *after* the last change that could move a number.
+Export `RIGEL_RUNS` (the data root, `RUNS` in `scripts/design/_shared.py`), activate the `rigel` env, set
+`OMP_NUM_THREADS=1`, and preserve each panel's previous arms first (`cp -r arms arms_<what-it-was>_<date>`): a
+before-and-after is what makes the next delta attributable. `panel.py score` passes
+`--set em.assignment_mode=fractional` and `--set scan.total_threads=1` itself.
 
-```bash
-ls -la $RIGEL_RUNS/suite/ladder/arms/*.jsonl
-git log -1 --format='%h %ad %s' --date=iso
-```
+| input | command | after a change to Rigel? |
+|---|---|---|
+| the ladder on the simulator's alignments | `python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base oracle` | always |
+| **the STAR rung's alignments** | `python scripts/sim/panel.py align --config scripts/sim/configs/gdna_ladder.yaml --aligner <rustar or STAR> --aligner-index <STAR index of the suite genome> --threads 16` | never: once per panel (about 45 s and 1 GB per condition); the BAMs are kept |
+| **the STAR rung** | `python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base --bam rustar_recommended` | always |
+| the two gap panels | `python scripts/sim/panel.py score --config scripts/sim/configs/flgap_rna_long.yaml --jobs 4 --arms base`, and `flgap_rna_short.yaml` | always |
+| calibration against the oracle | `python scripts/design/calibration_vs_oracle.py --suite $RIGEL_RUNS/suite/<panel> --index $RIGEL_RUNS/suite/rigel_index --jobs 8 --json <dir>/cvo_<panel>.json`, for `ladder`, `flgap_rna_long`, `flgap_rna_short` | always; it reads the cached scan, so re-cache after a scan change |
+| the VCaP mix | `rigel quant --bam <the VCaP mix's BAM> --index $RIGEL_RUNS/refs/rigel_index -o <dir>/vcap_rc --threads 8`, alone (one whole-genome job at a time) | always |
 
-If the tool has moved, re-score the base arm, the only one the report renders; it rebuilds nothing:
+`panel.py status` shows the STAR rung as `align rustar_recommended 16/16`. The rung's aligner is rustar (the Rust
+port of STAR, which reads STAR's index and options and matches STAR on 99.9 % of templates); its options are
+`scripts/sim/configs/star_recommended.params.txt`, the MANUAL's recommended STAR settings.
 
-```bash
-source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
-export OMP_NUM_THREADS=1
-python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base
-```
-
-⚠ `panel.py score` passes `--set em.assignment_mode=fractional` and `--set scan.total_threads=1`
-itself. Preserve the previous arms first (`cp -r arms arms_<what-it-was>_<date>`) — a before-and-after
-is what makes the next delta attributable.
-
-## 2. Build both renderings
+## 2. Build the page and the markdown
 
 ```bash
 python .claude/skills/ladder-report/build_report.py \
-    --html /tmp/ladder_report.html \
+    --html <scratchpad>/ladder_report.html \
+    --cvo <dir> --vcap <dir>/vcap_rc/summary.json --vcap-truth 0.2518 --vcap-v071 0.263117 \
+    --v071 $RIGEL_RUNS/prototypes/2026-10-05_capture_learning/baseline/release_tag.jsonl \
     --markdown $RIGEL_RUNS/reports/ladder_accuracy_<DATE>.md
 ```
 
-The markdown comes from `quant_accuracy.py --markdown`, which the suite gates
-(`tests/calibration/test_quant_accuracy.py`); the page is the same payload through
-`report_template.html`.
+`--vcap-truth` is the mix's DNA-origin share by read name, and `--vcap-v071` 0.7.1's reading of it; `--head` and
+`--scored` default to HEAD and the base arm's date. The markdown comes from `quant_accuracy.py --markdown`, which the
+suite gates (`tests/calibration/test_quant_accuracy.py`); the page is `report_template.html` with the payload in place
+of `__DATA__`.
 
 ## 3. Publish the page — to the SAME artifact
 
@@ -55,7 +54,7 @@ Pass that as `url` to the Artifact tool so the owner's link keeps working and th
 
 ```
 Artifact(action="publish", url="https://claude.ai/artifact/Cek2wmKtitgbDyfM5gNqyj",
-         file_path="/tmp/ladder_report.html")
+         file_path="<scratchpad>/ladder_report.html")
 ```
 
 ⛔ Read the artifact first if this conversation has not published it. Publishing **without** `url`
@@ -74,6 +73,8 @@ watched to fail under its own perturbation — if you change the rendering, keep
 | a false-negative column | `fn_mass` needs an estimate of *exactly* zero, which a fractional posterior never is — it reads 0 on all 16 conditions and looks like a perfect score for something unmeasured (`TRAPS: could-the-arm-have-fired`). Report `count_under` |
 | the truth table's row count as a transcript count | The table carries a row per synthetic entity too (6,919 of 15,669 on the current index), zero on **both** sides. Only 2,466 of 9,385 gene rows are real genes. `expressed` and `detected` are the scored sets |
 | the deferred stratum unmarked | Unstranded × capture-ON carries most of the error; unmarked, a reader takes a pooled total for the tool's accuracy (`TRAPS: never-pool-the-strata`) |
+| the STAR rung's gDNA gap read as Rigel's | The aligner leaves part of the simulated library unplaced, most of it gDNA drawn over the suite genome's N runs (about a fifth of the gDNA off capture). The rung is scored against the same truth as the simulator's alignments, so the two compare directly; `unaligned` counts what the aligner left out by origin, and the gDNA fraction's truth is read over what it placed (`gdna_frac_true_aligned`) |
+| a rung that mixes aligners | Every condition comes from one `panel.py align` run: its `<name>.align.json` records the aligner, its version and the parameter file, and `quant_accuracy.py --bam` stamps the input on every row |
 | a ragged markdown table | It renders as a *wrong* table, not an error. The escaped pipes in a `Σ\|Δ\|` header are cell content, not delimiters |
 
 Two labels that must stay explicit: **MARD is symmetric** (`|est−true|/(|est|+|true|)`, bounded [0,1] —
@@ -84,6 +85,8 @@ transcripts contribute ~300 fragments to nascent truth while their tool-side cou
 ## How the report is read
 
 - **Per stratum, never pooled.** Three strata are in scope; unstranded × capture-ON is deferred.
+- **Two inputs, one truth.** The simulator's alignments are the regression check; the STAR rung is what a user's
+  library looks like to Rigel, and the difference between the two is the alignment's.
 - **By size.** An A/B pair runs with the scan pinned (`--set scan.total_threads=1`) and is exactly
   reproducible; judge an effect by its size, genes and pools beside the transcript table.
 - **The capture-OFF magnitudes are a stress reading.** The panel runs 20.2 % nascent fragments against
@@ -93,8 +96,8 @@ transcripts contribute ~300 fragments to nascent truth while their tool-side cou
 
 | | |
 |---|---|
-| `build_report.py` | reads the arm jsonl, derives the truth table's composition and the library depth, writes the page and (optionally) the markdown |
-| `report_template.html` | the page: tokens for both themes, per-scenario cards with paired truth/estimate bars, the metric tables. `__DATA__` is the payload placeholder |
+| `build_report.py` | reads every input above, derives the truth table's composition and the library depth, writes the page and (optionally) the markdown |
+| `report_template.html` | the page: tokens for both themes, the headline tiles, the per-stratum and STAR-rung tables, per-scenario pool cards, the metric tables, the gap panels, calibration and VCaP. `__DATA__` is the payload placeholder |
 
 The palette is the data-viz reference instance's categorical slots 1–3 in fixed order (gDNA blue,
 nascent orange, annotated aqua), both themes. If you restyle, keep the assignment stable — colour

@@ -55,11 +55,12 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   `quant_accuracy.py` (the pools per row); the RNA floor is closed for 0.8.0 until a fundamentally different
   algorithm (owner, 2026-09-26), `ISSUES: rna-prior-floor-at-pure-gdna-loci`.
 - **The deliverable, end to end**: measured per stratum on the rebuilt ladder under the shared length (the report card
-  re-derives it, from `quant_accuracy.py`'s arms), and on aligned input on the STAR panel at the recommended parameters; stranded × capture-ON has been the worst in-scope stratum and its capture-aware
-  lengths own most of it — the junction price's
-  structure, closed for now at diminishing returns (owner, 2026-09-26) — then the capture likelihood's lean toward RNA (the
-  synthetic spans over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` beside
-  `--arm oracle_ruler` and `--arm oracle`, `ISSUES: the-capture-length-owns-stranded-capture-on`.
+  re-derives it, from `quant_accuracy.py`'s arms), on the simulator's alignments and on STAR alignments of the same
+  reads (the ladder's STAR rung, `panel.py align`, `quant_accuracy.py --bam`); stranded × capture-ON has been the
+  worst in-scope stratum and its capture-aware lengths own most of it — the junction price's structure, closed for now
+  at diminishing returns (owner, 2026-09-26) — then the capture likelihood's lean toward RNA (the synthetic spans
+  over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` beside `--arm
+  oracle_ruler` and `--arm oracle`, `ISSUES: the-capture-length-owns-stranded-capture-on`.
 - **Fragment lengths**: the scorer's two length tables are censuses that average capture over different placements,
   and the capture ruler counts capture a second time on RNA's; one uncaptured frame is the largest lever measured on
   stranded × capture ON, but it loses on real length gaps until the ruler prices RNA's capture from gDNA's

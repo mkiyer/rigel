@@ -823,10 +823,9 @@ factor so the fully probed class reads 1, the old reader's reference, while the 
 against the uncaptured bulk and the locus gDNA component keeps its shipped length, so the injected transcript lengths
 sit on a scale far below gDNA's. Re-anchor on the shipped convention (an unprobed object reads 1), prove it on the
 capture-OFF identity and a capture-ON row, and re-read the ceiling.
-(j) The STAR panel, the scan's decision input since 2026-10-18 (`TESTING.md` §0d), has no in-tree instrument:
-`quant_accuracy.py` reads each condition's `sim_oracle.bam` only, so every STAR-panel number comes from a harness
-copied between arm directories under `$RIGEL_RUNS/arms/` (`run_cond.py`, with switches for a prototype build and for
-every capture efficiency at 1). The candidate is `quant_accuracy.py` reading another BAM per condition.
+(j) The capture-efficiencies-at-1 arm that every scan change is read with (`TESTING.md` §0d) is a harness copied
+between arm directories under `$RIGEL_RUNS/arms/` (`run_cond.py`), not an arm of `quant_accuracy.py`, which since
+2026-10-21 scores an aligned input (`--bam`, the ladder's STAR rung) but only as shipped.
 
 ### latent-defects
 `priority: next — 0.8.1; its 0.8.0 user-path items landed 2026-10-14 · stage: several · kind: defect · 2026-09-28`

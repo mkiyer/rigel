@@ -308,7 +308,18 @@ capture efficiency at 1 beside the shipped run while `ISSUES: the-reader-reads-f
 the reader amplifies every scan change. The ladder's simulator alignments stay the regression check: a scan change
 that should not touch them must leave them identical. What the panel cannot judge: the deferred stratum (unstranded ×
 capture ON is not aligned), more than one realization per condition, and sequencing errors, since the simulator's
-reads carry none. No in-tree instrument reads it yet (`ISSUES: instrument-ledger` (j)).
+reads carry none.
+
+**The ladder's STAR rung** carries the same input to every one of the 16 conditions: each condition's reads aligned
+by rustar with the same recommended settings (`scripts/sim/configs/star_recommended.params.txt`) into
+`<condition>/rustar_recommended.bam`, beside the simulator's own BAM. `panel.py align` writes it once (about 45 s and
+1 GB per condition; a condition counts aligned once its `rustar_recommended.align.json` records the aligner, its
+version and the parameter file, after the BAM was checked to hold every template the simulator drew), and
+`panel.py score --bam rustar_recommended` scores it after every change, through `quant_accuracy.py --bam`: the base
+arm only, against the same truth as the simulator's alignments, so the two inputs compare directly. Every row records
+its input, and the library row adds what the aligner left unplaced, by true origin (`unaligned_*`: about a fifth of the
+gDNA off capture, drawn over the suite genome's N runs) and the gDNA fraction's truth over what it placed
+(`gdna_frac_true_aligned`). The report card shows both inputs.
 
 ---
 

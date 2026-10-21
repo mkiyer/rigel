@@ -272,3 +272,90 @@ def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one
     assert "--build" in cmd and cmd[cmd.index("--jobs") + 1] == "3"
     assert cmd[cmd.index("--condition") + 1] == "gdna_g00_ss_0.50_x"
     assert not any("prewarm" in c for c in cmd), "there is no zero-gDNA hold-out to pre-warm"
+
+
+# ── an aligned input: the ladder's STAR rung ─────────────────────────────────────────────────────
+
+
+def test_the_parameter_file_is_read_as_the_aligner_reads_it(tmp_path):
+    """`align` passes each line of the parameter file as `--<option> <values>`, as STAR's own
+    `--parametersFiles` reads it (rustar takes none): a comment or a blank line is no option, and an
+    option keeps every value on its line."""
+    f = tmp_path / "p.txt"
+    f.write_text(
+        "# a comment\n\noutSAMtype BAM Unsorted\n  # indented comment\nalignSJstitchMismatchNmax 5 -1 5 5\n"
+    )
+    assert PANEL.star_options(f) == [
+        "--outSAMtype",
+        "BAM",
+        "Unsorted",
+        "--alignSJstitchMismatchNmax",
+        "5",
+        "-1",
+        "5",
+        "5",
+    ]
+
+
+def test_the_rung_aligns_with_the_MANUALs_recommended_STAR_settings():
+    """The STAR rung is the input the MANUAL tells a user to make: its parameter file carries the two
+    settings the MANUAL recommends, so the benchmark cannot drift from the advice."""
+    opts = " ".join(PANEL.star_options(PANEL.STAR_PARAMS))
+    manual = (ROOT / "docs" / "MANUAL.md").read_text()
+    for setting in ("--sjdbScore 0", "--outFilterMultimapScoreRange 2"):
+        assert setting in opts, f"the rung's parameters lack {setting}"
+        assert setting in manual, f"the MANUAL no longer recommends {setting}"
+
+
+def test_align_REFUSES_without_the_aligner_or_its_index(tmp_path):
+    p = PANEL.Panel(_config(tmp_path))
+    (p.dir / "c1").mkdir(parents=True)
+    (p.dir / "c1" / "sim_oracle.bam").write_bytes(b"")
+    args = type(
+        "A",
+        (),
+        {
+            "conditions": None,
+            "aligner": None,
+            "aligner_index": None,
+            "params": PANEL.STAR_PARAMS,
+            "name": "rustar_recommended",
+            "threads": 1,
+            "force": False,
+        },
+    )()
+    with pytest.raises(SystemExit, match="a STAR or rustar binary"):
+        PANEL.cmd_align(p, args)
+    args.aligner = sys.executable  # a file that exists
+    args.aligner_index = tmp_path  # with no STAR index in it
+    with pytest.raises(SystemExit, match="genome index"):
+        PANEL.cmd_align(p, args)
+
+
+def test_an_aligned_input_counts_only_with_its_record(tmp_path):
+    """`status` counts a condition aligned only when `align` finished it: the BAM and the record it writes
+    last, after the BAM's templates were checked against the simulator's. A BAM alone is an interrupted run."""
+    p = PANEL.Panel(_config(tmp_path))
+    for c in ("c1", "c2", "c3"):
+        (p.dir / c).mkdir(parents=True)
+        (p.dir / c / "sim_oracle.bam").write_bytes(b"")
+    for c in ("c1", "c2"):
+        (p.dir / c / "rustar_recommended.bam").write_bytes(b"")
+    for c in ("c1", "c3"):  # c3's record outlived its BAM
+        (p.dir / c / "rustar_recommended.align.json").write_text("{}")
+    assert PANEL.aligned_inputs(p) == {"rustar_recommended": 1}
+
+
+def test_an_aligned_input_scores_into_an_arm_file_of_its_own(tmp_path):
+    """The simulator's alignments and an aligner's are two inputs to one arm, and each keeps its own
+    file, so neither overwrites the other and `report` names the one it lacks."""
+    p = PANEL.Panel(_config(tmp_path))
+    assert PANEL.arm_file(p, "base", None).name == "qa_mypanel_base.jsonl"
+    assert (
+        PANEL.arm_file(p, "base", "rustar_recommended").name
+        == "qa_mypanel_base__rustar_recommended.jsonl"
+    )
+    args = type("A", (), {"arms": ["base"], "bam": "rustar_recommended"})()
+    with pytest.raises(SystemExit) as e:
+        PANEL.cmd_report(p, args)
+    assert "qa_mypanel_base__rustar_recommended.jsonl" in str(e.value)

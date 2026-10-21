@@ -28,6 +28,12 @@ Usage::
     python scripts/design/quant_accuracy.py --arm base --conditions COND --em-seed 1 --suite DIR --index INDEX
     python scripts/design/quant_accuracy.py --report $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_oracle.jsonl
     python scripts/design/quant_accuracy.py --arm base --set em.assignment_mode=fractional --out F   # a config arm
+    python scripts/design/quant_accuracy.py --arm base --bam rustar_recommended.bam --out F   # an aligner's input
+
+``--bam`` reads each condition from an aligner's BAM (``panel.py align``) in place of the simulator's own
+alignments, scored against the same truth so the two inputs' rows compare directly; the library row adds what
+the aligner left out by origin (``unaligned_*``) and the gDNA fraction's truth over what reached Rigel
+(``gdna_frac_true_aligned``).
 """
 
 from __future__ import annotations
@@ -361,6 +367,70 @@ def gdna_estimate(library: dict) -> float:
     return library["gdna_est"] + library["n_intergenic_gdna"]
 
 
+# ── an aligned input ─────────────────────────────────────────────────────────────────────────────
+
+#: the simulator's own alignments, every read placed where it was drawn: the input every arm reads by default
+ORACLE_BAM = "sim_oracle.bam"
+
+
+def check_input_bam(suite: Path, names: list[str], arm: str, bam_name: str) -> None:
+    """Refuse an input no row could honestly come from. Another BAM than the simulator's is the base arm's
+    alone: every other arm substitutes truth built from the simulator's alignments (the oracle cache), which
+    on another input is another scan's. And every condition must hold the named BAM, or the panel would be
+    scored short and read as complete."""
+    if bam_name == ORACLE_BAM:
+        return
+    if arm != "base":
+        raise SystemExit(
+            f"⛔ --bam {bam_name} reads an aligner's output, which only the base arm can score: arm {arm!r} "
+            f"substitutes truth built from the simulator's own alignments"
+        )
+    missing = [n for n in names if not (suite / n / bam_name).is_file()]
+    if missing:
+        raise SystemExit(f"⛔ no {bam_name} in {len(missing)} condition(s): {', '.join(missing)} (panel.py align)")
+
+
+def aligner_loss(bam: Path, origin_counts: dict) -> dict:
+    """What an aligner left out, by true origin: the templates of its BAM with no mapped record.
+
+    A row read from an aligned input is scored against the same simulator truth as the simulator's own
+    alignments, so the two inputs' rows compare directly; but that truth counts every fragment the simulator
+    drew, and on the ladder's suite genome about a fifth of the gDNA is drawn over N runs no aligner can
+    place. These counts say how much of a pool's gap is the aligner's. A template counts as lost only when
+    none of its records is mapped: one mate placed reached Rigel, and is Rigel's to judge. The BAM must hold
+    the simulator's templates, each once and in one run of records (the read name gives its origin), or the
+    counts would shift silently: anything else is refused."""
+    import pysam
+
+    from rigel.sim.read_name import parse_origin
+
+    lost = {"gdna": 0, "mrna": 0, "nrna": 0}
+    seen = dict(lost)
+    name, mapped = None, False
+
+    def close():
+        kind = parse_origin(name).kind
+        seen[kind] += 1
+        lost[kind] += not mapped
+
+    with pysam.AlignmentFile(str(bam), "rb", check_sq=False) as fh:
+        for r in fh.fetch(until_eof=True):
+            if r.query_name != name:
+                if name is not None:
+                    close()
+                name, mapped = r.query_name, False
+            mapped = mapped or not r.is_unmapped
+    if name is not None:
+        close()
+    want = {k: int(origin_counts.get(k, 0)) for k in seen}
+    if seen != want:
+        raise SystemExit(
+            f"⛔ {bam}: its templates by origin {seen} are not the simulator's {want}: a template is missing, "
+            "or its records are not in one run (the input is not collated)"
+        )
+    return {f"unaligned_{k}": v for k, v in lost.items()}
+
+
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -573,8 +643,10 @@ def install_truth_weights(weights: np.ndarray):
 
 
 def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
-                  oracle_cache: Path | None, em_seed: int = DEFAULT_EM_SEED) -> list[dict]:
-    bam = str(suite / condition / "sim_oracle.bam")
+                  oracle_cache: Path | None, em_seed: int = DEFAULT_EM_SEED,
+                  bam_name: str = ORACLE_BAM) -> list[dict]:
+    check_input_bam(suite, [condition], arm, bam_name)
+    bam = str(suite / condition / bam_name)
     truth = pd.read_csv(suite / condition / "truth_abundances.tsv", sep="\t")
     summary = json.loads((suite / condition / "truth_summary.json").read_text())
     pipeline_config = seeded(pipeline_config, arm, em_seed)
@@ -626,18 +698,29 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     common = {"arm": arm, "condition": condition, "seconds": seconds,
               "em_seed": int(pipeline_config.em.seed),
               # stamped on every row, so a fractional run cannot be reported as a sampled one
-              "assignment_mode": pipeline_config.em.assignment_mode}
+              "assignment_mode": pipeline_config.em.assignment_mode,
+              # and the input it read, so an aligner's rows cannot be read as the simulator's
+              "bam": bam_name}
     if arm in _RULER_ARMS:
         # How far the arm moved the EM's lengths, and how far the truth sits from the shipped ruler, in
         # base pairs of opportunity on the worst transcript — recorded beside the score, so the arm's
         # REACH is readable off the output file.
         common["ruler_max_abs_delta"] = float(fired["max_abs_delta"])
         common["ruler_truth_delta"] = float(fired["truth_delta"])
+    library = score_library(result, quant, summary)
+    if bam_name != ORACLE_BAM:
+        # the same truth as the simulator's alignments, and beside it what the aligner left out: the gDNA
+        # fraction's truth is then also read over the templates that reached Rigel
+        loss = aligner_loss(Path(bam), summary.get("origin_counts", {}))
+        library.update(loss)
+        t_g = library["gdna_true"] - loss["unaligned_gdna"]
+        t_r = library["rna_true"] - loss["unaligned_mrna"] - loss["unaligned_nrna"]
+        library["gdna_frac_true_aligned"] = t_g / (t_g + t_r) if (t_g + t_r) > 0 else float("nan")
     return [
         {**common, "axis": "transcript", **score_transcripts(quant, truth)},
         # the SAME scorer over genes — isoform ambiguity summed away, see score_genes
         {**common, "axis": "gene", **score_genes(quant, truth)},
-        {**common, "axis": "library", **score_library(result, quant, summary)},
+        {**common, "axis": "library", **library},
     ]
 
 
@@ -1087,6 +1170,9 @@ def main() -> int:
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--conditions", nargs="*", default=None)
+    ap.add_argument("--bam", default=ORACLE_BAM,
+                    help="the BAM each condition is read from, by name in its directory: the simulator's own "
+                         "alignments by default, or an aligner's (panel.py align), which only the base arm scores")
     ap.add_argument("--oracle-cache", type=Path, default=None,
                     help="defaults to <suite>/oracle_cache when that directory exists")
     ap.add_argument("--out", type=Path, default=None)
@@ -1109,8 +1195,9 @@ def main() -> int:
         raise SystemExit("--arm and --out are required (or use --report)")
 
     names = args.conditions or sorted(
-        p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()
+        p.name for p in args.suite.iterdir() if (p / ORACLE_BAM).is_file()
     )
+    check_input_bam(args.suite, names, args.arm, args.bam)
     cache = args.oracle_cache
     if cache is None and (args.suite / "oracle_cache").is_dir():
         cache = args.suite / "oracle_cache"
@@ -1134,7 +1221,7 @@ def main() -> int:
             outs.append(o)
             cmd = [sys.executable, str(Path(__file__).resolve()), "--arm", args.arm,
                    "--suite", str(args.suite), "--index", str(args.index),
-                   "--out", str(o), "--em-seed", str(args.em_seed),
+                   "--out", str(o), "--em-seed", str(args.em_seed), "--bam", args.bam,
                    "--conditions", *sh]
             if cache is not None:
                 cmd += ["--oracle-cache", str(cache)]
@@ -1168,7 +1255,7 @@ def main() -> int:
     for name in names:
         print(f"  … {args.arm}  {name}", flush=True)
         rows += run_condition(args.arm, args.suite, index, name, pipeline_config, cache,
-                              em_seed=args.em_seed)
+                              em_seed=args.em_seed, bam_name=args.bam)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as fh:
         for r in rows:

@@ -5,7 +5,8 @@
     panel.py build     reference + index + capture probes
     panel.py simulate  the conditions
     panel.py cache     the scan cache AND the oracle cache
-    panel.py score     run rigel end to end, score against per-fragment truth
+    panel.py align     optional: every condition's reads aligned by STAR or rustar, the ladder's STAR rung
+    panel.py score     run rigel end to end, score against per-fragment truth (`--bam NAME`: an aligned input)
     panel.py report    the tables
 
 ⛔⛔ **WHY THIS EXISTS: THE RECIPE STOPPED HALFWAY AND THE MISSING HALF WAS THE POINT.** `TESTING.md` §2
@@ -31,9 +32,13 @@ resumable, and the failure mode this replaces is discovering after 20 minutes th
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -55,6 +60,20 @@ from rigel.sim.whole_genome import expand_config_path  # noqa: E402
 
 #: the three origin partitions the oracle cache holds and the per-strand RNA pair the certifier requires.
 ORACLE_PARTS = ("gdna", "mrna", "nrna", "rna_pos", "rna_neg")
+
+#: the STAR options the ladder's STAR rung is aligned with: the MANUAL's recommended settings
+STAR_PARAMS = SIM / "configs" / "star_recommended.params.txt"
+
+
+def star_options(params: Path) -> list[str]:
+    """A STAR parameter file as command-line options: each line `option values...` is `--option values...`,
+    as STAR's `--parametersFiles` reads it (rustar takes no parameter file); comments and blank lines are none."""
+    out = []
+    for line in Path(params).read_text().splitlines():
+        words = line.split()
+        if words and not words[0].startswith("#"):
+            out += [f"--{words[0]}", *words[1:]]
+    return out
 
 
 class Panel:
@@ -97,6 +116,23 @@ class Panel:
         if not self.dir.is_dir():
             return []
         return sorted(p.name for p in self.dir.iterdir() if (p / "sim_oracle.bam").is_file())
+
+
+def aligned_inputs(p: Panel) -> dict[str, int]:
+    """Each aligned input on disk and the conditions `align` finished it for: a BAM counts with its record
+    (`<name>.align.json`), which `align` writes last, once the BAM's templates match the simulator's."""
+    found: dict[str, int] = {}
+    for c in p.conditions:
+        for record in sorted((p.dir / c).glob("*.align.json")):
+            name = record.name.removesuffix(".align.json")
+            if (p.dir / c / f"{name}.bam").is_file():
+                found[name] = found.get(name, 0) + 1
+    return found
+
+
+def arm_file(p: Panel, arm: str, bam: str | None) -> Path:
+    """An arm's scored rows: one file for the simulator's alignments, and one per aligned input beside it."""
+    return p.arms / (f"qa_{p.dir.name}_{arm}.jsonl" if not bam else f"qa_{p.dir.name}_{arm}__{bam}.jsonl")
 
 
 def run(cmd: list[str], *, what: str) -> None:
@@ -157,6 +193,9 @@ def cmd_status(p: Panel, args) -> int:
     ]
     for stage, ok, what, path in rows:
         print(f"  {mark(ok)}  {stage:<12} {what:<34} {path}")
+    # an aligned input is optional, so it is shown and never asked for as the next stage
+    for name, n in aligned_inputs(p).items():
+        print(f"  {mark(n == len(conds))}  {'align':<12} {f'{name} {n}/{len(conds)}':<34} <condition>/{name}.bam")
     if arms:
         print()
         for a in arms:
@@ -283,6 +322,11 @@ def cmd_cache(p: Panel, args) -> int:
 
 def cmd_score(p: Panel, args) -> int:
     need(p.oracle_cache.is_dir(), f"the oracle cache ({p.oracle_cache})", "panel.py cache")
+    bam = getattr(args, "bam", None)
+    if bam:
+        n = aligned_inputs(p).get(bam, 0)
+        need(n == len(p.conditions), f"{bam}.bam in every condition ({n}/{len(p.conditions)})",
+             f"panel.py align --name {bam}")
     p.arms.mkdir(parents=True, exist_ok=True)
     for arm in args.arms:
         run(
@@ -300,7 +344,8 @@ def cmd_score(p: Panel, args) -> int:
                 "--oracle-cache",
                 p.oracle_cache,
                 "--out",
-                p.arms / f"qa_{p.dir.name}_{arm}.jsonl",
+                arm_file(p, arm, bam),
+                *(["--bam", f"{bam}.bam"] if bam else []),
                 # the benchmark protocol (owner, 2026-09-19): the shipped assignment is a sampled draw,
                 # so every arm is read under fractional assignment, with the scan pinned so an A/B pair
                 # is exactly reproducible
@@ -310,18 +355,70 @@ def cmd_score(p: Panel, args) -> int:
                 "scan.total_threads=1",
                 *(["--conditions", *args.conditions] if args.conditions else []),
             ],
-            what=f"score --arm {arm}",
+            what=f"score --arm {arm}" + (f" --bam {bam}" if bam else ""),
         )
     return 0
 
 
+def cmd_align(p: Panel, args) -> int:
+    """Every condition's simulated reads aligned by STAR, or rustar (its Rust port, which reads STAR's index
+    and options), into `<condition>/<name>.bam`: the input a real library gives Rigel, beside the simulator's
+    own alignments, which place every read where it was drawn. One condition at a time with every thread: the
+    alignment is the expensive half and is done once, while `score --bam <name>` re-reads it after every change
+    to Rigel. Resumable: a condition with its record is skipped unless `--force`. The record (`<name>.align.json`:
+    the aligner and its version, the index, the parameter file, the time) is written last, once the BAM holds
+    every template the simulator drew, so an interrupted alignment never counts."""
+    conds = args.conditions or p.conditions
+    need(bool(conds), "simulated conditions", "panel.py simulate")
+    aligner = Path(args.aligner) if args.aligner else None
+    need(aligner is not None and aligner.is_file(), "an aligner (--aligner: a STAR or rustar binary)",
+         "panel.py align --aligner <STAR or rustar> --aligner-index <its genome index of the panel's genome>")
+    index = Path(args.aligner_index) if args.aligner_index else None
+    need(index is not None and (index / "SA").is_file(),
+         "the aligner's genome index (--aligner-index, STAR's format, of the panel's genome)",
+         f"STAR --runMode genomeGenerate --genomeDir <dir> --genomeFastaFiles {p.genome} --sjdbGTFfile {p.gtf}")
+    params = Path(args.params)
+    opts = star_options(params)
+    version = subprocess.run([str(aligner), "--version"], capture_output=True, text=True).stdout.strip()
+    gunzip = shutil.which("gzcat") or "zcat"  # one word, as rustar takes it; macOS's zcat is not gzip's
+    import pysam
+
+    for c in conds:
+        d = p.dir / c
+        bam, record = d / f"{args.name}.bam", d / f"{args.name}.align.json"
+        if record.is_file() and bam.is_file() and not args.force:
+            print(f"   ✔ {c}: aligned ({record.name})")
+            continue
+        r1, r2 = d / "sim_R1.fq.gz", d / "sim_R2.fq.gz"
+        need(r1.is_file() and r2.is_file(), f"{c}'s simulated reads ({r1.name}, {r2.name})", "panel.py simulate")
+        record.unlink(missing_ok=True)
+        prefix = d / args.name
+        start = time.time()
+        run([aligner, "--runThreadN", args.threads, "--genomeDir", index, "--readFilesIn", r1, r2,
+             "--readFilesCommand", gunzip, "--outFileNamePrefix", f"{prefix}.", *opts], what=f"align {c}")
+        os.replace(f"{prefix}.Aligned.out.bam", bam)
+        with pysam.AlignmentFile(str(bam), "rb", check_sq=False) as fh:
+            n = sum(r.is_read1 and not r.is_secondary and not r.is_supplementary for r in fh.fetch(until_eof=True))
+        drawn = sum(json.loads((d / "truth_summary.json").read_text())["origin_counts"].values())
+        if n != drawn:
+            raise SystemExit(f"⛔ align {c}: {bam.name} holds {n} templates, the simulator drew {drawn}")
+        record.write_text(json.dumps({
+            "aligner": str(aligner), "version": version, "index": str(index), "params": params.name,
+            "params_md5": hashlib.md5(params.read_bytes()).hexdigest(), "options": opts,
+            "threads": args.threads, "seconds": round(time.time() - start, 1), "templates": n,
+        }, indent=1) + "\n")
+        print(f"   ⭐ {c}: {n:,} templates, {time.time() - start:.0f} s -> {bam.name}", flush=True)
+    return 0
+
+
 def cmd_report(p: Panel, args) -> int:
-    files = [p.arms / f"qa_{p.dir.name}_{a}.jsonl" for a in args.arms]
+    bam = getattr(args, "bam", None)
+    files = [arm_file(p, a, bam) for a in args.arms]
     missing = [f for f in files if not f.is_file()]
     need(
         not missing,
         f"arm file(s) {[m.name for m in missing]}",
-        f"panel.py score --arms {' '.join(args.arms)}",
+        f"panel.py score --arms {' '.join(args.arms)}" + (f" --bam {bam}" if bam else ""),
     )
     run([sys.executable, DESIGN / "quant_accuracy.py", "--report", *files], what="report")
     return 0
@@ -331,9 +428,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="stages: status | build | simulate | cache | score | report",
+        epilog="stages: status | build | simulate | cache | align | score | report",
     )
-    ap.add_argument("stage", choices=("status", "build", "simulate", "cache", "score", "report"))
+    ap.add_argument("stage", choices=("status", "build", "simulate", "cache", "align", "score", "report"))
     ap.add_argument("--config", type=Path, required=True, help="a panel YAML in sim/configs/")
     ap.add_argument("--index", type=Path, default=None, help="override the derived index path")
     ap.add_argument("--jobs", type=int, default=8)
@@ -345,6 +442,12 @@ def main() -> int:
         help="quant_accuracy arms: base, noop, oracle, oracle_ruler, oracle_alloc_seed, …",
     )
     ap.add_argument("--force", action="store_true", help="rebuild a stage that already exists")
+    ap.add_argument("--aligner", default=None, help="align: a STAR or rustar binary")
+    ap.add_argument("--aligner-index", default=None, help="align: its genome index of the panel's genome")
+    ap.add_argument("--params", default=STAR_PARAMS, help="align: a STAR parameter file (the MANUAL's settings)")
+    ap.add_argument("--name", default="rustar_recommended", help="align: the aligned input's name")
+    ap.add_argument("--threads", type=int, default=os.cpu_count(), help="align: the aligner's threads")
+    ap.add_argument("--bam", default=None, help="score, report: an aligned input by name (panel.py align)")
     args = ap.parse_args()
     p = Panel(args.config, args.index)
     return {
@@ -352,6 +455,7 @@ def main() -> int:
         "build": cmd_build,
         "simulate": cmd_simulate,
         "cache": cmd_cache,
+        "align": cmd_align,
         "score": cmd_score,
         "report": cmd_report,
     }[args.stage](p, args)

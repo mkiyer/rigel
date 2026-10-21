@@ -1011,3 +1011,111 @@ def test_the_allocation_weights_REFUSE_a_truth_table_that_carries_no_nascent_col
     )
     with pytest.raises(SystemExit, match="nascent"):
         QA.truth_weights(molar, _AllocIndex(molar["transcript_id"]))
+
+
+# ── GATE: an aligned input, scored against the same truth, its aligner's losses counted ────────────
+
+
+def _templates(bam_path):
+    """The BAM's records grouped by template, in file order: ``[(name, [AlignedSegment, ...]), ...]``."""
+    import pysam
+
+    groups = []
+    with pysam.AlignmentFile(str(bam_path), "rb", check_sq=False) as fh:
+        header = fh.header.to_dict()
+        for r in fh.fetch(until_eof=True):
+            if not groups or groups[-1][0] != r.query_name:
+                groups.append((r.query_name, []))
+            groups[-1][1].append(r)
+    return header, groups
+
+
+def _write(path, header, groups):
+    import pysam
+
+    with pysam.AlignmentFile(str(path), "wb", header=header) as out:
+        for _name, recs in groups:
+            for r in recs:
+                out.write(r)
+    return path
+
+
+def _unmap(r):
+    """The record as an aligner writes a read it could not place, its pair kept (`outSAMunmapped Within`)."""
+    r.flag = (r.flag | 0x4 | 0x8) & ~0x2
+    return r
+
+
+def _origin_counts(groups):
+    from rigel.sim.read_name import parse_origin
+
+    counts = {"gdna": 0, "mrna": 0, "nrna": 0}
+    for name, _recs in groups:
+        counts[parse_origin(name).kind] += 1
+    return counts
+
+
+def test_the_aligner_loss_counts_UNMAPPED_TEMPLATES_by_their_true_origin(toy, tmp_path):
+    """An aligned input is scored against the simulator's truth, which counts every fragment it drew, so a
+    row read from it must carry what the aligner left out, by origin: on the ladder's suite genome about a
+    fifth of the gDNA is drawn over N runs no aligner can place, and read against the full truth that reads
+    as Rigel's error. A template is lost only when NONE of its records is mapped: one mate placed is the
+    aligner's delivery and Rigel's to judge.
+
+    Perturbation: counting records instead of templates, or a template lost when any record is unmapped,
+    or the origin read from anything but the read name, each moves the counts."""
+    from rigel.sim.read_name import parse_origin
+
+    header, groups = _templates(toy.bam_path)
+    expected = {"gdna": 0, "mrna": 0, "nrna": 0}
+    half = None
+    for i, (name, recs) in enumerate(groups):
+        if i % 5 == 0:
+            for r in recs:
+                _unmap(r)
+            expected[parse_origin(name).kind] += 1
+        elif half is None and len(recs) >= 2:
+            _unmap(recs[0])  # one mate unplaced: the template still reached Rigel
+            half = name
+    assert half is not None and min(expected.values()) > 0, (
+        "the toy must lose templates of every origin"
+    )
+    bam = _write(tmp_path / "aligned.bam", header, groups)
+    got = QA.aligner_loss(bam, _origin_counts(groups))
+    assert got == {f"unaligned_{k}": v for k, v in expected.items()}
+
+
+def test_an_aligned_BAM_that_is_not_the_simulators_is_REFUSED(toy, tmp_path):
+    """The aligned input must hold the simulator's templates, each once and in one group: a template
+    missing (a truncated alignment) or split into two runs of records (an input that is not collated)
+    would shift the aligner's losses silently.
+
+    Perturbation: dropping the completeness check lets both through."""
+    header, groups = _templates(toy.bam_path)
+    counts = _origin_counts(groups)
+    short = _write(tmp_path / "short.bam", header, groups[:-1])
+    with pytest.raises(SystemExit, match="not the simulator's"):
+        QA.aligner_loss(short, counts)
+    name, recs = next((n, r) for n, r in groups if len(r) >= 2)
+    split = [g for g in groups if g[0] != name] + [(name, recs[:1])]
+    split.insert(0, (name, recs[1:]))
+    with pytest.raises(SystemExit, match="not the simulator's"):
+        QA.aligner_loss(_write(tmp_path / "split.bam", header, split), counts)
+
+
+def test_another_input_BAM_is_scored_by_the_BASE_arm_alone_and_must_exist(tmp_path):
+    """The oracle arms inject truth built from the simulator's own alignments (the oracle cache), so on
+    another input their substitution would be another scan's: refused. A condition without the named BAM
+    is refused by name before anything runs, never scored as a shorter panel.
+
+    Perturbation: dropping either refusal lets an oracle arm read an aligned BAM, or a partial panel through."""
+    for c in ("c1", "c2"):
+        (tmp_path / c).mkdir()
+        (tmp_path / c / QA.ORACLE_BAM).write_bytes(b"")
+    (tmp_path / "c1" / "aligned.bam").write_bytes(b"")
+    with pytest.raises(SystemExit, match="c2"):
+        QA.check_input_bam(tmp_path, ["c1", "c2"], "base", "aligned.bam")
+    QA.check_input_bam(tmp_path, ["c1"], "base", "aligned.bam")  # every condition has it
+    with pytest.raises(SystemExit, match="base"):
+        QA.check_input_bam(tmp_path, ["c1"], "oracle", "aligned.bam")
+    QA.check_input_bam(tmp_path, ["c1", "c2"], "oracle", QA.ORACLE_BAM)  # the simulator's: any arm

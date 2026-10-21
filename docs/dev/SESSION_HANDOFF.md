@@ -79,8 +79,9 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 - The tier promotions above, and the re-cache's timing (step 4).
 - The VCaP mix's gDNA fraction, 0.252 → 0.257 against 0.2518: read it against the truth of the read pairs the scan
   still quantifies (the VCaP read-name labels) before taking it for a regression.
-- `ISSUES: instrument-ledger` (j): the STAR panel has no in-tree instrument; every number comes from `run_cond.py`,
-  copied between arm directories. Fold it into `quant_accuracy.py` (another BAM per condition)?
+- Since this handoff was written the ladder has a STAR rung (all 16 conditions aligned by rustar with the recommended
+  settings, `panel.py align`, scored by `quant_accuracy.py --bam`; `TESTING.md` §0d), on the report card. What stays
+  out of tree is the capture-efficiencies-at-1 arm (`ISSUES: instrument-ledger` (j)).
 - The MANUAL's new recommended-STAR paragraph and README line: the wording is new.
 - `SUCCESS.md` says `panel.py score --jobs 2` (7–8.5 GB per condition), the ladder-report skill `--jobs 8`; the card ran
   at 8 without trouble on this machine.
