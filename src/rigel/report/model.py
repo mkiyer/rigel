@@ -166,41 +166,47 @@ def _si(n: float) -> str:
 
 def _alignment(summary: SummaryReader) -> dict:
     a = summary["alignment_stats"]
-    # Record-level (individual BAM alignment records).
+    # Records (individual BAM alignment records).
     total = a["total_reads"]
     mapped = a["mapped_reads"]
-    # Read-NAME-group level (one per read/pair) — the "read fate" denominator.
-    unique = a["unique_reads"]
-    multi = a["multimapping_reads"]
-    groups = a["read_groups"]
-    unmapped_grp = max(0, groups - unique - multi)
+    # Read pairs, one outcome each, summing to the total: the read fate's one denominator.
+    pairs = summary["read_pairs"]
+    n_pairs = pairs["total"]
+    unique = summary["read_pairs.placed"]["unique"]
+    multi = summary["read_pairs.placed"]["multimapping"]
+    withheld = sum(summary["read_pairs.withheld"].values())
+    excluded = pairs["excluded"]
+    by_option = pairs["excluded_by_option"]
 
-    # Fate over read groups: every segment shares the read-group denominator.
     fate = [
-        {"label": "Uniquely mapped", "value": unique, "cls": _C[1]},
-        {"label": "Multi-mapping", "value": multi, "cls": _C[3]},
+        {"label": "Placed, unique", "value": unique, "cls": _C[1]},
+        {"label": "Placed, multimapping", "value": multi, "cls": _C[3]},
+        {"label": "Withheld", "value": withheld, "cls": _C[6]},
+        {"label": "Unmapped or filtered", "value": excluded, "cls": "fmuted"},
+        {"label": "Excluded: multimapping", "value": by_option, "cls": _C[5]},
     ]
-    if unmapped_grp > 0:
-        fate.append({"label": "Unmapped", "value": unmapped_grp, "cls": "fmuted"})
+    fate = [seg for seg in fate if seg["value"] > 0]
 
     kpis = [
-        {"l": "Read groups", "v": groups, "fmt": "count"},
-        {"l": "Uniquely mapped", "v": _pct(unique, groups), "fmt": "pct"},
-        {"l": "Multi-mapping", "v": _pct(multi, groups), "fmt": "pct"},
+        {"l": "Read pairs", "v": n_pairs, "fmt": "count"},
+        {"l": "Placed", "v": _pct(unique + multi, n_pairs), "fmt": "pct"},
+        {"l": "Multimapping", "v": _pct(multi, n_pairs), "fmt": "pct"},
         {"l": "Alignment records", "v": total, "fmt": "count"},
         {"l": "Duplicates", "v": _pct(a["duplicate_reads"], total), "fmt": "pct"},
     ]
     # Table keeps both unit families, each labeled so they are not conflated.
     rows = [
-        ["Read groups (reads/pairs)", groups, 1.0],
-        ["  uniquely mapped", unique, _pct(unique, groups)],
-        ["  multi-mapping", multi, _pct(multi, groups)],
-        ["  unmapped", unmapped_grp, _pct(unmapped_grp, groups)],
+        ["Read pairs", n_pairs, 1.0],
+        ["  placed, unique", unique, _pct(unique, n_pairs)],
+        ["  placed, multimapping", multi, _pct(multi, n_pairs)],
+        ["  withheld", withheld, _pct(withheld, n_pairs)],
+        ["  unmapped or filtered", excluded, _pct(excluded, n_pairs)],
+        ["  excluded: multimapping", by_option, _pct(by_option, n_pairs)],
         ["Alignment records", total, 1.0],
         ["  mapped", mapped, _pct(mapped, total)],
         ["  secondary", a["secondary_reads"], _pct(a["secondary_reads"], total)],
         ["  supplementary", a["supplementary_reads"], _pct(a["supplementary_reads"], total)],
-        ["  proper pairs", a["proper_pairs"], _pct(a["proper_pairs"], total)],
+        ["  flagged proper pair", a["proper_pairs"], _pct(a["proper_pairs"], total)],
         ["  duplicates", a["duplicate_reads"], _pct(a["duplicate_reads"], total)],
         ["  QC-fail", a["qc_fail_reads"], _pct(a["qc_fail_reads"], total)],
     ]

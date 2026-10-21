@@ -478,6 +478,19 @@ pairing, is not read (`template_hits`, `hit_verdict`; `tests/test_hit_verdict.py
   capture-OFF condition, it finds the correct pair wherever a template's places hold one, and it costs nothing
   measurable on a deep library; the record is CLOSED `ISSUES: star-hi-pairs-against-rigels-own-pairing`.
 
+### 1.2 One outcome per read pair, one status per record (owner, 2026-10-21)
+
+A read pair is a run of records sharing a read name, filtered records included, so the scan and the annotation pass,
+which writes a filtered record where it stands, close one at the same record. Its one outcome, in this order:
+**excluded** (every record unmapped, QC-failed or a skipped duplicate); **withheld**, with no usable hit, by reason
+(`off_index` > `chimeric` > `unannotated_splice` > `unpaired`, an unpaired pair also by the furthest check of the pair
+rule any hit reached, `missing_mate` < `reference` < `strand` < `outward` < `length`, and a pair with no hit at all
+`missing_mate`); **excluded by the multimap option**; or **placed**, unique or multimapping by its usable hits. Each
+record's status follows from its pair's outcome: filtered; used (its alignment is a location of a usable hit); unused
+(in a placed pair, in no usable hit, as a supplementary record always is); or unplaced. The outcomes sum to the read
+pairs and the statuses to the records by construction, so the scan checks both and stops on a difference
+(`tests/test_accounting.py`); `summary.json` reports them as `read_pairs` and `alignment_stats.records`.
+
 ---
 
 ## 2. The index

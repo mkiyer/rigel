@@ -368,19 +368,29 @@ struct StrandObservations {
 // ================================================================
 
 struct BamScanStats {
-    // BAM-level
+    // Records: each flag counter counts every record carrying the flag; `proper_pair` the primary records flagged as a
+    // proper pair; `filtered` the records the scan drops (unmapped, QC-failed, or a skipped duplicate)
     int64_t total = 0;
     int64_t qc_fail = 0;
     int64_t unmapped = 0;
     int64_t secondary = 0;
     int64_t supplementary = 0;
     int64_t duplicate = 0;
-    int64_t n_read_names = 0;
-    int64_t unique = 0;
-    int64_t multimapping = 0;
     int64_t proper_pair = 0;
-    int64_t improper_pair = 0;
-    int64_t mate_unmapped = 0;
+    int64_t filtered = 0;
+
+    // One outcome per read pair, a run of records sharing a name: excluded (every record filtered), withheld (by
+    // `WITHHELD_*` outcome, below), excluded by the multimap option, or placed, unique or multimapping by its usable
+    // hits. And one status per eligible record: used (its alignment is a location of a usable hit), unused (in a
+    // placed read pair, in no usable hit), unplaced (in a read pair with any other outcome).
+    int64_t n_read_pairs = 0;
+    int64_t n_excluded = 0;
+    int64_t n_excluded_by_option = 0;
+    int64_t n_placed_unique = 0;
+    int64_t n_placed_multimapping = 0;
+    int64_t n_records_used = 0;
+    int64_t n_records_unused = 0;
+    int64_t n_records_unplaced = 0;
 
     // Resolution-level
     int64_t n_fragments = 0;
@@ -410,9 +420,11 @@ struct BamScanStats {
     IntTagCounts nm_tag, nh_tag;
     int64_t n_nm_conflicting = 0;
 
-    // Hits that are not usable, by `HIT_*` reason, and the templates left with none, by `WITHHELD_*` outcome
+    // Hits that are not usable, by `HIT_*` reason; the templates left with none, by `WITHHELD_*` outcome; and the unpaired
+    // ones by the furthest check any of their hits reached (`unpaired_reason`)
     std::array<int64_t, N_HIT_VERDICTS> hits_rejected{};
     std::array<int64_t, N_WITHHELD> withheld{};
+    std::array<int64_t, N_HIT_VERDICTS> unpaired_reason{};
     // Templates whose NH exceeds the records reported for either mate: the aligner truncated its output
     int64_t n_nh_above_reported = 0;
 
@@ -453,12 +465,16 @@ struct BamScanStats {
         secondary += o.secondary;
         supplementary += o.supplementary;
         duplicate += o.duplicate;
-        n_read_names += o.n_read_names;
-        unique += o.unique;
-        multimapping += o.multimapping;
         proper_pair += o.proper_pair;
-        improper_pair += o.improper_pair;
-        mate_unmapped += o.mate_unmapped;
+        filtered += o.filtered;
+        n_read_pairs += o.n_read_pairs;
+        n_excluded += o.n_excluded;
+        n_excluded_by_option += o.n_excluded_by_option;
+        n_placed_unique += o.n_placed_unique;
+        n_placed_multimapping += o.n_placed_multimapping;
+        n_records_used += o.n_records_used;
+        n_records_unused += o.n_records_unused;
+        n_records_unplaced += o.n_records_unplaced;
         n_fragments += o.n_fragments;
         n_intergenic += o.n_intergenic;
         n_with_exon += o.n_with_exon;
@@ -479,6 +495,7 @@ struct BamScanStats {
         n_nm_conflicting += o.n_nm_conflicting;
         for (int32_t v = 0; v < N_HIT_VERDICTS; v++) hits_rejected[v] += o.hits_rejected[v];
         for (int32_t w = 0; w < N_WITHHELD; w++) withheld[w] += o.withheld[w];
+        for (int32_t v = 0; v < N_HIT_VERDICTS; v++) unpaired_reason[v] += o.unpaired_reason[v];
         n_nh_above_reported += o.n_nh_above_reported;
         for (size_t i = 0; i < splice_census.size(); i++)
             splice_census[i] += o.splice_census[i];
@@ -518,6 +535,7 @@ struct WorkerState {
     FragmentAccumulator accumulator;
     BamScanStats stats;
     StrandObservations strand_obs;
+    std::vector<char> record_used;  // `records_used`, per template
     // Per-worker accumulator set (one Accumulator per ref). Owned
     // here so worker threads never touch the shared template. Null when no
     // region partition was provided.
@@ -1094,10 +1112,11 @@ static int32_t hit_verdict(
 }
 
 /// Every hit's verdict into ``verdicts`` (`hit_verdict`: HIT_USABLE or the reason), and why the template is withheld
-/// when it has hits and none is usable: off the index when one of them lies on a reference the index does not hold,
-/// else chimeric when one of them has a mate aligned in pieces, else an unannotated splice when the annotated-path
-/// rule withheld one of them, else unpaired (WITHHELD_NONE otherwise). The scan and the annotation pass both judge a
-/// template here, so the BAM the annotation pass writes says what the scan counted.
+/// when none of its hits is usable: off the index when one of them lies on a reference the index does not hold, else
+/// chimeric when one of them has a mate aligned in pieces, else an unannotated splice when the annotated-path rule
+/// withheld one of them, else unpaired, as a template with no hit at all is (WITHHELD_NONE when one is usable). The
+/// scan and the annotation pass both judge a template here, so the BAM the annotation pass writes says what the scan
+/// counted.
 static int32_t judge_hits(const TemplateHits& th, const FragmentResolver& ctx, ResolverScratch& scratch,
                           std::vector<int32_t>& verdicts)
 {
@@ -1111,10 +1130,38 @@ static int32_t judge_hits(const TemplateHits& th, const FragmentResolver& ctx, R
         chimeric |= v == HIT_CHIMERIC;
         unannotated_splice |= is_unannotated_splice(v);
     }
-    if (usable || th.hits.empty()) return WITHHELD_NONE;
+    if (usable) return WITHHELD_NONE;
     if (off_index) return WITHHELD_OFF_INDEX;
     if (chimeric) return WITHHELD_CHIMERIC;
     return unannotated_splice ? WITHHELD_UNANNOTATED_SPLICE : WITHHELD_UNPAIRED;
+}
+
+/// Why an unpaired template's mates are not one molecule: the furthest check of the pair rule any of its hits reached,
+/// in the order the rule asks them, `HIT_MISSING_MATE` < `HIT_REFERENCE` < `HIT_STRAND` < `HIT_OUTWARD` < `HIT_LENGTH`.
+/// A template with no hit at all has no mate.
+static int32_t unpaired_reason(const std::vector<int32_t>& verdicts)
+{
+    static_assert(HIT_REFERENCE < HIT_STRAND && HIT_STRAND < HIT_OUTWARD && HIT_OUTWARD < HIT_LENGTH,
+                  "the pair rule's checks are numbered in the order it asks them");
+    int32_t reason = HIT_MISSING_MATE;
+    for (int32_t v : verdicts)
+        if (v != HIT_MISSING_MATE && (reason == HIT_MISSING_MATE || v > reason)) reason = v;
+    return reason;
+}
+
+/// Which records of a template are used, ``used[k]`` 1: those whose alignment is a location of a usable hit, an alias
+/// of the location included. A supplementary record joins no hit, so it is never used.
+static void records_used(const std::vector<ParsedAlignment>& records, const TemplateHits& th,
+                         const std::vector<int32_t>& verdicts, std::vector<char>& used)
+{
+    used.assign(records.size(), 0);
+    for (size_t h = 0; h < th.hits.size(); ++h) {
+        if (verdicts[h] != HIT_USABLE) continue;
+        for (const auto* reads : {&th.hits[h].first, &th.hits[h].second})
+            for (const ParsedAlignment* r : *reads) used[r - records.data()] = 1;
+    }
+    for (size_t k = 0; k < records.size(); ++k)
+        if (th.alias_of[k] >= 0) used[k] = records[k].is_supplementary() ? 0 : used[th.alias_of[k]];
 }
 
 /// A template's NH: the first record's above 1, else 1 (a missing NH reads 1).
@@ -1576,16 +1623,49 @@ public:
                     return input_queue.push(std::move(current_batch));
                 };
 
+                // A read pair is a run of records sharing a name, filtered records included, so a name whose every
+                // record is filtered is a read pair too (excluded), and the annotation pass, which writes a filtered
+                // record where it stands, closes a pair where the scan does. A pair with an eligible record is a
+                // group, given the next frag_id. False when the queue was aborted.
+                bool pair_open = false;
+                auto close_pair = [&]() -> bool {
+                    if (current_group.records.empty()) {
+                        stats_.n_excluded++;
+                        return true;
+                    }
+                    current_group.frag_id = frag_id++;
+                    if (!push_group(std::move(current_group))) return false;
+                    current_group = QnameGroup{};
+                    return true;
+                };
+
                 int read_ret = 0;
                 while ((read_ret = sam_read1(fp, hdr, b)) >= 0) {
                     stats_.total++;
 
-                    uint16_t flag = b->core.flag;
-                    if (flag & BAM_FQCFAIL) { stats_.qc_fail++; continue; }
-                    if (flag & BAM_FUNMAP) { stats_.unmapped++; continue; }
-                    if (flag & BAM_FDUP) {
-                        stats_.duplicate++;
-                        if (skip_duplicates_) continue;
+                    // Each flag counted on every record carrying it; a proper pair on the primary records only
+                    const uint16_t flag = b->core.flag;
+                    stats_.qc_fail += (flag & BAM_FQCFAIL) != 0;
+                    stats_.unmapped += (flag & BAM_FUNMAP) != 0;
+                    stats_.duplicate += (flag & BAM_FDUP) != 0;
+                    stats_.secondary += (flag & BAM_FSECONDARY) != 0;
+                    stats_.supplementary += (flag & BAM_FSUPPLEMENTARY) != 0;
+                    stats_.proper_pair +=
+                        (flag & (BAM_FPROPER_PAIR | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) == BAM_FPROPER_PAIR;
+
+                    const char* qname = bam_get_qname(b);
+                    if (!pair_open || current_qname != qname) {
+                        if (pair_open && !close_pair()) {
+                            input_aborted = true;
+                            break;  // aborted
+                        }
+                        stats_.n_read_pairs++;
+                        current_qname = qname;
+                        pair_open = true;
+                    }
+                    if ((flag & (BAM_FQCFAIL | BAM_FUNMAP)) || ((flag & BAM_FDUP) && skip_duplicates_)) {
+                        stats_.filtered++;
+                        continue;
                     }
                     if (!(flag & BAM_FPAIRED)) {
                         bam_destroy1(b);
@@ -1595,20 +1675,6 @@ public:
                             "Input BAM must be paired-end, "
                             "but found unpaired read");
                     }
-                    if (flag & BAM_FSECONDARY) stats_.secondary++;
-                    if (flag & BAM_FSUPPLEMENTARY) stats_.supplementary++;
-
-                    const char* qname = bam_get_qname(b);
-                    if (!current_group.records.empty() &&
-                        current_qname != qname) {
-                        current_group.frag_id = frag_id++;
-                        if (!push_group(std::move(current_group))) {
-                            input_aborted = true;
-                            break;  // aborted
-                        }
-                        current_group = QnameGroup{};
-                    }
-                    current_qname = qname;
                     current_group.records.push_back(
                         parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_, ctx_, &stats_));
                 }
@@ -1620,11 +1686,8 @@ public:
                     throw read_error(bam_path, read_ret, stats_.total);
                 }
 
-                // Flush last group
-                if (!input_aborted && !current_group.records.empty()) {
-                    current_group.frag_id = frag_id++;
-                    input_aborted = !push_group(std::move(current_group));
-                }
+                // Close the last read pair
+                if (!input_aborted && pair_open) input_aborted = !close_pair();
                 if (!input_aborted) {
                     flush_batch();
                 }
@@ -1858,41 +1921,33 @@ private:
         };
 
         // Per-worker state refs
-        stats.n_read_names++;
         ws.pending.clear();
         ws.pending_hypotheses.clear();
         ws.arena_observed.clear();
         ws.arena_implied.clear();
 
+        // One outcome per template, and one status per record from it: an option-excluded or withheld template's
+        // records are unplaced, a placed one's used or unused.
+        const int64_t n_records = static_cast<int64_t>(records.size());
         const int32_t nh = template_nh(records);
-        if (is_multimapper(records, nh)) {
-            stats.multimapping++;
-            if (!include_multimap) return;
-        } else {
-            stats.unique++;
+        if (!include_multimap && is_multimapper(records, nh)) {
+            stats.n_excluded_by_option++;
+            stats.n_records_unplaced += n_records;
+            return;
         }
 
         auto hit_result = template_hits(records);
         stats.n_nm_conflicting += hit_result.n_nm_conflicting;
 
         // NH counts a template's pair alignments, and an aligner writes a mate's record in each; a mate reported in
-        // fewer records means the aligner truncated its output (counted). The mate counters, once per template, read
-        // its primary records.
+        // fewer records means the aligner truncated its output (counted). A template none of whose primary or secondary
+        // records is eligible reports no alignment to compare NH with.
         {
             int32_t n_r1 = 0, n_r2 = 0;
-            const ParsedAlignment* p1 = nullptr;
-            const ParsedAlignment* p2 = nullptr;
-            for (const auto& r : records) {
-                if (r.is_supplementary()) continue;
-                ++(r.is_read1() ? n_r1 : n_r2);
-                if (r.is_secondary()) continue;
-                if (r.is_read1() && !p1) p1 = &r;
-                else if (!r.is_read1() && !p2) p2 = &r;
-            }
-            if (nh > std::max(n_r1, n_r2)) stats.n_nh_above_reported++;
-            if (!p1 || !p2) stats.mate_unmapped++;
-            else if (p1->is_proper_pair()) stats.proper_pair++;
-            else stats.improper_pair++;
+            for (const auto& r : records)
+                if (!r.is_supplementary()) ++(r.is_read1() ? n_r1 : n_r2);
+            const int32_t reported = std::max(n_r1, n_r2);
+            if (reported > 0 && nh > reported) stats.n_nh_above_reported++;
         }
 
         auto& all_hits = hit_result.hits;
@@ -1906,8 +1961,14 @@ private:
             if (v != HIT_USABLE) stats.hits_rejected[v]++;
         if (withheld != WITHHELD_NONE) {
             stats.withheld[withheld]++;
+            if (withheld == WITHHELD_UNPAIRED) stats.unpaired_reason[unpaired_reason(verdicts)]++;
+            stats.n_records_unplaced += n_records;
             return;
         }
+        records_used(records, hit_result, verdicts, ws.record_used);  // before the usable hits are compacted
+        const int64_t n_used = std::count(ws.record_used.begin(), ws.record_used.end(), 1);
+        stats.n_records_used += n_used;
+        stats.n_records_unused += n_records - n_used;
         size_t kept = 0;
         for (size_t h = 0; h < all_hits.size(); ++h) {
             if (verdicts[h] != HIT_USABLE) continue;
@@ -1920,6 +1981,7 @@ private:
         // template could be from.
         int32_t num_hits = static_cast<int32_t>(all_hits.size());
         bool is_unique_mapper = (num_hits == 1);
+        ++(is_unique_mapper ? stats.n_placed_unique : stats.n_placed_multimapping);
         int32_t n_buffered_mm = 0;
 
         // Track per-molecule intergenic status across all hits.
@@ -2089,12 +2151,16 @@ private:
         stats_dict["secondary"] = stats_.secondary;
         stats_dict["supplementary"] = stats_.supplementary;
         stats_dict["duplicate"] = stats_.duplicate;
-        stats_dict["n_read_names"] = stats_.n_read_names;
-        stats_dict["unique"] = stats_.unique;
-        stats_dict["multimapping"] = stats_.multimapping;
         stats_dict["proper_pair"] = stats_.proper_pair;
-        stats_dict["improper_pair"] = stats_.improper_pair;
-        stats_dict["mate_unmapped"] = stats_.mate_unmapped;
+        stats_dict["filtered"] = stats_.filtered;
+        stats_dict["n_read_pairs"] = stats_.n_read_pairs;
+        stats_dict["n_excluded"] = stats_.n_excluded;
+        stats_dict["n_excluded_by_option"] = stats_.n_excluded_by_option;
+        stats_dict["n_placed_unique"] = stats_.n_placed_unique;
+        stats_dict["n_placed_multimapping"] = stats_.n_placed_multimapping;
+        stats_dict["n_records_used"] = stats_.n_records_used;
+        stats_dict["n_records_unused"] = stats_.n_records_unused;
+        stats_dict["n_records_unplaced"] = stats_.n_records_unplaced;
         stats_dict["n_fragments"] = stats_.n_fragments;
         stats_dict["n_intergenic"] = stats_.n_intergenic;
         stats_dict["n_with_exon"] = stats_.n_with_exon;
@@ -2122,6 +2188,8 @@ private:
             stats_dict[("n_hits_rejected_" + std::string(hit_verdict_label(v))).c_str()] = stats_.hits_rejected[v];
         for (int32_t w = WITHHELD_NONE + 1; w < N_WITHHELD; w++)
             stats_dict[("n_withheld_" + std::string(withheld_label(w))).c_str()] = stats_.withheld[w];
+        for (int32_t v : {HIT_MISSING_MATE, HIT_REFERENCE, HIT_STRAND, HIT_OUTWARD, HIT_LENGTH})
+            stats_dict[("n_withheld_unpaired_" + std::string(hit_verdict_label(v))).c_str()] = stats_.unpaired_reason[v];
         stats_dict["n_nh_above_reported"] = stats_.n_nh_above_reported;
         // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
         // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same

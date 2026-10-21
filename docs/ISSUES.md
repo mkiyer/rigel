@@ -431,10 +431,6 @@ MOVES A NUMBER (each alone):
 - The splice census counts placements: a multimapper's secondary placements enter `splice.*` (an NH:2 fixture: 20,500
   for 20,000 fragments), so `with_annotated_sj` and `splice.spliced_annotated` count different units; the census
   identity gate omits `deferred_multiple_placements` and runs on NH = 1 only.
-- `summary.json`: `quantification.n_transcripts` counts the synthetic spans
-  (918 for 553 quant rows) while `n_genes` counts annotated genes; `read_groups` never counts a fully unmapped pair,
-  so the report's read-fate bar reads 100 % uniquely mapped with a quarter of the pairs unmapped; `mapped_reads`
-  counts a QC-failed unmapped record as mapped.
 - Sample mode's `posterior_mean` is Σp²/Σp (a transcript that won 17 units reports 0.891 for a plain mean of 0.687),
   and NaN for a transcript with no EM unit, which the MANUAL does not say.
 - A `gene_id` with transcripts on two references takes its reference and strand from one and its span across both.

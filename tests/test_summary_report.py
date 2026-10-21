@@ -196,16 +196,27 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     def schema_warnings(run_dir):
         return [w for w in load_substrate(run_dir).warnings if "schema_version" in w]
 
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 4
+    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 5
     assert schema_warnings(out) == []
     bumped = tmp_path / "bumped"
     bumped.mkdir()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
         cli._write_quant_outputs(pr, result.index, bumped, args)
-        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 5
+        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 6
         assert schema_warnings(bumped) == [] and schema_warnings(out) != []
     assert summary["quantification"]["n_gated_out"] == 0  # the default alphas gate nothing
+
+    # one outcome per read pair and one status per record, each summing to its total, as the scan counted them
+    pairs, records = summary["read_pairs"], summary["alignment_stats"]["records"]
+    placed = pairs["placed"]["unique"] + pairs["placed"]["multimapping"]
+    assert pairs["total"] == pr.stats.n_read_pairs > 0
+    assert pairs["total"] == (
+        pairs["excluded"] + sum(pairs["withheld"].values()) + pairs["excluded_by_option"] + placed
+    )
+    assert sum(pairs["unpaired_by_reason"].values()) == pairs["withheld"]["unpaired"]
+    assert placed == summary["fragment_stats"]["total"]
+    assert sum(records.values()) == summary["alignment_stats"]["total_reads"] == pr.stats.total
     # the transcripts are the annotated ones; the synthetic spans are counted apart, as the nascent RNA
     is_synthetic = result.index.t_df["is_synthetic"].to_numpy(dtype=bool)
     assert summary["quantification"]["n_nascent"] == int(is_synthetic.sum()) > 0

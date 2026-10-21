@@ -199,6 +199,60 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
     )
 
 
+def _check_scan_accounting(stats: PipelineStats) -> None:
+    """Every read pair has one outcome and every record one status, so the scan's counts reconcile by construction; a
+    difference is a defect in the scan, and the run stops rather than report counts that do not add up."""
+    withheld = (
+        stats.n_withheld_unpaired
+        + stats.n_withheld_unannotated_splice
+        + stats.n_withheld_off_index
+        + stats.n_withheld_chimeric
+    )
+    unpaired = (
+        stats.n_withheld_unpaired_missing_mate
+        + stats.n_withheld_unpaired_reference
+        + stats.n_withheld_unpaired_strand
+        + stats.n_withheld_unpaired_outward
+        + stats.n_withheld_unpaired_length
+    )
+    placed = stats.n_placed_unique + stats.n_placed_multimapping
+    pairs = stats.n_excluded + withheld + stats.n_excluded_by_option + placed
+    records = (
+        stats.filtered + stats.n_records_used + stats.n_records_unused + stats.n_records_unplaced
+    )
+    broken = [
+        what
+        for what, holds in (
+            (
+                f"{stats.n_read_pairs:,} read pairs but {pairs:,} outcomes",
+                pairs == stats.n_read_pairs,
+            ),
+            (f"{stats.total:,} records but {records:,} statuses", records == stats.total),
+            (
+                f"{stats.n_withheld_unpaired:,} unpaired but {unpaired:,} reasons",
+                unpaired == stats.n_withheld_unpaired,
+            ),
+            (f"{stats.n_fragments:,} fragments but {placed:,} placed", placed == stats.n_fragments),
+        )
+        if not holds
+    ]
+    if broken:
+        raise RuntimeError(f"The scan's counts do not reconcile: {'; '.join(broken)}.")
+    logger.info(
+        "[SCAN] %s read pairs: %s placed (%s unique, %s multimapping), %s withheld, %s excluded (every record "
+        "unmapped, QC-failed or a duplicate)%s",
+        f"{stats.n_read_pairs:,}",
+        f"{placed:,}",
+        f"{stats.n_placed_unique:,}",
+        f"{stats.n_placed_multimapping:,}",
+        f"{withheld:,}",
+        f"{stats.n_excluded:,}",
+        f", {stats.n_excluded_by_option:,} excluded by --no-include-multimap"
+        if stats.n_excluded_by_option
+        else "",
+    )
+
+
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
     """Copy the C++ scan's counters onto ``stats``, each key onto the field of its name.
 
@@ -284,7 +338,7 @@ def _check_bam_header(bam_path: str, index: TranscriptIndex) -> None:
     if beyond:
         logger.warning(
             "%s of the BAM's %s references are not in the index (%s); the reads aligned there are withheld, "
-            "counted in no pool (fragment_stats.withheld.off_index).",
+            "counted in no pool (read_pairs.withheld.off_index).",
             f"{len(beyond):,}",
             f"{len(bam_refs):,}",
             some(beyond),
@@ -389,6 +443,7 @@ def scan_and_buffer(
 
     # Replay stats
     _apply_scan_stats(stats, result["stats"])
+    _check_scan_accounting(stats)
 
     # Build the strand models from the scanner's observations. Immutable and built
     # once — the spliced 2×2 is the marginal of its per-sj strand table.

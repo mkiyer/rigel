@@ -788,7 +788,7 @@ def test_tags_of_another_type_are_counted_and_read_as_absent(index, tmp_path):
     records[0].set_tag("NM", "2", "Z")
     records[1].set_tag("NH", "1", "Z")
     stats, nm = _scan_nm(tmp_path, index, records)
-    assert nm == [0] and stats.unique == 1
+    assert nm == [0] and stats.n_placed_unique == 1 and stats.n_nh_above_reported == 0
     assert stats.n_nm_tag_invalid == 1 and stats.n_nh_tag_invalid == 1
     assert stats.n_nm_tag_missing == 0 and stats.n_nh_tag_missing == 0
 
@@ -801,7 +801,7 @@ def test_a_record_without_nh_is_counted(index, tmp_path):
         _record("no_nh", R2_REV, 1100, "100M", 1010, nh=None),
     ]
     stats, _nm = _scan_nm(tmp_path, index, records)
-    assert stats.unique == 1
+    assert stats.n_placed_unique == 1 and stats.n_nh_above_reported == 0
     assert stats.n_nh_tag_missing == 2
 
 

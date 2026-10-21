@@ -82,11 +82,11 @@ _SECTIONS = """
         <div class="kpis" id="align-kpis"></div>
         <div class="grid2 wide-left">
           <div>
-            <p class="cap">Read fate — read groups by NH tag</p>
+            <p class="cap">Read fate — every read pair, by outcome</p>
             <div class="stackbar" id="align-bar"></div>
             <div class="legend" id="align-legend"></div>
           </div>
-          <div class="tw"><p class="cap">Counts (records vs read groups)</p><table class="data" id="align-table"></table></div>
+          <div class="tw"><p class="cap">Counts (records vs read pairs)</p><table class="data" id="align-table"></table></div>
         </div>
       </div>
     </section>

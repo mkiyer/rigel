@@ -48,10 +48,10 @@ SUMMARY_KEYS: dict[str, dict] = {
         "proper_pairs": 0,
         "duplicate_reads": 0,
         "qc_fail_reads": 0,
-        "read_groups": 0,
-        "unique_reads": 0,
-        "multimapping_reads": 0,
     },
+    "read_pairs": {"total": 0, "excluded": 0, "excluded_by_option": 0},
+    "read_pairs.withheld": {"unpaired": 0, "unannotated_splice": 0, "off_index": 0, "chimeric": 0},
+    "read_pairs.placed": {"unique": 0, "multimapping": 0},
     "fragment_stats": {
         "total": 0,
         "genic": 0,

@@ -19,19 +19,27 @@ class PipelineStats:
     Use ``to_dict()`` for JSON serialization.
     """
 
-    # --- BAM-level ---
+    # --- Records: each flag counter counts every record carrying the flag ---
     total: int = 0
     qc_fail: int = 0
     unmapped: int = 0
     secondary: int = 0
     supplementary: int = 0
     duplicate: int = 0
-    n_read_names: int = 0
-    unique: int = 0
-    multimapping: int = 0
-    proper_pair: int = 0
-    improper_pair: int = 0
-    mate_unmapped: int = 0
+    proper_pair: int = 0  # primary records flagged as a proper pair
+    filtered: int = 0  # records the scan drops: unmapped, QC-failed, or a skipped duplicate
+
+    # --- One outcome per read pair (a run of records sharing a name), one status per eligible record ---
+    #   n_read_pairs = n_excluded + the n_withheld_* + n_excluded_by_option + n_placed_unique + n_placed_multimapping
+    #   total = filtered + n_records_used + n_records_unused + n_records_unplaced
+    n_read_pairs: int = 0
+    n_excluded: int = 0  # every record filtered
+    n_excluded_by_option: int = 0  # dropped by --no-include-multimap
+    n_placed_unique: int = 0  # one usable hit
+    n_placed_multimapping: int = 0  # more than one usable hit
+    n_records_used: int = 0  # the alignment of a usable hit's location
+    n_records_unused: int = 0  # in a placed read pair, in no usable hit
+    n_records_unplaced: int = 0  # in a read pair withheld or excluded by the option
 
     # --- Resolution-level ---
     n_fragments: int = 0
@@ -57,7 +65,7 @@ class PipelineStats:
     # --- Gating ---
     n_gated_out: int = 0
 
-    # --- Multimapper scan stats (NH > 1) ---
+    # --- Multimapping fragments with a hit in a transcript, and those hits ---
     n_multimapper_groups: int = 0
     n_multimapper_alignments: int = 0
 
@@ -93,7 +101,15 @@ class PipelineStats:
     n_hits_rejected_unsupported: int = 0  # junctions no one transcript over both mates holds
     n_hits_rejected_off_index: int = 0  # both mates on one reference the index does not hold
     n_hits_rejected_chimeric: int = 0  # a mate aligned in pieces (SA, or a 5' hard clip)
-    n_withheld_unpaired: int = 0  # templates none of whose hits is a molecule
+    n_withheld_unpaired: int = (
+        0  # templates none of whose hits is a molecule, a template with no hit included
+    )
+    # ... by the furthest check any of its hits reached
+    n_withheld_unpaired_missing_mate: int = 0
+    n_withheld_unpaired_reference: int = 0
+    n_withheld_unpaired_strand: int = 0
+    n_withheld_unpaired_outward: int = 0
+    n_withheld_unpaired_length: int = 0
     n_withheld_unannotated_splice: int = (
         0  # templates whose molecules no annotated transcript holds
     )

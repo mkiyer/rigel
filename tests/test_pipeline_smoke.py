@@ -105,7 +105,7 @@ def test_scan_read_name_batch_size_boundaries_match(tmp_path):
         atol=1e-6,
         rtol=1e-6,
     )
-    assert batch_one.stats.n_read_names == batch_huge.stats.n_read_names
+    assert batch_one.stats.n_read_pairs == batch_huge.stats.n_read_pairs
     assert batch_one.stats.n_fragments == batch_huge.stats.n_fragments
 
 

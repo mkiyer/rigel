@@ -52,7 +52,7 @@ from rigel.sim import ReadSimConfig, Scenario
 _HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
 
 #: The ``summary.json`` schema the synthesized substrate mirrors, and the one the real writer must write.
-_SCHEMA = 4
+_SCHEMA = 5
 
 #: The output convention's four pools, as the report names them.
 _POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic gDNA")
@@ -76,21 +76,21 @@ def _write_substrate(d: Path) -> Path:
         "alignment_stats": {
             "total_reads": 1000,
             "mapped_reads": 950,
-            "unique_reads": 800,
-            "multimapping_reads": 150,
             "proper_pairs": 900,
             "duplicate_reads": 60,
             "qc_fail_reads": 5,
-            "read_groups": 980,
+        },
+        "read_pairs": {
+            "total": 750,
+            "excluded": 30,
+            "withheld": {"unpaired": 5, "unannotated_splice": 10, "off_index": 0, "chimeric": 5},
+            "excluded_by_option": 0,
+            "placed": {"unique": 620, "multimapping": 80},
         },
         "fragment_stats": {
             "total": 700,
             "genic": 600,
             "intergenic": intergenic,
-            "chimeric": 30,
-            "chimeric_trans": 10,
-            "chimeric_cis_same": 15,
-            "chimeric_cis_diff": 5,
             "with_annotated_sj": 400,
             "splice": {
                 "unspliced": 270,
@@ -249,8 +249,8 @@ def test_view_model_shape(tmp_path):
     numeric = next(k for k in vm["alignment"]["kpis"] if k["fmt"] in ("pct", "count"))
     assert isinstance(numeric["v"], (int, float))
     assert all("fmt" in v for v in vm["verdicts"])
-    # alignment fate never double-counts past the total
-    assert sum(seg["value"] for seg in vm["alignment"]["fate"]) <= 1000
+    # the read fate is every read pair, each counted once
+    assert sum(seg["value"] for seg in vm["alignment"]["fate"]) == 750
     # the splice bar: the four splice types, one spliced (every junction annotated)
     labels = [s["label"] for s in vm["fragments"]["splice"]]
     assert labels == ["Unspliced", "Annotated", "Implicit", "Artifact"]
@@ -837,7 +837,7 @@ def _held(summary: dict, path: str) -> bool:
     return True
 
 
-def test_every_key_the_report_reads_is_one_the_schema_4_writer_writes(quant_output):
+def test_every_key_the_report_reads_is_one_the_writer_writes(quant_output):
     """Every ``SUMMARY_KEYS`` key, at every fragment-length category, is one the writer wrote; so is every
     ``gene_quant`` column the gene table shows; the fragment-length categories it lists are the ones the labels
     name (its histogram table holds the ones with observations); and the whole report builds from what it

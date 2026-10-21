@@ -154,8 +154,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,107 passed / 0 skipped / 0 xfail, 3,107 collected** — re-derived
-2026-10-21 on the worktree recording the tolerance K's two sites (fourteen gates added; 3,093 after deleting the
+**The standing baseline: 0 failed / 3,121 passed / 0 skipped / 0 xfail, 3,121 collected** — re-derived
+2026-10-21 on the worktree counting one outcome per read pair (fourteen gates added; 3,107 after recording the
+tolerance K's two sites, fourteen gates added; 3,093 after deleting the
 resolver's chimera call, its twenty gates deleted and one added; 3,112 after the
 overrun rule, four gates added; 3,108 after withholding chimeric alignments, nine
 gates added and three deleted with the gluing of a supplementary record's pieces; 3,102 after counting the record tags

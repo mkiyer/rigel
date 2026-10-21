@@ -162,8 +162,19 @@ the code is open; each is less critical.
     skips, ten lines of code fewer. A numeric no-op: rename_identity bit-identical on oracle g00, STAR g50 ss.50 OFF,
     cfRNA-A and cfRNA-C (frozen on 5482a10c); breaking the shared test at K + 1 or K − 1 fires both callers' outer-end
     cases. The pinned scan 38.8 → 38.6 s (A B A B). Suite 3,107
-15. ☐ Accounting: one outcome per template, each record's status from its template's outcome, the counters and the
-  annotated-BAM tags; the annotation pass checked against the scan by identity
+15. ◐ Accounting (2026-10-21, owner; `ACCOUNTING_DESIGN.md`): one outcome per read pair and one status per record,
+  counted by the scan; the annotated BAM stamps them; the annotation pass checked against the scan by identity
+  - ☑ Outcomes and statuses, counted (2026-10-21): a read pair is a run of records sharing a name, filtered records
+    included, so a pair whose mates are both unmapped is one (excluded), counted nowhere before: 2.8–22 % of the cfRNA
+    libraries' pairs, 0.7 % of `vcap_mix`'s; withheld by reason, `unpaired` by the furthest check any hit reached, and a
+    template with no candidate hit withheld, no longer counted a fragment; placed unique or multimapping by its usable
+    hits; each record filtered, used, unused or unplaced, both sums checked by the scan. Each flag counted on every
+    record; `proper_pairs` the primary records flagged (it reported exactly half on every BAM); `mate_unmapped`,
+    `improper_pair` and the NH-based `unique` / `multimapping` deleted; `nh_above_reported` no longer counts a template
+    with no eligible primary or secondary record. `summary.json` schema 5 (`read_pairs`, `alignment_stats.records`); the
+    report's read fate over every read pair. No quantification number moves: rename_identity bit-identical on oracle
+    g00, STAR g50 ss.50 OFF, cfRNA-A and cfRNA-C; every counter equal to the audit's on the nine BAMs, but `vcap_mix`'s
+    `secondary_reads`, 13 higher: secondary records flagged unmapped, now counted with their flag. Suite 3,121
 
 *Phase B, calibration*
 0. ☐ First, the highest priority (owner, 2026-10-19): the capture reader reads false gDNA as capture on aligned input

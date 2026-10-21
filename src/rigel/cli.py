@@ -207,7 +207,7 @@ def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noq
 #: summary.json schema version, which a consumer should read before parsing. The fragment-length
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
 #: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name.
-SUMMARY_SCHEMA_VERSION = 4
+SUMMARY_SCHEMA_VERSION = 5
 
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
@@ -560,7 +560,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "index_dir": str(Path(args.index_dir).resolve()),
         },
         "alignment_stats": {
-            # Record-level counts (individual alignment records in the BAM).
+            # Records, each counter every record carrying its flag; ``proper_pairs`` the primary records flagged as a
+            # proper pair
             "total_reads": stats.total,
             "mapped_reads": stats.total - stats.unmapped,
             "unmapped_reads": stats.unmapped,
@@ -569,12 +570,15 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "proper_pairs": stats.proper_pair,
             "duplicate_reads": stats.duplicate,
             "qc_fail_reads": stats.qc_fail,
-            # Read-NAME-group counts (one per read name, i.e. per read/pair) —
-            # a different unit than the record counts above. The "read fate"
-            # visual is built from these so its segments share one denominator.
-            "read_groups": stats.n_read_names,
-            "unique_reads": stats.unique,
-            "multimapping_reads": stats.multimapping,
+            # One status per record, summing to ``total_reads``: filtered (unmapped, QC-failed or a skipped
+            # duplicate), used (a usable alignment's), unused (in a placed read pair, in no usable alignment), or
+            # unplaced (in a read pair withheld or excluded by the multimap option)
+            "records": {
+                "filtered": stats.filtered,
+                "used": stats.n_records_used,
+                "unused": stats.n_records_unused,
+                "unplaced": stats.n_records_unplaced,
+            },
             # Each spliced record's junction-strand tag, read on that record: given a strand, given none,
             # or ambiguous because its XS and ts disagree; ``invalid`` counts the tag values that were
             # neither '+' nor '-', each read as absent.
@@ -594,18 +598,36 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             },
             "nh_tag": {"missing": stats.n_nh_tag_missing, "invalid": stats.n_nh_tag_invalid},
         },
-        "fragment_stats": {
-            "total": stats.n_fragments,
-            "genic": stats.n_fragments - stats.n_intergenic,
-            "intergenic": stats.n_intergenic,
-            "with_annotated_sj": stats.n_with_annotated_sj,
-            # Templates withheld, with no usable hit, by outcome; the hits dropped, by reason, are below
+        # One outcome per read pair (a run of records sharing a name), summing to ``total``: excluded (every record
+        # filtered), withheld with no usable alignment by reason (an unpaired one also by the furthest check any of its
+        # alignments reached), excluded by the multimap option, or placed, unique or multimapping
+        "read_pairs": {
+            "total": stats.n_read_pairs,
+            "excluded": stats.n_excluded,
             "withheld": {
                 "unpaired": stats.n_withheld_unpaired,
                 "unannotated_splice": stats.n_withheld_unannotated_splice,
                 "off_index": stats.n_withheld_off_index,
                 "chimeric": stats.n_withheld_chimeric,
             },
+            "unpaired_by_reason": {
+                "missing_mate": stats.n_withheld_unpaired_missing_mate,
+                "reference": stats.n_withheld_unpaired_reference,
+                "strand": stats.n_withheld_unpaired_strand,
+                "outward": stats.n_withheld_unpaired_outward,
+                "length": stats.n_withheld_unpaired_length,
+            },
+            "excluded_by_option": stats.n_excluded_by_option,
+            "placed": {
+                "unique": stats.n_placed_unique,
+                "multimapping": stats.n_placed_multimapping,
+            },
+        },
+        "fragment_stats": {
+            "total": stats.n_fragments,
+            "genic": stats.n_fragments - stats.n_intergenic,
+            "intergenic": stats.n_intergenic,
+            "with_annotated_sj": stats.n_with_annotated_sj,
             # Templates whose NH exceeds the alignments reported for them (a truncated output)
             "nh_above_reported": stats.n_nh_above_reported,
             "hits_rejected": {
