@@ -1209,6 +1209,7 @@ def run_pipeline(
             str(config.annotated_bam_path),
             annotations,
             index,
+            stats=stats,
             skip_duplicates=scan.skip_duplicates,
             include_multimap=scan.include_multimap,
             sj_spec=_sj_tag_to_spec(scan.sj_strand_tag),

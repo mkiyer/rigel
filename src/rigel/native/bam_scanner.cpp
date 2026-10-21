@@ -193,6 +193,27 @@ static constexpr int32_t WITHHELD_OFF_INDEX          = 3;  // one of its hits li
 static constexpr int32_t WITHHELD_CHIMERIC           = 4;  // one of its hits has a mate aligned in pieces
 static constexpr int32_t N_WITHHELD                  = 5;
 
+// The rest of a read pair's outcomes, numbered after the WITHHELD_* ones (`pair_digest`)
+static constexpr int32_t PAIR_EXCLUDED_BY_OPTION  = N_WITHHELD;
+static constexpr int32_t PAIR_PLACED_UNIQUE       = N_WITHHELD + 1;
+static constexpr int32_t PAIR_PLACED_MULTIMAPPING = N_WITHHELD + 2;
+
+/// One read pair's part of the digest the scan and the annotation pass each fold their read pairs into: its frag_id,
+/// its name (``name_hash``, `std::hash` of it), its records, its outcome (with an unpaired pair's reason) and its used
+/// records. Summed over the read pairs, so the order in which the workers take them does not matter.
+static uint64_t pair_digest(int64_t frag_id, size_t name_hash, int64_t n_records, int32_t outcome, int32_t reason,
+                            int64_t n_used)
+{
+    size_t h = name_hash;
+    hash_combine(h, static_cast<int32_t>(frag_id));
+    hash_combine(h, static_cast<int32_t>(frag_id >> 32));
+    hash_combine(h, static_cast<int32_t>(n_records));
+    hash_combine(h, outcome);
+    hash_combine(h, reason);
+    hash_combine(h, static_cast<int32_t>(n_used));
+    return static_cast<uint64_t>(h);
+}
+
 static const char* withheld_label(int32_t outcome) {
     switch (outcome) {
         case WITHHELD_UNPAIRED:           return "unpaired";
@@ -304,6 +325,7 @@ struct ParsedAlignment {
 struct QnameGroup {
     std::vector<ParsedAlignment> records;
     int64_t frag_id = 0;
+    size_t name_hash = 0;  // `std::hash` of the read name, for the digest both passes fold
 };
 
 struct QnameBatch {
@@ -391,6 +413,7 @@ struct BamScanStats {
     int64_t n_records_used = 0;
     int64_t n_records_unused = 0;
     int64_t n_records_unplaced = 0;
+    uint64_t template_digest = 0;  // every read pair with an eligible record, folded by `pair_digest`
 
     // Resolution-level
     int64_t n_fragments = 0;
@@ -475,6 +498,7 @@ struct BamScanStats {
         n_records_used += o.n_records_used;
         n_records_unused += o.n_records_unused;
         n_records_unplaced += o.n_records_unplaced;
+        template_digest += o.template_digest;
         n_fragments += o.n_fragments;
         n_intergenic += o.n_intergenic;
         n_with_exon += o.n_with_exon;
@@ -1650,6 +1674,7 @@ public:
                         return true;
                     }
                     current_group.frag_id = frag_id++;
+                    current_group.name_hash = std::hash<std::string>{}(current_qname);
                     if (!push_group(std::move(current_group))) return false;
                     current_group = QnameGroup{};
                     return true;
@@ -1949,6 +1974,7 @@ private:
         if (!include_multimap && is_multimapper(records, nh)) {
             stats.n_excluded_by_option++;
             stats.n_records_unplaced += n_records;
+            stats.template_digest += pair_digest(frag_id, group.name_hash, n_records, PAIR_EXCLUDED_BY_OPTION, 0, 0);
             return;
         }
 
@@ -1976,15 +2002,20 @@ private:
         for (int32_t v : verdicts)
             if (v != HIT_USABLE) stats.hits_rejected[v]++;
         if (withheld != WITHHELD_NONE) {
+            const int32_t reason = withheld == WITHHELD_UNPAIRED ? unpaired_reason(verdicts) : 0;
             stats.withheld[withheld]++;
-            if (withheld == WITHHELD_UNPAIRED) stats.unpaired_reason[unpaired_reason(verdicts)]++;
+            if (withheld == WITHHELD_UNPAIRED) stats.unpaired_reason[reason]++;
             stats.n_records_unplaced += n_records;
+            stats.template_digest += pair_digest(frag_id, group.name_hash, n_records, withheld, reason, 0);
             return;
         }
         records_used(records, hit_result, verdicts, ws.record_used);  // before the usable hits are compacted
         const int64_t n_used = std::count(ws.record_used.begin(), ws.record_used.end(), 1);
         stats.n_records_used += n_used;
         stats.n_records_unused += n_records - n_used;
+        const int32_t n_usable = static_cast<int32_t>(std::count(verdicts.begin(), verdicts.end(), HIT_USABLE));
+        stats.template_digest += pair_digest(frag_id, group.name_hash, n_records,
+                                             n_usable == 1 ? PAIR_PLACED_UNIQUE : PAIR_PLACED_MULTIMAPPING, 0, n_used);
         size_t kept = 0;
         for (size_t h = 0; h < all_hits.size(); ++h) {
             if (verdicts[h] != HIT_USABLE) continue;
@@ -2163,6 +2194,7 @@ private:
         stats_dict["n_records_used"] = stats_.n_records_used;
         stats_dict["n_records_unused"] = stats_.n_records_unused;
         stats_dict["n_records_unplaced"] = stats_.n_records_unplaced;
+        stats_dict["template_digest"] = stats_.template_digest;
         stats_dict["n_fragments"] = stats_.n_fragments;
         stats_dict["n_intergenic"] = stats_.n_intergenic;
         stats_dict["n_with_exon"] = stats_.n_with_exon;
@@ -2571,12 +2603,15 @@ public:
         std::string current_qname;
         int64_t frag_id = 0;
 
-        // Summary counters
-        int64_t n_read_groups = 0;
-        int64_t n_annotated = 0;
-        int64_t n_intergenic = 0;
+        // The read pairs and records as this pass judges them, each counted as the scan counts it, and the digest of
+        // its read pairs (`pair_digest`): `write_annotated_bam` holds every one to the scan's
+        std::array<int64_t, N_WITHHELD> withheld_pairs{};
+        std::array<int64_t, N_HIT_VERDICTS> unpaired_pairs{};
+        int64_t n_read_pairs = 0, n_excluded = 0, n_excluded_by_option = 0;
+        int64_t n_placed_unique = 0, n_placed_multimapping = 0;
+        int64_t n_records_used = 0, n_records_unused = 0, n_records_unplaced = 0, n_filtered = 0;
+        uint64_t template_digest = 0;
         int64_t n_records_written = 0;
-        int64_t n_filtered_passthrough = 0;
 
         // Scratch buffer for resolve calls (single-threaded, reused), and each template's record statuses
         ResolverScratch scratch(ctx_->n_transcripts_);
@@ -2584,8 +2619,8 @@ public:
 
         auto process_and_write = [&]() {
             if (light_group.empty()) return;
-
-            n_read_groups++;
+            const int64_t n_records = static_cast<int64_t>(light_group.size());
+            const size_t name_hash = std::hash<std::string>{}(current_qname);
 
             if (!include_multimap_ && is_multimapper(light_group, template_nh(light_group))) {
                 // Write records without annotation (match pass 1 skip)
@@ -2601,7 +2636,9 @@ public:
                                     -1, -1,
                                     AF_MULTIMAPPER_DROP, 0.0f,
                                     ".", 0, 0, "unknown", -1);
-                n_intergenic++;
+                n_excluded_by_option++;
+                n_records_unplaced += n_records;
+                template_digest += pair_digest(frag_id, name_hash, n_records, PAIR_EXCLUDED_BY_OPTION, 0, 0);
                 n_records_written += static_cast<int64_t>(raw_group.size());
                 frag_id++;
                 return;
@@ -2625,6 +2662,11 @@ public:
                                     -1, -1,
                                     AF_UNRESOLVED, 0.0f,
                                     withheld_label(withheld), 0, 0, "unknown", -1);
+                const int32_t reason = withheld == WITHHELD_UNPAIRED ? unpaired_reason(verdicts) : 0;
+                withheld_pairs[withheld]++;
+                if (withheld == WITHHELD_UNPAIRED) unpaired_pairs[reason]++;
+                n_records_unplaced += n_records;
+                template_digest += pair_digest(frag_id, name_hash, n_records, withheld, reason, 0);
                 n_records_written += static_cast<int64_t>(raw_group.size());
                 frag_id++;
                 return;
@@ -2637,6 +2679,12 @@ public:
             // the scan keeps has a transcript holding its junctions), ZW 1 with no competing hypothesis.
             records_used(light_group, hit_result, verdicts, used);
             const int32_t num_hits = static_cast<int32_t>(std::count(verdicts.begin(), verdicts.end(), HIT_USABLE));
+            const int64_t n_used = std::count(used.begin(), used.end(), 1);
+            ++(num_hits == 1 ? n_placed_unique : n_placed_multimapping);
+            n_records_used += n_used;
+            n_records_unused += n_records - n_used;
+            template_digest += pair_digest(frag_id, name_hash, n_records,
+                                           num_hits == 1 ? PAIR_PLACED_UNIQUE : PAIR_PLACED_MULTIMAPPING, 0, n_used);
             const int first_valid_hit = static_cast<int>(
                 std::find(verdicts.begin(), verdicts.end(), HIT_USABLE) - verdicts.begin());
 
@@ -2700,7 +2748,6 @@ public:
                 stamp_and_write_hit(hit_raws, out, hdr, zt, zg, zr, best_tid, best_gid, zf, zw, zc,
                                     is_primary ? 1 : 0, zn,
                                     frag.exons.empty() ? "unknown" : splice_type_label(cr.splice_type), zl);
-                (has_ann ? n_annotated : n_intergenic)++;
                 n_records_written += static_cast<int64_t>(hit_raws.size());
             }
 
@@ -2716,9 +2763,20 @@ public:
         };
 
         // ---- Main BAM read loop ----
+        // A read pair is a run of records sharing a name, filtered records included, as the scan reads it: a run with
+        // no eligible record is excluded.
+        std::string run_name;
+        bool run_open = false, run_kept = false;
         int read_ret = 0;
         while ((read_ret = sam_read1(fp, hdr, b)) >= 0) {
             uint16_t flag = b->core.flag;
+            if (!run_open || run_name != bam_get_qname(b)) {
+                if (run_open && !run_kept) n_excluded++;
+                n_read_pairs++;
+                run_name = bam_get_qname(b);
+                run_open = true;
+                run_kept = false;
+            }
 
             // Filtered reads: write through as-is (no annotation tags)
             // to preserve every record from the original BAM.  These
@@ -2740,10 +2798,11 @@ public:
                 if (sam_write1(out, hdr, b) < 0)
                     throw std::runtime_error(
                         "Failed to write filtered BAM record");
-                n_filtered_passthrough++;
+                n_filtered++;
                 n_records_written++;
                 continue;
             }
+            run_kept = true;
 
             const char* qname = bam_get_qname(b);
 
@@ -2780,6 +2839,7 @@ public:
             process_and_write();
             for (auto* r : raw_group) bam_destroy1(r);
         }
+        if (run_open && !run_kept) n_excluded++;
 
         // Cleanup
         bam_destroy1(b);
@@ -2789,11 +2849,21 @@ public:
 
         // Build summary dict
         nb::dict summary;
-        summary["n_read_groups"] = n_read_groups;
-        summary["n_annotated"] = n_annotated;
-        summary["n_intergenic"] = n_intergenic;
+        summary["n_read_pairs"] = n_read_pairs;
+        summary["n_excluded"] = n_excluded;
+        for (int32_t w = WITHHELD_NONE + 1; w < N_WITHHELD; w++)
+            summary[("n_withheld_" + std::string(withheld_label(w))).c_str()] = withheld_pairs[w];
+        for (int32_t v : {HIT_MISSING_MATE, HIT_REFERENCE, HIT_STRAND, HIT_OUTWARD, HIT_LENGTH})
+            summary[("n_withheld_unpaired_" + std::string(hit_verdict_label(v))).c_str()] = unpaired_pairs[v];
+        summary["n_excluded_by_option"] = n_excluded_by_option;
+        summary["n_placed_unique"] = n_placed_unique;
+        summary["n_placed_multimapping"] = n_placed_multimapping;
+        summary["n_records_used"] = n_records_used;
+        summary["n_records_unused"] = n_records_unused;
+        summary["n_records_unplaced"] = n_records_unplaced;
+        summary["filtered"] = n_filtered;
+        summary["template_digest"] = template_digest;
         summary["n_records_written"] = n_records_written;
-        summary["n_filtered_passthrough"] = n_filtered_passthrough;
         return summary;
     }
 
@@ -3353,7 +3423,8 @@ NB_MODULE(_bam_impl, m) {
              "Returns\n"
              "-------\n"
              "dict\n"
-             "    Summary: n_read_groups, n_annotated, n_intergenic, etc.\n")
+             "    The read pairs and records as this pass judged them, counted as the scan counts them, the\n"
+             "    digest of its read pairs, and the records written.\n")
         ;
 
 }

@@ -391,3 +391,70 @@ def test_each_alignment_is_stamped_with_its_own_splice_type(index, tmp_path):
     assert splice("s_annot", {13000, 13200}) == {"unspliced"}
     assert splice("s_implicit", {1150, 2150}) == {"spliced_implicit"}
     assert splice("s_implicit", {14000, 14200}) == {"unspliced"}
+
+
+# ── the annotation pass sees what the scan saw, read pair by read pair ───────────────────────────────────────────
+
+
+def _two_placed_pairs(first, second):
+    """Two read pairs, each placed uniquely with both records used, named ``first`` then ``second``, in this order."""
+    return [*_pair(first, 5000, "50M", 5200, "50M"), *_pair(second, 7000, "50M", 7200, "50M")]
+
+
+def _run_with_annotation(tmp_path, index, bam, before=None):
+    from rigel.config import EMConfig, PipelineConfig
+    from rigel.pipeline import run_pipeline
+
+    out = tmp_path / "annotated.bam"
+    config = PipelineConfig(
+        scan=BamScanConfig(total_threads=1),
+        em=EMConfig(seed=1, assignment_mode="fractional"),
+        annotated_bam_path=out,
+    )
+    run_pipeline(bam, index, config=config, before_annotated_bam=before)
+    return out
+
+
+def test_the_annotation_pass_sees_what_the_scan_saw(index, tmp_path):
+    """The counters BAM, and a BAM a filtered record of another name splits a name in: both passes close each read
+    pair at the same record, judge it alike, and the pass's digest equals the scan's."""
+    assert _run_with_annotation(tmp_path, index, _bam(tmp_path, _counters_bam_records())).exists()
+    a1, a2 = _pair("a", 5000, "50M", 5200, "50M")
+    split = [
+        a1,
+        _unmapped("b", True, 5500, MATE_UNMAPPED),
+        _unmapped("b", False, 5500, MATE_UNMAPPED),
+        a2,
+    ]
+    assert _run_with_annotation(
+        tmp_path, index, _bam_as_given(tmp_path, split, "split.bam")
+    ).exists()
+
+
+def test_an_annotation_pass_that_judges_otherwise_stops_the_run(index, tmp_path):
+    """The pass re-judges every read pair; one told another fragment-length limit than the scan's judges otherwise,
+    and the run stops, the annotated BAM deleted, rather than stamp what the scan did not decide."""
+    try:
+        with pytest.raises(RuntimeError, match="annotation pass"):
+            _run_with_annotation(
+                tmp_path,
+                index,
+                _bam(tmp_path, _counters_bam_records()),
+                before=lambda _result: index.resolver.set_max_fragment_length(100),
+            )
+    finally:
+        index.resolver.set_max_fragment_length(BamScanConfig().max_frag_length)
+    assert not (tmp_path / "annotated.bam").exists()
+
+
+def test_an_annotation_pass_given_other_read_pairs_stops_the_run(index, tmp_path):
+    """Two read pairs alike in every count, their names swapped in the BAM the pass reads: the same outcomes, records
+    and statuses, but other read pairs, which only their names tell apart, so the run stops."""
+    import shutil
+
+    bam = _bam_as_given(tmp_path, _two_placed_pairs("x1", "x2"), "pairs.bam")
+    swapped = _bam_as_given(tmp_path, _two_placed_pairs("x2", "x1"), "swapped.bam")
+    with pytest.raises(RuntimeError, match="annotation pass"):
+        _run_with_annotation(
+            tmp_path, index, bam, before=lambda _result: shutil.copyfile(swapped, bam)
+        )

@@ -184,6 +184,13 @@ the code is open; each is less critical.
     the scan's unused, filtered and unplaced: STAR g50 ss.50 OFF 658,486, 1,995,256 and 23,471; cfRNA-C 52,220, 495,714
     and 892,319. No quantification number moves: rename_identity bit-identical on the four inputs. The annotation pass
     resolves every usable hit: cfRNA-C 24.2 → 28.6 s (A B A B). Suite 3,127
+  - ☑ The annotation pass checked against the scan (2026-10-21): each pass folds every read pair (its frag_id, its
+    name's hash, its records, its outcome with an unpaired pair's reason, its used records) into a 64-bit digest, and
+    the pass reports its counts as the scan names them; a difference deletes the annotated BAM and stops the run. Equal
+    on STAR g50 ss.50 OFF, cfRNA-C and `vcap_mix` (38.3 M records); a pass told another fragment-length limit than the
+    scan's, or given the BAM with two read names swapped, stops. No quantification number moves: rename_identity
+    bit-identical on the four inputs. The pinned scan of STAR g50 ss.50 OFF 42.2 → 43.0 s, five A B pairs, +0.6 s
+    median. Suite 3,130
 
 *Phase B, calibration*
 0. ☐ First, the highest priority (owner, 2026-10-19): the capture reader reads false gDNA as capture on aligned input

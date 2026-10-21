@@ -491,7 +491,9 @@ record's status follows from its pair's outcome: filtered; used (its alignment i
 pairs and the statuses to the records by construction, so the scan checks both and stops on a difference
 (`tests/test_accounting.py`); `summary.json` reports them as `read_pairs` and `alignment_stats.records`. The annotated
 BAM stamps them: a withheld pair's records ZF 0 with the reason in ZC, an unused record ZC `unused_alignment` with ZH
-0, and a used record the splice type of its own placement.
+0, and a used record the splice type of its own placement. The annotation pass re-judges every read pair with the
+scan's code and stops the run unless its counts, and a digest of its read pairs (frag_id, name, records, outcome,
+used records), equal the scan's.
 
 ---
 

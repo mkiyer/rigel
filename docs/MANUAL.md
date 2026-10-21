@@ -616,7 +616,10 @@ Produced by `--annotated-bam PATH`. Requires a second pass over the BAM.
 The output is a BAM with exactly the same records as the input (no drops, no duplications), collated —
 every qname in one contiguous run. Filtered records (QC-failed, unmapped or a skipped duplicate) are written
 through unchanged without annotation tags. Rigel's tags replace any tag of the same name the aligner wrote
-(HISAT2's `ZS:i`, for one). The quantification tables are written before this pass begins.
+(HISAT2's `ZS:i`, for one). The quantification tables are written before this pass begins. The pass re-reads the
+BAM and re-judges every read pair as the scan did, and checks that it saw what the scan saw: its count of each
+outcome and status, and a digest of its read pairs. On any difference it deletes the annotated BAM and stops with
+an error, so the input BAM must not change between the two passes.
 
 | Tag | Type | Description |
 |-----|------|-------------|

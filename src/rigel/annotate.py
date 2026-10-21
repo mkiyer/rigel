@@ -97,6 +97,7 @@ BAM Tag Schema
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -333,12 +334,38 @@ def _tag_strings(values) -> list[str]:
     return [v if isinstance(v, str) and v else "." for v in values]
 
 
+#: The counts the annotation pass reports, each named and counted as the scan counts it, and the digest of its read
+#: pairs: every one must equal the scan's, or the pass stamped what the scan did not decide.
+SAME_AS_THE_SCAN = (
+    "n_read_pairs",
+    "n_excluded",
+    "n_withheld_unpaired",
+    "n_withheld_unannotated_splice",
+    "n_withheld_off_index",
+    "n_withheld_chimeric",
+    "n_withheld_unpaired_missing_mate",
+    "n_withheld_unpaired_reference",
+    "n_withheld_unpaired_strand",
+    "n_withheld_unpaired_outward",
+    "n_withheld_unpaired_length",
+    "n_excluded_by_option",
+    "n_placed_unique",
+    "n_placed_multimapping",
+    "n_records_used",
+    "n_records_unused",
+    "n_records_unplaced",
+    "filtered",
+    "template_digest",
+)
+
+
 def write_annotated_bam(
     bam_path: str,
     output_path: str,
     annotations: AnnotationTable,
     index,
     *,
+    stats,
     skip_duplicates: bool,
     include_multimap: bool,
     sj_spec: str,
@@ -363,6 +390,10 @@ def write_annotated_bam(
         The annotation table built during quantification.
     index : TranscriptIndex
         Reference index (for transcript / gene ID lookup).
+    stats : PipelineStats
+        The scan's counts. The pass re-reads the BAM and re-judges every read pair, and must see what the scan saw:
+        every count in :data:`SAME_AS_THE_SCAN`, the digest of its read pairs among them, and every record written. On
+        any difference the annotated BAM is deleted and the run stops.
     skip_duplicates : bool
         Must match the value used in Pass 1.
     include_multimap : bool
@@ -429,12 +460,26 @@ def write_annotated_bam(
         g_names,
     )
 
+    differ = {
+        key: (summary[key], getattr(stats, key))
+        for key in SAME_AS_THE_SCAN
+        if summary[key] != getattr(stats, key)
+    }
+    if summary["n_records_written"] != stats.total:
+        differ["records written"] = (summary["n_records_written"], stats.total)
+    if differ:
+        Path(output_path).unlink(missing_ok=True)
+        raise RuntimeError(
+            "The annotation pass did not see what the scan saw, so its BAM is deleted: "
+            + "; ".join(
+                f"{key} {seen:,} against the scan's {scanned:,}"
+                for key, (seen, scanned) in differ.items()
+            )
+            + ". The BAM must not change between the two passes."
+        )
     logger.info(
-        f"[ANNOTATE] Wrote {summary['n_records_written']:,} records "
-        f"to {output_path} "
-        f"({summary['n_annotated']:,} annotated, "
-        f"{summary['n_intergenic']:,} intergenic, "
-        f"{summary['n_filtered_passthrough']:,} filtered pass-through)"
+        f"[ANNOTATE] Wrote {summary['n_records_written']:,} records to {output_path}: "
+        f"{summary['n_read_pairs']:,} read pairs, as the scan judged them"
     )
 
     return summary

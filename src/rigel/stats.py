@@ -40,6 +40,9 @@ class PipelineStats:
     n_records_used: int = 0  # the alignment of a usable hit's location
     n_records_unused: int = 0  # in a placed read pair, in no usable hit
     n_records_unplaced: int = 0  # in a read pair withheld or excluded by the option
+    template_digest: int = (
+        0  # every read pair with an eligible record folded into 64 bits, for the annotation pass
+    )
 
     # --- Resolution-level ---
     n_fragments: int = 0
