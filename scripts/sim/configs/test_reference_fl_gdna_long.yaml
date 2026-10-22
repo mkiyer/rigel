@@ -39,6 +39,10 @@ shadow_gtf: $RIGEL_RUNS/test_reference/test_shadow.gtf
 index: $RIGEL_RUNS/test_reference/idx
 outdir: $RIGEL_RUNS/test_reference/scenarios_fl_gdna_long
 
+# ⭐ No FASTQs (owner, 2026-10-03 and 2026-10-22): nothing reads them — every scorer reads the oracle BAM and
+# `panel.py` finds a condition by `sim_oracle.bam`. The truth tables are written from the oracle BAM first.
+emit_fastq: false
+
 simulation:
   # ⭐ small on purpose — the point of this reference is a SECONDS-long loop
   n_total_fragments: 1170000

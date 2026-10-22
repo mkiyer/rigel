@@ -102,8 +102,9 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 
 - **The order.** The region-length defect now carries most of the oracle ladder's in-scope error; it is stage
   calibration, and the fix order puts the scan's remaining items first. Whether it moves up is the owner's call.
-- **Re-align on the cluster?** The deleted five-condition STAR panel could be re-aligned from the new FASTQs
-  (`$RIGEL_RUNS/suite/ladder/<condition>/sim_R{1,2}.fq.gz`) at the production and recommended settings.
+- **Re-align on the cluster?** The deleted five-condition STAR panel could be re-aligned from the new reads at the
+  production and recommended settings. The panels keep no FASTQs (2026-10-22): rebuild a pair from the condition's
+  `sim_oracle.bam` with `samtools fastq -N`, byte for byte the simulator's.
 - The tier promotions above, and the re-cache's timing (step 4).
 - The VCaP mix's gDNA fraction, 0.252 → 0.257 against 0.2518: read it against the truth of the read pairs the scan
   still quantifies (the VCaP read-name labels) before taking it for a regression.
@@ -125,7 +126,8 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 | the report card | built by the ladder-report skill from the arms; this run's receipts `$RIGEL_RUNS/benchmarks/2026-10-21_resim/` (`run.sh`, a log per stage, `card/cvo_*.json`) |
 | the old panels | `$RIGEL_RUNS/archive/suite_before_resim_2026-10-21/` (text only: arms, truth tables, logs, cache manifests) |
 | the mask A/B | `$RIGEL_RUNS/prototypes/2026-10-21_mask_ab/` (the unmasked arm's config, runner, BAMs and scores) |
-| the local minimap2 panel | `$RIGEL_RUNS/prototypes/2026-10-15_splice_a/aligned/` (the only local artifact truth; keep) |
+| deleted 2026-10-22 (owner) | every panel's FASTQs (rebuilt on demand from the simulator's BAM); the local minimap2 panel, aligned from the old reads (its receipts stay in `$RIGEL_RUNS/prototypes/2026-10-15_splice_a/`); the closed campaigns' per-object dumps in `$RIGEL_RUNS/arms/` |
+| leftover panel folders | `$RIGEL_RUNS/archive/leftover_panels_2026-10-22/` (`ladder_nrna_lo`, the test chromosome's `step3_*`) |
 
 ## The prompt for the next session
 

@@ -21,7 +21,9 @@ Two rules govern the whole file (`TRAPS: prove-the-substrate`, `TRAPS: can-the-b
 `$RIGEL_RUNS` names the benchmark data root, which lives outside the repository: the instruments read it from
 the environment, and the shell lines below need it exported (`export RIGEL_RUNS=<the data root>`). Everything
 simulated lives under `$RIGEL_RUNS/suite/` (the ladder, the two side panels, the carved reference and the index)
-and `$RIGEL_RUNS/test_reference/` (the test chromosome, §0a).
+and `$RIGEL_RUNS/test_reference/` (the test chromosome, §0a). No panel keeps FASTQs (owner, 2026-10-22): every
+scorer reads the simulator's BAM, which holds every read as it was written, and `panel.py align` rebuilds a pair from
+it byte for byte (`samtools fastq -N`) and deletes it once aligned.
 The panel says how much error there is and where.
 
 **The ladder** (`scripts/sim/configs/gdna_ladder.yaml`, `ladder/`) is the only panel the tool is ranked on.
@@ -305,8 +307,8 @@ in the sense of §0 — its transcript-level number is not a calibration result 
 aligned by `rustar`, STAR's Rust port, which runs locally where STAR does not, with the MANUAL's recommended settings
 (`scripts/sim/configs/star_recommended.params.txt`) into `<condition>/rustar_recommended.bam`, beside the simulator's
 own BAM. Every read name carries its molecule's true source and coordinates, so a pair, a placement or an origin is
-scored against truth template by template. `panel.py align` writes it once (about 50 s and 1 GB per condition; a
-condition counts aligned once its `rustar_recommended.align.json` records the aligner, its version and the parameter
+scored against truth template by template. `panel.py align` writes it once (about 50 s and 1 GB per condition, the
+reads rebuilt from the simulator's BAM; a condition counts aligned once its `rustar_recommended.align.json` records the aligner, its version and the parameter
 file, after the BAM was checked to hold every template the simulator drew), and `panel.py score --bam
 rustar_recommended` scores it after every change, through `quant_accuracy.py --bam`: the base arm only, against the
 same truth as the simulator's alignments, so the two inputs compare directly. Every row records its input, and the

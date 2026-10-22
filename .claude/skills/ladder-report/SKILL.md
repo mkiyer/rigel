@@ -21,7 +21,7 @@ before-and-after is what makes the next delta attributable. `panel.py score` pas
 | input | command | after a change to Rigel? |
 |---|---|---|
 | the ladder on the simulator's alignments | `python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base oracle` | always |
-| **the STAR rung's alignments** | `python scripts/sim/panel.py align --config scripts/sim/configs/gdna_ladder.yaml --aligner <rustar or STAR> --aligner-index <STAR index of the suite genome> --threads 16` | never: once per panel (about 50 s and 1 GB per condition); the BAMs are kept |
+| **the STAR rung's alignments** | `python scripts/sim/panel.py align --config scripts/sim/configs/gdna_ladder.yaml --aligner <rustar or STAR> --aligner-index <STAR index of the suite genome> --threads 16` | never: once per panel (about 50 s and 1 GB per condition); the BAMs are kept, the FASTQs are not (`align` rebuilds a pair from the simulator's BAM) |
 | **the STAR rung** | `python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base --bam rustar_recommended` | always |
 | the two gap panels | `python scripts/sim/panel.py score --config scripts/sim/configs/flgap_rna_long.yaml --jobs 4 --arms base`, and `flgap_rna_short.yaml` | always |
 | calibration against the oracle | `python scripts/design/calibration_vs_oracle.py --suite $RIGEL_RUNS/suite/<panel> --index $RIGEL_RUNS/suite/rigel_index --jobs 8 --json <dir>/cvo_<panel>.json`, for `ladder`, `flgap_rna_long`, `flgap_rna_short` | always; it reads the cached scan, so re-cache after a scan change |

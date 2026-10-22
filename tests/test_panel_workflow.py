@@ -14,6 +14,7 @@ does not cover rather than reading as more coverage than it has
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 
@@ -329,6 +330,100 @@ def test_align_REFUSES_without_the_aligner_or_its_index(tmp_path):
     args.aligner = sys.executable  # a file that exists
     args.aligner_index = tmp_path  # with no STAR index in it
     with pytest.raises(SystemExit, match="genome index"):
+        PANEL.cmd_align(p, args)
+
+
+def _fake_aligner(tmp_path):
+    """An executable that answers `--version`, writes the pair it is handed (read through `--readFilesCommand`) to
+    `<prefix>reads_seen`, and writes the condition's simulator BAM as its alignment, every template, as `align`
+    checks."""
+    script = tmp_path / "fake_aligner"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, shutil, subprocess, sys\n"
+        "a = sys.argv[1:]\n"
+        "if a == ['--version']:\n"
+        "    print('fake 1.0')\n"
+        "    sys.exit(0)\n"
+        "i = a.index('--readFilesIn')\n"
+        "cmd = a[a.index('--readFilesCommand') + 1]\n"
+        "prefix = a[a.index('--outFileNamePrefix') + 1]\n"
+        "seen = b''.join(subprocess.run([cmd, r], capture_output=True, check=True).stdout for r in a[i + 1 : i + 3])\n"
+        "pathlib.Path(prefix + 'reads_seen').write_bytes(seen)\n"
+        "shutil.copy(pathlib.Path(prefix).parent / 'sim_oracle.bam', prefix + 'Aligned.out.bam')\n"
+    )
+    script.chmod(0o755)
+    return script
+
+
+def _simulator_bam(path, pairs):
+    """A simulator BAM as the engine writes one: each pair's R1 forward, then its R2 on the reverse strand, whose
+    stored sequence is the read's reverse complement."""
+    import pysam
+
+    header = pysam.AlignmentHeader.from_dict(
+        {"HD": {"VN": "1.6"}, "SQ": [{"SN": "chr1", "LN": 10_000}]}
+    )
+    comp = str.maketrans("ACGT", "TGCA")
+    with pysam.AlignmentFile(str(path), "wb", header=header) as out:
+        for name, r1, r2 in pairs:
+            for stored, flag, pos, mate in (
+                (r1, 99, 100, 300),
+                (r2[::-1].translate(comp), 147, 300, 100),
+            ):
+                rec = pysam.AlignedSegment(header)
+                rec.query_name, rec.query_sequence, rec.flag = name, stored, flag
+                rec.reference_id, rec.reference_start, rec.cigar = 0, pos, [(0, len(stored))]
+                rec.next_reference_id, rec.next_reference_start = 0, mate
+                rec.query_qualities = pysam.qualitystring_to_array("I" * len(stored))
+                out.write(rec)
+
+
+def test_align_rebuilds_a_missing_pair_from_the_simulators_BAM(tmp_path):
+    """The panels keep no FASTQs: the simulator's BAM holds every read as it was written, so `align` rebuilds a
+    missing pair with `samtools fastq -N`, byte for byte the FASTQs the simulator wrote (a whole 10 M-pair ladder
+    condition and a test-chromosome one hashed identical, 2026-10-22), aligns it and deletes it. With neither the
+    reads nor the BAM it refuses, naming both.
+
+    Perturbation: no rebuild refuses the condition; a rebuild without `-N` drops the `/1`, `/2` the simulator's
+    names carry; a rebuilt pair left behind is what the panels shed."""
+    p = PANEL.Panel(_config(tmp_path))
+    d = p.dir / "c1"
+    d.mkdir(parents=True)
+    pairs = [
+        ("rna_T1:10-210:r:0", "ACGTTGCA", "GGATCCAT"),
+        ("gdna_chr1:400-640:f:1", "TTGACCAG", "CAGTACGT"),
+    ]
+    _simulator_bam(d / "sim_oracle.bam", pairs)
+    (d / "truth_summary.json").write_text(json.dumps({"origin_counts": {"mrna": 1, "gdna": 1}}))
+    index = tmp_path / "index"
+    index.mkdir()
+    (index / "SA").write_bytes(b"")
+    args = type(
+        "A",
+        (),
+        {
+            "conditions": ["c1"],
+            "aligner": str(_fake_aligner(tmp_path)),
+            "aligner_index": str(index),
+            "params": PANEL.STAR_PARAMS,
+            "name": "rustar_recommended",
+            "threads": 1,
+            "force": False,
+        },
+    )()
+    assert PANEL.cmd_align(p, args) == 0
+    expected = "".join(f"@{n}/1\n{r1}\n+\n{'I' * len(r1)}\n" for n, r1, _ in pairs) + "".join(
+        f"@{n}/2\n{r2}\n+\n{'I' * len(r2)}\n" for n, _, r2 in pairs
+    )
+    assert (d / "rustar_recommended.reads_seen").read_text() == expected
+    assert not (d / "sim_R1.fq.gz").exists() and not (d / "sim_R2.fq.gz").exists(), (
+        "the rebuilt pair was left behind"
+    )
+    assert (d / "rustar_recommended.align.json").is_file()
+    (d / "sim_oracle.bam").unlink()
+    args.force = True
+    with pytest.raises(SystemExit, match="simulator's BAM"):
         PANEL.cmd_align(p, args)
 
 

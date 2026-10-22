@@ -37,12 +37,10 @@ Usage::
     python scripts/design/ruler_vs_truth.py --panel ladder --condition C --module proto.py --out table.tsv
     python scripts/design/ruler_vs_truth.py --panel test --condition C --set calibration.message_policy=silent
     python scripts/design/ruler_vs_truth.py --panel ladder --condition C --scale        # THE ONE-SCALE READ-OUT
-    python scripts/design/ruler_vs_truth.py --panel ladder --panel-dir $RIGEL_RUNS/suite/ladder_nrna_lo --condition gdna_g50_ss_0.99_nrna_lo_capture_on --scale
     python scripts/design/ruler_vs_truth.py --self-test
 
 ⛔ ``--panel-dir`` names a directory of conditions, never the index: pass ``--panel ladder`` with it for a ladder-derived
-panel (``ladder_nrna_lo`` is the ladder's g50 ss.99 ON at a nascent ``on_fraction`` of 0.10), or the test
-chromosome's index is loaded against the ladder's BAM and no fragment deposits.
+panel, or the test chromosome's index is loaded against the ladder's BAM and no fragment deposits.
 
 ``--scale`` — ARE EVERY HYPOTHESIS CLASS'S OPPORTUNITIES ON ONE SCALE? The E-step balances two hypotheses at a
 fragment only if their opportunities are the same multiple of the yield the simulator actually drew them with, so

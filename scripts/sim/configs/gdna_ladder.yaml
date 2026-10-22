@@ -123,6 +123,11 @@ gtf: $RIGEL_RUNS/suite/reference/genes.gtf
 index: $RIGEL_RUNS/suite/rigel_index
 outdir: $RIGEL_RUNS/suite/ladder
 
+# ⭐ No FASTQs (owner, 2026-10-22): every scorer reads the oracle BAM and `panel.py` finds a condition by
+# `sim_oracle.bam`; `panel.py align`, the one stage that reads them, rebuilds a pair from the oracle BAM byte for
+# byte (`samtools fastq -N`) and deletes it once aligned. The truth tables are written from the oracle BAM first.
+emit_fastq: false
+
 # ── Read simulation ─────────────────────────────────────────────────────────────────────────────
 # ⚠ `n_total_fragments` is what governs; `n_rna_fragments` is ignored in this mode and is left at
 # the same value only so the file reads sensibly if the total is ever removed.

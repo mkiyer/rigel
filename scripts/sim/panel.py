@@ -367,7 +367,9 @@ def cmd_align(p: Panel, args) -> int:
     alignment is the expensive half and is done once, while `score --bam <name>` re-reads it after every change
     to Rigel. Resumable: a condition with its record is skipped unless `--force`. The record (`<name>.align.json`:
     the aligner and its version, the index, the parameter file, the time) is written last, once the BAM holds
-    every template the simulator drew, so an interrupted alignment never counts."""
+    every template the simulator drew, so an interrupted alignment never counts. The panels keep no FASTQs: a
+    missing pair is rebuilt from the simulator's BAM, which holds every read as it was written (`samtools fastq -N`
+    gives back the simulator's FASTQs byte for byte), and deleted once aligned."""
     conds = args.conditions or p.conditions
     need(bool(conds), "simulated conditions", "panel.py simulate")
     aligner = Path(args.aligner) if args.aligner else None
@@ -390,12 +392,25 @@ def cmd_align(p: Panel, args) -> int:
             print(f"   ✔ {c}: aligned ({record.name})")
             continue
         r1, r2 = d / "sim_R1.fq.gz", d / "sim_R2.fq.gz"
-        need(r1.is_file() and r2.is_file(), f"{c}'s simulated reads ({r1.name}, {r2.name})", "panel.py simulate")
+        rebuilt = not (r1.is_file() and r2.is_file())
+        if rebuilt:
+            oracle = d / "sim_oracle.bam"
+            need(oracle.is_file(), f"{c}'s simulated reads ({r1.name}, {r2.name}) or the simulator's BAM",
+                 "panel.py simulate")
+            need(shutil.which("samtools") is not None, "samtools, to rebuild the reads from the simulator's BAM",
+                 "conda install -c bioconda samtools")
+            run(["samtools", "fastq", "-N", "-0", "/dev/null", "-s", "/dev/null", "-1", r1, "-2", r2, oracle],
+                what=f"rebuild {c}'s reads from {oracle.name}")
         record.unlink(missing_ok=True)
         prefix = d / args.name
         start = time.time()
-        run([aligner, "--runThreadN", args.threads, "--genomeDir", index, "--readFilesIn", r1, r2,
-             "--readFilesCommand", gunzip, "--outFileNamePrefix", f"{prefix}.", *opts], what=f"align {c}")
+        try:
+            run([aligner, "--runThreadN", args.threads, "--genomeDir", index, "--readFilesIn", r1, r2,
+                 "--readFilesCommand", gunzip, "--outFileNamePrefix", f"{prefix}.", *opts], what=f"align {c}")
+        finally:
+            if rebuilt:
+                r1.unlink(missing_ok=True)
+                r2.unlink(missing_ok=True)
         os.replace(f"{prefix}.Aligned.out.bam", bam)
         with pysam.AlignmentFile(str(bam), "rb", check_sq=False) as fh:
             n = sum(r.is_read1 and not r.is_secondary and not r.is_supplementary for r in fh.fetch(until_eof=True))
