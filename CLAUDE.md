@@ -198,7 +198,7 @@ order. `tests/test_scripts_index.py` holds the `design/` rows against the disk i
 | `sim/build_test_reference.py` | Renders the test chromosome from its one hand-edited YAML, `test_chr.yaml` (`docs/TESTING.md` §0a) |
 | `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | The panel's substrate; `panel.py build` drives the probe design, `panel.py simulate` the reads, and the reference carve is manual |
 | `sim/configs/gdna_ladder.yaml` | The 16-condition panel the tool is ranked on (`docs/TESTING.md` §0) |
-| `sim/configs/flgap_rna_long.yaml` · `flgap_rna_short.yaml` | The fl-gap side panel, re-simulated 2026-10-03 with the ladder's nascent block, so the length gap is its only difference from the ladder. ⛔ Never a ladder rung; read both arms, per stratum, beside the ladder |
+| `sim/configs/flgap_rna_long.yaml` · `flgap_rna_short.yaml` | The fl-gap side panel, re-simulated with the ladder on 2026-10-21, so the length gap is its only difference from the ladder. ⛔ Never a ladder rung; read both arms, per stratum, beside the ladder |
 
 ## CLI
 

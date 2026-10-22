@@ -21,7 +21,7 @@ before-and-after is what makes the next delta attributable. `panel.py score` pas
 | input | command | after a change to Rigel? |
 |---|---|---|
 | the ladder on the simulator's alignments | `python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base oracle` | always |
-| **the STAR rung's alignments** | `python scripts/sim/panel.py align --config scripts/sim/configs/gdna_ladder.yaml --aligner <rustar or STAR> --aligner-index <STAR index of the suite genome> --threads 16` | never: once per panel (about 45 s and 1 GB per condition); the BAMs are kept |
+| **the STAR rung's alignments** | `python scripts/sim/panel.py align --config scripts/sim/configs/gdna_ladder.yaml --aligner <rustar or STAR> --aligner-index <STAR index of the suite genome> --threads 16` | never: once per panel (about 50 s and 1 GB per condition); the BAMs are kept |
 | **the STAR rung** | `python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base --bam rustar_recommended` | always |
 | the two gap panels | `python scripts/sim/panel.py score --config scripts/sim/configs/flgap_rna_long.yaml --jobs 4 --arms base`, and `flgap_rna_short.yaml` | always |
 | calibration against the oracle | `python scripts/design/calibration_vs_oracle.py --suite $RIGEL_RUNS/suite/<panel> --index $RIGEL_RUNS/suite/rigel_index --jobs 8 --json <dir>/cvo_<panel>.json`, for `ladder`, `flgap_rna_long`, `flgap_rna_short` | always; it reads the cached scan, so re-cache after a scan change |
@@ -38,8 +38,13 @@ python .claude/skills/ladder-report/build_report.py \
     --html <scratchpad>/ladder_report.html \
     --cvo <dir> --vcap <dir>/vcap_rc/summary.json --vcap-truth 0.2518 --vcap-v071 0.263117 \
     --v071 $RIGEL_RUNS/prototypes/2026-10-05_capture_learning/baseline/release_tag.jsonl \
+    --baseline "v0.7.1, scored 2026-10-05 on the panel before its re-simulation — a ballpark" \
     --markdown $RIGEL_RUNS/reports/ladder_accuracy_<DATE>.md
 ```
+
+The 0.7.1 rows were scored on the panel before the re-simulation of 2026-10-21 and stay on the card as a ballpark
+(owner, 2026-10-21): their reads drew gDNA over the `N` runs and carried no errors, so a delta against them crosses
+simulations. Re-score the tagged release on the current panel before reading one.
 
 `--vcap-truth` is the mix's DNA-origin share by read name, and `--vcap-v071` 0.7.1's reading of it; `--head` and
 `--scored` default to HEAD and the base arm's date. The markdown comes from `quant_accuracy.py --markdown`, which the
@@ -73,7 +78,7 @@ watched to fail under its own perturbation — if you change the rendering, keep
 | a false-negative column | `fn_mass` needs an estimate of *exactly* zero, which a fractional posterior never is — it reads 0 on all 16 conditions and looks like a perfect score for something unmeasured (`TRAPS: could-the-arm-have-fired`). Report `count_under` |
 | the truth table's row count as a transcript count | The table carries a row per synthetic entity too (6,919 of 15,669 on the current index), zero on **both** sides. Only 2,466 of 9,385 gene rows are real genes. `expressed` and `detected` are the scored sets |
 | the deferred stratum unmarked | Unstranded × capture-ON carries most of the error; unmarked, a reader takes a pooled total for the tool's accuracy (`TRAPS: never-pool-the-strata`) |
-| the STAR rung's gDNA gap read as Rigel's | The aligner leaves part of the simulated library unplaced, most of it gDNA drawn over the suite genome's N runs (about a fifth of the gDNA off capture). The rung is scored against the same truth as the simulator's alignments, so the two compare directly; `unaligned` counts what the aligner left out by origin, and the gDNA fraction's truth is read over what it placed (`gdna_frac_true_aligned`) |
+| the STAR rung's gDNA gap read as Rigel's | The aligner leaves a little of the simulated library unplaced: since the re-simulation of 2026-10-21, 1.4 % of the gDNA off capture and 0.07 % on (it was a fifth off capture, drawn over the suite genome's N runs). The rung is scored against the same truth as the simulator's alignments, so the two compare directly; `unaligned` counts what the aligner left out by origin, and the gDNA fraction's truth is read over what it placed (`gdna_frac_true_aligned`) |
 | a rung that mixes aligners | Every condition comes from one `panel.py align` run: its `<name>.align.json` records the aligner, its version and the parameter file, and `quant_accuracy.py --bam` stamps the input on every row |
 | a ragged markdown table | It renders as a *wrong* table, not an error. The escaped pipes in a `Σ\|Δ\|` header are cell content, not delimiters |
 

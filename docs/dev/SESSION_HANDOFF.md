@@ -1,10 +1,29 @@
-# Session handoff — 2026-10-21
+# Session handoff — 2026-10-21 (evening)
 
 For the next session. Sandbox: nothing here is authoritative; the state is `ISSUES.md` and `ROADMAP.md`, the rulings
 `DESIGN.md`. Read `CLAUDE.md` first, then this, then `ROADMAP.md`'s "Next" and the entries it names.
 
 ## Where things stand
 
+- **The panels are fair now, and they show a large error the old ones hid** (2026-10-21 evening). The simulator no
+  longer draws a fragment over an `N` run (18.8 % of the suite genome, where the old panels drew about a fifth of their
+  gDNA off capture as all-`N` reads), its errors change the base (0.002 per base on the panels, NM on every oracle
+  record), lengths are rounded, and probes on folded duplicates bind (ba9501c4; `ISSUES:
+  the-simulator-draws-over-unknown-sequence` and its two companions, closed). The ladder and both fl-gap panels were
+  wiped and re-simulated, cached and certified, aligned by rustar, scored, and the card republished. On them Rigel
+  under-calls gDNA by 6–18 % off capture and 7–21 % on stranded capture-ON and books the rest as nascent RNA;
+  transcript error on the three in-scope strata reads 3.23 / 2.34 / 5.49 % (2.36 / 2.02 / 3.88 % on the old panel). An
+  A/B toggling only the mask proves the mask causes it, the perfect-prior arm loses as much, and calibration's library
+  fraction matches the oracle's, so the loss lies past calibration's count: `ISSUES:
+  region-lengths-count-unobservable-bases` (now, release-blocking, stage calibration) has the numbers. Not dissected.
+  The STAR rung barely moved (its aligner never placed the all-`N` reads, so it read the defect all along); its g00
+  unstranded capture-OFF control rose 6.6 → 29.5 % with its pools unchanged, also undissected.
+- **The oracle certification**: every gDNA capture-OFF row's field gate now fails, by exactly its reference's known share,
+  so those rows certify composition only. That is the region-length defect read by the gate, not a broken cache.
+- **The cluster's STAR panel BAMs were deleted** with the re-simulation (their reads no longer exist); scan changes are
+  decided on the rustar rung's BAMs (`TESTING.md` §0d) until the cluster aligns the new reads. The STAR-panel harness
+  in `$RIGEL_RUNS/arms/2026-10-21_accounting/` (`run_cond.py`) still reads the deleted BAMs: point it at
+  `<condition>/rustar_recommended.bam` before using it.
 - **The scan's repair is landed and pushed** (the fix order's Phase A, items 1–15, 2026-10-18 → 2026-10-21): every
   usable hit is one molecule of both mates with a fragment length, paired by the search for every aligner (HI not
   read); chimeric and off-index alignments withheld; one length rule; each read pair one outcome and each record one
@@ -12,7 +31,7 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
   `ISSUES: the-scanner-builds-fragments-from-one-mate` (closed) and `DESIGN.md` §1.1–§1.2; the commits are
   `git log 07eba0fc^..f763270c`. What the scan still owes: `ISSUES: multimapper-intergenic-alignments`, the scan half
   of `ISSUES: splicing-artifacts`, and (0.8.1) `ISSUES: clips-are-walked-along-the-genome-only`.
-- **The suite's standing count is 3,131** (CLAUDE.md); `preflight.py --full` green.
+- **The suite's standing count is 3,374** (CLAUDE.md; 235 simulator gates added); `preflight.py --full` green.
 - **ISSUES.md was re-prioritized** (owner, 2026-10-21): every open entry names its `stage:`, and the OPEN section runs by
   tier, then in the order the tool runs. Closed in the audit: the one-mate entry and `output-names-are-not-consistent`
   (landed 1fa1c143 on 2026-10-17, still open by mistake). New: `the-second-pass-corrections`,
@@ -20,8 +39,11 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
   owner's fix order of 2026-10-18 puts them on the release path: `merge-keeps-least-overhang`,
   `pruning-uses-three-references`, `mismatch-gate-nan-in-multimapper-gdna`,
   `the-em-prior-share-excludes-drawn-multimappers` (the 0.8.0 cut of 2026-10-14 had kept its shipped denominator).
-- **The report card was re-run on f763270c** ("Rigel Ladder Accuracy", https://claude.ai/artifact/Cek2wmKtitgbDyfM5gNqyj;
-  generator and receipts in `$RIGEL_RUNS/benchmarks/2026-10-21_card/`). The oracle ladder moved by at most ±0.54 % per
+- **The report card was re-run on the fair panel** (ba9501c4, version 12 of
+  https://claude.ai/artifact/Cek2wmKtitgbDyfM5gNqyj; receipts in `$RIGEL_RUNS/benchmarks/2026-10-21_resim/`, the VCaP
+  run reused from `$RIGEL_RUNS/benchmarks/2026-10-21_card/`, Rigel's quantification unchanged since). Its 0.7.1 column is
+  a ballpark from the old panel (owner: stop scoring 0.7.1 for now). Earlier the same day, on f763270c and the old
+  panel: the oracle ladder moved by at most ±0.54 % per
   condition since 2026-10-14 (transcript error −0.13 / −0.13 / +0.09 % on the three in-scope strata): the simulator's
   alignments do not exercise the scan's repair, which the STAR panel measures. The card's calibration rows read the
   panels' scan caches, built 2026-10-16/17, and are unchanged to rounding. On the real VCaP mix the gDNA fraction
@@ -31,10 +53,12 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 - **The docs were refreshed**: the CHANGELOG (schema 5, `read_pairs`, the annotated BAM's statuses, the multimap option),
   the MANUAL's recommended STAR settings (`--sjdbScore 0 --outFilterMultimapScoreRange 2`) and its stale `NH`
   wording, `TESTING.md` §0d (the STAR panel), `SUCCESS.md`'s step 5 (a scan change). 94 settled sandbox notes were
-  deleted (`git show f763270c:docs/dev/<name>`); the untracked review evidence is in
+  deleted (`git show f763270c:docs/dev/<name>`); the untracked review evidence was moved to
   `$RIGEL_RUNS/archive/docs_dev_untracked_2026-10-21/`.
 - **Worktrees**: ten stale ones under the project's parent directory are the owner's to remove (each already on main;
-  their uncommitted prototype edits are saved in `$RIGEL_RUNS/archive/worktree_patches_2026-10-21/`).
+  their uncommitted prototype edits were saved in `$RIGEL_RUNS/archive/worktree_patches_2026-10-21/`).
+- ⚠ **Those two archive folders are gone**: found empty that evening (`$RIGEL_RUNS/archive/` held only the old panels'
+  receipts written then), and Spotlight finds neither name. The patches named in step 2 of "Next" may be lost.
 
 ## The frame (owner)
 
@@ -76,6 +100,10 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 
 ## Open for the owner
 
+- **The order.** The region-length defect now carries most of the oracle ladder's in-scope error; it is stage
+  calibration, and the fix order puts the scan's remaining items first. Whether it moves up is the owner's call.
+- **Re-align on the cluster?** The deleted five-condition STAR panel could be re-aligned from the new FASTQs
+  (`$RIGEL_RUNS/suite/ladder/<condition>/sim_R{1,2}.fq.gz`) at the production and recommended settings.
 - The tier promotions above, and the re-cache's timing (step 4).
 - The VCaP mix's gDNA fraction, 0.252 → 0.257 against 0.2518: read it against the truth of the read pairs the scan
   still quantifies (the VCaP read-name labels) before taking it for a regression.
@@ -90,11 +118,13 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 
 | what | where |
 |---|---|
-| the STAR panel | `$RIGEL_RUNS/star_panel/<condition>/recommended.bam` (`TESTING.md` §0d) |
+| the STAR panel | the rung: `$RIGEL_RUNS/suite/ladder/<condition>/rustar_recommended.bam` (`TESTING.md` §0d); the cluster panel's text receipts in `$RIGEL_RUNS/star_panel/` (BAMs deleted) |
 | the STAR-panel harness | `$RIGEL_RUNS/arms/2026-10-21_accounting/run_cond.py` (`NO_CAPTURE=1`: every efficiency at 1; `BASE=1`: the prototype site `RIGEL_PROTO_SITE` names), `tables.py`, `use_proto.py`, `identity_proto.py` |
-| frozen identity references | `$RIGEL_RUNS/arms/2026-10-20_location_rest/rename_ref_oracle_g00.json`; `$RIGEL_RUNS/arms/2026-10-21_k_outer_end/rename_ref_{star_g50u,cfRNA-A,cfRNA-C}.json` |
+| frozen identity references | on the fair panel: `$RIGEL_RUNS/arms/2026-10-21_resim/rename_ref_{oracle_g00,star_g50u}.json` (the STAR one from the rung's g50 κ0.50 capture-OFF BAM); the real libraries': `$RIGEL_RUNS/arms/2026-10-21_k_outer_end/rename_ref_{cfRNA-A,cfRNA-C}.json` |
 | the accounting receipts | `$RIGEL_RUNS/arms/2026-10-21_accounting/` (`summary.md`, `stepN/measure.log`, `breaks_stepN/`) |
-| the report card | `$RIGEL_RUNS/benchmarks/2026-10-21_card/` (`run.sh`, `make_card_data.py`, `build_card.py`); the ladder's earlier arms in `$RIGEL_RUNS/suite/ladder/arms_2026-10-14_before_paired_end_repair/` |
+| the report card | built by the ladder-report skill from the arms; this run's receipts `$RIGEL_RUNS/benchmarks/2026-10-21_resim/` (`run.sh`, a log per stage, `card/cvo_*.json`) |
+| the old panels | `$RIGEL_RUNS/archive/suite_before_resim_2026-10-21/` (text only: arms, truth tables, logs, cache manifests) |
+| the mask A/B | `$RIGEL_RUNS/prototypes/2026-10-21_mask_ab/` (the unmasked arm's config, runner, BAMs and scores) |
 | the local minimap2 panel | `$RIGEL_RUNS/prototypes/2026-10-15_splice_a/aligned/` (the only local artifact truth; keep) |
 
 ## The prompt for the next session

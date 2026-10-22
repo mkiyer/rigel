@@ -180,13 +180,17 @@ footer code{background:none;padding:0;word-break:break-all}
     spanning 0–98&nbsp;% genomic-DNA contamination × two strand specificities × capture on and off, then the
     two fragment-length gap panels, calibration against an oracle calibration, and one real cell-line mix with
     per-fragment truth. Every simulated figure is scored against the simulator&rsquo;s own <strong>realised
-    per-fragment truth</strong>, and the 0.7.1 column is the tagged release scored the same way on the same
-    libraries.</p>
-    <p style="margin-top:10px">Re-run on 2026-10-21 after the scan&rsquo;s repair: every alignment Rigel uses is now
-    one molecule of both mates with a fragment length, chimeric and off-index alignments are withheld, and every read
-    pair is accounted for. The simulator&rsquo;s own alignments carry neither secondary alignments nor broken pairs,
-    so the repair barely moves them (transcript error within &plusmn;0.54&nbsp;% per condition of the 2026-10-14
-    card); it shows on STAR alignments of the same reads.</p>
+    per-fragment truth</strong>. The 0.7.1 column is a <strong>ballpark</strong>: the tagged release scored the
+    same way on the panel&rsquo;s previous simulation, not on these reads.</p>
+    <p style="margin-top:10px">Re-simulated on 2026-10-21 with a fairer simulator. No fragment is drawn over sequence
+    the reference does not know: assembly gaps (<code>N</code>) are 18.8&nbsp;% of the panel&rsquo;s genome, and the
+    panel before drew about a fifth of its gDNA there as all-<code>N</code> reads, which no aligner places and the
+    simulator&rsquo;s own alignments placed by truth. Every read now carries substitution errors at 0.2&nbsp;% per
+    base, and fragment lengths follow the configured law exactly. The fair panel exposes a defect the old one hid:
+    Rigel&rsquo;s region lengths count those unknown bases, so it under-calls gDNA (by 6&ndash;21&nbsp;% on the
+    contaminated rungs of the three in-scope strata) and books the rest as nascent RNA &mdash; an open, release-blocking
+    issue (<code>region-lengths-count-unobservable-bases</code>). Every number here is on the new reads; set beside an
+    earlier card, it compares across simulations.</p>
     <p style="margin-top:10px" id="star-lede"></p>
   </div>
 
@@ -214,9 +218,9 @@ footer code{background:none;padding:0;word-break:break-all}
       <li><b>Two inputs, one truth.</b> Each simulated library is read twice: from the simulator&rsquo;s own
         alignments, which place every read where it was drawn, and from <b>STAR alignments</b> of the same
         reads, the input a real library gives Rigel. Both are scored against the same per-fragment truth, so
-        the columns compare directly. An aligner places only part of what was simulated, most of the rest
-        gDNA drawn over the reference&rsquo;s N runs; those fragments are counted apart (<b>unaligned</b>),
-        and the gDNA fraction&rsquo;s truth is read over what reached Rigel.</li>
+        the columns compare directly. An aligner leaves a little of what was simulated unplaced (about 1.4&nbsp;%
+        of the gDNA off capture); those fragments are counted apart (<b>unaligned</b>), and the gDNA
+        fraction&rsquo;s truth is read over what reached Rigel.</li>
       <li><b>MARD is symmetric</b>, <code>|est−true| / (|est|+|true|)</code>, bounded in [0,1]; 0.5 means a
         3× error. It and the median relative error weight a 1-fragment transcript as much as a 25,000-fragment
         one.</li>

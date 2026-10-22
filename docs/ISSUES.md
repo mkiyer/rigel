@@ -209,6 +209,27 @@ Calibration's region lengths count bases on which no fragment can be observed.
   gDNA over the N runs too, about 0.99 M of 5 M gDNA fragments at g50 capture OFF, all-N reads that no aligner places
   and the oracle BAM placed by truth, so the oracle ladder's region lengths agreed with its reads. On the re-simulated
   panels no fragment lies on an N base, on the oracle BAM as on an aligner's.
+- **Measured on the fair panel** (2026-10-21, ba9501c4, pinned and fractional). The oracle's gDNA-field gate fails on
+  every gDNA capture-OFF row of the ladder and both fl-gap panels, each class at its reference's known share (chr21,
+  14.2 % N: intergenic 0.85 of expected, every other class 1.15–1.16; chr22, 22.9 % N: 0.71 and 1.27–1.29), so those
+  rows certify composition only. End to end, Rigel under-calls gDNA and books the rest as nascent RNA: total gDNA
+  reads 0.82–0.94 of truth off capture, 0.79–0.93 on the stranded capture-ON rungs and 0.58–0.75 on the deferred ones
+  (0.97–1.00 and 0.99–1.00 on the panel before); at g50 nascent RNA reads 1.91× (unstranded) and 1.51× (stranded) off
+  capture and 7.7× stranded on (1.02×, 1.00×, 0.65× before). Transcript error on the three in-scope strata, unstranded
+  OFF / stranded OFF / stranded ON: 3.23 / 2.34 / 5.49 % against 2.36 / 2.02 / 3.88 % before; genes 0.62 / 0.50 /
+  2.72 % against 0.31 / 0.25 / 1.38 %. The STAR rung barely moved (5.81 / 4.69 / 10.71 % against 5.50 / 4.63 /
+  10.74 %): the aligner never placed the all-N reads, so the rung read this defect before the oracle ladder could.
+- **The A/B** (g50 κ0.99, the same seeds, errors and lengths, only the mask toggled): gDNA 1.000 → 0.898 of truth off
+  capture and 0.992 → 0.788 on; nascent 1.00× → 1.51× and 0.67× → 7.7×; transcript error 2.64 → 2.82 % and 4.38 →
+  6.09 %, genes 0.28 → 0.50 % and 2.06 → 3.11 %. The rest of the re-simulation (errors, rounded lengths, a new draw)
+  moved transcript error +0.26 % off capture and −0.10 % on.
+- **Where it is not.** Calibration's library gDNA fraction matches the oracle calibration's on every in-scope row
+  (g50 κ0.99 capture OFF 0.4805 against 0.4806), and the perfect-prior arm (`--arm oracle`) under-calls as much as
+  the shipped one (0.898 off capture, 0.789 on), so the loss lies past the prior's count, in what the EM reads that
+  the prior does not replace. Not yet dissected: one condition by node class and by locus, the gDNA density and
+  lengths the EM reads first.
+Instruments: `quant_accuracy.py` (the library rows), `calibration_oracle.py --build` (the field gate), and the A/B's
+unmasked arm, `$RIGEL_RUNS/prototypes/2026-10-21_mask_ab/` (its config and the runner that switches the mask off).
 
 ### the-gdna-length-contrast-is-ill-conditioned-on-aligned-input
 `priority: now — release-blocking (owner, 2026-10-15); the third wave of the paired-end repair, designed on the repaired scan · stage: calibration · kind: defect · 2026-10-15`

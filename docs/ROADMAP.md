@@ -47,8 +47,11 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `tests/test_scan_order_independence.py`; one
   open deposit defect, the leading intron (`ISSUES: latent-defects`); the second pass's four corrections are open
   (`ISSUES: the-second-pass-corrections`).
-- **Library gDNA fraction**: calibration's is accurate on the ladder's three in-scope strata at full depth and
-  structurally blind on the deferred one — `calibration_vs_oracle.py` (its pools); it falls with
+- **Library gDNA fraction**: calibration's matches the oracle calibration's on the ladder's three in-scope strata at full
+  depth and is structurally blind on the deferred one — `calibration_vs_oracle.py` (its pools); end to end, the fair
+  panel of 2026-10-21 under-calls it by 6–18 % off capture and 7–21 % on, books the rest as nascent RNA, and the
+  perfect-prior arm loses as much, so the loss lies past calibration's count — `quant_accuracy.py` (the library rows),
+  `ISSUES: region-lengths-count-unobservable-bases`; it falls with
   depth on sparse libraries (the landscape line below) and over-calls at low gDNA under capture
   (`ISSUES: capture-on-overcalls-gdna-at-low-gdna`); the EM's pseudocounts are neutral in their odds, and at `g98`
   the transcript table leans toward RNA through calibration's RNA floor and the capture likelihood —
@@ -113,10 +116,12 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   threads one at a time; the two 0.8.0 numeric no-ops landed and the rest of the thread is later —
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`; a `_debug`
   capture has no memory bound, so one real-genome job runs at a time (`ISSUES: debug-capture-memory-is-unbounded`).
-- **Panels**: the 16-condition ladder is rebuilt under the corrected capture physics, cached and certified, one
-  realization per condition; the test chromosome is cached and certified; the fl-gap side panels and the junction-probed
-  twin were re-simulated on the current simulator, cached and certified on 2026-10-03, with the ladder's nascent block
-  and no FASTQs — `panel.py status`, `docs/TESTING.md`, `ISSUES: expand-the-gdna-spectrum`.
+- **Panels**: the 16-condition ladder and both fl-gap side panels were wiped and re-simulated on 2026-10-21 on the fair
+  simulator (no fragment over an `N` run, errors at 0.002 per base with NM, rounded lengths), cached and certified, one
+  realization per condition (the gDNA capture-OFF rows certify composition only: their field gate reads the region
+  lengths' unknown bases), and the ladder aligned by rustar for its STAR rung; the test chromosome and the
+  junction-probed twin, which hold no `N`, are cached and certified as before — `panel.py status`, `docs/TESTING.md`,
+  `ISSUES: expand-the-gdna-spectrum`.
 - **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae` / Σ|err| over every
   object with mass (`calibration_vs_oracle.py`), never an intermediate (`TRAPS: the-intermediate-is-not-the-deliverable`).
 

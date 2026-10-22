@@ -32,7 +32,14 @@ The panel says how much error there is and where.
 | conditions | 16: gDNA `g00 / g05 / g50 / g98` × strand specificity `0.50 / 0.99` × capture off / on |
 | depth | 10 M fragments total per condition, fixed; the gDNA rate decides only the split |
 | fragment lengths | identical for both origins (206 ± 98, truncated to [50, 500], read 100) — a forcing function, `DESIGN.md` §0b |
+| sequence | known bases only: no fragment covers an `N` run of the suite genome (18.8 % of it), with capture or without; substitution errors at 0.002 per base, each oracle record's NM their count (owner, 2026-10-21) |
 | nascent RNA | sparse on every row: `mode: sparse`, `on_fraction 0.50` of gene spans on, level logU(1, 100) independent of the mature level. 0.50 is a development stress level, not real data (`DESIGN.md` §0b) |
+
+Wiped and re-simulated 2026-10-21 on that simulator, with both fl-gap panels, so a number measured on the panel before
+is not comparable; its text receipts, arms included, are in `$RIGEL_RUNS/archive/suite_before_resim_2026-10-21/`. The
+panel before drew gDNA over the `N` runs, where the region lengths count bases too, and read the gDNA fraction
+exactly; on this one the oracle's gDNA-field gate fails on every gDNA capture-OFF row, which then certifies its
+composition only, and Rigel under-calls gDNA (`ISSUES: region-lengths-count-unobservable-bases`).
 
 The 0.8.0 scope — three strata in scope, unstranded × capture-ON deferred but reported on every table,
 fragment length back in scope, and why the ladder still gives gDNA and RNA equal fragment lengths —
@@ -66,17 +73,17 @@ arms, so a real repair must move them in opposite directions.
 |---|---|---|
 | config | `scripts/sim/configs/flgap_rna_long.yaml` | `scripts/sim/configs/flgap_rna_short.yaml` |
 | gDNA / RNA fl configured | 75 ± 20 / 250 ± 60 | 250 ± 60 / 75 ± 20 |
-| gDNA / RNA fl measured, capture OFF | 78.58 / 247.63 (gap +169.1 bp) | 249.59 / 78.43 (gap −171.2 bp) |
-| gDNA / RNA fl measured, capture ON | 81.69 / 252.69 (gap +171.0 bp) | 258.82 / 81.54 (gap −177.3 bp) |
+| gDNA / RNA fl measured, capture OFF | 78.94 / 248.13 (gap +169.2 bp) | 250.08 / 78.78 (gap −171.3 bp) |
+| gDNA / RNA fl measured, capture ON | 82.11 / 253.15 (gap +171.0 bp) | 259.32 / 81.91 (gap −177.4 bp) |
 | conditions | `g50` × ss {0.50, 0.99} × capture {off, on} | the same 4 |
 | nascent RNA | the ladder's `sparse` block, verbatim | the same |
 
-Re-simulated 2026-10-03 on the current simulator — the one-contiguous-part capture physics and the
-ladder's sparse nascent model, no FASTQs — so the fragment-length gap is the ONLY difference from the
-ladder and a claim may be carried across them. The panels simulated before that date carried the retired
-uniform nascent model and the old capture physics; they were deleted and every number measured on them is
-void. The configured lengths are a configuration and the gap is a measurement (the sampler is a rejection
-draw truncated to `[frag_min, frag_max]`): the table reads it count-weighted off each condition's
+Re-simulated 2026-10-21 with the ladder, on the same simulator — the one-contiguous-part capture physics, the
+ladder's sparse nascent model, no fragment over an `N` run, errors at 0.002 per base, no FASTQs — so the
+fragment-length gap is the ONLY difference from the ladder and a claim may be carried across them. The panels
+simulated before 2026-10-03 carried the retired uniform nascent model and the old capture physics, and every number
+measured on them is void. The configured lengths are a configuration and the gap is a measurement (the sampler
+rounds a Normal draw and keeps it within `[frag_min, frag_max]`): the table reads it count-weighted off each condition's
 `truth_fragment_lengths.tsv`. A calibration mechanism is RANKED here only by what stops before the EM
 (`calibration_vs_oracle.py`) and the library gDNA fraction: a length gap hands the EM part of the answer,
 so the transcript table never ranks calibration. It is still read, per stratum, as the tool's end-to-end
@@ -294,32 +301,30 @@ in the sense of §0 — its transcript-level number is not a calibration result 
 
 ## 0d. The STAR panel — aligned input, where the scan is decided
 
-Five of the ladder's conditions, one or two per in-scope stratum — g00 κ0.99, g05 κ0.50, g50 κ0.50 and g50 κ0.99
-capture OFF, and g50 κ0.99 capture ON (κ the strand specificity) — re-aligned from the simulator's reads by STAR
-2.7.11b at two settings, `production` and `recommended` (the MANUAL's recommended STAR settings), each BAM collated,
-complete and carrying NM: `$RIGEL_RUNS/star_panel/<condition>/{production,recommended}.bam`. They were aligned on the
-cluster; `rustar`, which matches STAR on 99.9 % of the templates of a 100 k-pair sample, aligns locally. Every read
-name carries its molecule's true source and coordinates, so a pair, a placement or an origin is scored against truth
-template by template.
-
-Since 2026-10-18 every scan change is decided on the recommended BAMs (owner: the recommended settings stay, because
-they report the ambiguity the simulator's own alignments hide): pinned and fractional, per stratum, and with every
-capture efficiency at 1 beside the shipped run while `ISSUES: the-reader-reads-false-gdna-as-capture` stands, since
-the reader amplifies every scan change. The ladder's simulator alignments stay the regression check: a scan change
-that should not touch them must leave them identical. What the panel cannot judge: the deferred stratum (unstranded ×
-capture ON is not aligned), more than one realization per condition, and sequencing errors, since the simulator's
-reads carry none.
-
-**The ladder's STAR rung** carries the same input to every one of the 16 conditions: each condition's reads aligned
-by rustar with the same recommended settings (`scripts/sim/configs/star_recommended.params.txt`) into
-`<condition>/rustar_recommended.bam`, beside the simulator's own BAM. `panel.py align` writes it once (about 45 s and
-1 GB per condition; a condition counts aligned once its `rustar_recommended.align.json` records the aligner, its
-version and the parameter file, after the BAM was checked to hold every template the simulator drew), and
-`panel.py score --bam rustar_recommended` scores it after every change, through `quant_accuracy.py --bam`: the base
-arm only, against the same truth as the simulator's alignments, so the two inputs compare directly. Every row records
-its input, and the library row adds what the aligner left unplaced, by true origin (`unaligned_*`: about a fifth of the
-gDNA off capture, drawn over the suite genome's N runs) and the gDNA fraction's truth over what it placed
+**The ladder's STAR rung** reads every one of the 16 conditions from an aligner's input: each condition's reads
+aligned by `rustar`, STAR's Rust port, which runs locally where STAR does not, with the MANUAL's recommended settings
+(`scripts/sim/configs/star_recommended.params.txt`) into `<condition>/rustar_recommended.bam`, beside the simulator's
+own BAM. Every read name carries its molecule's true source and coordinates, so a pair, a placement or an origin is
+scored against truth template by template. `panel.py align` writes it once (about 50 s and 1 GB per condition; a
+condition counts aligned once its `rustar_recommended.align.json` records the aligner, its version and the parameter
+file, after the BAM was checked to hold every template the simulator drew), and `panel.py score --bam
+rustar_recommended` scores it after every change, through `quant_accuracy.py --bam`: the base arm only, against the
+same truth as the simulator's alignments, so the two inputs compare directly. Every row records its input, and the
+library row adds what the aligner left unplaced, by true origin (`unaligned_*`: on the panel of 2026-10-21, 1.4 % of
+the gDNA off capture and 0.07 % on, under 0.02 % of the RNA) and the gDNA fraction's truth over what it placed
 (`gdna_frac_true_aligned`). The report card shows both inputs.
+
+Since 2026-10-18 every scan change is decided on STAR alignments at the recommended settings (owner: they stay,
+because they report the ambiguity the simulator's own alignments hide): pinned and fractional, per stratum, and with
+every capture efficiency at 1 beside the shipped run while `ISSUES: the-reader-reads-false-gdna-as-capture` stands,
+since the reader amplifies every scan change. Until 2026-10-21 that was five conditions aligned by STAR 2.7.11b on the
+cluster, at the production and the recommended settings; their reads were re-simulated, so their BAMs were deleted and
+their text receipts stay in `$RIGEL_RUNS/star_panel/`. `rustar` matches STAR on 99.9 % of the templates of a 100
+k-pair sample, and on those five conditions Rigel's transcript error on the two agreed within 0.6 % except at g05
+κ0.50 capture OFF (κ the strand specificity), where the capture reader amplified a 0.1 % alignment difference (−0.08 %
+with every efficiency at 1), so the rung's BAMs decide until the cluster aligns the new reads. The ladder's simulator
+alignments stay the regression check: a scan change that should not touch them must leave them identical. What the
+rung cannot judge: more than one realization per condition.
 
 ---
 
