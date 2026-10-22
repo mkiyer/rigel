@@ -197,7 +197,7 @@ Instrument: pass 2's predicted probabilities and its draws against truth on the 
 per arm, once the panels are re-cached on the repaired scan.
 
 ### region-lengths-count-unobservable-bases
-`priority: now — release-blocking (owner, 2026-10-15); the third wave of the paired-end repair · stage: calibration · kind: defect · 2026-10-15`
+`priority: now — release-blocking (owner, 2026-10-15); taken first, ahead of the scan's remaining items, once the fair panel measured it (owner, 2026-10-22) · stage: calibration · kind: defect · 2026-10-15`
 Calibration's region lengths count bases on which no fragment can be observed.
 - **How much.** On the ladder's suite genome, 18.2 of 51.0 Mb of intergenic sequence is N (36%); on GRCh38, 150 of
   1,318 Mb (11.4%).

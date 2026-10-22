@@ -1,10 +1,14 @@
-# Session handoff — 2026-10-21 (evening)
+# Session handoff — 2026-10-22
 
 For the next session. Sandbox: nothing here is authoritative; the state is `ISSUES.md` and `ROADMAP.md`, the rulings
 `DESIGN.md`. Read `CLAUDE.md` first, then this, then `ROADMAP.md`'s "Next" and the entries it names.
 
 ## Where things stand
 
+- **The next task is the region-length dissection** (owner, 2026-10-22), ahead of the scan's remaining items: ROADMAP's
+  "Next" step 1 and the prompt at the end of this note.
+- **The benchmark data was pruned** (owner, 2026-10-22): 100 → 70 GB. No panel keeps FASTQs; `panel.py align` rebuilds a
+  pair from the simulator's BAM byte for byte (60a48f4d). The deletions are listed under "Where things are".
 - **The panels are fair now, and they show a large error the old ones hid** (2026-10-21 evening). The simulator no
   longer draws a fragment over an `N` run (18.8 % of the suite genome, where the old panels drew about a fifth of their
   gDNA off capture as all-`N` reads), its errors change the base (0.002 per base on the panels, NM on every oracle
@@ -79,33 +83,42 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 
 ## Next, in order (ROADMAP.md's "Next")
 
-1. (owner) the cluster's index manifest, `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`.
-2. `ISSUES: multimapper-intergenic-alignments`, the scan half: buffer a multimapper's hits that overlap no transcript
+1. `ISSUES: region-lengths-count-unobservable-bases` (owner, 2026-10-22: first). The dissection, then a design note:
+   where the gDNA the fair panel loses goes. Known: the loss lies past calibration's count (its library fraction
+   matches the oracle calibration's, and the perfect-prior arm loses as much). The mask A/B pair is on disk: g50 κ0.99
+   capture OFF and ON, the same seeds, `$RIGEL_RUNS/prototypes/2026-10-21_mask_ab/nomask/<condition>/sim_oracle.bam`
+   (mask off) beside `$RIGEL_RUNS/suite/ladder/<condition>/sim_oracle.bam` (mask on), scored in that directory's
+   `qa_nomask_base.jsonl` and the ladder's `arms/qa_ladder_base.jsonl`. Candidates to re-read and cite, none yet
+   verified: where a region's length becomes an opportunity (`effective_length`, `gdna_opportunity`, `gdna_density`),
+   the bulk gDNA level the capture reader reads (capture ON lost more), the gDNA component's length
+   (`priors.assemble_priors`) and the EM's gDNA term. Measure by node class (`policy_benchmark.py --by-class`) and by
+   locus, mask on against off. Which bases are observable is the reference's, so the design starts at the index.
+2. (owner) the cluster's index manifest, `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`.
+3. `ISSUES: multimapper-intergenic-alignments`, the scan half: buffer a multimapper's hits that overlap no transcript
    (the scan's intergenic path appends a unique mapper's alone). On its own it may be a numeric no-op for the EM, whose
    scorer skips a candidate-less hit, so the scorer's gDNA term for such a hit is its own step; how the group's term
    combines its places is `ISSUES: the-gdna-term-is-a-mean-over-places`, which needs each place's capture efficiency
-   (the sum without it cost RNA multimappers 33.6 k on 2026-10-15). Prior art, on a pre-repair base (port, never
-   apply): `$RIGEL_RUNS/archive/worktree_patches_2026-10-21/rigel-mm-intergenic.*` and `rigel-mm-sum.*`, measured in
-   `$RIGEL_RUNS/prototypes/2026-10-15_mm_intergenic/` and `2026-10-15_mm_sum/`.
-3. `ISSUES: splicing-artifacts`: the derivation first, on paper. The design trail is here (`SPLICE_ARTIFACTS_*`,
+   (the sum without it cost RNA multimappers 33.6 k on 2026-10-15). Prior art, on a pre-repair base: the patches named
+   `rigel-mm-intergenic.*` and `rigel-mm-sum.*` were saved under `$RIGEL_RUNS/archive/worktree_patches_2026-10-21/`,
+   which was found empty (see above); their measurements stay in `$RIGEL_RUNS/prototypes/2026-10-15_mm_intergenic/`
+   and `2026-10-15_mm_sum/`.
+4. `ISSUES: splicing-artifacts`: the derivation first, on paper. The design trail is here (`SPLICE_ARTIFACTS_*`,
    `GDNA_SPLICE_ARTIFACTS_*`) and the owner's own notes (`my_notes.md`: the RNA reading S and the gDNA reading C both
    propagate and compete in the EM).
-4. Every panel re-cached once with `--force`, and the identity references re-frozen, when the scan is final. Open for
-   the owner: whether that waits for step 3's scan infrastructure or comes after step 2.
-5. The accumulator: `ISSUES: the-second-pass-corrections`, one arm each; and measure the reach of `ISSUES: latent-defects`'
+5. Every panel re-cached once with `--force`, and the identity references re-frozen, when the scan is final. Open for
+   the owner: whether that waits for step 4's scan infrastructure or comes after step 3.
+6. The accumulator: `ISSUES: the-second-pass-corrections`, one arm each; and measure the reach of `ISSUES: latent-defects`'
    leading intron first.
-6. Calibration, opportunity before the reader: region lengths, the gDNA length law, then the reader (its planned fix:
-   each object's gDNA read through ψ's `Var(log f_g)`), then the annotated-path rule's cost read again.
-7. Before the EM: the merge, the gDNA sum with its NaN, the prior's denominator, pruning. Then the release.
+7. Calibration, opportunity before the reader: the gDNA length law, then the reader (its planned fix: each object's
+   gDNA read through ψ's `Var(log f_g)`), then the annotated-path rule's cost read again.
+8. Before the EM: the merge, the gDNA sum with its NaN, the prior's denominator, pruning. Then the release.
 
 ## Open for the owner
 
-- **The order.** The region-length defect now carries most of the oracle ladder's in-scope error; it is stage
-  calibration, and the fix order puts the scan's remaining items first. Whether it moves up is the owner's call.
 - **Re-align on the cluster?** The deleted five-condition STAR panel could be re-aligned from the new reads at the
   production and recommended settings. The panels keep no FASTQs (2026-10-22): rebuild a pair from the condition's
   `sim_oracle.bam` with `samtools fastq -N`, byte for byte the simulator's.
-- The tier promotions above, and the re-cache's timing (step 4).
+- The tier promotions above, and the re-cache's timing (step 5).
 - The VCaP mix's gDNA fraction, 0.252 → 0.257 against 0.2518: read it against the truth of the read pairs the scan
   still quantifies (the VCaP read-name labels) before taking it for a regression.
 - Since this handoff was written the ladder has a STAR rung (all 16 conditions aligned by rustar with the recommended
@@ -132,13 +145,18 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 ## The prompt for the next session
 
 ```
-Read CLAUDE.md, then docs/dev/SESSION_HANDOFF.md, then docs/ROADMAP.md's "Next" section and every ISSUES entry its
-scan steps name. We fix Rigel in the order the tool runs (index, scan, accumulator, calibration, before the EM, the
-EM, after it), one small change at a time, and the capture reader waits until the stages before it are resolved.
+Read CLAUDE.md, then docs/dev/SESSION_HANDOFF.md, then docs/ROADMAP.md's "Next" section and
+ISSUES: region-lengths-count-unobservable-bases in full. We fix Rigel in the order the tool runs (index, scan,
+accumulator, calibration, before the EM, the EM, after it), one small change at a time. I moved this defect first
+(2026-10-22): the fair panel shows it is the largest error we know of, it distorts every later measurement, and
+which bases are observable is a property of the reference.
 
-Start with ISSUES: multimapper-intergenic-alignments, its scan half. Audit and design first, as for items 13–15:
-re-read and cite every code path it names; measure what is at stake on the STAR panel at the recommended settings
-(the multimapping read pairs with an alignment outside every transcript, by true origin, per condition); then write a
-design note in docs/dev for my review, with the steps, the failing tests and the measurement each step will be judged
-on. Write no production code before I approve it.
+Start with the dissection, as for items 13–15. Re-read and cite every place a region's length becomes an
+opportunity, from the index through calibration, the priors and the EM. Then find the term that loses the gDNA on
+g50 κ0.99 capture OFF and ON with the mask A/B pair the handoff names (mask on against mask off, the same seeds),
+by node class and by locus, pinned and fractional, against truth: calibration's library fraction matches the
+oracle's and the perfect-prior arm loses as much, so look past calibration's count. Then write a design note in
+docs/dev for my review: what "observable" means (N runs first; a gap two mates span; repeats an aligner cannot
+place), where it is recorded and where it is read, the steps, the failing tests and the measurement each step will
+be judged on. Write no production code before I approve it.
 ```

@@ -125,7 +125,7 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
 - **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae` / Σ|err| over every
   object with mass (`calibration_vs_oracle.py`), never an intermediate (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
-## Next — in the order the tool runs (owner, 2026-10-18 and 2026-10-21)
+## Next — in the order the tool runs (owner, 2026-10-18 and 2026-10-21), the fair panel's defect first (owner, 2026-10-22)
 
 The tool is fixed in the order it runs, one small change at a time, because a defect upstream confounds every fix
 downstream: the capture reader has amplified every scan change (`ISSUES: the-reader-reads-false-gdna-as-capture`). Each
@@ -136,25 +136,33 @@ every capture efficiency at 1 beside the shipped run), the oracle ladder for reg
 recommended STAR parameters report the competing alignments and the multimapper handling is to weigh them, so that
 splice artifacts are handled downstream (`ISSUES: splicing-artifacts`).
 
+**First: the opportunity the fair panel exposed** (owner, 2026-10-22). The panels re-simulated on 2026-10-21 draw no
+read from an `N` run, and on them Rigel under-calls gDNA by 6–21 % on the in-scope strata and books the rest as nascent
+RNA. Every later step is measured on them, and the multimapper repair's gDNA term and the splice-artifact work both
+weigh gDNA against RNA, so this is taken first; which bases are observable is a property of the reference, so its fix
+starts at the index.
+1. `ISSUES: region-lengths-count-unobservable-bases`: the dissection first, to the term that loses the gDNA (past
+   calibration's count: the perfect-prior arm loses as much), with the mask A/B pair; then the design, for the owner's
+   review.
+
 **The index.**
-1. `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`: the cluster's manifest checked before any cluster
+2. `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`: the cluster's manifest checked before any cluster
    quant, the owner's.
 
 **The scan and its buffer.** The scan's repair landed between 2026-10-18 and 2026-10-21
 (`ISSUES: the-scanner-builds-fragments-from-one-mate`, closed); what it leaves:
-2. `ISSUES: multimapper-intergenic-alignments`: a multimapper's intergenic hits buffered and given a gDNA term, so its
+3. `ISSUES: multimapper-intergenic-alignments`: a multimapper's intergenic hits buffered and given a gDNA term, so its
    valid intergenic and genic alignments compete in the EM; release-blocking.
-3. `ISSUES: splicing-artifacts`: the derivation, then the scan's infrastructure (junction ids on buffered fragments, the
+4. `ISSUES: splicing-artifacts`: the derivation, then the scan's infrastructure (junction ids on buffered fragments, the
    contiguous reading of a spliced fragment), the fixtures, a prototype and the VCaP A/B; the release waits for its
    validation on the cluster.
-4. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
+5. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
    caches calibration is measured on date from 2026-10-16/17.
 
 **The accumulator.**
-5. `ISSUES: the-second-pass-corrections`: the length law, the weights, the mismatches and the motif rule, one arm each.
+6. `ISSUES: the-second-pass-corrections`: the length law, the weights, the mismatches and the motif rule, one arm each.
 
 **Calibration**, its opportunity before its capture reader.
-6. `ISSUES: region-lengths-count-unobservable-bases`.
 7. `ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`.
 8. `ISSUES: the-reader-reads-false-gdna-as-capture`: a chronic problem, approached only once the stages before it are
    resolved (owner, 2026-10-21); the planned fix reads each object's gDNA through calibration's own posterior for it.
