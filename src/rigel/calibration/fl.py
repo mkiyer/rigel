@@ -44,6 +44,13 @@ Never pool the four gDNA histograms raw. The contained opportunity falls with le
 crossing opportunity rises, so one divisor over the sum reads the gDNA mean far too long. Divide
 each pool by its own opportunity (:mod:`rigel.calibration.gdna_opportunity`), then combine.
 
+Every region is read over its OBSERVABLE pieces (`region_arrays.observable_pieces`): no fragment is observed
+on a base of the index's unobservable mask, so a region's count is over its observable starts alone, and every
+contained support here — the one-sided rate's exposure, the purities, the realized law's rate and each region's
+RNA excess — is summed over those pieces. A region masked whole carries no exposure and is no object: read over
+its whole length it would be the cleanest object of all, a zero count against a large exposure, and the rate it
+pulls down collapses the purities and hands the contrast's noise to the law.
+
 TWO gDNA ESTIMANDS, and routing them apart is the point:
 
 * ``gdna_pmf`` is the UNIFORM-FRAME law, what a gDNA fragment looks like before capture selects it.
@@ -69,7 +76,8 @@ import numpy as np
 
 from ..config import CONSTANTS
 from .gdna_density import contained_opportunity, one_sided_rate
-from .signature import RegionType
+from .region_arrays import observable_pieces
+from .signature import RegionType, coarse_type_array
 from .sj_opportunity import detilt_pool
 from ..scan_payload import (
     N_FRAGMENT_POOLS,
@@ -84,6 +92,7 @@ if TYPE_CHECKING:
     from ..frag_length_model import FragmentLengthModel
     from ..scan_payload import AccumulatorPayload
     from .gdna_opportunity import GdnaOpportunity
+    from .region_arrays import RegionArrays
 
 __all__ = [
     "FLModels",
@@ -312,11 +321,23 @@ def _couple_estimands(g_uniform, mass_uniform: float, g_boundary, mass_boundary:
     return uniform, g_common, lam
 
 
+def _region_sum(pieces: tuple[np.ndarray, np.ndarray], weights, n: int) -> np.ndarray:
+    """``float64[n]`` — one weight per observable piece, summed onto the piece's region."""
+    region = np.asarray(pieces[0], dtype=np.int64)
+    return np.bincount(region, weights=np.asarray(weights, dtype=np.float64), minlength=n)[:n]
+
+
+def _region_support(pieces: tuple[np.ndarray, np.ndarray], pmf: np.ndarray, n: int) -> np.ndarray:
+    """``float64[n]`` — each region's contained support under *pmf*, :func:`contained_opportunity` summed over its
+    observable pieces: a fragment contained in a region and touching no masked base lies in one piece. A region with
+    nothing masked is one piece, so its support is its length's, to the bit; one masked whole has none."""
+    return _region_sum(pieces, contained_opportunity(pmf, pieces[1]), n)
+
+
 def _deconvolved_gdna_counts(
     payload: "AccumulatorPayload",
     gdna_opportunity: "GdnaOpportunity",
-    region_lengths: np.ndarray,
-    region_types: np.ndarray,
+    regions: "RegionArrays",
 ) -> "tuple[np.ndarray | None, GdnaContrast]":
     """The two-pool contrast: the gDNA length histogram with the contaminant divided out.
 
@@ -364,21 +385,21 @@ def _deconvolved_gdna_counts(
     re-propose them: projecting onto the non-negative cone, and testing the recovered components'
     negative mass against its own Poisson noise floor.
     """
-    types = np.asarray(region_types).ravel()
-    lengths = np.asarray(region_lengths, dtype=np.float64).ravel()
+    types = coarse_type_array(regions.signature)
     counts = np.asarray(payload.region_contained_count, dtype=np.float64)
     # genome-strand columns summed: gDNA is strand-symmetric and this estimator is about DENSITY, which
     # is why it also works on an unstranded library, where the strand axis carries nothing.
     counts = counts.sum(axis=1) if counts.ndim > 1 else counts
-    n = min(types.size, lengths.size, counts.size)
-    types, lengths, counts = types[:n], lengths[:n], counts[:n]
+    n = min(types.size, counts.size)
+    types, counts = types[:n], counts[:n]
+    pieces = observable_pieces(regions)
+    observable = _region_sum(pieces, pieces[1], n)
 
-    is_ig = (types == int(RegionType.INTERGENIC)) & (lengths > 0.0)
-    is_in = (types == int(RegionType.INTRON)) & (lengths > 0.0)
+    is_ig = (types == int(RegionType.INTERGENIC)) & (observable > 0.0)
+    is_in = (types == int(RegionType.INTRON)) & (observable > 0.0)
     pooled_pmf = _normalized(_pool_sum(payload, _GDNA_CONTAINED_POOLS))
-    fit = one_sided_rate(
-        counts[is_ig | is_in], contained_opportunity(pooled_pmf, lengths[is_ig | is_in])
-    )
+    support = _region_support(pieces, pooled_pmf, n)
+    fit = one_sided_rate(counts[is_ig | is_in], support[is_ig | is_in])
     if not fit.informative:
         return None, GdnaContrast(
             False, "no gDNA density", fit.rate, fit.rate_over_pooled, 0.0, 0.0, 0.0
@@ -387,7 +408,7 @@ def _deconvolved_gdna_counts(
     weights, totals = [], []
     for mask in (is_ig, is_in):
         n_p = float(counts[mask].sum())
-        e_p = float(contained_opportunity(pooled_pmf, lengths[mask]).sum())
+        e_p = float(support[mask].sum())
         weights.append(min(fit.rate * e_p / n_p, 1.0) if n_p > 0.0 else 0.0)
         totals.append(n_p)
     a0, a1 = weights
@@ -465,8 +486,7 @@ def _adjacent_pairs(region_offsets, boundary_offsets) -> tuple[np.ndarray, np.nd
 def _realized_gdna_counts(
     payload,
     gdna_opportunity: "GdnaOpportunity",
-    region_lengths: np.ndarray,
-    region_types: np.ndarray,
+    regions: "RegionArrays",
     rna_pmf: np.ndarray,
     uniform_counts: np.ndarray,
 ) -> "tuple[np.ndarray | None, np.ndarray | None, GdnaRealized]":
@@ -502,18 +522,22 @@ def _realized_gdna_counts(
     ``FLModels.rna_pmf``, the one RNA law the tool reads).
     """
     obs_pools = np.asarray(payload.pool_lengths, dtype=np.float64)
-    ty = np.asarray(region_types).ravel()
-    ell = np.asarray(region_lengths, dtype=np.float64).ravel()
+    ty = coarse_type_array(regions.signature)
     cnt = np.asarray(payload.region_contained_count, dtype=np.float64)
     cnt = cnt.sum(axis=1) if cnt.ndim > 1 else cnt
-    n = min(ty.size, ell.size, cnt.size)
-    ty, ell, cnt = ty[:n], ell[:n], cnt[:n]
-    is_ig = (ty == int(RegionType.INTERGENIC)) & (ell > 0.0)
-    is_in = (ty == int(RegionType.INTRON)) & (ell > 0.0)
+    n = min(ty.size, cnt.size)
+    ty, cnt = ty[:n], cnt[:n]
+    # every contained support over the observable pieces; the exon classes' on-target shape below reads the
+    # whole exon
+    ell = np.asarray(regions.region_size_bp, dtype=np.float64)[:n]
+    pieces = observable_pieces(regions)
+    observable = _region_sum(pieces, pieces[1], n)
+    is_ig = (ty == int(RegionType.INTERGENIC)) & (observable > 0.0)
+    is_in = (ty == int(RegionType.INTRON)) & (observable > 0.0)
 
     g_C = _normalized(np.asarray(uniform_counts, dtype=np.float64))
     L_axis = np.arange(g_C.size, dtype=np.float64)
-    e_g = contained_opportunity(g_C, ell)
+    e_g = _region_support(pieces, g_C, n)
     fit = one_sided_rate(cnt[is_ig | is_in], e_g[is_ig | is_in])
     if not fit.informative:
         return None, None, GdnaRealized(False, "no gDNA density", 0.0, 0.0, 0.0, 0.0)
@@ -528,7 +552,7 @@ def _realized_gdna_counts(
     # ── the boundary stratum: per-boundary composition, regions calibrating boundaries
     rna = _normalized(np.asarray(rna_pmf, dtype=np.float64))
     mu_r = float((rna * np.arange(rna.size)).sum())
-    e_r = contained_opportunity(rna[: g_C.size], ell)
+    e_r = _region_support(pieces, rna[: g_C.size], n)
     excess = np.clip(cnt - rho_off * e_g, 0.0, None)
     rho_r = np.zeros_like(excess)
     np.divide(excess, e_r, out=rho_r, where=e_r > 0.0)
@@ -703,8 +727,7 @@ def build_fl_models(
     *,
     sj_opportunity: np.ndarray | None = None,
     gdna_opportunity: "GdnaOpportunity | None" = None,
-    region_lengths: np.ndarray | None = None,
-    region_types: np.ndarray | None = None,
+    regions: "RegionArrays | None" = None,
     prior_ess: float = CONSTANTS.fragment_length.pool_prior_ess,
 ) -> FLModels:
     """Build the global / RNA / gDNA FL pmfs from ONE payload, in ONE frame.
@@ -738,11 +761,11 @@ def build_fl_models(
       rises. Folding one divisor into the other, or applying one divisor over the pooled sum, is a
       category error that reads the gDNA mean far too long.
 
-    ``region_lengths`` and ``region_types`` are what enable the two-pool CONTRAST: the module
-    docstring derives it, and :func:`_deconvolved_gdna_counts` implements it and owns every reason
-    it declines. Both come straight from
-    :func:`~rigel.calibration.splice_graph.build_region_partition_arrays`, the same partition the
-    scanner deposits into, so they cannot disagree with the banks they index.
+    ``regions`` is what enables the two-pool CONTRAST: the module docstring derives it, and
+    :func:`_deconvolved_gdna_counts` implements it and owns every reason it declines. It is the index's
+    frame (:meth:`~rigel.calibration.region_arrays.RegionArrays.from_index`) — the partition the scanner
+    deposits into, so it cannot disagree with the banks it indexes, carrying the unobservable mask every
+    contained support here is read over.
 
     For the EB kernel over three free histograms — the shape a unit test needs and production never
     has — see :func:`_fl_models_from_histograms`.
@@ -758,10 +781,8 @@ def build_fl_models(
         gdna_counts = gdna_contained_fl_mass(payload)
     else:
         gdna_counts = detilt_pool(gdna_fl_mass(payload), gdna_opportunity.combined_probability())
-        if region_lengths is not None and region_types is not None:
-            deconvolved, _contrast = _deconvolved_gdna_counts(
-                payload, gdna_opportunity, region_lengths, region_types
-            )
+        if regions is not None:
+            deconvolved, _contrast = _deconvolved_gdna_counts(payload, gdna_opportunity, regions)
             if deconvolved is not None:
                 gdna_counts = deconvolved
             # the SECOND estimand: the library-census law for the scorer. It reads the uniform-frame
@@ -774,8 +795,7 @@ def build_fl_models(
             realized_counts, coupled_uniform, _realized = _realized_gdna_counts(
                 payload,
                 gdna_opportunity,
-                region_lengths,
-                region_types,
+                regions,
                 rna_pmf,
                 gdna_counts,
             )

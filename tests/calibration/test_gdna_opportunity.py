@@ -346,8 +346,8 @@ class TestWiredIntoTheModel:
         """Every annotation input to `build_fl_models` is optional, so tests without an index can build a
         model — which makes forgetting one in production silent. Without ``sj_opportunity`` the RNA pool
         stays tilted long; without ``gdna_opportunity`` the gDNA pool falls back to the contained pair and
-        reads ~15 % short under capture; without ``region_lengths`` / ``region_types`` the two-pool
-        contrast never runs. So every call site in the package is pinned.
+        reads ~15 % short under capture; without ``regions`` the two-pool contrast never runs. So every
+        call site in the package is pinned.
 
         Source-level on purpose — a runtime check would need a full pipeline run per call site — and over
         every module, so a new caller anywhere is checked without this test being retargeted.
@@ -357,7 +357,7 @@ class TestWiredIntoTheModel:
 
         import rigel
 
-        required = {"sj_opportunity", "gdna_opportunity", "region_lengths", "region_types"}
+        required = {"sj_opportunity", "gdna_opportunity", "regions"}
         package = Path(rigel.__file__).parent
         calls = []
         for path in sorted(package.rglob("*.py")):

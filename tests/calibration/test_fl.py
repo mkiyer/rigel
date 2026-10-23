@@ -362,12 +362,12 @@ def test_the_two_boundary_CLASSES_are_told_apart_by_what_flanks_the_exon():
 
     from rigel.calibration.fl import _realized_gdna_counts
 
-    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
+    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
     counts = np.array(payload.region_contained_count, dtype=np.float64, copy=True)
     counts[2] *= 40.0  # the INTRON alone reads far above the uniform field: RNA, not gDNA
     payload = dataclasses.replace(payload, region_contained_count=counts)
 
-    _counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, rl, rt, rna_pmf, uniform)
+    _counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, regions, rna_pmf, uniform)
     assert diag.applied
     assert diag.intron_exon_share < diag.intergenic_exon_share, (
         "the intron-flanking class carries the RNA-diluted weight; the intergenic one does not"
@@ -381,8 +381,8 @@ def test_no_enrichment_excess_means_no_on_target_correction():
     identically zero and the realized law is the sampled blend alone."""
     from rigel.calibration.fl import _realized_gdna_counts
 
-    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
-    counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, rl, rt, rna_pmf, uniform)
+    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
+    counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, regions, rna_pmf, uniform)
     assert diag.applied
     assert diag.ontarget_share == pytest.approx(0.0, abs=1e-9)
 
@@ -402,14 +402,14 @@ def test_the_census_reads_the_rna_law_whatever_its_scale():
     from rigel.calibration.fl import _realized_gdna_counts
     from _fl_realized_fixture import RHO, build_fixture
 
-    payload, opp, rl, rt, rna_pmf, uniform = build_fixture(boundary_excess=5.0, rna_rate=RHO)
+    payload, opp, regions, rna_pmf, uniform = build_fixture(boundary_excess=5.0, rna_rate=RHO)
     ref_realized, ref_uniform, ref_diag = _realized_gdna_counts(
-        payload, opp, rl, rt, rna_pmf, uniform
+        payload, opp, regions, rna_pmf, uniform
     )
     assert ref_diag.intron_exon_share < 1.0  # not vacuous: the intron's RNA dilutes its boundaries
     for scale in (30.0, 1e3, 1e6):
         realized, uniform_out, diag = _realized_gdna_counts(
-            payload, opp, rl, rt, scale * rna_pmf, uniform
+            payload, opp, regions, scale * rna_pmf, uniform
         )
         np.testing.assert_allclose(realized, ref_realized, rtol=1e-12)
         np.testing.assert_allclose(uniform_out, ref_uniform, rtol=1e-12)
@@ -427,9 +427,9 @@ def test_off_capture_rna_crossing_a_boundary_is_not_captured_gdna():
     from rigel.calibration.fl import _realized_gdna_counts
     from _fl_realized_fixture import RHO, build_fixture
 
-    payload, opp, rl, rt, rna_pmf, uniform = build_fixture(boundary_excess=1.0, rna_rate=RHO / 2.0)
+    payload, opp, regions, rna_pmf, uniform = build_fixture(boundary_excess=1.0, rna_rate=RHO / 2.0)
     realized, uniform_out, diag = _realized_gdna_counts(
-        payload, opp, rl, rt, 1e5 * rna_pmf, uniform
+        payload, opp, regions, 1e5 * rna_pmf, uniform
     )
     assert diag.applied
     assert diag.intron_exon_share < 1.0  # the intron's RNA is priced at its boundaries
@@ -448,16 +448,16 @@ def test_the_census_reads_the_rna_law_FLModels_carries(monkeypatch):
     import rigel.calibration.fl as fl
     from _fl_realized_fixture import RHO, build_fixture
 
-    payload, opp, rl, rt, _rna_pmf, _uniform = build_fixture(boundary_excess=5.0, rna_rate=RHO)
+    payload, opp, regions, _rna_pmf, _uniform = build_fixture(boundary_excess=5.0, rna_rate=RHO)
     seen = []
     original = fl._realized_gdna_counts
 
-    def spy(payload_, opportunity, lengths, types, rna_law, uniform_counts):
+    def spy(payload_, opportunity, regions_, rna_law, uniform_counts):
         seen.append(np.array(rna_law, copy=True))
-        return original(payload_, opportunity, lengths, types, rna_law, uniform_counts)
+        return original(payload_, opportunity, regions_, rna_law, uniform_counts)
 
     monkeypatch.setattr(fl, "_realized_gdna_counts", spy)
-    models = fl.build_fl_models(payload, gdna_opportunity=opp, region_lengths=rl, region_types=rt)
+    models = fl.build_fl_models(payload, gdna_opportunity=opp, regions=regions)
     assert len(seen) == 1
     np.testing.assert_array_equal(seen[0], models.rna_pmf)
 
@@ -468,8 +468,8 @@ def test_enriched_boundaries_raise_the_on_target_share():
     well clear of the no-excess case's exact 0, and the boundary share alive beside it."""
     from rigel.calibration.fl import _realized_gdna_counts
 
-    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
-    counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, rl, rt, rna_pmf, uniform)
+    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
+    counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, regions, rna_pmf, uniform)
     assert diag.applied
     assert diag.ontarget_share > 0.2
     assert diag.boundary_share > 0.05
@@ -524,7 +524,9 @@ def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
     the introns per unit of opportunity; enough of it pulls the intronic purity below 1 and resolves the
     tie; the same amount in both pools (``rna_in_intergenic``, its own RNA law, mean 100) keeps the
     purities tied at a value below 1 with the two pools' shapes apart.
-    Returns ``(payload, opportunity, region_lengths, region_types, L)``."""
+    Returns ``(payload, opportunity, regions, L)``."""
+    from _fl_realized_fixture import regions_of
+
     from rigel.calibration.gdna_density import contained_opportunity
 
     n = 400
@@ -578,7 +580,7 @@ def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
         total=total,
         combined_probability=lambda: (a_ig + a_in + 2.0 * a_x) / total,
     )
-    return payload, opportunity, lengths, types, L
+    return payload, opportunity, regions_of(lengths, types), L
 
 
 def _mean_length(p, L) -> float:
@@ -594,9 +596,9 @@ def test_a_purity_tie_returns_the_contained_pairs_own_mixture():
     (`ISSUES: the-gdna-length-law-falls-back-at-identical-purities`)."""
     from rigel.calibration.fl import _deconvolved_gdna_counts
 
-    payload, opp, lengths, types, L = _tie_fixture(0.0)
+    payload, opp, regions, L = _tie_fixture(0.0)
     with np.errstate(divide="raise", invalid="raise"):  # a tie never divides by its zero separation
-        counts, contrast = _deconvolved_gdna_counts(payload, opp, lengths, types)
+        counts, contrast = _deconvolved_gdna_counts(payload, opp, regions)
     assert contrast.intergenic_gdna_share == contrast.intronic_gdna_share == 1.0
     assert contrast.separation == 0.0
     assert counts is not None and contrast.applied
@@ -611,11 +613,9 @@ def test_the_uniform_law_is_continuous_through_a_purity_tie():
 
     means, seps = [], []
     for rna in (0.0005, 0.001):
-        payload, opp, lengths, types, L = _tie_fixture(rna)
-        seps.append(_deconvolved_gdna_counts(payload, opp, lengths, types)[1].separation)
-        m = build_fl_models(
-            payload, gdna_opportunity=opp, region_lengths=lengths, region_types=types
-        )
+        payload, opp, regions, L = _tie_fixture(rna)
+        seps.append(_deconvolved_gdna_counts(payload, opp, regions)[1].separation)
+        m = build_fl_models(payload, gdna_opportunity=opp, regions=regions)
         means.append(_mean_length(m.gdna_pmf, L))
     assert seps[0] == 0.0 < seps[1]  # the fixture straddles the tie
     assert abs(means[0] - means[1]) < 0.5, (
@@ -635,9 +635,9 @@ def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
     from rigel.calibration.fl import _deconvolved_gdna_counts
     from rigel.calibration.sj_opportunity import detilt_pool
 
-    payload, opp, lengths, types, L = _tie_fixture(0.005, 0.005)
+    payload, opp, regions, L = _tie_fixture(0.005, 0.005)
     with np.errstate(divide="raise", invalid="raise"):
-        counts, contrast = _deconvolved_gdna_counts(payload, opp, lengths, types)
+        counts, contrast = _deconvolved_gdna_counts(payload, opp, regions)
     assert contrast.separation == 0.0 and contrast.intergenic_gdna_share < 1.0
     assert counts is not None and contrast.applied and np.isfinite(counts).all()
     pools = np.asarray(payload.pool_lengths)
@@ -653,14 +653,14 @@ def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
 def test_zero_gdna_declines_rather_than_fabricating_a_law():
     from rigel.calibration.fl import _realized_gdna_counts
 
-    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
+    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
     import dataclasses
 
     rc = np.zeros_like(np.asarray(payload.region_contained_count))
     pl = np.asarray(payload.pool_lengths, dtype=np.float64).copy()
     pl[:4] = 0.0
     starved = dataclasses.replace(payload, region_contained_count=rc, pool_lengths=pl)
-    counts, _uniform_out, diag = _realized_gdna_counts(starved, opp, rl, rt, rna_pmf, uniform)
+    counts, _uniform_out, diag = _realized_gdna_counts(starved, opp, regions, rna_pmf, uniform)
     assert counts is None and not diag.applied
 
 
@@ -674,7 +674,7 @@ def test_at_zero_gdna_an_uncrossed_boundary_class_drops_the_boundary_stratum():
 
     from rigel.calibration.fl import _realized_gdna_counts
 
-    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
+    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
     counts = np.array(payload.region_contained_count, dtype=np.float64, copy=True)
     counts[[0, 4]] = 0.0  # no gDNA and no RNA in intergenic space
     counts[2] *= 40.0  # the intron holds nascent RNA alone
@@ -687,7 +687,7 @@ def test_at_zero_gdna_an_uncrossed_boundary_class_drops_the_boundary_stratum():
         payload, region_contained_count=counts, boundary_unspliced_count=bnd, pool_lengths=pools
     )
     with np.errstate(divide="raise", invalid="raise"):
-        realized, uniform_out, diag = _realized_gdna_counts(payload, opp, rl, rt, rna_pmf, uniform)
+        realized, uniform_out, diag = _realized_gdna_counts(payload, opp, regions, rna_pmf, uniform)
     assert diag.applied and diag.boundary_share == 0.0
     assert np.isfinite(realized).all()
     np.testing.assert_allclose(uniform_out / uniform_out.sum(), uniform / uniform.sum(), rtol=1e-12)
@@ -703,10 +703,10 @@ def test_with_no_spliced_fragments_the_boundary_odds_stay_finite():
     PERTURBATION: normalising by a plain division divides 0 by 0."""
     from rigel.calibration.fl import _realized_gdna_counts
 
-    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
+    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
     with np.errstate(divide="raise", invalid="raise"):
         realized, uniform_out, diag = _realized_gdna_counts(
-            payload, opp, rl, rt, np.zeros_like(rna_pmf), uniform
+            payload, opp, regions, np.zeros_like(rna_pmf), uniform
         )
     assert diag.applied
     assert diag.intron_exon_share == diag.intergenic_exon_share == 1.0
@@ -790,3 +790,176 @@ def test_there_is_no_cliff_anywhere_along_the_capture_spectrum():
     unis = np.array([_couple_estimands(g_c, 1e3, g_b, float(m))[0] for m in masses])
     steps = np.abs(np.diff(unis, axis=0)).sum(axis=1)
     assert steps.max() < 0.05, f"a step of {steps.max():.3f} is a cliff, not a fade"
+
+
+# ── the length law over observable bases ───────────────────────────────────────────────────────────
+
+#: The masked genome's unknown runs: the first intergenic region ([0, 20 000)) N end to end, and the middle
+#: half of the second ([25 000, 35 000)).
+_UNKNOWN = [(0, 20_000), (25_000, 35_000)]
+
+
+#: The observable pieces of the masked genome's eight off-target regions, written out by hand from ``_UNKNOWN``:
+#: the all-N region has none, the half-N one two 5-kb pieces, the rest are whole.
+_PIECES = [[], [5_000, 5_000]] + [[20_000]] * 6
+
+
+def _masked_fixture(rna_intergenic: float, rna_intronic: float = 0.05, mask=_UNKNOWN):
+    """`_tie_fixture`'s genome — four intergenic and four intronic 20-kb regions and four probed exons — with the
+    unknown sequence a real assembly has. No fragment is drawn on N, so every count is per OBSERVABLE start: gDNA
+    (mean 150) at ``RHO``, RNA of one law (mean 120) at *rna_intronic* in two introns and at *rna_intergenic* in two
+    intergenic regions, so the contrast's premise — one contaminant law in both pools — holds exactly. The opportunity is the
+    frame's own (`observable_gdna_opportunity`), so each contained pool is its exact expectation. Returns
+    ``(payload, opportunity, regions, L)``."""
+    from _fl_realized_fixture import regions_of
+
+    from rigel.calibration.gdna_density import contained_opportunity
+    from rigel.calibration.gdna_opportunity import observable_gdna_opportunity
+
+    rho = 0.05
+    n = 400
+    L = np.arange(n + 1, dtype=np.float64)
+
+    def law(mu):
+        p = np.exp(-0.5 * ((L - mu) / 30.0) ** 2)
+        p[0] = 0.0
+        return p / p.sum()
+
+    g, g_captured, r = law(150.0), law(200.0), law(120.0)
+    lengths = np.full(12, 20_000)
+    lengths[8:] = 300
+    types = np.array([0] * 4 + [1] * 4 + [2] * 4)
+    regions = regions_of(lengths, types, mask)
+
+    def support(pmf):
+        return np.array([contained_opportunity(pmf, np.array(ps, float)).sum() for ps in _PIECES])
+
+    e_g, e_r = support(g), support(r)
+    counts = np.zeros((12, 2))
+    counts[:8, 0] = rho * e_g
+    counts[2:4, 0] += rna_intergenic * e_r[2:4]
+    counts[4:6, 0] += rna_intronic * e_r[4:6]
+    counts[8:, 0] = 1e4
+    opportunity = observable_gdna_opportunity(regions, n)
+    whole = np.clip(20_000.0 - L + 1.0, 0.0, None)  # the RNA regions are unmasked 20-kb regions
+    pools = np.zeros((N_FRAGMENT_POOLS, n + 1))
+    pools[POOL_DNA_INTERGENIC] = rho * g * opportunity.intergenic_contained
+    pools[POOL_DNA_INTERGENIC] += 2.0 * rna_intergenic * r * whole
+    pools[POOL_DNA_INTRONIC] = rho * g * opportunity.intronic_contained
+    pools[POOL_DNA_INTRONIC] += 2.0 * rna_intronic * r * whole
+    pools[POOL_DNA_INTRON_EXON] = pools[POOL_DNA_INTERGENIC_EXON] = g_captured * 1e3
+    pools[POOL_RNA_SPLICED] = r * 1e5
+    payload = SimpleNamespace(
+        pool_lengths=pools,
+        region_contained_count=counts,
+        boundary_unspliced_count=np.zeros((0, 2)),
+        ref_region_offsets=np.array([0, 12]),
+        ref_boundary_offsets=np.array([0, 0]),
+        max_length=n,
+        deposited_lengths=pools.sum(axis=0),
+    )
+    # the pools' own arithmetic: every contained count is in exactly one pool
+    assert pools[POOL_DNA_INTERGENIC].sum() == pytest.approx(counts[:4, 0].sum(), rel=1e-12)
+    assert pools[POOL_DNA_INTRONIC].sum() == pytest.approx(counts[4:8, 0].sum(), rel=1e-12)
+    return payload, opportunity, regions, L
+
+
+def test_the_one_sided_rate_and_the_purities_read_observable_support():
+    """A region of N carries no fragment. Read over its whole length it is the cleanest region of all — a zero
+    count against 20 kb of exposure — and it pulls the one-sided rate to a hundredth of the truth, which is what
+    the fair panel's all-N regions did to its gDNA law; read over its pieces it is no object at all, and a half-N
+    region is the density it holds. So the rate is the estimator on each region's OBSERVABLE support — here every
+    region's pieces are written out by hand — and each pool's gDNA share reads the same support: the half-N region
+    read whole overstates the intergenic share by a fifth. (On these exact-expectation counts the estimator itself
+    reads a few percent above ``RHO``, its dispersion term expecting scatter below the mean that exact counts lack;
+    that is the estimator's, the same on any genome, and not what this gate is about.)"""
+    from rigel.calibration.fl import _deconvolved_gdna_counts, _pool_sum, _normalized
+    from rigel.calibration.gdna_density import contained_opportunity, one_sided_rate
+
+    payload, opportunity, regions, _L = _masked_fixture(rna_intergenic=0.005)
+    _counts, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
+    pooled = _normalized(_pool_sum(payload, (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)))
+    support = np.array([contained_opportunity(pooled, np.array(ps, float)).sum() for ps in _PIECES])
+    counts = payload.region_contained_count[:8].sum(axis=1)
+    live = support > 0.0  # the all-N region is no object
+    rate = one_sided_rate(counts[live], support[live]).rate
+    assert contrast.applied
+    assert contrast.gdna_density == pytest.approx(rate, rel=1e-12)
+    for share, pool in (
+        (contrast.intergenic_gdna_share, slice(0, 4)),
+        (contrast.intronic_gdna_share, slice(4, 8)),
+    ):
+        assert share == pytest.approx(
+            min(rate * support[pool].sum() / counts[pool].sum(), 1.0), rel=1e-12
+        )
+    assert (
+        0.9 < contrast.intergenic_gdna_share < 1.0
+    )  # RNA in the intergenic pool: the share does not clip
+
+
+def test_over_observable_bases_the_contrast_recovers_the_uniform_law():
+    """End to end through the contrast, the design's case: with the intergenic pool pure its gDNA share clips at 1,
+    and the contrast is that pool's de-tilted histogram — the uniform-frame law, mean 150 bp — moved toward the pools'
+    mixture only by the resolution weight, which resolves the shares' separation almost whole. With the rate read
+    over whole lengths it collapses, both shares fall near zero, their separation drowns in its own error, the
+    resolution weight goes to zero and the law is the pools' mixture, which the introns' RNA (mean 120) pulls short."""
+    from rigel.calibration.fl import _deconvolved_gdna_counts
+
+    payload, opportunity, regions, L = _masked_fixture(rna_intergenic=0.0)
+    counts, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
+    assert contrast.applied
+    assert contrast.intergenic_gdna_share == 1.0
+    assert _mean_length(counts, L) == pytest.approx(150.0, abs=0.1)
+
+
+def test_the_census_law_prices_a_boundary_off_observable_bases():
+    """The census law prices each exon-flanking boundary from the regions beside it: gDNA at the one-sided rate,
+    RNA at the adjacent region's own excess over it. Here the first intergenic region is N end to end and the
+    intron's middle half is N, and the intron|exon boundaries' gDNA share reads what the unmasked genome's does —
+    ``RHO / (RHO + r)`` at ``r = RHO`` — only when both are read over observable bases: the all-N region collapses
+    a rate read over its whole length, and the intron read whole halves its RNA excess."""
+    from _fl_realized_fixture import RHO, build_fixture
+
+    from rigel.calibration.fl import _realized_gdna_counts
+
+    _counts, _uniform, unmasked = _realized_gdna_counts(
+        *build_fixture(boundary_excess=1.0, rna_rate=RHO)
+    )
+    _counts, _uniform, masked = _realized_gdna_counts(
+        *build_fixture(boundary_excess=1.0, rna_rate=RHO, mask=[(0, 10_000), (12_200, 16_200)])
+    )
+    assert unmasked.applied and masked.applied
+    assert unmasked.intron_exon_share == pytest.approx(0.5, abs=0.02)
+    assert masked.intron_exon_share == pytest.approx(unmasked.intron_exon_share, abs=0.02)
+
+
+def test_the_length_law_reads_the_index_mask(tmp_path, monkeypatch):
+    """`pipeline.library_fl_models` hands `build_fl_models` the index's frame, carrying its unobservable mask, and
+    the gDNA opportunity over that observable genome: an index whose genome holds an N run gets both, and the
+    pools' total ``T(w)`` counts no start on N."""
+    import rigel.calibration.fl as fl
+    from _index_builder import MINI_GTF, write_fasta
+
+    from rigel.calibration.gdna_opportunity import (
+        gdna_opportunity_from_index,
+        observable_gdna_opportunity,
+    )
+    from rigel.calibration.region_arrays import RegionArrays
+    from rigel.index import TranscriptIndex
+    from rigel.pipeline import library_fl_models
+
+    fasta = write_fasta(tmp_path / "g.fa", {"chr1": 2000}, {"chr1": [(1500, 1800)]})
+    gtf = tmp_path / "a.gtf"
+    gtf.write_text(MINI_GTF)
+    TranscriptIndex.build(fasta, gtf, tmp_path / "idx", write_tsv=False)
+    index = TranscriptIndex.load(tmp_path / "idx")
+    seen = {}
+    monkeypatch.setattr(fl, "build_fl_models", lambda payload, **kw: seen.update(kw))
+    library_fl_models(SimpleNamespace(max_length=200), index)
+
+    assert seen["regions"].unobservable.tolist() == [[0, 1500, 1800]]
+    want = observable_gdna_opportunity(RegionArrays.from_index(index), 200)
+    got = seen["gdna_opportunity"]
+    for got_pool, want_pool in zip(got.pools + (got.total,), want.pools + (want.total,)):
+        np.testing.assert_array_equal(got_pool, want_pool)
+    assert np.all(got.total[2:] < gdna_opportunity_from_index(index, 200).total[2:])

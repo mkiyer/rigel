@@ -491,27 +491,27 @@ def library_fl_models(payload, index: TranscriptIndex) -> "FLModels":
     enters a pool when exactly one hypothesis survived, so its ``L`` is not in doubt. The RNA pool is
     de-tilted by its own sj opportunity ("used an annotated sj" is a length-dependent selection), and
     the gDNA pools — none of them pure — are deconvolved by the two-pool contrast, which needs the
-    partition the scanner deposits into (`calibration.fl`). Both components are smooth-EB shrunk toward
-    the unconditional anchor.
+    partition the scanner deposits into (`calibration.fl`). Every gDNA opportunity is read over the
+    index's observable genome: the pools' and the regions' (`gdna_opportunity.observable_gdna_opportunity`,
+    the frame's `region_arrays.observable_pieces`). Both components are smooth-EB shrunk toward the
+    unconditional anchor.
 
     The one home for this call: the second pass scores on pass one's payload, calibration fits on the
     drained one, and an instrument that measured a different length model than production's would be
     measuring a tool that does not ship.
     """
     from .calibration.fl import build_fl_models
-    from .calibration.gdna_density import region_lengths_from_partition
-    from .calibration.gdna_opportunity import gdna_opportunity_from_index
+    from .calibration.gdna_opportunity import observable_gdna_opportunity
+    from .calibration.region_arrays import RegionArrays
     from .calibration.sj_opportunity import crossing_probability_from_index
-    from .calibration.splice_graph import build_region_partition_arrays
 
-    bounds, offsets, region_types = build_region_partition_arrays(index)
+    regions = RegionArrays.from_index(index)
     max_length = int(payload.max_length)
     return build_fl_models(
         payload,
         sj_opportunity=crossing_probability_from_index(index, max_length),
-        gdna_opportunity=gdna_opportunity_from_index(index, max_length),
-        region_lengths=region_lengths_from_partition(bounds, offsets, len(region_types)),
-        region_types=region_types,
+        gdna_opportunity=observable_gdna_opportunity(regions, max_length),
+        regions=regions,
     )
 
 
