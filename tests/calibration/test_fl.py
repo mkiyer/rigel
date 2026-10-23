@@ -940,10 +940,7 @@ def test_the_length_law_reads_the_index_mask(tmp_path, monkeypatch):
     import rigel.calibration.fl as fl
     from _index_builder import MINI_GTF, write_fasta
 
-    from rigel.calibration.gdna_opportunity import (
-        gdna_opportunity_from_index,
-        observable_gdna_opportunity,
-    )
+    from rigel.calibration.gdna_opportunity import observable_gdna_opportunity, total_opportunity
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.index import TranscriptIndex
     from rigel.pipeline import library_fl_models
@@ -962,4 +959,6 @@ def test_the_length_law_reads_the_index_mask(tmp_path, monkeypatch):
     got = seen["gdna_opportunity"]
     for got_pool, want_pool in zip(got.pools + (got.total,), want.pools + (want.total,)):
         np.testing.assert_array_equal(got_pool, want_pool)
-    assert np.all(got.total[2:] < gdna_opportunity_from_index(index, 200).total[2:])
+    assert np.all(
+        got.total < total_opportunity(np.array([2000]), 200)
+    )  # the whole reference's starts

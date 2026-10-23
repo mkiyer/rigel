@@ -78,7 +78,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .gdna_density import region_lengths_from_partition
 from .region_arrays import (
     boundary_reaches,
     boundary_region_indices,
@@ -88,14 +87,12 @@ from .region_arrays import (
 from .signature import RegionType, coarse_type_array
 
 if TYPE_CHECKING:
-    from ..index import TranscriptIndex
     from .region_arrays import RegionArrays
 
 __all__ = [
     "GdnaOpportunity",
     "contained_opportunity",
     "crossing_opportunity",
-    "gdna_opportunity_from_index",
     "observable_gdna_opportunity",
     "total_opportunity",
 ]
@@ -203,55 +200,6 @@ class GdnaOpportunity:
         return np.divide(summed, self.total, out=np.zeros_like(summed), where=self.total > 0.0)
 
 
-def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> GdnaOpportunity:
-    """Build the four pools' opportunities from an index's region partition alone.
-
-    Reads the same ``build_region_partition_arrays`` axis the accumulator deposits onto, so the
-    divisor and the deposit rule cannot drift apart: a divisor derived from a different view of the
-    partition is how a pool comes to be divided by an opportunity it does not have.
-    """
-    from .splice_graph import build_region_partition_arrays
-
-    region_bounds, offsets, region_types = build_region_partition_arrays(index)
-    region_bounds = np.asarray(region_bounds, dtype=np.int64)
-    offsets = np.asarray(offsets, dtype=np.int64)
-    types = np.asarray(region_types, dtype=np.int64)
-    if types.size == 0:
-        # No reference has a region, so none can host a gDNA fragment.
-        zero = np.zeros(max_width + 1, dtype=np.float64)
-        return GdnaOpportunity(zero, zero.copy(), zero.copy(), zero.copy(), zero.copy())
-
-    # float64 holding exact integers; every opportunity function casts them to int64 before it counts.
-    lengths = region_lengths_from_partition(region_bounds, offsets, types.size)
-    # ``k`` regions from a reference's ``k + 1`` bounds; a reference with no bounds has none.
-    regions_per_reference = np.maximum(np.diff(offsets) - 1, 0)
-    # Interior boundaries only: between two adjacent regions of one reference, never between references.
-    lo, hi = boundary_region_indices(
-        np.repeat(np.arange(regions_per_reference.size), regions_per_reference)
-    )
-    left, right = lengths[lo], lengths[hi]
-    # Sorted, so the flank pair is order-insensitive exactly as the accumulator's own `_SPLASH_POOL`
-    # key is.
-    pairs = np.sort(np.stack([types[lo], types[hi]]), axis=0)
-    # A reference's length is its last bound.
-    reference_lengths = region_bounds[offsets[1:][regions_per_reference > 0] - 1]
-
-    intron_exon = (pairs[0] == RegionType.INTRON) & (pairs[1] == RegionType.EXON)
-    intergenic_exon = (pairs[0] == RegionType.INTERGENIC) & (pairs[1] == RegionType.EXON)
-
-    return GdnaOpportunity(
-        intergenic_contained=contained_opportunity(
-            lengths[types == RegionType.INTERGENIC], max_width
-        ),
-        intronic_contained=contained_opportunity(lengths[types == RegionType.INTRON], max_width),
-        intron_exon_crossing=crossing_opportunity(left[intron_exon], right[intron_exon], max_width),
-        intergenic_exon_crossing=crossing_opportunity(
-            left[intergenic_exon], right[intergenic_exon], max_width
-        ),
-        total=total_opportunity(reference_lengths, max_width),
-    )
-
-
 def observable_gdna_opportunity(region_arrays: "RegionArrays", max_width: int) -> GdnaOpportunity:
     """The four pools' opportunities and the total over the observable genome (`rigel.observable`): a start counts only
     where its fragment touches no masked base.
@@ -259,8 +207,8 @@ def observable_gdna_opportunity(region_arrays: "RegionArrays", max_width: int) -
     The contained pools sum each region's observable pieces by the region's type; a crossing pool's flanks are the
     boundary's two regions up to the nearest masked base, since a fragment reaching that base is not observed, exactly
     as one reaching the next boundary is not in the pool, and the inclusion-exclusion of :func:`crossing_opportunity`
-    removes both; the total sums every reference's observable stretches. With nothing masked every array is
-    :func:`gdna_opportunity_from_index`'s, to the bit.
+    removes both; the total sums every reference's observable stretches. With nothing masked every pool is its regions'
+    whole-length opportunity, to the bit (`tests/calibration/test_observable_geometry.py`).
     """
     types = coarse_type_array(region_arrays.signature)
     piece_region, piece_len = observable_pieces(region_arrays)

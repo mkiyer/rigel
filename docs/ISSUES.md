@@ -1183,7 +1183,7 @@ Instrument: `06_fl.md` under `$RIGEL_RUNS/prototypes/2026-09-28_od_design/`.
 
 ### capture-blind-gdna-divisor
 `priority: later — the fl second wave; it absorbs crossing-pool-contrast · stage: calibration · kind: defect · 2026-08-31`
-`gdna_opportunity_from_index` is computed from the index alone, so under capture it removes ~6 bp of a ~30 bp
+`observable_gdna_opportunity` is computed from the index alone, so under capture it removes ~6 bp of a ~30 bp
 length selection — the gDNA control moved +6.0 % on all six capture-ON rows (gDNA has no introns to miss), and with
 `ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling. `capture_eff_length` already models
 the panel; it also blocks `ISSUES: crossing-pool-contrast`. ⛔ Not priced on the deliverable: no `quant_accuracy`

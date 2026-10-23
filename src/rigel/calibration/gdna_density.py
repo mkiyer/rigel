@@ -49,7 +49,6 @@ __all__ = [
     "contained_opportunity",
     "one_sided_rate",
     "poisson_lower_mean",
-    "region_lengths_from_partition",
 ]
 
 
@@ -191,26 +190,3 @@ def contained_opportunity(pmf, lengths) -> np.ndarray:
     idx = np.clip(ell, 0, p.size - 1).astype(np.int64)
     out = (ell + 1.0) * cum_mass[idx] - cum_first[idx]
     return np.maximum(out, 0.0)
-
-
-def region_lengths_from_partition(region_bounds, ref_pos_offsets, n_regions: int) -> np.ndarray:
-    """Region lengths from the scanner's own partition, differenced **PER REFERENCE**.
-
-    ``np.diff(region_bounds)`` straight through is WRONG. The bound positions are concatenated per
-    reference (``ref_pos_offsets`` delimits them), and each reference's ``k`` regions contribute
-    ``k + 1`` positions, so a plain diff manufactures one phantom region spanning the junction
-    between every pair of adjacent references. It is silent, plausible-looking, and lands on
-    whichever reference happens to follow.
-    """
-    b = np.asarray(region_bounds, dtype=np.float64).ravel()
-    off = np.asarray(ref_pos_offsets, dtype=np.int64).ravel()
-    out = np.zeros(int(n_regions), dtype=np.float64)
-    at = 0
-    for r in range(off.size - 1):
-        lo, hi = int(off[r]), int(off[r + 1])
-        k = hi - lo - 1  # k regions from k+1 bound positions
-        if k <= 0:
-            continue
-        out[at : at + k] = np.diff(b[lo:hi])
-        at += k
-    return out

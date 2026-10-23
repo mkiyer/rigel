@@ -1,7 +1,7 @@
 """The gDNA background rate, and which counts are gDNA counts at all.
 
-The rate blocks gate the closed form `poisson_lower_mean`, the contamination-robust one-sided root,
-the contained opportunity and the per-reference region lengths. The last block gates
+The rate blocks gate the closed form `poisson_lower_mean`, the contamination-robust one-sided root
+and the contained opportunity. The last block gates
 `density_model.count_observable_masks`, the selector deciding which counts are gDNA counts at all; its
 rule is signature arithmetic and nothing else. A
 REGION is count-observable iff it carries no exon bit, because an exon's contained count holds
@@ -10,8 +10,7 @@ because one exon strand continuing across the boundary is what lets unspliced ma
 and two exons on opposite strands share no bit, so nothing continues and the crossing count is gDNA.
 
 PERTURBATION (`TRAPS: perturb-every-gate`): a `poisson_lower_mean` that drops the `floor` fires 9
-gates, a `region_lengths_from_partition` that diffs straight through the reference junctions fires 2,
-a `contained_opportunity` that forgets the `+1` fires 2, and a bisection returning the pooled rate
+gates, a `contained_opportunity` that forgets the `+1` fires 2, and a bisection returning the pooled rate
 instead of the one-sided root fires 1. Bracketing the bisection from exactly `0.0` fires NOTHING,
 because `F(0+) < 0` walks the bracket off the boundary by itself — so that guard is speculative, and
 `test_the_returned_rate_is_actually_a_root` checks the property instead.
@@ -28,7 +27,6 @@ from rigel.calibration.gdna_density import (
     contained_opportunity,
     one_sided_rate,
     poisson_lower_mean,
-    region_lengths_from_partition,
 )
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
@@ -261,35 +259,6 @@ def test_a_region_shorter_than_every_fragment_has_no_contained_opportunity():
     pmf = np.zeros(51)
     pmf[50] = 1.0
     assert contained_opportunity(pmf, np.array([10.0]))[0] == 0.0
-
-
-# ── the per-reference region lengths ─────────────────────────────────────────────────────────────
-
-
-def test_region_lengths_are_differenced_per_reference():
-    """PERTURBATION, and the defect this gate exists for: with two references a straight ``np.diff``
-    manufactures a PHANTOM region spanning the junction between them."""
-    # ref A: bounds 0,100,300 -> regions of 100 and 200. ref B: bounds 0,50 -> one region of 50.
-    bounds = np.array([0, 100, 300, 0, 50], dtype=np.int64)
-    offsets = np.array([0, 3, 5], dtype=np.int64)
-    got = region_lengths_from_partition(bounds, offsets, n_regions=3)
-    assert got.tolist() == [100.0, 200.0, 50.0]
-    # the phantom the naive form would emit, and which must NOT appear
-    assert -300.0 not in np.diff(bounds)[:0].tolist() + got.tolist()
-    assert got.size == 3
-
-
-def test_a_reference_with_no_regions_contributes_none():
-    bounds = np.array([0, 100, 0, 40], dtype=np.int64)
-    offsets = np.array([0, 2, 2, 4], dtype=np.int64)  # middle reference is empty
-    assert region_lengths_from_partition(bounds, offsets, n_regions=2).tolist() == [100.0, 40.0]
-
-
-def test_region_lengths_match_the_naive_diff_on_a_single_reference():
-    """With one reference there IS no junction, so the two agree — which is why the bug is silent."""
-    bounds = np.array([0, 10, 45, 70], dtype=np.int64)
-    offsets = np.array([0, 4], dtype=np.int64)
-    assert region_lengths_from_partition(bounds, offsets, 3).tolist() == np.diff(bounds).tolist()
 
 
 # ── which counts are gDNA counts: the count-observable masks ─────────────────────────────────

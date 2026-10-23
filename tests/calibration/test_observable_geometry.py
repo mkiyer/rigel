@@ -27,9 +27,12 @@ from rigel.calibration.effective_length import (
     observable_cut_shares,
 )
 from rigel.calibration.gdna_opportunity import (
-    gdna_opportunity_from_index,
+    contained_opportunity,
+    crossing_opportunity,
     observable_gdna_opportunity,
+    total_opportunity,
 )
+from rigel.calibration.signature import RegionType, coarse_type_array
 from rigel.calibration.region_arrays import (
     RegionArrays,
     boundary_reaches,
@@ -194,9 +197,23 @@ def test_with_nothing_masked_every_function_is_its_plain_forms_number_to_the_bit
     np.testing.assert_array_equal(
         observable_cut_shares(ra, pmf), _gdna_boundary_conserved_len(ra, pmf)
     )
-    plain = gdna_opportunity_from_index(unmasked_index, pmf.shape[0] - 1)
-    observable = observable_gdna_opportunity(ra, pmf.shape[0] - 1)
-    for got, want in zip(observable.pools + (observable.total,), plain.pools + (plain.total,)):
+    # the pools over whole regions: contained by each region's type, crossing by its flanks' sorted pair
+    width = pmf.shape[0] - 1
+    types = coarse_type_array(ra.signature)
+    length = (ra.end - ra.start).astype(np.int64)
+    lo, hi = boundary_region_indices(ra.ref_id)
+    pairs = np.sort(np.stack([types[lo], types[hi]]), axis=0)
+    intron_exon = (pairs[0] == RegionType.INTRON) & (pairs[1] == RegionType.EXON)
+    intergenic_exon = (pairs[0] == RegionType.INTERGENIC) & (pairs[1] == RegionType.EXON)
+    whole = (
+        contained_opportunity(length[types == RegionType.INTERGENIC], width),
+        contained_opportunity(length[types == RegionType.INTRON], width),
+        crossing_opportunity(length[lo][intron_exon], length[hi][intron_exon], width),
+        crossing_opportunity(length[lo][intergenic_exon], length[hi][intergenic_exon], width),
+        total_opportunity(np.array([2000, 1500]), width),
+    )
+    observable = observable_gdna_opportunity(ra, width)
+    for got, want in zip(observable.pools + (observable.total,), whole):
         np.testing.assert_array_equal(got, want)
 
 

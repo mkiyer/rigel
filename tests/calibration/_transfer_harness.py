@@ -441,27 +441,20 @@ def capture_sweep_inputs(tmp_path_factory):
 
     toy = build_toy(tmp_path_factory)
 
-    from rigel.calibration.fl import build_fl_models
-    from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
     from rigel.calibration.region_arrays import RegionArrays
-    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
         build_boundary_flags_array,
         build_sj_geometry_arrays,
     )
     from rigel.config import CalibrationConfig, PipelineConfig
-    from rigel.pipeline import scan_and_buffer
+    from rigel.pipeline import library_fl_models, scan_and_buffer
 
     index = toy.index
     _stats, strand_model, _buf, payload = scan_and_buffer(
         str(toy.bam_path), index, PipelineConfig().scan
     )
-    ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
-    fl = build_fl_models(
-        payload,
-        sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
-        gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
-    )
+    ra = RegionArrays.from_index(index)
+    fl = library_fl_models(payload, index)
     grabbed: list = []
     calibrate_mod = sys.modules["rigel.calibration.calibrate"]
     orig = SW.solve_chain
