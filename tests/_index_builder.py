@@ -44,12 +44,17 @@ MINI_GTF = textwrap.dedent("""\
 #   t3: exons (999,1100), (1199,1300)
 
 
-def write_fasta(path: str | Path, refs: Mapping[str, int]) -> Path:
+def write_fasta(
+    path: str | Path,
+    refs: Mapping[str, int],
+    unknown: Mapping[str, list[tuple[int, int]]] | None = None,
+) -> Path:
     """Write an indexed FASTA of KNOWN sequence: each reference is ``ACGT`` repeated to its length.
 
     A structural test's genome holds no unknown base, so an index built from it observes every base and its
     unobservable set is empty, as a real genome's is outside its gaps. An all-``N`` genome is unobservable end to end.
-    Returns *path*.
+    *unknown* writes ``N`` over the given ``[start, end)`` runs of a reference, which an index built without a store
+    then masks. Returns *path*.
     """
     import pysam
 
@@ -57,7 +62,10 @@ def write_fasta(path: str | Path, refs: Mapping[str, int]) -> Path:
     with open(path, "w") as f:
         for ref_name, ref_len in refs.items():
             f.write(f">{ref_name}\n")
-            seq = ("ACGT" * (ref_len // 4 + 1))[:ref_len]
+            seq = list(("ACGT" * (ref_len // 4 + 1))[:ref_len])
+            for start, end in (unknown or {}).get(ref_name, []):
+                seq[start:end] = "N" * (end - start)
+            seq = "".join(seq)
             for i in range(0, len(seq), 80):
                 f.write(seq[i : i + 80] + "\n")
     pysam.faidx(str(path))

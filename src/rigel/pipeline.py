@@ -546,6 +546,7 @@ def _drain_side_buffer(
     leaves ``_lift`` UNTOUCHED — the early return below is the "nothing was drained" signal on this
     path too.
     """
+    from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
     from .second_pass import choose_hypotheses, drain, score_held_fragments
 
@@ -569,7 +570,7 @@ def _drain_side_buffer(
         # `P(align_strand agrees | RNA)`. On an R1-antisense (dUTP) library it is near 0, so
         # DISAGREEMENT is the likely case.
         rna_sense_frac=strand_models.p_r1_sense,
-        region_types=region_types,
+        regions=RegionArrays.from_index(index),
         sj=sj,
     )
     choices = choose_hypotheses(scores, payload, seed=seed)

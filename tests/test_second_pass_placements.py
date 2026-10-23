@@ -12,10 +12,12 @@ hard. Specification: ``second_pass.placement_abundance`` and ``combine_factors``
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 from _index_builder import write_fasta
 
 from rigel.calibration.fl import build_fl_models
+from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
 from rigel.config import BamScanConfig
 from rigel.index import TranscriptIndex
@@ -37,14 +39,15 @@ def _gtf() -> str:
     return "".join(rows)
 
 
-def _scan(tmp_path_factory, label: str, unique_depth: tuple[int, int]):
+def _scan(tmp_path_factory, label: str, unique_depth: tuple[int, int], unknown=None):
     """Scan a fixture with ``unique_depth[f]`` uniquely mapped contained pairs in contig ``f``'s first exon and
-    ``N_MULTI`` multimapping pairs contained in both; return what the scorer reads."""
+    ``N_MULTI`` multimapping pairs contained in both, the genome holding ``N`` over *unknown*'s runs; return what
+    the scorer reads."""
     import pysam
 
     base = tmp_path_factory.mktemp(f"placements_{label}")
     fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {"chr1": GENOME, "chr2": GENOME})
+    write_fasta(fasta, {"chr1": GENOME, "chr2": GENOME}, unknown)
     gtf.write_text(_gtf())
     TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
     index = TranscriptIndex.load(str(base / "idx"))
@@ -90,16 +93,22 @@ def _scan(tmp_path_factory, label: str, unique_depth: tuple[int, int]):
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
     _, _, region_types = build_region_partition_arrays(index)
-    return payload, region_types, build_sj_arrays(index), strand_model
+    return (
+        payload,
+        region_types,
+        build_sj_arrays(index),
+        strand_model,
+        RegionArrays.from_index(index),
+    )
 
 
 def _scored(scanned):
-    payload, region_types, sj, strand_model = scanned
+    payload, region_types, sj, strand_model, regions = scanned
     scores = score_held_fragments(
         payload,
         fl_models=build_fl_models(payload),
         rna_sense_frac=strand_model.p_r1_sense,
-        region_types=region_types,
+        regions=regions,
         sj=sj,
     )
     d = payload.deferred
@@ -121,6 +130,16 @@ def nothing_unique(tmp_path_factory):
 @pytest.fixture(scope="module")
 def one_side_only(tmp_path_factory):
     return _scan(tmp_path_factory, "one", (12, 0))
+
+
+#: chr2's copy of the first exon ([1000, 1600)) holds an N run beyond every read, so the index masks it: of the
+#: library's 300 bp fragments the copy's observable support is 151 starts, chr1's whole copy 301.
+_MASKED_COPY = {"chr2": [(1450, 1600)]}
+
+
+@pytest.fixture(scope="module")
+def one_density_one_copy_masked(tmp_path_factory):
+    return _scan(tmp_path_factory, "masked", (301, 151), unknown=_MASKED_COPY)
 
 
 def test_the_fixture_holds_every_multimapper_on_its_two_placements(three_to_one):
@@ -199,3 +218,40 @@ def test_unique_evidence_on_one_side_only_is_a_hard_zero_on_the_other(one_side_o
     assert int(np.asarray(drained.region_contained_count)[exon2].sum()) == 0, (
         "nothing reaches the silent copy"
     )
+
+
+def test_one_density_over_observable_bases_scores_the_placements_evenly(
+    one_density_one_copy_masked,
+):
+    """Unique depth 301 on chr1's copy and 151 on chr2's, whose last 150 bases are N: one density per observable
+    start on both, so the placement term ties and the draw is even. Read over the whole exon the masked copy's
+    density is understated by 151/301 and the draw weighs it low, 0.67 against 0.33."""
+    payload, scores, multi, runs, _rt, _sj = _scored(one_density_one_copy_masked)
+    assert multi.size == N_MULTI
+    assert one_density_one_copy_masked[4].unobservable.tolist() == [[1, 1450, 1600]]
+    for i in multi:
+        r0, r1 = int(runs[i]), int(runs[i + 1])
+        a = scores.terms.placement_abundance[r0:r1]
+        assert a[0] == pytest.approx(a[1], rel=1e-12), (
+            "one density on both copies' observable bases"
+        )
+        np.testing.assert_allclose(scores.score[r0:r1], [0.5, 0.5], rtol=1e-12, atol=0.0)
+    assert scores.n_undecided == N_MULTI, "a tie on every record, so every draw is a fair coin"
+
+
+def test_a_frame_of_another_partition_is_refused(three_to_one):
+    """The frame is the partition the scan deposited into, or the placement term would read another region's
+    support: one with another region count is refused before anything is scored."""
+    payload, _region_types, sj, strand_model, _regions = three_to_one
+    other = RegionArrays.from_frame(
+        pd.DataFrame({"ref_name": ["chr1"], "start": [0], "end": [GENOME], "signature": [0]}),
+        {"chr1": 0, "chr2": 1},
+    )
+    with pytest.raises(ValueError, match="different partitions"):
+        score_held_fragments(
+            payload,
+            fl_models=build_fl_models(payload),
+            rna_sense_frac=strand_model.p_r1_sense,
+            regions=other,
+            sj=sj,
+        )

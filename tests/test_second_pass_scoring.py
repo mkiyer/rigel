@@ -146,10 +146,8 @@ def scored(tmp_path_factory):
     import pysam
 
     from rigel.calibration.fl import build_fl_models
-    from rigel.calibration.splice_graph import (
-        build_sj_arrays,
-        build_region_partition_arrays,
-    )
+    from rigel.calibration.region_arrays import RegionArrays
+    from rigel.calibration.splice_graph import build_sj_arrays
     from rigel.index import TranscriptIndex
     from rigel.second_pass import score_held_fragments
 
@@ -229,7 +227,7 @@ def scored(tmp_path_factory):
     _stats, strand_model, _buffer, payload = scan_and_buffer(
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
-    _, _, region_types = build_region_partition_arrays(index)
+    regions = RegionArrays.from_index(index)
     sj = build_sj_arrays(index)
     fl_models = build_fl_models(payload)
 
@@ -240,7 +238,7 @@ def scored(tmp_path_factory):
             payload,
             fl_models=fl_models,
             rna_sense_frac=rna_sense_frac,
-            region_types=region_types,
+            regions=regions,
             sj=sj,
         )
 

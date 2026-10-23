@@ -345,6 +345,7 @@ def scanned_two_contigs(tmp_path_factory):
     """Scan a two-contig fixture; return everything the payload-path gates read."""
     import pysam
 
+    from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.splice_graph import (
         build_sj_arrays,
         build_region_partition_arrays,
@@ -434,19 +435,25 @@ def scanned_two_contigs(tmp_path_factory):
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
     _, _, region_types = build_region_partition_arrays(index)
-    return payload, region_types, build_sj_arrays(index), strand_model
+    return (
+        payload,
+        region_types,
+        build_sj_arrays(index),
+        strand_model,
+        RegionArrays.from_index(index),
+    )
 
 
 def _drained(scanned_two_contigs, seed=11):
     from rigel.calibration.fl import build_fl_models
     from rigel.second_pass import choose_hypotheses, drain, score_held_fragments
 
-    payload, region_types, sj, strand_model = scanned_two_contigs
+    payload, region_types, sj, strand_model, regions = scanned_two_contigs
     scores = score_held_fragments(
         payload,
         fl_models=build_fl_models(payload),
         rna_sense_frac=strand_model.p_r1_sense,
-        region_types=region_types,
+        regions=regions,
         sj=sj,
     )
     choices = choose_hypotheses(scores, payload, seed=seed)
@@ -550,7 +557,7 @@ def test_a_payload_cannot_be_drained_TWICE(scanned_two_contigs):
     from rigel.second_pass import drain
 
     _before, after, choices = _drained(scanned_two_contigs)
-    payload, region_types, sj, _strand = scanned_two_contigs
+    payload, region_types, sj, _strand, _regions = scanned_two_contigs
     with pytest.raises(ValueError, match="already been drained"):
         drain(after, np.zeros(0, np.int64), region_types=region_types, sj=sj)
     assert len(choices) == 10
@@ -574,6 +581,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
     import pysam
 
     from rigel.calibration.fl import build_fl_models
+    from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.splice_graph import (
         build_sj_arrays,
         build_region_partition_arrays,
@@ -646,6 +654,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
 
     _, _, region_types = build_region_partition_arrays(index)
     sj = build_sj_arrays(index)
+    regions = RegionArrays.from_index(index)
 
     results = {}
     for threads in (1, 2, 4, 8):
@@ -660,7 +669,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
             payload,
             fl_models=build_fl_models(payload),
             rna_sense_frac=strand_model.p_r1_sense,
-            region_types=region_types,
+            regions=regions,
             sj=sj,
         )
         choices = choose_hypotheses(scores, payload, seed=5)

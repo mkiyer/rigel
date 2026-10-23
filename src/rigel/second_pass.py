@@ -40,10 +40,12 @@ be a second definition of exactly that quantity.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .calibration.effective_length import contained_eff_length
+from .calibration.effective_length import observable_contained_eff_length
+from .calibration.signature import coarse_type_array
 from .native import Accumulator as NativeAccumulator
 from .scan_payload import (
     _DEFERRED_RECORD_FIELDS,
@@ -52,6 +54,9 @@ from .scan_payload import (
     DrainQC,
 )
 from .types import Strand
+
+if TYPE_CHECKING:
+    from .calibration.region_arrays import RegionArrays
 
 
 __all__ = [
@@ -399,7 +404,7 @@ def _covered_segments(start: int, end: int, observed: np.ndarray) -> list[tuple[
 
 
 def placement_abundance(
-    payload: AccumulatorPayload, p: int, accumulator: NativeAccumulator, global_pmf: np.ndarray
+    payload: AccumulatorPayload, p: int, accumulator: NativeAccumulator, region_support: np.ndarray
 ) -> float:
     """``A_p``: the pass-one UNIQUE traffic at the objects the placement's own path deposits on — the
     owner's "abundance of uniquely aligned fragments" at a placement, read through the deposit rule's own
@@ -411,9 +416,12 @@ def placement_abundance(
     * the annotated sj it uses, when its observed introns resolve to one — then the bottleneck of their
       ``sj_inv_length_sum`` (the spliced hypothesis's own rule); an AMBIGUOUS motif trusts no splice;
     * else the contiguous boundaries it crosses — the bottleneck of their ``boundary_unspliced_inv_length_sum``;
-    * else, contained in one region, that region — its ``region_contained_count`` per start opportunity,
-      ``contained_eff_length`` under the unconditional anchor (the component is unknown, as for the
-      genomic hypothesis's ``f``);
+    * else, contained in one region, that region — its ``region_contained_count`` per OBSERVABLE start:
+      *region_support*, each region's contained support over its observable pieces under the
+      unconditional anchor (`effective_length.observable_contained_eff_length`; the component is unknown,
+      as for the genomic hypothesis's ``f``). No fragment is observed on a masked base, so a region's count
+      is over its observable starts alone, and its density read over the whole region understated it by
+      the masked share — which drew a multimapper away from a copy beside a gap;
     * and a path contained in no object (an unannotated intron that swallowed every boundary between
       two regions) deposits on nothing and reads 0, as an empty bottleneck does.
 
@@ -467,8 +475,7 @@ def placement_abundance(
         return 0.0
     region = int(payload.ref_region_offsets[ref]) + first_region
     count = float(np.asarray(payload.region_contained_count[region], dtype=np.float64).sum())
-    length = float(bounds[first_region + 1] - bounds[first_region])
-    opportunity = float(contained_eff_length(np.array([length], dtype=np.float64), global_pmf)[0])
+    opportunity = float(region_support[region])
     return count / opportunity if opportunity > 0.0 else 0.0
 
 
@@ -477,7 +484,7 @@ def score_held_fragments(
     *,
     fl_models,
     rna_sense_frac: float,
-    region_types: np.ndarray,
+    regions: "RegionArrays",
     sj,
 ) -> HeldScores:
     """Score every held fragment's hypotheses. Pure: reads pass-1 state, writes nothing.
@@ -495,9 +502,11 @@ def score_held_fragments(
         certified RNA because an annotated splice proves it. On an R1-antisense (dUTP) library it is
         near 0, so disagreement is the likely case; it is used as the probability of agreement it is,
         never inverted.
-    region_types, sj
-        From the index: ``build_region_partition_arrays`` and ``build_sj_arrays``. The sj
-        CSR is genuinely not on the payload, so this dependency is real rather than an oversight.
+    regions, sj
+        From the index: ``RegionArrays.from_index`` — the partition the scanner deposits into, with the
+        index's unobservable mask, from which the region types and each region's observable support come —
+        and ``build_sj_arrays``. Neither is on the payload, so this dependency is real rather than an
+        oversight.
     """
     deferred = payload.deferred
     n_hyp = deferred.n_hypotheses
@@ -511,6 +520,15 @@ def score_held_fragments(
     rna_pmf, global_pmf = fl_models.rna_pmf, fl_models.global_pmf
     max_size = int(fl_models.max_size)
 
+    n_regions = int(np.asarray(payload.region_contained_count).shape[0])
+    if regions.n_regions != n_regions:
+        raise ValueError(
+            f"score_held_fragments: the frame has {regions.n_regions:,} regions and the payload {n_regions:,} — "
+            "they address different partitions. Pass RegionArrays.from_index of the index the scan used."
+        )
+    region_types = coarse_type_array(regions.signature)
+    # the placement term's divisor, once per region: the unconditional anchor over each region's observable pieces
+    region_support = observable_contained_eff_length(regions, global_pmf)
     accumulators = _Accumulators(payload, region_types, sj)
     sj_of, first_of, last_of = _resolve_intron_lookups(payload, accumulators)
     intron_offsets = np.asarray(deferred.hypothesis_intron_offsets, dtype=np.int64)
@@ -539,7 +557,7 @@ def score_held_fragments(
             if multi:
                 # ⭐ The placement's own term, once per placement, carried per hypothesis; a one-placement
                 # record never has it applied (it would be a common factor), so its scores are today's.
-                abundance[h0:h1] = placement_abundance(payload, p, acc, global_pmf)
+                abundance[h0:h1] = placement_abundance(payload, p, acc, region_support)
             # The region the GENOMIC hypothesis claims is contiguous and every spliced one jumps: the union
             # of the competing implied introns. Scoring `∅` over exactly this — rather than over its whole
             # path — is what keeps the comparison symmetric, since otherwise `∅` is penalised simply for

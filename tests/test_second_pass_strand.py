@@ -15,7 +15,8 @@ import pytest
 from _index_builder import write_fasta
 
 from rigel.calibration.fl import build_fl_models
-from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
+from rigel.calibration.region_arrays import RegionArrays
+from rigel.calibration.splice_graph import build_sj_arrays
 from rigel.config import BamScanConfig
 from rigel.index import TranscriptIndex
 from rigel.pipeline import scan_and_buffer
@@ -116,12 +117,11 @@ def scanned(tmp_path_factory):
     _s, strand_model, _b, payload = scan_and_buffer(
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
-    _, _, region_types = build_region_partition_arrays(index)
-    return payload, region_types, build_sj_arrays(index), strand_model
+    return payload, RegionArrays.from_index(index), build_sj_arrays(index), strand_model
 
 
 def test_a_wrong_strand_spliced_placement_carries_one_minus_p_beside_an_unspliced_one(scanned):
-    payload, region_types, sj, strand_model = scanned
+    payload, regions, sj, strand_model = scanned
     p = strand_model.p_r1_sense
     assert 0.9 < p < 1.0, (
         "the fixture's library must be stranded, and not perfectly, for 1 - p to be a probability"
@@ -130,7 +130,7 @@ def test_a_wrong_strand_spliced_placement_carries_one_minus_p_beside_an_unsplice
         payload,
         fl_models=build_fl_models(payload),
         rna_sense_frac=p,
-        region_types=region_types,
+        regions=regions,
         sj=sj,
     )
     d = payload.deferred
