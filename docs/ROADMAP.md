@@ -48,9 +48,10 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   open deposit defect, the leading intron (`ISSUES: latent-defects`); the second pass's four corrections are open
   (`ISSUES: the-second-pass-corrections`).
 - **Library gDNA fraction**: calibration's matches the oracle calibration's on the ladder's three in-scope strata at full
-  depth and is structurally blind on the deferred one — `calibration_vs_oracle.py` (its pools); end to end, the fair
-  panel of 2026-10-21 under-calls it by 6–18 % off capture and 7–21 % on, books the rest as nascent RNA, and the
-  perfect-prior arm loses as much, so the loss lies past calibration's count — `quant_accuracy.py` (the library rows),
+  depth and is structurally blind on the deferred one — `calibration_vs_oracle.py` (its pools); end to end, with the
+  length law read over the observable genome (2026-10-22) it reads 0.96–1.00 of truth on every in-scope row of the fair
+  panel, the STAR rung and both fl-gap panels, where it under-called by up to 28 % and booked the rest as nascent RNA,
+  and 0.2526 on the VCaP mix against 0.2518 — `quant_accuracy.py` (the library rows),
   `ISSUES: region-lengths-count-unobservable-bases`; it falls with
   depth on sparse libraries (the landscape line below) and over-calls at low gDNA under capture
   (`ISSUES: capture-on-overcalls-gdna-at-low-gdna`); the EM's pseudocounts are neutral in their odds, and at `g98`
@@ -141,9 +142,14 @@ read from an `N` run, and on them Rigel under-calls gDNA by 6–21 % on the in-s
 RNA. Every later step is measured on them, and the multimapper repair's gDNA term and the splice-artifact work both
 weigh gDNA against RNA, so this is taken first; which bases are observable is a property of the reference, so its fix
 starts at the index.
-1. `ISSUES: region-lengths-count-unobservable-bases`: the dissection first, to the term that loses the gDNA (past
-   calibration's count: the perfect-prior arm loses as much), with the mask A/B pair; then the design, for the owner's
-   review.
+1. `ISSUES: region-lengths-count-unobservable-bases`: dissected 2026-10-22 — the term is the gDNA length law, whose
+   one-sided rate reads unobservable bases as the cleanest gDNA. The owner's direction (2026-10-22): an observable
+   genome from mappability, a mask first; the mask is approved: with an `alignable` store its zero-mappability set at
+   the store's longest read length, N included; without one, the N runs; the existing GRCh38 store serves for now.
+   Built 2026-10-22, one step at a time: the index records the mask, the second pass and the length law read it, and
+   every in-scope row reads its gDNA at 0.96–1.00 of truth; the costs are traced in the entry. Next, one at a time: the
+   census law's boundary reads, calibration's geometry (the oracle's gdna-field gate must pass after it), the RNA
+   lengths, and the report.
 
 **The index.**
 2. `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`: the cluster's manifest checked before any cluster

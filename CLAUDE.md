@@ -154,8 +154,10 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,375 passed / 0 skipped / 0 xfail, 3,375 collected** — re-derived
-2026-10-22 on `panel.py align` rebuilding a missing pair from the simulator's BAM (one gate added; 3,374 after the
+**The standing baseline: 0 failed / 3,414 passed / 0 skipped / 0 xfail, 3,414 collected** — re-derived
+2026-10-22 on the observable genome's first four steps (39 gates added: the index's mask, the geometry, the second
+pass and the length law; 3,375 after `panel.py align` rebuilding a missing pair from the simulator's BAM, one gate
+added; 3,374 after the
 simulator's fixes, 235 gates added, 216 of them one parametrized enumeration; 3,139 after the
 ladder's STAR rung, eight gates added; 3,131 after making a record with no aligned
 base no location, three gates added, two deleted; 3,130

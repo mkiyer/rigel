@@ -5,8 +5,17 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 
 ## Where things stand
 
-- **The next task is the region-length dissection** (owner, 2026-10-22), ahead of the scan's remaining items: ROADMAP's
-  "Next" step 1 and the prompt at the end of this note.
+- **The observable genome is built through its fourth step, uncommitted** (2026-10-22, after the owner's "Go"):
+  `OBSERVABLE_OPPORTUNITY_DESIGN.md` §9 has every number. The index records the unobservable mask
+  (`unobservable.feather`, format 11, `rigel.observable`: with a store its zero set at the longest bin, N included;
+  without one, the FASTA's N runs); `region_arrays` cuts regions at it; the second pass and the length law read it.
+  gDNA now reads 0.96–1.00 of truth on every in-scope row of the ladder, the STAR rung and both fl-gap panels (0.73–1.03
+  before), VCaP 0.2526 against 0.2518 (0.2574 before, store-built index); the costs are traced in `ISSUES:
+  region-lengths-count-unobservable-bases`. Four code patches and one docs patch, in order on `acc029bb`, are in
+  `$RIGEL_RUNS/arms/2026-10-22_observable/patches/` with every receipt beside them. Nothing is committed; the owner
+  drives commits. Deletions waiting for that commit: `gdna_opportunity_from_index` and `region_lengths_from_partition`
+  (no production caller; their tests and `tests/calibration/_transfer_harness.py` still read them), and the `.v10` index
+  directories kept beside the rebuilt format-11 ones (`suite`, `test_reference`, `refs`).
 - **The benchmark data was pruned** (owner, 2026-10-22): 100 → 70 GB. No panel keeps FASTQs; `panel.py align` rebuilds a
   pair from the simulator's BAM byte for byte (60a48f4d). The deletions are listed under "Where things are".
 - **The panels are fair now, and they show a large error the old ones hid** (2026-10-21 evening). The simulator no
@@ -35,7 +44,7 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
   `ISSUES: the-scanner-builds-fragments-from-one-mate` (closed) and `DESIGN.md` §1.1–§1.2; the commits are
   `git log 07eba0fc^..f763270c`. What the scan still owes: `ISSUES: multimapper-intergenic-alignments`, the scan half
   of `ISSUES: splicing-artifacts`, and (0.8.1) `ISSUES: clips-are-walked-along-the-genome-only`.
-- **The suite's standing count is 3,374** (CLAUDE.md; 235 simulator gates added); `preflight.py --full` green.
+- **The suite's standing count is 3,414** (CLAUDE.md; 39 gates added by the observable genome's four steps); `preflight.py --full` green.
 - **ISSUES.md was re-prioritized** (owner, 2026-10-21): every open entry names its `stage:`, and the OPEN section runs by
   tier, then in the order the tool runs. Closed in the audit: the one-mate entry and `output-names-are-not-consistent`
   (landed 1fa1c143 on 2026-10-17, still open by mistake). New: `the-second-pass-corrections`,
@@ -83,16 +92,14 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 
 ## Next, in order (ROADMAP.md's "Next")
 
-1. `ISSUES: region-lengths-count-unobservable-bases` (owner, 2026-10-22: first). The dissection, then a design note:
-   where the gDNA the fair panel loses goes. Known: the loss lies past calibration's count (its library fraction
-   matches the oracle calibration's, and the perfect-prior arm loses as much). The mask A/B pair is on disk: g50 κ0.99
-   capture OFF and ON, the same seeds, `$RIGEL_RUNS/prototypes/2026-10-21_mask_ab/nomask/<condition>/sim_oracle.bam`
-   (mask off) beside `$RIGEL_RUNS/suite/ladder/<condition>/sim_oracle.bam` (mask on), scored in that directory's
-   `qa_nomask_base.jsonl` and the ladder's `arms/qa_ladder_base.jsonl`. Candidates to re-read and cite, none yet
-   verified: where a region's length becomes an opportunity (`effective_length`, `gdna_opportunity`, `gdna_density`),
-   the bulk gDNA level the capture reader reads (capture ON lost more), the gDNA component's length
-   (`priors.assemble_priors`) and the EM's gDNA term. Measure by node class (`policy_benchmark.py --by-class`) and by
-   locus, mask on against off. Which bases are observable is the reference's, so the design starts at the index.
+1. `ISSUES: region-lengths-count-unobservable-bases` (owner, 2026-10-22: first). Steps 1–4 built; next, one at a
+   time, as the design's §6 and §9 have them: 4b (the census law's boundary odds and exon on-target shape over reaches;
+   16 boundaries on the suite, so likely below the A/B's noise — decide with the owner whether it is measured or only
+   gated), 5 (calibration's geometry: the slot divisors, the landscape's anchors, the capture reader's supports, the
+   priors' `S_r`; the oracle's gdna-field gate must pass after it), 6 (the transcripts' RNA lengths) and 7 (the
+   report). Two findings to dissect beside it: the nascent → annotated leak under capture that step 4 exposed (oracle
+   g50 stranded ON, about 50 k fragments; nearest `ISSUES: the-scorer-reads-a-census-length-law`), and the STAR rung's
+   own store (cluster).
 2. (owner) the cluster's index manifest, `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`.
 3. `ISSUES: multimapper-intergenic-alignments`, the scan half: buffer a multimapper's hits that overlap no transcript
    (the scan's intergenic path appends a unique mapper's alone). On its own it may be a numeric no-op for the EM, whose
@@ -119,8 +126,13 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
   production and recommended settings. The panels keep no FASTQs (2026-10-22): rebuild a pair from the condition's
   `sim_oracle.bam` with `samtools fastq -N`, byte for byte the simulator's.
 - The tier promotions above, and the re-cache's timing (step 5).
-- The VCaP mix's gDNA fraction, 0.252 → 0.257 against 0.2518: read it against the truth of the read pairs the scan
-  still quantifies (the VCaP read-name labels) before taking it for a regression.
+- **Commit the observable genome's four steps?** One patch per step (with the regressions each traced: two isoform
+  cases at g05, the capture-ON nascent → annotated leak step 4 exposed, the reader's g00 amplification on the STAR rung).
+- **Which index the card's VCaP row reads.** The card reads `refs/rigel_index` (N-only mask, no blacklist); the owner's
+  store gives `refs/rigel_index_alignable` (built 2026-10-22: the store's mask and its splice blacklist, 5.83 M
+  junctions). On the store-built index VCaP reads 0.2574 → 0.2526 against 0.2518 with step 4; the blacklist is a change
+  of its own, so a switch is measured alone.
+- **Step 4b**: the census law's boundary reads touch 16 boundaries on the suite; measure it, or gate it only?
 - Since this handoff was written the ladder has a STAR rung (all 16 conditions aligned by rustar with the recommended
   settings, `panel.py align`, scored by `quant_accuracy.py --bam`; `TESTING.md` §0d), on the report card. What stays
   out of tree is the capture-efficiencies-at-1 arm (`ISSUES: instrument-ledger` (j)).
@@ -142,7 +154,9 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
 | deleted 2026-10-22 (owner) | every panel's FASTQs (rebuilt on demand from the simulator's BAM); the local minimap2 panel, aligned from the old reads (its receipts stay in `$RIGEL_RUNS/prototypes/2026-10-15_splice_a/`); the closed campaigns' per-object dumps in `$RIGEL_RUNS/arms/` |
 | leftover panel folders | `$RIGEL_RUNS/archive/leftover_panels_2026-10-22/` (`ladder_nrna_lo`, the test chromosome's `step3_*`) |
 
-## The prompt for the next session
+## The prompt this session ran (2026-10-22)
+
+The next session's prompt follows the owner's review of `OBSERVABLE_OPPORTUNITY_DESIGN.md`.
 
 ```
 Read CLAUDE.md, then docs/dev/SESSION_HANDOFF.md, then docs/ROADMAP.md's "Next" section and
