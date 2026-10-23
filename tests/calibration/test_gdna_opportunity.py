@@ -14,14 +14,18 @@ fragment, a multi-boundary crossing — enters no pool at all.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from rigel.calibration.gdna_opportunity import (
     GdnaOpportunity,
     contained_opportunity,
     crossing_opportunity,
+    observable_gdna_opportunity,
     total_opportunity,
 )
+from rigel.calibration.region_arrays import RegionArrays
+from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 
 TYPE_INTERGENIC, TYPE_INTRON, TYPE_EXON = 0, 1, 2
 
@@ -29,14 +33,21 @@ TYPE_INTERGENIC, TYPE_INTRON, TYPE_EXON = 0, 1, 2
 # ── the oracle ──────────────────────────────────────────────────────────────────────────────────
 
 
-def enumerate_pools(region_bounds: list[int], types: list[int], width: int) -> dict:
+def enumerate_pools(
+    region_bounds: list[int], types: list[int], width: int, mask: list[tuple[int, int]] = ()
+) -> dict:
     """Walk every start position on one reference and classify it exactly as the deposit rule does.
 
     ``region_bounds`` is the reference's cut-point axis, ascending, first 0 and last ``L_ref``.
-    ``types`` is one coarse type per region, so ``len(types) == len(region_bounds) - 1``.
+    ``types`` is one coarse type per region, so ``len(types) == len(region_bounds) - 1``. ``mask`` is
+    the reference's unobservable runs, ``[start, end)``: a start whose fragment touches one is no start,
+    for the pools and the total alike.
     """
     reference_length = region_bounds[-1]
     boundaries = region_bounds[1:-1]  # interior boundaries only
+    masked = np.zeros(reference_length, dtype=bool)
+    for run_start, run_end in mask:
+        masked[run_start:run_end] = True
     counts = {
         "contained": {TYPE_INTERGENIC: 0, TYPE_INTRON: 0, TYPE_EXON: 0},
         "crossing": {},
@@ -44,6 +55,8 @@ def enumerate_pools(region_bounds: list[int], types: list[int], width: int) -> d
     }
     for start in range(0, reference_length - width + 1):
         end = start + width
+        if masked[start:end].any():
+            continue
         counts["total"] += 1
         crossed = [i for i, p in enumerate(boundaries) if start < p < end]
         if not crossed:
@@ -76,6 +89,50 @@ PARTITIONS = [
     ([0, 3, 250], [TYPE_EXON, TYPE_INTRON]),
 ]
 WIDTHS = [1, 2, 3, 7, 20, 41, 55, 99, 130]
+
+#: The partitions under an unobservable mask: a run inside a region, runs touching a boundary from its left,
+#: from its right and across it, runs filling a region (a 1 bp one among them), two closer than a fragment, a
+#: single base, and runs at a reference's two ends.
+MASKED_PARTITIONS = [
+    (*PARTITIONS[0], [(10, 12), (41, 42), (60, 63), (66, 70), (190, 200)]),
+    (*PARTITIONS[1], [(5, 10), (60, 61), (100, 101)]),
+    (*PARTITIONS[2], [(0, 3), (50, 51)]),
+    (*PARTITIONS[3], [(9, 11), (20, 25)]),
+    (*PARTITIONS[4], [(4, 6), (120, 125), (127, 130)]),
+]
+
+#: A coarse type's signature: one strand's bit types a region.
+_SIGNATURE = {TYPE_INTERGENIC: 0, TYPE_INTRON: BIT_INTRON_POS, TYPE_EXON: BIT_EXON_POS}
+
+
+def _masked_region_arrays(references) -> RegionArrays:
+    """One reference per ``(region_bounds, types, mask)``; a reference with no bounds has no region."""
+    regions, runs = [], []
+    for i, (bounds, types, mask) in enumerate(references):
+        regions += [
+            (f"r{i}", s, e, _SIGNATURE[t]) for s, e, t in zip(bounds[:-1], bounds[1:], types)
+        ]
+        runs += [(f"r{i}", s, e) for s, e in mask]
+    return RegionArrays.from_frame(
+        pd.DataFrame(regions, columns=["ref_name", "start", "end", "signature"]),
+        {f"r{i}": i for i in range(len(references))},
+        pd.DataFrame(runs, columns=["ref", "start", "end"]),
+    )
+
+
+def _pooled(oracles) -> dict:
+    """The four pools and the total, each the references' oracle counts summed."""
+    return {
+        "intergenic_contained": sum(o["contained"][TYPE_INTERGENIC] for o in oracles),
+        "intronic_contained": sum(o["contained"][TYPE_INTRON] for o in oracles),
+        "intron_exon_crossing": sum(
+            o["crossing"].get((TYPE_INTRON, TYPE_EXON), 0) for o in oracles
+        ),
+        "intergenic_exon_crossing": sum(
+            o["crossing"].get((TYPE_INTERGENIC, TYPE_EXON), 0) for o in oracles
+        ),
+        "total": sum(o["total"] for o in oracles),
+    }
 
 
 class TestAgainstTheEnumeratingOracle:
@@ -143,6 +200,23 @@ class TestAgainstTheEnumeratingOracle:
                 mask = (pairs[0] == pair[0]) & (pairs[1] == pair[1])
                 computed += crossing_opportunity(left[mask], right[mask], max_width)[width]
         assert computed == pytest.approx(pooled)
+
+    @pytest.mark.parametrize(
+        "references",
+        [[p] for p in MASKED_PARTITIONS]
+        + [[MASKED_PARTITIONS[0], ([], [], []), *MASKED_PARTITIONS[1:]]],
+        ids=[f"partition{i}" for i in range(len(MASKED_PARTITIONS))] + ["several_references"],
+    )
+    def test_the_observable_opportunity_counts_only_observable_starts(self, references):
+        """Over the observable genome a start whose fragment touches a masked base is no start: each pool and
+        the total are the oracle's counts with those starts skipped, exactly, and over several references
+        (one with no region) their sum. A crossing pool's flank ends at the nearest masked base as it ends at
+        the next boundary, and the total counts each reference's observable stretches."""
+        got = observable_gdna_opportunity(_masked_region_arrays(references), max(WIDTHS))
+        for width in WIDTHS:
+            oracles = [enumerate_pools(b, t, width, mask) for b, t, mask in references if b]
+            for pool, count in _pooled(oracles).items():
+                assert getattr(got, pool)[width] == count, f"{pool}, width {width}"
 
 
 class TestTheTiltsAreOpposite:
@@ -337,16 +411,5 @@ class TestFromTheIndex:
         got = gdna_opportunity_from_index(None, max(WIDTHS))
         for width in WIDTHS:
             oracles = [enumerate_pools(b, t, width) for b, t in references if b]
-            want = {
-                "intergenic_contained": sum(o["contained"][TYPE_INTERGENIC] for o in oracles),
-                "intronic_contained": sum(o["contained"][TYPE_INTRON] for o in oracles),
-                "intron_exon_crossing": sum(
-                    o["crossing"].get((TYPE_INTRON, TYPE_EXON), 0) for o in oracles
-                ),
-                "intergenic_exon_crossing": sum(
-                    o["crossing"].get((TYPE_INTERGENIC, TYPE_EXON), 0) for o in oracles
-                ),
-                "total": sum(o["total"] for o in oracles),
-            }
-            for pool, count in want.items():
+            for pool, count in _pooled(oracles).items():
                 assert getattr(got, pool)[width] == pytest.approx(count), f"{pool}, width {width}"

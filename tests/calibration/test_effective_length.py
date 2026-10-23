@@ -16,6 +16,7 @@ written from the same algebra as the implementation agrees with it while both ar
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 from scipy.stats import norm
 
@@ -24,7 +25,11 @@ from rigel.calibration.effective_length import (
     conserved_cut_shares,
     contained_eff_length,
     crossing_eff_length,
+    observable_contained_eff_length,
+    observable_crossing_eff_length,
+    observable_cut_shares,
 )
+from rigel.calibration.region_arrays import RegionArrays, observable_stretches
 
 UNBOUNDED = el.UNBOUNDED_REACH
 
@@ -253,16 +258,22 @@ def _small_pmf() -> np.ndarray:
     return p / p.sum()
 
 
-def _deposit_every_placement(bounds, blocks, pmf, chromosome=False):
+def _deposit_every_placement(bounds, blocks, pmf, chromosome=False, mask=()):
     """THE DEPOSIT RULE, per object: every placement of every width through the reference accumulator
     (`tests/native/_accumulator_reference.py`), weighted by the pmf. A template is its ``blocks`` on one
     reference cut at ``bounds``, the introns between blocks annotated; ``chromosome`` places every start on
-    the reference instead (gDNA's template). Returns the partition and the per-region contained units,
-    per-boundary mass and per-sj mass — nothing of the slice rule is restated here."""
+    the reference instead (gDNA's template), and then a start whose fragment touches a ``mask`` run
+    (``[start, end)``, the unobservable genome) is no placement. Returns the partition and the per-region
+    contained units, per-boundary mass and per-sj mass — nothing of the slice rule is restated here."""
     from native._accumulator_reference import Accumulator, DepositOutcome, Partition
 
     from rigel.types import Strand
 
+    assert chromosome or not mask, "the mask cuts gDNA's template"
+    masked = np.zeros(int(bounds[-1]), dtype=bool)
+    for ms, me in mask:
+        masked[ms:me] = True
+    masked_before = np.concatenate([[0], np.cumsum(masked)])
     sj = [(0, blocks[k][1], blocks[k + 1][0], int(Strand.POS)) for k in range(len(blocks) - 1)]
     part = Partition.from_region_bounds([bounds], sj=sj)
     offs = np.cumsum([0] + [e - s for s, e in blocks])
@@ -275,6 +286,8 @@ def _deposit_every_placement(bounds, blocks, pmf, chromosome=False):
         for s in range(0, L - int(w) + 1):
             if chromosome:
                 g0, g1, introns = bounds[0] + s, bounds[0] + s + int(w), ()
+                if masked_before[g1] != masked_before[g0]:
+                    continue
             else:
                 k0 = int(np.searchsorted(offs, s, side="right")) - 1
                 k1 = int(np.searchsorted(offs, s + w - 1, side="right")) - 1
@@ -363,6 +376,79 @@ def test_the_gdna_shares_are_what_the_deposit_rule_gives_each_boundary():
     short = (length[:-1] < 40) | (length[1:] < 40)
     assert short.sum() >= 6
     assert np.all(boundary[short] < incidence - 1e-9)
+
+
+#: gDNA's template cut by an unobservable mask: a run one base from a boundary (100), runs touching a boundary
+#: from its left (135) and from its right (300), one filling a region ([140, 150)), one inside a long region, and
+#: two closer than a fragment ([322, 325) between them), beside pieces of 1–3 bp. Every boundary lies more than a
+#: fragment from the chromosome's ends or behind a masked run, since gDNA's template has no end.
+_MASKED_BOUNDS = [0, 100, 101, 103, 106, 135, 140, 150, 190, 250, 300, 340, 400, 460]
+_MASK = [(97, 99), (130, 135), (140, 150), (215, 218), (300, 303), (320, 322), (325, 327)]
+
+
+def _masked_chromosome() -> RegionArrays:
+    """``_MASKED_BOUNDS`` as one reference's regions, with ``_MASK`` as its unobservable runs."""
+    bounds = _MASKED_BOUNDS
+    return RegionArrays.from_frame(
+        pd.DataFrame({"ref_name": "chr1", "start": bounds[:-1], "end": bounds[1:], "signature": 0}),
+        {"chr1": 0},
+        pd.DataFrame({"ref": "chr1", "start": [s for s, _ in _MASK], "end": [e for _, e in _MASK]}),
+    )
+
+
+def test_gdnas_observable_crossing_support_is_every_observable_placement_across_the_boundary():
+    """:func:`observable_crossing_eff_length` counts, at every boundary, the starts on the chromosome whose
+    fragment crosses it and touches no masked base, whatever else it crosses, weighted by the pmf: gDNA's
+    template there is the observable stretch the boundary lies in. A boundary with a masked base beside it
+    has none; one with no masked base within a fragment has the unbounded support ``mean − 1``."""
+    pmf = _small_pmf()
+    bounds = _MASKED_BOUNDS
+    masked = np.zeros(bounds[-1], dtype=bool)
+    for ms, me in _MASK:
+        masked[ms:me] = True
+    expected = np.zeros(len(bounds) - 2)
+    for w in np.flatnonzero(pmf):
+        for s in range(0, bounds[-1] - int(w) + 1):
+            if not masked[s : s + int(w)].any():
+                expected += pmf[w] * np.array([s < x < s + w for x in bounds[1:-1]])
+    got = observable_crossing_eff_length(_masked_chromosome(), pmf)
+    np.testing.assert_allclose(got, expected, rtol=0, atol=1e-12)
+    assert np.count_nonzero(got == 0.0) == 4  # 135, 140, 150 and 300 have a masked base beside them
+    unbounded = crossing_eff_length(pmf, np.array([UNBOUNDED]), np.array([UNBOUNDED]))[0]
+    assert got[-1] == unbounded
+
+
+def test_the_observable_gdna_shares_are_what_the_deposit_rule_gives_each_boundary():
+    """The gate above over the OBSERVABLE genome: every start on the chromosome whose fragment touches no masked
+    base, through the reference accumulator. Each boundary's mass is :func:`observable_cut_shares` — its flanking
+    regions up to the nearest masked base, the template's reach ending there — and each region's contained units
+    :func:`observable_contained_eff_length`, to 1e-12; the whole is every observable start once. PERTURBATION:
+    today's shares at unbounded reach over the whole regions overstate every boundary a masked base lies within a
+    fragment of, and are exact at the one none does."""
+    pmf = _small_pmf()
+    bounds = _MASKED_BOUNDS
+    part, region, boundary, _ = _deposit_every_placement(
+        bounds, [(bounds[0], bounds[-1])], pmf, chromosome=True, mask=_MASK
+    )
+    ra = _masked_chromosome()
+    np.testing.assert_allclose(boundary, observable_cut_shares(ra, pmf), rtol=0, atol=1e-12)
+    np.testing.assert_allclose(region, observable_contained_eff_length(ra, pmf), rtol=0, atol=1e-12)
+    w = np.arange(pmf.shape[0], dtype=np.float64)
+    stretch = observable_stretches(ra).astype(np.float64)
+    whole = float((pmf * np.maximum(stretch[:, None] - w + 1.0, 0.0)).sum())
+    assert region.sum() + boundary.sum() == pytest.approx(whole, rel=1e-12)
+
+    length = np.diff(np.asarray(bounds, dtype=np.float64))
+    plain = np.add(*conserved_cut_shares(pmf, length[:-1], length[1:], UNBOUNDED, UNBOUNDED))
+    near = np.array(
+        [
+            any(ms - 40 < x < me + 40 for ms, me in _MASK)
+            for x in bounds[1:-1]  # a masked base within a fragment of the boundary
+        ]
+    )
+    assert near.sum() == len(near) - 1
+    assert np.all(plain[near] > boundary[near] + 1e-9)
+    np.testing.assert_allclose(boundary[~near], plain[~near], rtol=0, atol=1e-12)
 
 
 def test_the_conserved_share_at_unbounded_reach_closes():

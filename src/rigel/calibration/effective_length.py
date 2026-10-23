@@ -31,6 +31,12 @@ exonic reach is actually passed. At a contiguous boundary the unspliced RNA reac
 :data:`UNBOUNDED_REACH` by ruling, which this module expresses as a value rather than as a second
 code path.
 
+OBSERVABLE OPPORTUNITY. A start counts only where its fragment could be observed: one touching a base of the index's
+unobservable mask (`rigel.observable`) is no place at all. :func:`observable_contained_eff_length`,
+:func:`observable_crossing_eff_length` and :func:`observable_cut_shares` read the partition's observable geometry
+(`region_arrays`): a region's contained support summed over its observable pieces, and gDNA's template at a boundary
+ending at the nearest masked base on either side. With nothing masked each is its plain form's number, to the bit.
+
 The ``+1`` in the contained formula is the discrete count of start positions, not a fudge: a
 fragment ``[s, s+w)`` sits inside ``[a, a+L)`` iff ``s`` is in ``[a, a+L-w]``, which is
 ``L - w + 1`` positions. Dropping it makes the divisor exactly 0 when a region is one fragment
@@ -44,7 +50,14 @@ floored division turns "no data" into a confident wrong answer.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+from .region_arrays import boundary_reaches, boundary_region_indices, observable_pieces
+
+if TYPE_CHECKING:
+    from .region_arrays import RegionArrays
 
 
 __all__ = [
@@ -52,6 +65,9 @@ __all__ = [
     "conserved_cut_shares",
     "contained_eff_length",
     "crossing_eff_length",
+    "observable_contained_eff_length",
+    "observable_crossing_eff_length",
+    "observable_cut_shares",
 ]
 
 #: The reach of a molecule whose template does not end — gDNA, always; and RNA wherever the taper is
@@ -237,3 +253,53 @@ def conserved_cut_shares(
     if np.any(lo < a) or np.any(hi < b):
         raise ValueError("a cut's reach on each side must include the piece beside it.")
     return _side_share(p, a, lo, hi), _side_share(p, b, hi, lo)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+#  OBSERVABLE OPPORTUNITY — the same three readings over the observable genome
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def _reach(bases: np.ndarray) -> np.ndarray:
+    """A side's reach in this module's terms: the bases to the nearest masked base, ``UNBOUNDED_REACH`` where none."""
+    return np.where(np.isfinite(bases), bases, UNBOUNDED_REACH)
+
+
+def observable_contained_eff_length(
+    region_arrays: "RegionArrays", fl_pmf: np.ndarray
+) -> np.ndarray:
+    """``float64[R]`` — each region's contained support over its observable pieces, ``Σ_pieces E_f[(ℓₚ − w + 1)₊]``: a
+    fragment contained in the region and touching no masked base lies in one piece. A region with nothing masked is one
+    piece, so its support is :func:`contained_eff_length`'s of its length, to the bit."""
+    piece_region, piece_len = observable_pieces(region_arrays)
+    return np.bincount(
+        piece_region,
+        weights=contained_eff_length(piece_len.astype(np.float64), fl_pmf),
+        minlength=region_arrays.n_regions,
+    )
+
+
+def observable_crossing_eff_length(region_arrays: "RegionArrays", fl_pmf: np.ndarray) -> np.ndarray:
+    """``float64[E]`` — gDNA's crossing support at every contiguous boundary, its template the observable stretch the
+    boundary lies in: :func:`crossing_eff_length` at the bases to the nearest masked base on each side, and at
+    ``UNBOUNDED_REACH`` on a side with none, which with nothing masked is ``mean − 1`` everywhere, to the bit."""
+    reach_lo, reach_hi = boundary_reaches(region_arrays)
+    return crossing_eff_length(fl_pmf, _reach(reach_lo), _reach(reach_hi))
+
+
+def observable_cut_shares(region_arrays: "RegionArrays", fl_pmf: np.ndarray) -> np.ndarray:
+    """``float64[E]`` — gDNA's conserved share at every contiguous boundary over its observable stretch: the pieces
+    beside the cut are the boundary's two flanking regions up to the nearest masked base, and the reaches the bases to
+    it (``UNBOUNDED_REACH`` on a side with none). With nothing masked it is :func:`conserved_cut_shares` of the two
+    flanking regions at unbounded reach, to the bit."""
+    lo, hi = boundary_region_indices(region_arrays.ref_id)
+    reach_lo, reach_hi = boundary_reaches(region_arrays)
+    size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
+    left, right = conserved_cut_shares(
+        fl_pmf,
+        np.minimum(size[lo], reach_lo),
+        np.minimum(size[hi], reach_hi),
+        _reach(reach_lo),
+        _reach(reach_hi),
+    )
+    return left + right

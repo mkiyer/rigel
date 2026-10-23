@@ -79,17 +79,24 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .gdna_density import region_lengths_from_partition
-from .region_arrays import boundary_region_indices
-from .signature import RegionType
+from .region_arrays import (
+    boundary_reaches,
+    boundary_region_indices,
+    observable_pieces,
+    observable_stretches,
+)
+from .signature import RegionType, coarse_type_array
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
+    from .region_arrays import RegionArrays
 
 __all__ = [
     "GdnaOpportunity",
     "contained_opportunity",
     "crossing_opportunity",
     "gdna_opportunity_from_index",
+    "observable_gdna_opportunity",
     "total_opportunity",
 ]
 
@@ -242,4 +249,40 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
             left[intergenic_exon], right[intergenic_exon], max_width
         ),
         total=total_opportunity(reference_lengths, max_width),
+    )
+
+
+def observable_gdna_opportunity(region_arrays: "RegionArrays", max_width: int) -> GdnaOpportunity:
+    """The four pools' opportunities and the total over the observable genome (`rigel.observable`): a start counts only
+    where its fragment touches no masked base.
+
+    The contained pools sum each region's observable pieces by the region's type; a crossing pool's flanks are the
+    boundary's two regions up to the nearest masked base, since a fragment reaching that base is not observed, exactly
+    as one reaching the next boundary is not in the pool, and the inclusion-exclusion of :func:`crossing_opportunity`
+    removes both; the total sums every reference's observable stretches. With nothing masked every array is
+    :func:`gdna_opportunity_from_index`'s, to the bit.
+    """
+    types = coarse_type_array(region_arrays.signature)
+    piece_region, piece_len = observable_pieces(region_arrays)
+    piece_type = types[piece_region]
+    lo, hi = boundary_region_indices(region_arrays.ref_id)
+    reach_lo, reach_hi = boundary_reaches(region_arrays)
+    size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
+    left = np.minimum(size[lo], reach_lo).astype(np.int64)
+    right = np.minimum(size[hi], reach_hi).astype(np.int64)
+    pairs = np.sort(np.stack([types[lo], types[hi]]), axis=0)
+    intron_exon = (pairs[0] == RegionType.INTRON) & (pairs[1] == RegionType.EXON)
+    intergenic_exon = (pairs[0] == RegionType.INTERGENIC) & (pairs[1] == RegionType.EXON)
+    return GdnaOpportunity(
+        intergenic_contained=contained_opportunity(
+            piece_len[piece_type == RegionType.INTERGENIC], max_width
+        ),
+        intronic_contained=contained_opportunity(
+            piece_len[piece_type == RegionType.INTRON], max_width
+        ),
+        intron_exon_crossing=crossing_opportunity(left[intron_exon], right[intron_exon], max_width),
+        intergenic_exon_crossing=crossing_opportunity(
+            left[intergenic_exon], right[intergenic_exon], max_width
+        ),
+        total=total_opportunity(observable_stretches(region_arrays), max_width),
     )

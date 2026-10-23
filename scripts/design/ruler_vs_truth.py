@@ -499,7 +499,7 @@ def main() -> int:
         config = set_field(config, spec)
     arms = load_arms(args.module)
     index = TranscriptIndex.load(str(index_dir))
-    region_arrays = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
+    region_arrays = RegionArrays.from_index(index)
 
     if args.scale:
         if not args.condition:
@@ -1163,7 +1163,7 @@ def self_test() -> int:
         #    base: each crossing fragment then starts in a neighbour, so its whole unit lands on the footprint's
         #    objects
         from rigel.calibration.region_arrays import RegionArrays
-        ra_t = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
+        ra_t = RegionArrays.from_index(index)
         # the geometry indexes a pmf BY WIDTH (calibration's convention); the simulator's pair is positional
         by_width = np.zeros(int(max(widths)) + 1)
         by_width[np.asarray(widths, dtype=np.int64)] = np.asarray(pmf, dtype=np.float64)

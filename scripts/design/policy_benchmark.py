@@ -213,7 +213,7 @@ def main() -> int:
         raise SystemExit(f"no certified conditions under {oracle} (missing slot_truth.npz)")
 
     index = TranscriptIndex.load(str(index_dir))
-    region_arrays = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
+    region_arrays = RegionArrays.from_index(index)
     sj = build_sj_geometry_arrays(index)
     boundary_flags = build_boundary_flags_array(index)
 
