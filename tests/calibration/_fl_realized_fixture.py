@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from rigel.calibration.gdna_density import contained_opportunity
+from rigel.calibration.effective_length import contained_eff_length
 from rigel.calibration.region_arrays import RegionArrays, boundary_reaches, observable_pieces
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 
@@ -86,7 +86,7 @@ def build_fixture(boundary_excess: float, rna_rate: float = 0.0, mask=()):
 
     piece_region, piece_len = observable_pieces(regions)
     e_contained = np.bincount(
-        piece_region, weights=contained_opportunity(pmf, piece_len), minlength=5
+        piece_region, weights=contained_eff_length(piece_len, pmf), minlength=5
     )
     counts = np.zeros((5, 2), dtype=np.float64)
     for i in (0, 2, 4):  # the off-target regions carry exactly the uniform expectation

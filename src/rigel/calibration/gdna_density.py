@@ -46,7 +46,6 @@ from ..config import CONSTANTS
 
 __all__ = [
     "GdnaDensityFit",
-    "contained_opportunity",
     "one_sided_rate",
     "poisson_lower_mean",
 ]
@@ -169,24 +168,3 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
         else:
             lo = mid
     return GdnaDensityFit(0.5 * (lo + hi), pooled, int(n.size), total_e, bracket_ok=True)
-
-
-def contained_opportunity(pmf, lengths) -> np.ndarray:
-    """``E_f[(ell - L + 1)+]`` per object — the CONTAINED opportunity a uniformly placed fragment has.
-
-    Evaluated by cumulative sums rather than an ``(objects x lengths)`` outer product, which at
-    genome scale would be tens of billions of entries. Writing ``F`` and ``S`` for the pmf's
-    cumulative mass and cumulative first moment, ``E[(ell-L+1)+] = (ell+1)*F(ell) - S(ell)``, and
-    for ``ell`` beyond the pmf's support that is exactly ``ell + 1 - E[L]``. Cost is
-    ``O(objects + max_length)``.
-    """
-    p = np.asarray(pmf, dtype=np.float64)
-    ell = np.asarray(lengths, dtype=np.float64)
-    if p.size == 0:
-        return np.zeros(ell.shape, dtype=np.float64)
-    L = np.arange(p.size, dtype=np.float64)
-    cum_mass = np.cumsum(p)
-    cum_first = np.cumsum(p * L)
-    idx = np.clip(ell, 0, p.size - 1).astype(np.int64)
-    out = (ell + 1.0) * cum_mass[idx] - cum_first[idx]
-    return np.maximum(out, 0.0)

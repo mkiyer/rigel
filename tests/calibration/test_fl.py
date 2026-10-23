@@ -527,7 +527,7 @@ def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
     Returns ``(payload, opportunity, regions, L)``."""
     from _fl_realized_fixture import regions_of
 
-    from rigel.calibration.gdna_density import contained_opportunity
+    from rigel.calibration.effective_length import contained_eff_length
 
     n = 400
     L = np.arange(n + 1, dtype=np.float64)
@@ -541,7 +541,7 @@ def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
     lengths = np.full(12, 20_000.0)
     lengths[8:] = 300.0
     types = np.array([0] * 4 + [1] * 4 + [2] * 4, dtype=np.uint8)  # intergenic / intron / exon
-    e = contained_opportunity(g, lengths)
+    e = contained_eff_length(lengths, g)
     counts = np.zeros((12, 2))
     counts[:8, 0] = 0.05 * e[:8]
     # the RNA sits in two regions of a pool at twice the pool rate, so the one-sided rate still reads
@@ -813,7 +813,7 @@ def _masked_fixture(rna_intergenic: float, rna_intronic: float = 0.05, mask=_UNK
     ``(payload, opportunity, regions, L)``."""
     from _fl_realized_fixture import regions_of
 
-    from rigel.calibration.gdna_density import contained_opportunity
+    from rigel.calibration.effective_length import contained_eff_length
     from rigel.calibration.gdna_opportunity import observable_gdna_opportunity
 
     rho = 0.05
@@ -832,7 +832,7 @@ def _masked_fixture(rna_intergenic: float, rna_intronic: float = 0.05, mask=_UNK
     regions = regions_of(lengths, types, mask)
 
     def support(pmf):
-        return np.array([contained_opportunity(pmf, np.array(ps, float)).sum() for ps in _PIECES])
+        return np.array([contained_eff_length(np.array(ps, float), pmf).sum() for ps in _PIECES])
 
     e_g, e_r = support(g), support(r)
     counts = np.zeros((12, 2))
@@ -874,12 +874,13 @@ def test_the_one_sided_rate_and_the_purities_read_observable_support():
     reads a few percent above ``RHO``, its dispersion term expecting scatter below the mean that exact counts lack;
     that is the estimator's, the same on any genome, and not what this gate is about.)"""
     from rigel.calibration.fl import _deconvolved_gdna_counts, _pool_sum, _normalized
-    from rigel.calibration.gdna_density import contained_opportunity, one_sided_rate
+    from rigel.calibration.effective_length import contained_eff_length
+    from rigel.calibration.gdna_density import one_sided_rate
 
     payload, opportunity, regions, _L = _masked_fixture(rna_intergenic=0.005)
     _counts, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
     pooled = _normalized(_pool_sum(payload, (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)))
-    support = np.array([contained_opportunity(pooled, np.array(ps, float)).sum() for ps in _PIECES])
+    support = np.array([contained_eff_length(np.array(ps, float), pooled).sum() for ps in _PIECES])
     counts = payload.region_contained_count[:8].sum(axis=1)
     live = support > 0.0  # the all-N region is no object
     rate = one_sided_rate(counts[live], support[live]).rate
@@ -962,3 +963,16 @@ def test_the_length_law_reads_the_index_mask(tmp_path, monkeypatch):
     assert np.all(
         got.total < total_opportunity(np.array([2000]), 200)
     )  # the whole reference's starts
+
+
+def test_a_frame_of_another_partition_is_refused():
+    """The contrast reads each region's count against that region's support, so the frame must be the partition the
+    payload was deposited into: one with another region count is refused, never truncated to the shorter of the two."""
+    from _fl_realized_fixture import regions_of
+
+    from rigel.calibration.fl import _deconvolved_gdna_counts
+
+    payload, opportunity, _regions, _L = _tie_fixture(0.0)  # twelve regions
+    other = regions_of([20_000] * 11, [0] * 11)
+    with pytest.raises(ValueError, match="different partitions"):
+        _deconvolved_gdna_counts(payload, opportunity, other)

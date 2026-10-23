@@ -154,8 +154,10 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,410 passed / 0 skipped / 0 xfail, 3,410 collected** — re-derived
-2026-10-22 on deleting the two index wrappers production no longer calls (four gates deleted; 3,414 after the
+**The standing baseline: 0 failed / 3,408 passed / 0 skipped / 0 xfail, 3,408 collected** — re-derived
+2026-10-22 on one contained-support formula in place of two (three gates deleted with the duplicate, one added for
+the length law's partition refusal; 3,410 after deleting the two index wrappers production no longer calls, four
+gates deleted; 3,414 after the
 observable genome's first four steps, 39 gates added: the index's mask, the geometry, the second pass and the length
 law; 3,375 after `panel.py align` rebuilding a missing pair from the simulator's BAM, one gate
 added; 3,374 after the

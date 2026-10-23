@@ -1,7 +1,7 @@
 """The gDNA background rate, and which counts are gDNA counts at all.
 
-The rate blocks gate the closed form `poisson_lower_mean`, the contamination-robust one-sided root
-and the contained opportunity. The last block gates
+The rate blocks gate the closed form `poisson_lower_mean` and the contamination-robust one-sided
+root. The last block gates
 `density_model.count_observable_masks`, the selector deciding which counts are gDNA counts at all; its
 rule is signature arithmetic and nothing else. A
 REGION is count-observable iff it carries no exon bit, because an exon's contained count holds
@@ -10,7 +10,7 @@ because one exon strand continuing across the boundary is what lets unspliced ma
 and two exons on opposite strands share no bit, so nothing continues and the crossing count is gDNA.
 
 PERTURBATION (`TRAPS: perturb-every-gate`): a `poisson_lower_mean` that drops the `floor` fires 9
-gates, a `contained_opportunity` that forgets the `+1` fires 2, and a bisection returning the pooled rate
+gates, and a bisection returning the pooled rate
 instead of the one-sided root fires 1. Bracketing the bisection from exactly `0.0` fires NOTHING,
 because `F(0+) < 0` walks the bracket off the boundary by itself — so that guard is speculative, and
 `test_the_returned_rate_is_actually_a_root` checks the property instead.
@@ -24,7 +24,6 @@ from scipy.stats import poisson
 
 from rigel.calibration.density_model import count_observable_masks
 from rigel.calibration.gdna_density import (
-    contained_opportunity,
     one_sided_rate,
     poisson_lower_mean,
 )
@@ -233,32 +232,6 @@ def test_the_returned_rate_is_actually_a_root():
 def test_misaligned_inputs_raise():
     with pytest.raises(ValueError):
         one_sided_rate(np.ones(4), np.ones(5))
-
-
-# ── the opportunity ──────────────────────────────────────────────────────────────────────────────
-
-
-def test_contained_opportunity_matches_brute_force():
-    """The cumulative-sum form against the literal ``sum_L pmf(L) max(0, ell-L+1)``."""
-    rng = np.random.default_rng(17)
-    pmf = rng.random(60)
-    pmf /= pmf.sum()
-    L = np.arange(pmf.size, dtype=np.float64)
-    ell = np.array([0.0, 1.0, 5.0, 30.0, 59.0, 60.0, 200.0, 10_000.0])
-    brute = np.array([float((pmf * np.clip(x - L + 1.0, 0.0, None)).sum()) for x in ell])
-    assert contained_opportunity(pmf, ell) == pytest.approx(brute, rel=1e-12, abs=1e-12)
-
-
-def test_contained_opportunity_is_ell_plus_one_minus_mean_beyond_support():
-    pmf = np.zeros(11)
-    pmf[10] = 1.0  # every fragment exactly 10 long
-    assert contained_opportunity(pmf, np.array([1000.0]))[0] == pytest.approx(991.0)
-
-
-def test_a_region_shorter_than_every_fragment_has_no_contained_opportunity():
-    pmf = np.zeros(51)
-    pmf[50] = 1.0
-    assert contained_opportunity(pmf, np.array([10.0]))[0] == 0.0
 
 
 # ── which counts are gDNA counts: the count-observable masks ─────────────────────────────────

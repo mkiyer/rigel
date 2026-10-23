@@ -75,8 +75,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ..config import CONSTANTS
-from .gdna_density import contained_opportunity, one_sided_rate
-from .region_arrays import observable_pieces
+from .effective_length import observable_contained_eff_length
+from .gdna_density import one_sided_rate
+from .region_arrays import observable_length
 from .signature import RegionType, coarse_type_array
 from .sj_opportunity import detilt_pool
 from ..scan_payload import (
@@ -321,17 +322,18 @@ def _couple_estimands(g_uniform, mass_uniform: float, g_boundary, mass_boundary:
     return uniform, g_common, lam
 
 
-def _region_sum(pieces: tuple[np.ndarray, np.ndarray], weights, n: int) -> np.ndarray:
-    """``float64[n]`` — one weight per observable piece, summed onto the piece's region."""
-    region = np.asarray(pieces[0], dtype=np.int64)
-    return np.bincount(region, weights=np.asarray(weights, dtype=np.float64), minlength=n)[:n]
-
-
-def _region_support(pieces: tuple[np.ndarray, np.ndarray], pmf: np.ndarray, n: int) -> np.ndarray:
-    """``float64[n]`` — each region's contained support under *pmf*, :func:`contained_opportunity` summed over its
-    observable pieces: a fragment contained in a region and touching no masked base lies in one piece. A region with
-    nothing masked is one piece, so its support is its length's, to the bit; one masked whole has none."""
-    return _region_sum(pieces, contained_opportunity(pmf, pieces[1]), n)
+def _region_counts(payload, regions: "RegionArrays") -> np.ndarray:
+    """``float64[R]`` — each region's contained count, its genome-strand columns summed: gDNA is strand-symmetric and
+    these estimators are about DENSITY, which is why they also work on an unstranded library, where the strand axis
+    carries nothing. Refused unless *regions* is the partition the payload was deposited into."""
+    counts = np.asarray(payload.region_contained_count, dtype=np.float64)
+    counts = counts.sum(axis=1) if counts.ndim > 1 else counts
+    if counts.shape[0] != regions.n_regions:
+        raise ValueError(
+            f"the frame has {regions.n_regions:,} regions and the payload {counts.shape[0]:,}: they address "
+            "different partitions. Pass RegionArrays.from_index of the index the scan used."
+        )
+    return counts
 
 
 def _deconvolved_gdna_counts(
@@ -386,19 +388,13 @@ def _deconvolved_gdna_counts(
     negative mass against its own Poisson noise floor.
     """
     types = coarse_type_array(regions.signature)
-    counts = np.asarray(payload.region_contained_count, dtype=np.float64)
-    # genome-strand columns summed: gDNA is strand-symmetric and this estimator is about DENSITY, which
-    # is why it also works on an unstranded library, where the strand axis carries nothing.
-    counts = counts.sum(axis=1) if counts.ndim > 1 else counts
-    n = min(types.size, counts.size)
-    types, counts = types[:n], counts[:n]
-    pieces = observable_pieces(regions)
-    observable = _region_sum(pieces, pieces[1], n)
+    counts = _region_counts(payload, regions)
+    observable = observable_length(regions)
 
     is_ig = (types == int(RegionType.INTERGENIC)) & (observable > 0.0)
     is_in = (types == int(RegionType.INTRON)) & (observable > 0.0)
-    pooled_pmf = _normalized(_pool_sum(payload, _GDNA_CONTAINED_POOLS))
-    support = _region_support(pieces, pooled_pmf, n)
+    # the contained pools' own law prices the regions they come from
+    support = observable_contained_eff_length(regions, _pool_sum(payload, _GDNA_CONTAINED_POOLS))
     fit = one_sided_rate(counts[is_ig | is_in], support[is_ig | is_in])
     if not fit.informative:
         return None, GdnaContrast(
@@ -523,21 +519,17 @@ def _realized_gdna_counts(
     """
     obs_pools = np.asarray(payload.pool_lengths, dtype=np.float64)
     ty = coarse_type_array(regions.signature)
-    cnt = np.asarray(payload.region_contained_count, dtype=np.float64)
-    cnt = cnt.sum(axis=1) if cnt.ndim > 1 else cnt
-    n = min(ty.size, cnt.size)
-    ty, cnt = ty[:n], cnt[:n]
+    cnt = _region_counts(payload, regions)
     # every contained support over the observable pieces; the exon classes' on-target shape below reads the
     # whole exon
-    ell = np.asarray(regions.region_size_bp, dtype=np.float64)[:n]
-    pieces = observable_pieces(regions)
-    observable = _region_sum(pieces, pieces[1], n)
+    ell = np.asarray(regions.region_size_bp, dtype=np.float64)
+    observable = observable_length(regions)
     is_ig = (ty == int(RegionType.INTERGENIC)) & (observable > 0.0)
     is_in = (ty == int(RegionType.INTRON)) & (observable > 0.0)
 
     g_C = _normalized(np.asarray(uniform_counts, dtype=np.float64))
     L_axis = np.arange(g_C.size, dtype=np.float64)
-    e_g = _region_support(pieces, g_C, n)
+    e_g = observable_contained_eff_length(regions, uniform_counts)
     fit = one_sided_rate(cnt[is_ig | is_in], e_g[is_ig | is_in])
     if not fit.informative:
         return None, None, GdnaRealized(False, "no gDNA density", 0.0, 0.0, 0.0, 0.0)
@@ -552,7 +544,7 @@ def _realized_gdna_counts(
     # ── the boundary stratum: per-boundary composition, regions calibrating boundaries
     rna = _normalized(np.asarray(rna_pmf, dtype=np.float64))
     mu_r = float((rna * np.arange(rna.size)).sum())
-    e_r = _region_support(pieces, rna[: g_C.size], n)
+    e_r = observable_contained_eff_length(regions, rna_pmf)
     excess = np.clip(cnt - rho_off * e_g, 0.0, None)
     rho_r = np.zeros_like(excess)
     np.divide(excess, e_r, out=rho_r, where=e_r > 0.0)

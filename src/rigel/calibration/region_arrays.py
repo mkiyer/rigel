@@ -74,6 +74,17 @@ class RegionArrays:
     #: int64[M, 3] — the index's unobservable mask in this frame's reference ids, ``(ref_id, start, end)`` runs, merged
     #: and ascending by reference then start (`rigel.observable`); empty for a partition built by hand.
     unobservable: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), dtype=np.int64))
+    #: int64[P] each — every region cut at the mask into its observable pieces (:func:`observable_pieces`), cut once
+    #: when the frame is built, so every reader of the observable genome reads one cut.
+    piece_region: np.ndarray = field(init=False, repr=False, compare=False)
+    piece_len: np.ndarray = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        region, length = _cut_at_mask(
+            self.start, self.end, self.ref_offsets, self.n_refs, self.unobservable
+        )
+        object.__setattr__(self, "piece_region", region)
+        object.__setattr__(self, "piece_len", length)
 
     @property
     def n_regions(self) -> int:
@@ -248,32 +259,25 @@ def overlapping_region_runs(
 # ---------------------------------------------------------------------------
 
 
-def _mask_runs(region_arrays: RegionArrays, ref: int) -> tuple[np.ndarray, np.ndarray]:
+def _mask_runs(mask: np.ndarray, ref: int) -> tuple[np.ndarray, np.ndarray]:
     """``(starts, ends)`` — reference *ref*'s masked runs, ascending (merged, so the ends ascend too)."""
-    mask = region_arrays.unobservable
     lo, hi = np.searchsorted(mask[:, 0], [ref, ref + 1])
     return mask[lo:hi, 1], mask[lo:hi, 2]
 
 
-def observable_pieces(region_arrays: RegionArrays) -> tuple[np.ndarray, np.ndarray]:
-    """``(piece_region, piece_len)`` int64 — every region cut at the mask into its observable pieces, in region order.
-
-    A region with no masked base is one piece, itself; one wholly masked has none. A piece is a maximal run of
-    observable bases inside one region, so a fragment contained in a region and touching no masked base lies in
-    exactly one of its pieces.
-    """
-    ra = region_arrays
+def _cut_at_mask(start, end, ref_offsets, n_refs: int, mask) -> tuple[np.ndarray, np.ndarray]:
+    """The cut :func:`observable_pieces` returns, from the frame's own arrays (it runs while the frame is built)."""
     regions, lengths = [], []
-    for r in range(ra.n_refs):
-        lo, hi = int(ra.ref_offsets[r]), int(ra.ref_offsets[r + 1])
+    for r in range(n_refs):
+        lo, hi = int(ref_offsets[r]), int(ref_offsets[r + 1])
         if hi <= lo:
             continue
-        ms, me = _mask_runs(ra, r)
+        ms, me = _mask_runs(mask, r)
         if ms.size == 0:
             regions.append(np.arange(lo, hi, dtype=np.int64))
-            lengths.append(ra.end[lo:hi] - ra.start[lo:hi])
+            lengths.append(end[lo:hi] - start[lo:hi])
             continue
-        bounds = np.concatenate([ra.start[lo:hi], ra.end[hi - 1 : hi]])
+        bounds = np.concatenate([start[lo:hi], end[hi - 1 : hi]])
         cuts = np.unique(np.concatenate([bounds, ms, me]))
         cuts = cuts[(cuts >= bounds[0]) & (cuts <= bounds[-1])]
         a, b = cuts[:-1], cuts[1:]
@@ -288,6 +292,16 @@ def observable_pieces(region_arrays: RegionArrays) -> tuple[np.ndarray, np.ndarr
         np.concatenate(regions).astype(np.int64, copy=False),
         np.concatenate(lengths).astype(np.int64, copy=False),
     )
+
+
+def observable_pieces(region_arrays: RegionArrays) -> tuple[np.ndarray, np.ndarray]:
+    """``(piece_region, piece_len)`` int64 — every region cut at the mask into its observable pieces, in region order.
+
+    A region with no masked base is one piece, itself; one wholly masked has none. A piece is a maximal run of
+    observable bases inside one region, so a fragment contained in a region and touching no masked base lies in
+    exactly one of its pieces. Cut once, when the frame is built.
+    """
+    return region_arrays.piece_region, region_arrays.piece_len
 
 
 def observable_length(region_arrays: RegionArrays) -> np.ndarray:
@@ -309,7 +323,7 @@ def boundary_reaches(region_arrays: RegionArrays) -> tuple[np.ndarray, np.ndarra
     reach_hi = np.full(lo.shape[0], np.inf)
     ref = ra.ref_id[lo]
     for r in np.unique(ref):
-        ms, me = _mask_runs(ra, int(r))
+        ms, me = _mask_runs(ra.unobservable, int(r))
         if ms.size == 0:
             continue
         rows = np.flatnonzero(ref == r)
@@ -335,7 +349,7 @@ def observable_stretches(region_arrays: RegionArrays) -> np.ndarray:
         if hi <= lo:
             continue
         ref_start, ref_end = int(ra.start[lo]), int(ra.end[hi - 1])
-        ms, me = _mask_runs(ra, r)
+        ms, me = _mask_runs(ra.unobservable, r)
         # a stretch runs from the reference's start, or a masked run's end, to the next masked run's start, or the
         # reference's end; a masked run at either end leaves an empty one there
         starts = np.concatenate([[ref_start], me])
