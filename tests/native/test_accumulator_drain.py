@@ -19,6 +19,7 @@ import dataclasses
 
 import numpy as np
 import pytest
+from _index_builder import write_fasta
 
 from rigel.scan_payload import ADDITIVE_AXES
 from rigel.types import Strand
@@ -354,13 +355,7 @@ def scanned_two_contigs(tmp_path_factory):
 
     base = tmp_path_factory.mktemp("drain_two_contigs")
     fasta, gtf = base / "g.fa", base / "a.gtf"
-    fasta.write_text(
-        "".join(
-            f">{ref}\n" + "\n".join(["N" * 80] * (DRAIN_GENOME // 80)) + "\n"
-            for ref in ("chr1", "chr2")
-        )
-    )
-    pysam.faidx(str(fasta))
+    write_fasta(fasta, {"chr1": DRAIN_GENOME, "chr2": DRAIN_GENOME})
     gtf.write_text(_drain_gtf())
     index = TranscriptIndex.load(
         str(
@@ -590,13 +585,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
 
     base = tmp_path_factory.mktemp("drain_workers")
     fasta, gtf = base / "g.fa", base / "a.gtf"
-    fasta.write_text(
-        "".join(
-            f">{ref}\n" + "\n".join(["N" * 80] * (DRAIN_GENOME // 80)) + "\n"
-            for ref in ("chr1", "chr2")
-        )
-    )
-    pysam.faidx(str(fasta))
+    write_fasta(fasta, {"chr1": DRAIN_GENOME, "chr2": DRAIN_GENOME})
     gtf.write_text(_drain_gtf())
     TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
     index = TranscriptIndex.load(str(base / "idx"))

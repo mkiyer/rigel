@@ -12,8 +12,8 @@ route per-locus gDNA estimation to the wrong contig.
 import dataclasses
 
 import numpy as np
-import pysam
 import pytest
+from _index_builder import write_fasta
 
 from rigel.index import TranscriptIndex
 from rigel.locus import Locus, MultiLocus, build_multi_loci
@@ -135,16 +135,7 @@ def two_ref_index(tmp_path_factory):
     gtf_path = base / "two_ref.gtf"
     gtf_path.write_text(_TWO_REF_GTF)
 
-    fasta_path = base / "genome.fa"
-    seq = "N" * 2000
-    with open(fasta_path, "w") as f:
-        f.write(">chrZ\n")
-        for i in range(0, len(seq), 80):
-            f.write(seq[i : i + 80] + "\n")
-        f.write(">chrA\n")
-        for i in range(0, len(seq), 80):
-            f.write(seq[i : i + 80] + "\n")
-    pysam.faidx(str(fasta_path))
+    fasta_path = write_fasta(base / "genome.fa", {"chrZ": 2000, "chrA": 2000})
 
     idx_dir = base / "index"
     TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)

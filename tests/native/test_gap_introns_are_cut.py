@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from _index_builder import write_fasta
 
 from rigel.config import BamScanConfig
 from rigel.pipeline import scan_and_buffer
@@ -117,15 +118,12 @@ def _hypotheses_of(payload, i: int) -> list[tuple[list[tuple[int, int]], int]]:
 
 @pytest.fixture(scope="module")
 def gap_intron_index(tmp_path_factory):
-    import pysam
 
     from rigel.index import TranscriptIndex
 
     base = tmp_path_factory.mktemp("gap_introns")
     fasta, gtf = base / "g.fa", base / "a.gtf"
-    contig = "\n".join(["N" * 80] * (GENOME // 80))
-    fasta.write_text(f">chr1\n{contig}\n>chr2\n{contig}\n")
-    pysam.faidx(str(fasta))
+    write_fasta(fasta, {"chr1": GENOME, "chr2": GENOME})
     gtf.write_text(GTF)
     index_dir = base / "idx"
     TranscriptIndex.build(str(fasta), str(gtf), str(index_dir), write_tsv=False)

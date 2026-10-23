@@ -74,12 +74,9 @@ def test_index_gtf_parse_mode_warn_skip():
 def test_index_refuses_a_negative_nascent_tolerance_as_an_error_before_writing(tmp_path):
     """A negative tolerance clustered as 0 does, and the manifest recorded it as given. `build` validates its settings
     as an `IndexConfig`, so the refusal is an error before the output directory is made."""
-    import pysam
-    from _index_builder import MINI_GTF
+    from _index_builder import MINI_GTF, write_fasta
 
-    fasta = tmp_path / "genome.fa"
-    fasta.write_text(">chr1\n" + "N" * 2000 + "\n")
-    pysam.faidx(str(fasta))
+    fasta = write_fasta(tmp_path / "genome.fa", {"chr1": 2000})
     gtf = tmp_path / "test.gtf"
     gtf.write_text(MINI_GTF)
     out = tmp_path / "idx"

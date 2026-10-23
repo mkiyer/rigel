@@ -898,6 +898,11 @@ class ResourceConstants:
     #: Read size when the index digests its input files.
     digest_chunk_bytes: int = 1 << 20
 
+    #: Bases of an alignable store the index reads per call when it records a reference's unobservable runs: one
+    #: read-length bin's counts cost 16 bytes a base, so a window is 160 MB. It sets memory only, since a run is
+    #: stitched across window edges, and ``tests/test_index_observable.py`` holds the mask to the bit at every window.
+    alignable_window_bp: int = 10_000_000
+
     #: The per-fragment annotation table is sized to the buffered fragment count plus this padding, and never
     #: below the minimum capacity; it doubles when full, by at least the minimum growth.
     annotation_table_padding: int = 1024

@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from _index_builder import rebuild_with_splice_blacklist
+from _index_builder import StandInStore, rebuild_with_splice_blacklist, stand_in_store
 from rigel.config import IndexConfig
 from rigel.index import MANIFEST_JSON, SJ_BLACKLIST_FEATHER, SJ_BLACKLIST_TSV, TranscriptIndex
 from rigel.splice_blacklist import BLACKLIST_COLUMNS, aggregate_splice_blacklist
@@ -379,6 +379,8 @@ def _stub_blacklist(monkeypatch, refs):
         }
     )
     monkeypatch.setattr(sb, "load_splice_blacklist_from_zarr", lambda path, min_count=2: rows)
+    # the store's mask: every base of the mini genome placed back
+    stand_in_store(monkeypatch, StandInStore({"chr1": 2000}))
 
 
 def test_a_blacklist_whose_references_miss_the_fasta_refuses_the_build(

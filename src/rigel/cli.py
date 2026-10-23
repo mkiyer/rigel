@@ -1248,8 +1248,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Path to an alignable Zarr store built for the same genome+aligner. "
             "Provides the splice-junction artifact blacklist (for filtering "
-            "spurious sj at BAM-scan time). Required unless --no-mappability "
-            "is set explicitly."
+            "spurious sj at BAM-scan time) and the unobservable genome: the bases "
+            "no read pair can be placed back at, at the store's longest read length. "
+            "Required unless --no-mappability is set explicitly."
         ),
     )
     idx.add_argument(
@@ -1258,10 +1259,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help=(
-            "Explicitly opt out of the alignable store and its splice blacklist. "
-            "Use this for synthetic genomes, stranded-only benchmarks, or "
-            "any setting where running 'alignable' is unnecessary. "
-            "Mutually exclusive with --alignable-zarr."
+            "Explicitly opt out of the alignable store: no splice blacklist, and the "
+            "unobservable genome is the FASTA's N runs alone. Use this for synthetic "
+            "genomes, stranded-only benchmarks, or any setting where running "
+            "'alignable' is unnecessary. Mutually exclusive with --alignable-zarr."
         ),
     )
     idx.add_argument(

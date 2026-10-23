@@ -40,13 +40,10 @@ from rigel.types import GenomicInterval, Interval, IntervalType, Strand
 
 
 def _mini_sources(base: Path) -> tuple[Path, Path]:
-    """Write ``MINI_GTF`` and an indexed all-N 2,000-bp chr1 into *base*; return (FASTA, GTF)."""
-    import pysam
-    from _index_builder import MINI_GTF
+    """Write ``MINI_GTF`` and an indexed 2,000-bp chr1 of known sequence into *base*; return (FASTA, GTF)."""
+    from _index_builder import MINI_GTF, write_fasta
 
-    fasta = base / "genome.fa"
-    fasta.write_text(">chr1\n" + "N" * 2000 + "\n")
-    pysam.faidx(str(fasta))
+    fasta = write_fasta(base / "genome.fa", {"chr1": 2000})
     gtf = base / "test.gtf"
     gtf.write_text(MINI_GTF)
     return fasta, gtf

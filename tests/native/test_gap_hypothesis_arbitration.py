@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from _index_builder import write_fasta
 
 from rigel.config import BamScanConfig
 from rigel.pipeline import scan_and_buffer
@@ -385,8 +386,7 @@ def scanned(tmp_path_factory):
 
     base = tmp_path_factory.mktemp("gap_strand")
     fasta, gtf = base / "g.fa", base / "a.gtf"
-    fasta.write_text(">chr1\n" + "\n".join(["N" * 80] * (GENOME // 80)) + "\n")
-    pysam.faidx(str(fasta))
+    write_fasta(fasta, {"chr1": GENOME})
     gtf.write_text(GTF)
     index_dir = base / "idx"
     with pytest.warns(RuntimeWarning, match="strand-coincident"):

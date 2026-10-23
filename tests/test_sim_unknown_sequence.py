@@ -20,7 +20,8 @@ import pysam
 import pytest
 
 from rigel.sim.capture import CaptureConfig, CaptureSampler
-from rigel.sim.capture.sampler import ProbeInterval, unknown_runs
+from rigel.observable import unknown_runs
+from rigel.sim.capture.sampler import ProbeInterval
 from rigel.sim.genome import MutableGenome
 from rigel.sim.read_name import parse_origin
 from rigel.sim.wgs_config import GDNASimConfig, SimulationParams

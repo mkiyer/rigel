@@ -13,6 +13,9 @@ TSV mirrors) in an output directory:
     sj.feather                 — annotated splice junctions from transcript introns
     splice_blacklist.feather   — (optional) splice-artifact sj derived
                                  from the alignable Zarr store
+    unobservable.feather       — the unobservable mask: with the alignable store, its zero-
+                                 mappability runs at its longest read length; without, the
+                                 FASTA's N runs (`rigel.observable`)
     transcript_aliases.feather — dropped → kept transcript IDs of the duplicates
                                  ``--collapse-duplicate-transcripts`` folded
     manifest.json              — the format version, the build sources and flags
@@ -67,6 +70,10 @@ SJ_TSV = "sj.tsv"
 SJ_BLACKLIST_FEATHER = "splice_blacklist.feather"
 SJ_BLACKLIST_TSV = "splice_blacklist.tsv"
 
+#: The unobservable mask: the runs of the reference no read pair is observed at (`rigel.observable`).
+UNOBSERVABLE_FEATHER = "unobservable.feather"
+UNOBSERVABLE_TSV = "unobservable.tsv"
+
 #: ``dropped_t_id → kept_t_id`` for every transcript ``--collapse-duplicate-transcripts`` folded into an
 #: identical one; written for the user, never read.
 TRANSCRIPT_ALIASES_FEATHER = "transcript_aliases.feather"
@@ -81,8 +88,9 @@ MANIFEST_JSON = "manifest.json"
 #: alias table and the splice blacklist's count, and counts every span's contributors to a nascent entity
 #: that covers several. 10 names the transcript table's columns for what they hold (``is_single_exon``,
 #: ``span_t_index``, ``span_n_contributors``) and the manifest's ``nascent_tolerance``, and writes 0 in the
-#: contiguous boundaries' reach columns, which nothing reads.
-INDEX_FORMAT_VERSION = 10
+#: contiguous boundaries' reach columns, which nothing reads. 11 records the unobservable mask
+#: (``unobservable.feather``) and its measure in the manifest's ``observable`` block.
+INDEX_FORMAT_VERSION = 11
 
 
 def _rigel_version() -> str:
@@ -866,6 +874,8 @@ class TranscriptIndex:
         self.index_dir: str | None = None
         #: the splice graph's region partition; :meth:`load` requires it (older formats are refused).
         self.regions_df = None
+        #: the unobservable mask, ``ref, start, end`` runs (`rigel.observable.check_mask`); :meth:`load` requires it.
+        self.unobservable_df: pd.DataFrame | None = None
         self.edges_df = None
         self.t_df: pd.DataFrame | None = None
         self.g_df: pd.DataFrame | None = None
@@ -1076,6 +1086,23 @@ class TranscriptIndex:
             )
             _check_blacklist_references(bl_df, ref_lengths, alignable_zarr_path)
 
+        # -- The unobservable mask: read before the first write too, so a store that is incomplete or built for
+        #    another assembly refuses the build and leaves the index it would replace intact
+        from .observable import mask_from_fasta, mask_from_store
+
+        if alignable_zarr_path is None:
+            logger.info("[START] Recording the reference's unknown runs (no alignable store)")
+            mask_df = mask_from_fasta(fasta_file, ref_lengths)
+            mask_record = {"rule": "the reference's unknown bases (N or n)", "read_length": None}
+        else:
+            logger.info(f"[START] Recording the unobservable mask from {alignable_zarr_path}")
+            mask_df, mask_record = mask_from_store(alignable_zarr_path, ref_lengths, fasta_file)
+        masked_bases = int((mask_df["end"] - mask_df["start"]).sum())
+        genome_bases = int(sum(ref_lengths.values()))
+        logger.info(
+            f"[DONE] {len(mask_df):,} unobservable runs: {masked_bases:,} of {genome_bases:,} bp"
+        )
+
         # -- Transcripts ------------------------------------------------------
         logger.info(f"[START] Reading transcripts from {gtf_file}")
         transcripts = read_transcripts(
@@ -1188,6 +1215,11 @@ class TranscriptIndex:
             if write_tsv:
                 bl_df.to_csv(output_dir / SJ_BLACKLIST_TSV, sep="\t", index=False)
 
+        # -- The unobservable mask ---------------------------------------------
+        mask_df.to_feather(output_dir / UNOBSERVABLE_FEATHER, **feather_kwargs)
+        if write_tsv:
+            mask_df.to_csv(output_dir / UNOBSERVABLE_TSV, sep="\t", index=False)
+
         # -- Manifest --------------------------------------------------------
         # Everything needed to REBUILD this index: without both the sources and the flags a rebuild
         # has to infer them. Defaults are written out explicitly, so a rebuilder need not know this
@@ -1215,6 +1247,12 @@ class TranscriptIndex:
                 "nascent_tolerance": nascent_tolerance,
                 "splice_blacklist_min_count": splice_blacklist_min_count,
                 "write_tsv": write_tsv,
+            },
+            # What the mask is and how much of the reference it holds; the runs are `unobservable.feather`.
+            "observable": {
+                **mask_record,
+                "unobservable_bases": masked_bases,
+                "observable_bases": genome_bases - masked_bases,
             },
         }
         logger.info("[DONE] Sources digested")
@@ -1306,6 +1344,7 @@ class TranscriptIndex:
                 BOUNDARIES_FEATHER,
                 INTERVALS_FEATHER,
                 SJ_FEATHER,
+                UNOBSERVABLE_FEATHER,
             )
             if not os.path.exists(os.path.join(index_dir, name))
         ]
@@ -1319,6 +1358,18 @@ class TranscriptIndex:
         self.ref_lengths = load_ref_lengths(os.path.join(index_dir, REF_LENGTHS_FEATHER))
         self.ref_names = list(self.ref_lengths.keys())
         self.ref_name_to_id = {name: i for i, name in enumerate(self.ref_names)}
+
+        # -- the unobservable mask -----------------------------------------------
+        from .observable import check_mask
+
+        try:
+            self.unobservable_df = check_mask(
+                pd.read_feather(os.path.join(index_dir, UNOBSERVABLE_FEATHER)), self.ref_lengths
+            )
+        except ValueError as exc:
+            raise IndexLoadError(
+                f"Index at {index_dir}: {exc}. Rebuild the index (rigel index --fasta ... --gtf ... -o {index_dir})."
+            ) from exc
 
         # -- transcripts ------------------------------------------------------
         self.t_df = pd.read_feather(os.path.join(index_dir, TRANSCRIPTS_FEATHER))

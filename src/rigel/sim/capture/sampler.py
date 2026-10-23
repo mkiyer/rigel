@@ -48,6 +48,7 @@ from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
+from ...observable import true_runs, unknown_bases
 from ...transcript import Transcript
 from ...types import Strand
 from ..bam import transcript_to_genomic_blocks
@@ -56,24 +57,7 @@ from .config import CaptureConfig
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CaptureSampler", "ProbeInterval", "unknown_runs"]
-
-_N = ord("N")
-
-
-def unknown_runs(seq: np.ndarray) -> np.ndarray:
-    """``int64[n, 2]`` — the ``[start, end)`` runs of unknown bases (`N`) in an upper-cased byte sequence, ascending."""
-    return _true_runs(np.asarray(seq, dtype=np.uint8) == _N)
-
-
-def _true_runs(mask: np.ndarray) -> np.ndarray:
-    """``int64[n, 2]`` — the ``[start, end)`` runs where a boolean array is true, ascending."""
-    if not mask.any():
-        return np.empty((0, 2), dtype=np.int64)
-    edges = np.diff(np.concatenate(([0], mask.view(np.int8), [0])))
-    return np.stack([np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)], axis=1).astype(
-        np.int64
-    )
+__all__ = ["CaptureSampler", "ProbeInterval"]
 
 
 def _merged(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
@@ -211,9 +195,8 @@ class CaptureSampler:
             rows = self._tx_by_ref.get(ref, ())
             if ref not in gdna_refs and not rows:
                 continue
-            # either case: `| 0x20` lower-cases a letter, and only `N` and `n` become `n`
-            isn = (np.frombuffer(fasta.fetch(ref).encode(), dtype=np.uint8) | 0x20) == ord("n")
-            runs = _true_runs(isn)
+            isn = unknown_bases(fasta.fetch(ref))
+            runs = true_runs(isn)
             if ref in gdna_refs:
                 self.mask_unknown("gdna", ref, runs)
             n_before = np.concatenate(([0], np.cumsum(isn)))
@@ -225,7 +208,7 @@ class CaptureSampler:
                 template = np.concatenate([isn[e.start : e.end] for e in t.exons])
                 if t.strand == Strand.NEG:
                     template = template[::-1]
-                self.mask_unknown("mrna", t_idx, _true_runs(template))
+                self.mask_unknown("mrna", t_idx, true_runs(template))
 
     def _masked_among(self, space: str, keys) -> list[tuple[int, int | str]]:
         """``(position, key)`` of each template in ``keys`` that has unknown runs."""

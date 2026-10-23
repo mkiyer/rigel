@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from _index_builder import write_fasta
 
 from rigel.calibration.fl import build_fl_models
 from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
@@ -49,12 +50,7 @@ def scanned(tmp_path_factory):
 
     base = tmp_path_factory.mktemp("strand_placements")
     fasta, gtf = base / "g.fa", base / "a.gtf"
-    fasta.write_text(
-        "".join(
-            f">{ref}\n" + "\n".join(["N" * 80] * (GENOME // 80)) + "\n" for ref in ("chr1", "chr2")
-        )
-    )
-    pysam.faidx(str(fasta))
+    write_fasta(fasta, {"chr1": GENOME, "chr2": GENOME})
     gtf.write_text(_gtf())
     TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
     index = TranscriptIndex.load(str(base / "idx"))

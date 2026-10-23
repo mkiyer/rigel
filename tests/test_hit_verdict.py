@@ -38,6 +38,7 @@ from __future__ import annotations
 import pandas as pd
 import pysam
 import pytest
+from _index_builder import write_fasta
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.index import TranscriptIndex
@@ -68,12 +69,7 @@ def _gtf(rows) -> str:
 
 def _index(base, rows=TOY, n_refs=1):
     fasta, gtf = base / "g.fa", base / "a.gtf"
-    fasta.write_text(
-        "".join(
-            f">chr{i + 1}\n" + "\n".join(["N" * 80] * (GENOME // 80)) + "\n" for i in range(n_refs)
-        )
-    )
-    pysam.faidx(str(fasta))
+    write_fasta(fasta, {f"chr{i + 1}": GENOME for i in range(n_refs)})
     gtf.write_text(_gtf(rows))
     TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
     return TranscriptIndex.load(str(base / "idx"))
