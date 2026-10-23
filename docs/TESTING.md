@@ -530,13 +530,13 @@ bit for bit; `--block-slots N|none` replays it at another locus-block size, whic
 the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. A reference is frozen
 once, from the tree a stage starts on, and every `--check` of that stage reads against it; a reference from an older
 tree reads MOVED whatever the change, since the tool's output has moved since (the `arms/review_identity_*.json` of
-2026-09-21 are such). The current references were frozen at 27f6a1dc (2026-10-14) — the ladder's
-`gdna_g05_ss_0.99_nrna_mid_capture_off` and the VCaP mix — and every commit since checked BIT-IDENTICAL against them:
-`$RIGEL_RUNS/prototypes/2026-10-14_sched/identity_head_{g05off,vcap}.json`. The instrument's default
+2026-09-21 are such). The current references were frozen at 0bad0aa3 (2026-10-22, the observable genome's first four
+steps), on the GRCh38 index built with the `alignable` store — the ladder's `gdna_g05_ss_0.99_nrna_mid_capture_off`
+and the VCaP mix: `$RIGEL_RUNS/arms/2026-10-22_cleanup/identity_head_{g05off,vcap}.json`. The instrument's default
 `--reference` does not exist and it prints ⛔ rather than failing, so pass each one and read the log, never the exit
 code:
 
-    P=$RIGEL_RUNS/prototypes/2026-10-14_sched S=$RIGEL_RUNS/suite
+    P=$RIGEL_RUNS/arms/2026-10-22_cleanup S=$RIGEL_RUNS/suite
     python scripts/design/rename_identity.py --check --suite $S/ladder --index $S/rigel_index \
       --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference $P/identity_head_g05off.json
     python scripts/design/rename_identity.py --check --index $RIGEL_RUNS/refs/rigel_index \

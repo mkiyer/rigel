@@ -116,8 +116,9 @@ rigel index \
 ```
 
 `rigel index` requires either `--alignable-zarr PATH` (the store the companion `alignable` tool
-builds for the same genome and aligner, whose splice-artifact blacklist Rigel reads; recommended for
-real genomes) or `--no-mappability` to opt out explicitly.
+builds for the same genome and aligner, whose splice-artifact blacklist and unobservable regions Rigel
+reads; recommended for real genomes) or `--no-mappability` to opt out explicitly, when the reference's
+N runs are its unobservable regions.
 
 ### 2. Quantify a BAM
 

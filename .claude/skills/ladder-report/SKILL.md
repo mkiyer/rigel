@@ -25,7 +25,7 @@ before-and-after is what makes the next delta attributable. `panel.py score` pas
 | **the STAR rung** | `python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base --bam rustar_recommended` | always |
 | the two gap panels | `python scripts/sim/panel.py score --config scripts/sim/configs/flgap_rna_long.yaml --jobs 4 --arms base`, and `flgap_rna_short.yaml` | always |
 | calibration against the oracle | `python scripts/design/calibration_vs_oracle.py --suite $RIGEL_RUNS/suite/<panel> --index $RIGEL_RUNS/suite/rigel_index --jobs 8 --json <dir>/cvo_<panel>.json`, for `ladder`, `flgap_rna_long`, `flgap_rna_short` | always; it reads the cached scan, so re-cache after a scan change |
-| the VCaP mix | `rigel quant --bam <the VCaP mix's BAM> --index $RIGEL_RUNS/refs/rigel_index -o <dir>/vcap_rc --threads 8`, alone (one whole-genome job at a time) | always |
+| the VCaP mix | `rigel quant --bam <the VCaP mix's BAM> --index $RIGEL_RUNS/refs/rigel_index -o <dir>/vcap_rc --threads 8`, alone (one whole-genome job at a time); the index is built with the GRCh38 `alignable` store (`--alignable-zarr`: its splice blacklist and its unobservable genome; owner, 2026-10-22) | always |
 
 `panel.py status` shows the STAR rung as `align rustar_recommended 16/16`. The rung's aligner is rustar (the Rust
 port of STAR, which reads STAR's index and options and matches STAR on 99.9 % of templates); its options are

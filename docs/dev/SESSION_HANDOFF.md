@@ -126,13 +126,14 @@ For the next session. Sandbox: nothing here is authoritative; the state is `ISSU
   production and recommended settings. The panels keep no FASTQs (2026-10-22): rebuild a pair from the condition's
   `sim_oracle.bam` with `samtools fastq -N`, byte for byte the simulator's.
 - The tier promotions above, and the re-cache's timing (step 5).
-- **Commit the observable genome's four steps?** One patch per step (with the regressions each traced: two isoform
-  cases at g05, the capture-ON nascent → annotated leak step 4 exposed, the reader's g00 amplification on the STAR rung).
-- **Which index the card's VCaP row reads.** The card reads `refs/rigel_index` (N-only mask, no blacklist); the owner's
-  store gives `refs/rigel_index_alignable` (built 2026-10-22: the store's mask and its splice blacklist, 5.83 M
-  junctions). On the store-built index VCaP reads 0.2574 → 0.2526 against 0.2518 with step 4; the blacklist is a change
-  of its own, so a switch is measured alone.
-- **Step 4b**: the census law's boundary reads touch 16 boundaries on the suite; measure it, or gate it only?
+- **Decided 2026-10-22**: the four steps committed (16a0dd0f, 42117c8d, e3f31435, 508b4a0e, docs 0bad0aa3; not pushed);
+  `$RIGEL_RUNS/refs/rigel_index` is now the index built with the GRCh38 store (the N-only one is `rigel_index_nostore`,
+  the format-10 one `rigel_index.v10`, both for deletion). The switch alone moves VCaP 0.2523 → 0.2526 against 0.2518
+  (the store's mask beyond N and its splice blacklist together). The identity references for the next no-op stage were
+  frozen on it at 0bad0aa3 (`TESTING.md` §6).
+- **Open**: step 4b (explained to the owner: a measurement below the panels' noise, recommended for the 0.8.1 census-law
+  redesign); the code cleanup (proposed: the two dead wrappers, `observable_length`, one contained-support function in
+  place of two, fl's size truncation and double geometry, the transfer harness's drift) and the data deletions; a push.
 - Since this handoff was written the ladder has a STAR rung (all 16 conditions aligned by rustar with the recommended
   settings, `panel.py align`, scored by `quant_accuracy.py --bam`; `TESTING.md` §0d), on the report card. What stays
   out of tree is the capture-efficiencies-at-1 arm (`ISSUES: instrument-ledger` (j)).

@@ -161,8 +161,8 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--fasta` | required | Genome FASTA (must have a `.fai` index) |
 | `--gtf` | required | Annotation GTF (GENCODE recommended; `exon` records required) |
 | `-o`, `--output-dir` | required | Output directory for index files |
-| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. Read before anything is written, so a store that cannot be read, or whose blacklist names none of the FASTA's references, refuses the build and leaves an existing index in place. |
-| `--no-mappability` | off | Explicitly opt out of the alignable store and its splice blacklist (synthetic genomes, stranded-only benchmarks). Mutually exclusive with `--alignable-zarr`. |
+| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist (applied at BAM-scan time) and the unobservable genome: the bases at which no read pair the store tiled was placed back, at its longest read length, N runs included (see Mappability below). Required unless `--no-mappability` is set. Read before anything is written, so a store that cannot be read, that is unfinished, that holds a reference at another length than the FASTA's, or whose blacklist names none of the FASTA's references, refuses the build and leaves an existing index in place. |
+| `--no-mappability` | off | Explicitly opt out of the alignable store and its splice blacklist (synthetic genomes, stranded-only benchmarks); the unobservable genome is then the FASTA's N runs. Mutually exclusive with `--alignable-zarr`. |
 | `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a sj to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
 | `--nascent-tolerance N` | `20` | Max distance (bp) for clustering multi-exon transcripts' start and end sites into the shared synthetic spans that model their nascent RNA |
 | `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID; `transcript_aliases` maps each collapsed ID to the one kept). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
@@ -339,13 +339,25 @@ recurrent spurious splice junctions there. Rigel can ingest a Zarr store built
 by the companion `alignable` tool (not yet on PyPI or Bioconda: install it from a checkout with
 `pip install -e /path/to/alignable`) for the *same*
 genome and aligner, at index time via `--alignable-zarr`. From it the index
-records a **splice-junction artifact blacklist**: those spurious sj are treated
-as unspliced during scoring, which the annotated BAM reports per record via the
-`ZB` tag. The store's per-base mappability is not read.
+records two things:
+
+- a **splice-junction artifact blacklist**: those spurious sj are treated as
+  unspliced during scoring, which the annotated BAM reports per record via the
+  `ZB` tag;
+- the **unobservable genome**: every base at which no read pair the store tiled
+  over it was placed back, at the store's longest read length — the reference's
+  N runs and the repeats an aligner cannot place. No fragment is observed there,
+  so wherever Rigel divides a count by the number of places a fragment could
+  have come from, it counts only the places that avoid these bases; read over
+  them, an N-filled region looks like an empty one and drags the library's gDNA
+  estimate down. A reference the store does not hold falls back to its N runs,
+  with a warning. Partial mappability (bases an aligner places only some of the
+  time) is not read.
 
 For synthetic genomes, stranded-only benchmarks, or any setting where
 running `alignable` is unnecessary, pass `--no-mappability` (mutually
-exclusive with `--alignable-zarr`). The one advanced knob,
+exclusive with `--alignable-zarr`); the unobservable genome is then the
+reference's N runs. The one advanced knob,
 `--splice-blacklist-min-count`, sets the support a junction needs to enter the
 blacklist; it is ignored under `--no-mappability`.
 
@@ -917,8 +929,9 @@ the protocol preserves strand is decided from the junctions (`summary.json`'s `s
 
 **Do I need the alignable Zarr store?**
 For real genomes it is recommended — it provides the splice-artifact blacklist
-(its per-base mappability is not read). For synthetic genomes or stranded-only
-benchmarks, pass `--no-mappability` at index time.
+and the unobservable genome (its zero-mappability set; partial mappability is not
+read). For synthetic genomes or stranded-only benchmarks, pass `--no-mappability`
+at index time, and the unobservable genome is the reference's N runs.
 
 **How much memory does Rigel use?**
 The scan buffer defaults to 2 GiB (`--scan-buffer-size`); overflow spills to
