@@ -151,6 +151,27 @@ def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_p
             np.asarray(cold.parts[origin].region_contained_count),
         )
 
+    # a forced build re-splits even though the cache would hit: after a change to what the scan offers a stale
+    # partition still loads, and only a rebuild makes it describe the scan again
+    calls = {"n": 0}
+    real = _oracle._split_bam
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(mod, "_split_bam", counting)
+    forced = mod.load_or_build_oracle(
+        bam, index, cfg, tmp_path / "wf", "t", full, cache, force=True
+    )
+    assert calls["n"] == 1, "a forced build reused the cache"
+    for origin in _oracle.ORIGINS:
+        np.testing.assert_array_equal(
+            np.asarray(forced.parts[origin].region_contained_count),
+            np.asarray(cold.parts[origin].region_contained_count),
+        )
+    monkeypatch.setattr(mod, "_split_bam", _boom)
+
     # the cached path is NOT exempt from sum-to-full
     npz = cache / "t" / "gdna" / "payload.npz"
     data = {k: v for k, v in np.load(npz).items()}

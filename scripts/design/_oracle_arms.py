@@ -129,7 +129,7 @@ def check_same_basis(name: str, arm, full_substrate) -> None:
 
 
 def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payload, cache_root,
-                         lift=None):
+                         lift=None, force=False):
     """T, from a per-origin cache when one is valid, otherwise split, scan, and populate it.
 
     The oracle depends only on the accumulator and the index, so it is invariant across every solver
@@ -139,7 +139,9 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
     index it is loaded against (``reach`` in particular is covered by no other hash), so a stale
     oracle is refused loudly rather than silently feeding everything downstream. The sum-to-full
     identity is re-run over the loaded arrays regardless: the cache skips the scanning, never the
-    validation.
+    validation. ``force`` rebuilds whatever is cached: the key hashes the deposit rule, not the scan's
+    code, so after a change to which fragments a scan offers a stale partition still loads, and only a
+    rebuild can make it describe the scan again.
     """
     # the drained frame: ``full_payload`` is the drained whole and ``lift`` the drain's box; the
     # partitions are drained by replaying the whole's choices. An empty ``lift`` (no held fragments)
@@ -147,16 +149,17 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
     lift = lift or {}
     scan = pipeline_config.scan
     dirs = {k: Path(cache_root) / tag / k for k in ORIGINS}
-    try:
-        parts = {k: read_scan_cache(dirs[k], index, scan).payload for k in ORIGINS}
-        truth = OracleTruth.from_cached_parts(full_payload, parts, lift)
-    except (FileNotFoundError, KeyError, ScanCacheKeyError):
-        pass  # no cache, or it does not describe this index/scan: rebuild it below
-    else:
-        # the three-way cache can be complete while the per-strand one is not, so it is ensured on
-        # the hit path too rather than only when the three are rebuilt
-        ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
-        return truth
+    if not force:
+        try:
+            parts = {k: read_scan_cache(dirs[k], index, scan).payload for k in ORIGINS}
+            truth = OracleTruth.from_cached_parts(full_payload, parts, lift)
+        except (FileNotFoundError, KeyError, ScanCacheKeyError):
+            pass  # no cache, or it does not describe this index/scan: rebuild it below
+        else:
+            # the three-way cache can be complete while the per-strand one is not, so it is ensured on
+            # the hit path too rather than only when the three are rebuilt
+            ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
+            return truth
 
     paths, read_counts = _split_bam(bam, Path(work_dir), tag)
     parts = {}
@@ -167,26 +170,27 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
         # condition with this tag, in any panel, overwrites it
         write_scan_cache(dirs[origin], payload=payload, strand_model=strand_model, index=index,
                          bam=bam, scan_config=scan)
-    ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
+    ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root, force=force)
     # the cache stays pass one (write_scan_cache refuses a drained payload); the returned truth is
     # lifted into the drained frame exactly as the cached path is.
     return OracleTruth.from_cached_parts(full_payload, parts, lift, read_counts)
 
 
-def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root) -> bool:
+def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root, force=False) -> bool:
     """Cache the RNA reads split by transcript strand, ``rna_pos`` / ``rna_neg`` beside the three
     ``ORIGINS`` partitions, which is what a per-component truth needs (`_oracle.RNA_STRAND_ORIGINS`
     says why the payload's genome-strand columns cannot serve). Additive: the two partitions describe
     the same reads as ``mrna`` + ``nrna``, so ``calibration_oracle.py`` gates them against each other.
-    Skips the work when both caches already load. Returns True if it built them.
+    Skips the work when both caches already load, unless ``force``. Returns True if it built them.
     """
     dirs = {k: Path(cache_root) / tag / k for k in RNA_STRAND_ORIGINS}
-    try:
-        for k in RNA_STRAND_ORIGINS:
-            read_scan_cache(dirs[k], index, scan)
-        return False
-    except (FileNotFoundError, KeyError, ScanCacheKeyError):
-        pass
+    if not force:
+        try:
+            for k in RNA_STRAND_ORIGINS:
+                read_scan_cache(dirs[k], index, scan)
+            return False
+        except (FileNotFoundError, KeyError, ScanCacheKeyError):
+            pass
     paths, _counts = split_rna_by_transcript_strand(bam, Path(work_dir), tag)
     for key in RNA_STRAND_ORIGINS:
         _stats, strand_model, _buf, payload = scan_and_buffer(paths[key], index, scan)

@@ -452,7 +452,7 @@ def self_test() -> int:
     return 1 if fail else 0
 
 
-def build_one(index, suite: Path, condition: str, work_dir: Path) -> None:
+def build_one(index, suite: Path, condition: str, work_dir: Path, force: bool = False) -> None:
     """One condition's oracle cache under ``<suite>/oracle_cache/<condition>``: the three origin
     partitions and the two transcript-strand ones (`_oracle_arms.load_or_build_oracle`, which
     re-runs sum-to-full against the scan cache on a hit and rebuilds on a miss). The whole is never
@@ -468,21 +468,24 @@ def build_one(index, suite: Path, condition: str, work_dir: Path) -> None:
     bam = str(Path(suite) / condition / "sim_oracle.bam")
     OA.load_or_build_oracle(
         bam, index, PipelineConfig(), Path(work_dir) / f"w_{condition}", condition, kw["payload"],
-        Path(suite) / "oracle_cache", lift,
+        Path(suite) / "oracle_cache", lift, force=force,
     )
 
 
-def build(index, suite: Path, conds: list[str], jobs: int, work_dir: Path, args_index: Path) -> None:
+def build(index, suite: Path, conds: list[str], jobs: int, work_dir: Path, args_index: Path,
+          force: bool = False) -> None:
     """Every condition's cache, in parallel over conditions when ``jobs > 1`` — each worker is this
     script on one condition with ``--skip-certify``; a worker that fails is rebuilt serially here, so
     the numbers do not depend on ``jobs``."""
     todo = list(conds)
+    failed = set(todo)  # what the serial pass must build itself
     if jobs > 1 and len(todo) > 1:
         import concurrent.futures as cf
         import subprocess
 
         base = [sys.executable, str(Path(__file__).resolve()), "--suite", str(suite), "--index",
-                str(args_index), "--work-dir", str(work_dir), "--build", "--skip-certify", "--condition"]
+                str(args_index), "--work-dir", str(work_dir), "--build", "--skip-certify",
+                *(["--force"] if force else []), "--condition"]
 
         def one(c):
             return c, subprocess.run(base + [c], capture_output=True, text=True).returncode
@@ -492,8 +495,10 @@ def build(index, suite: Path, conds: list[str], jobs: int, work_dir: Path, args_
         with cf.ThreadPoolExecutor(max_workers=n) as ex:
             for c, rc in ex.map(one, todo):
                 print(f"    {'✔' if rc == 0 else '⚠ rebuilding serially'} {c}", flush=True)
+                if rc == 0:
+                    failed.discard(c)
     for c in todo:
-        build_one(index, suite, c, work_dir)
+        build_one(index, suite, c, work_dir, force=force and c in failed)
 
 
 def main() -> int:
@@ -508,6 +513,8 @@ def main() -> int:
     ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_oracle_build",
                     help="--build's scratch for the split BAMs")
     ap.add_argument("--skip-certify", action="store_true", help="--build only (the worker half of --jobs)")
+    ap.add_argument("--force", action="store_true",
+                    help="--build rebuilds every cached partition (after a change to what the scan offers)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -519,7 +526,7 @@ def main() -> int:
         p.name for p in (args.suite / "scan_cache").iterdir()
     )
     if args.build:
-        build(index, args.suite, conds, args.jobs, args.work_dir, args.index)
+        build(index, args.suite, conds, args.jobs, args.work_dir, args.index, force=args.force)
         if args.skip_certify:
             return 0
     bad = 0

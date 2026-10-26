@@ -273,6 +273,15 @@ def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one
     assert "--build" in cmd and cmd[cmd.index("--jobs") + 1] == "3"
     assert cmd[cmd.index("--condition") + 1] == "gdna_g00_ss_0.50_x"
     assert not any("prewarm" in c for c in cmd), "there is no zero-gDNA hold-out to pre-warm"
+    assert "--force" not in cmd and not any("--force" in c for _, c in issued)
+
+    # --force reaches BOTH caches: the scan cache and the origin-split partitions, keyed alike and alike stale
+    issued.clear()
+    launched.clear()
+    args.force = True
+    assert PANEL.cmd_cache(p, args) == 0
+    assert "--force" in issued[0][1], "--force did not reach the scan cache"
+    assert "--force" in launched[0], "--force did not reach the oracle's partitions"
 
 
 # ── an aligned input: the ladder's STAR rung ─────────────────────────────────────────────────────

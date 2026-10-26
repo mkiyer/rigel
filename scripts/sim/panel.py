@@ -304,6 +304,9 @@ def cmd_cache(p: Panel, args) -> int:
         "--build",
         "--jobs",
         str(args.jobs),
+        # ⛔ and it must reach the origin-split partitions too, keyed the same way and as stale after a scan
+        #    change: a stale partition still loads and then fails sum-to-full against the fresh scan cache
+        *(["--force"] if args.force else []),
         *(["--condition", *conds] if args.conditions else []),
     ]
     print(f"\n\033[1m── oracle cache (origin-split truth) + certification -> {p.oracle_cache}\033[0m\n   $ {' '.join(cmd)}\n", flush=True)
