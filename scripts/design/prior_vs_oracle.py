@@ -65,6 +65,7 @@ from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import (  # noqa: E402
     _drain_side_buffer,
+    length_tables,
     quant_from_buffer,
     scan_and_buffer,
 )
@@ -134,7 +135,7 @@ def score_arm(arm: np.ndarray, ref: np.ndarray, select: np.ndarray | None = None
 # ── the arms ─────────────────────────────────────────────────────────────────────────────────────
 
 
-def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calibration,
+def capture_priors(buffer, index, strand_models, tables, region_arrays, stats, calibration,
                    pipeline_config):
     """Run the production quant path far enough to get ``(multi_loci, LocusPriors)``, then STOP.
 
@@ -164,7 +165,7 @@ def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calib
     PRIORS.assemble_priors = _wrapper
     try:
         quant_from_buffer(
-            buffer, index, strand_models, fl, region_arrays, stats, calibration,
+            buffer, index, strand_models, tables, region_arrays, stats, calibration,
             em_config=pipeline_config.em, scoring=pipeline_config.scoring,
         )
     except _StopAfterPriors:
@@ -348,7 +349,7 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
         boundary_flags=build_boundary_flags_array(index),
     )
     multi_loci, priors = capture_priors(
-        buffer, index, strand_model, fl, ra, stats, cal, pipeline_config
+        buffer, index, strand_model, length_tables(fl, cal, ra), ra, stats, cal, pipeline_config
     )
     return cal, multi_loci, priors
 

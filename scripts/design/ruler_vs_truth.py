@@ -92,6 +92,7 @@ from rigel.calibration.splice_graph import (  # noqa: E402
 )
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
+from rigel.pipeline import length_tables, library_fl_models  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 from rigel.sim.capture import CaptureConfig, CaptureSampler  # noqa: E402
 from rigel.sim.whole_genome import fl_pmf, load_transcripts_from_index  # noqa: E402
@@ -269,6 +270,8 @@ def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, c
     )
     debug["gdna_fl_pmf"] = kw["gdna_fl_pmf"]
     debug["rna_fl_pmf"] = kw["rna_fl_pmf"]
+    # the EM's two length tables, exactly as production decides them on this payload: the shipped ruler reads them
+    debug["length_tables"] = length_tables(library_fl_models(kw["payload"], index), cal, region_arrays)
     return cal, debug
 
 
@@ -414,15 +417,15 @@ def run_condition(index, region_arrays, index_dir, panel_dir, condition, config,
     truth = load_truth(index, index_dir, panel_dir, condition)
     cal, inputs = calibrate_condition(index, region_arrays, panel_dir, condition, config)
     out = {}
-    rna_pmf = inputs["rna_fl_pmf"]
+    tables = inputs["length_tables"]
     out["shipped"] = (
-        transcript_capture_eff_lengths(cal, region_arrays, index, truth.L_plain, rna_pmf),
+        transcript_capture_eff_lengths(cal, region_arrays, index, truth.L_plain, tables),
         cal,
     )
     if (panel_dir / "oracle_cache" / condition / "slot_truth.npz").is_file():
         o = oracle_gdna_result(cal, region_arrays, panel_dir, condition, inputs["gdna_fl_pmf"])
         out["oracle_gdna"] = (
-            transcript_capture_eff_lengths(o, region_arrays, index, truth.L_plain, rna_pmf),
+            transcript_capture_eff_lengths(o, region_arrays, index, truth.L_plain, tables),
             o,
         )
     for name, ruler in arms.items():
@@ -600,10 +603,11 @@ def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
         cap["fl_models"] = models  # the last fit is calibration's: its gdna_pmf is the pairing arm's law
         return models
 
-    def ruler_hook(calibration, region_arrays, index_, fl_eff_lengths, rna_fl_pmf):
-        out = orig_ruler(calibration, region_arrays, index_, fl_eff_lengths, rna_fl_pmf)
+    def ruler_hook(calibration, region_arrays, index_, fl_eff_lengths, tables):
+        out = orig_ruler(calibration, region_arrays, index_, fl_eff_lengths, tables)
         cap["fl"] = np.asarray(fl_eff_lengths, dtype=np.float64).copy()
-        cap["rna_pmf"] = np.asarray(rna_fl_pmf, dtype=np.float64).copy()
+        cap["rna_pmf"] = np.asarray(tables.rna, dtype=np.float64).copy()
+        cap["length_tables"] = tables
         cap["ruler"] = np.asarray(out, dtype=np.float64).copy()
         return out
 

@@ -1,24 +1,24 @@
-"""gDNA / RNA fragment-length laws: the pools, the smooth-EB build, and the two estimands.
+"""gDNA / RNA fragment-length laws: the pools, the smooth-EB build, each law's sampling variance, and the
+realized estimator the uniform law is coupled to.
 
 The pools are defined by structure and none is pure: only the RNA pool is certified, since gDNA
 cannot splice, while RNA inside introns and unannotated transcription reach the gDNA pools too. The
 partition gates hold the pool accessors exhaustive and disjoint, the build gates hold that a sparse
 pool shrinks smoothly toward the global anchor with no threshold anywhere, and the accessor gates
-hold the raw empirical views the QC report reads. Above them sit two estimands of the gDNA law:
-``gdna_pmf``, the UNIFORM-FRAME law that the chemistry makes and the opportunity and prior
-mathematics assume, and ``gdna_realized_pmf``, the LIBRARY-CENSUS law a sequenced gDNA fragment
-follows with capture selection included, which is what the EM's per-fragment scorer conditions on.
-They coincide off capture and split under it, and handing either consumer the other's estimand
-misassigns transcripts in bulk — so the ROUTING is gated as hard as the estimator: geometry stays
-bit-identical whether or not the realized law is computed, the realized law falls back to the
-uniform one exactly when it cannot be estimated, and the on-target correction vanishes identically
-with no enrichment excess.
+hold the raw empirical views the QC report reads. ``gdna_pmf`` is the UNIFORM-FRAME law the chemistry
+makes and the opportunity and prior mathematics assume; the realized (library-census) estimator below it
+survives only through the coupling, which moves the uniform law where the contained stratum is starved,
+and the on-target correction vanishes identically with no enrichment excess. Each component pmf
+carries its per-length sampling variance — its raw law's plug-in variance at its empirical-Bayes weight
+squared — which the EM's two length tables read to tell a difference from noise
+(``tests/calibration/test_shared_length_law.py``).
 
-PERTURBATION (`TRAPS: perturb-every-gate`): leaking the realized law into ``gdna_pmf``, breaking the
-fallback, and dropping the excess's ``-1`` each fire two gates. Removing the estimator's early
-no-density guard fires NOTHING — at ``rho_off = 0`` every mass term multiplies to zero and the
-mass-zero decline catches it downstream — so that guard is kept for its diagnostic string and its
-near-unreachable unbracketed-fit branch, and this note stands in place of a gate that cannot fire.
+PERTURBATION (`TRAPS: perturb-every-gate`): dropping the excess's ``-1`` fires two gates; dropping the
+variance's EB weight, reading a de-tilted law's own counts as its evidence, or giving an empty length a
+variance each fire their own. Removing the estimator's early no-density guard fires NOTHING — at
+``rho_off = 0`` every mass term multiplies to zero and the mass-zero decline catches it downstream — so
+that guard is kept for its diagnostic string and its near-unreachable unbracketed-fit branch, and this
+note stands in place of a gate that cannot fire.
 """
 
 from __future__ import annotations
@@ -301,38 +301,180 @@ def test_the_adjacent_pair_table_IS_the_reference_major_walk():
         assert got_left.size == 0 and got_boundary.size == 0
 
 
-def test_the_realized_law_is_always_present():
+def test_each_pmf_carries_its_raw_laws_variance_at_its_eb_weight_squared():
+    """``Var(pmf_l) = (n / (n + prior_ess))² · law_l² / count_l``: a length's relative variance is one over its
+    count, and the EB step shrinks the variance with the law."""
     m = _models()
-    assert m.gdna_realized_pmf is not None
-    assert m.gdna_realized_pmf.shape == m.gdna_pmf.shape
+    for counts, var, n in (
+        (m.rna_counts, m.rna_pmf_var, m.n_rna),
+        (m.gdna_counts, m.gdna_pmf_var, m.n_gdna),
+    ):
+        law = counts / counts.sum()
+        weight = n / (n + 1000.0)
+        np.testing.assert_allclose(var, weight * weight * law * law / counts, rtol=1e-12)
 
 
-def test_without_a_realized_estimate_the_two_estimands_coincide_exactly():
-    """The fallback is one law, byte-equal, so a consumer that reads the realized field on an
-    off-capture or input-starved build gets the uniform law rather than an absent one."""
-    m = _models()
-    np.testing.assert_array_equal(m.gdna_realized_pmf, m.gdna_pmf)
+def test_a_length_with_no_count_carries_no_variance():
+    counts = np.zeros(101)
+    counts[[20, 40, 60]] = (5.0, 50.0, 500.0)
+    m = _fl_models_from_histograms(
+        global_counts=counts + 1.0,
+        rna_counts=counts,
+        gdna_counts=counts,
+        max_size=100,
+        prior_ess=0.0,
+    )
+    assert np.count_nonzero(m.rna_pmf_var) == 3
+    np.testing.assert_array_equal(m.rna_pmf_var == 0.0, counts == 0.0)
 
 
-def test_a_supplied_realized_histogram_is_shrunk_like_its_sibling():
-    rng = np.random.default_rng(9)
-    realized = rng.random(101) * 50
-    m = _models(gdna_realized_counts=realized)
-    assert not np.array_equal(m.gdna_realized_pmf, m.gdna_pmf)
-    assert m.gdna_realized_pmf.min() > 0.0  # EB-shrunk toward the global anchor, like gdna_pmf
-    assert m.gdna_realized_pmf.sum() == pytest.approx(1.0)
+def test_more_evidence_carries_proportionally_less_variance():
+    rng = np.random.default_rng(3)
+    counts = rng.random(101) * 100.0
+    one = _fl_models_from_histograms(
+        global_counts=counts, rna_counts=counts, gdna_counts=counts, max_size=100, prior_ess=0.0
+    )
+    ten = _fl_models_from_histograms(
+        global_counts=counts,
+        rna_counts=10.0 * counts,
+        gdna_counts=10.0 * counts,
+        max_size=100,
+        prior_ess=0.0,
+    )
+    np.testing.assert_allclose(ten.rna_pmf_var, one.rna_pmf_var / 10.0, rtol=1e-12)
+    np.testing.assert_allclose(ten.gdna_pmf_var, one.gdna_pmf_var / 10.0, rtol=1e-12)
 
 
-def test_the_uniform_law_is_bit_identical_with_and_without_the_realized_input():
-    """The routing guarantee: computing the realized law must not perturb `gdna_pmf` by one ULP.
-    Every geometry consumer reads that field, and geometry eating the wrong estimand is the large
-    end-to-end regression this whole split exists to prevent."""
-    rng = np.random.default_rng(9)
-    a = _models()
-    b = _models(gdna_realized_counts=rng.random(101) * 50)
-    np.testing.assert_array_equal(a.gdna_pmf, b.gdna_pmf)
-    np.testing.assert_array_equal(a.rna_pmf, b.rna_pmf)
-    np.testing.assert_array_equal(a.global_pmf, b.global_pmf)
+def test_an_estimators_own_variance_is_carried_at_its_eb_weight():
+    rng = np.random.default_rng(4)
+    supplied = rng.random(101) * 1e-6
+    m = _models(rna_var=supplied, gdna_var=2.0 * supplied)
+    for var, own, n in (
+        (m.rna_pmf_var, supplied, m.n_rna),
+        (m.gdna_pmf_var, 2.0 * supplied, m.n_gdna),
+    ):
+        weight = n / (n + 1000.0)
+        np.testing.assert_allclose(var, weight * weight * own, rtol=1e-12)
+
+
+def test_de_tilting_adds_no_evidence_to_the_rna_laws_variance():
+    """The RNA law is the spliced pool divided by its sj opportunity, which rescales a length and adds no evidence:
+    its relative variance stays one over the RAW count."""
+    from rigel.calibration.fl import build_fl_models
+
+    rng = np.random.default_rng(8)
+    pools = np.zeros((N_FRAGMENT_POOLS, 101))
+    pools[POOL_RNA_SPLICED] = np.round(rng.random(101) * 200.0)
+    pools[POOL_DNA_INTERGENIC] = np.round(rng.random(101) * 50.0)
+    pools[POOL_RNA_SPLICED, :5] = 0.0
+    payload = SimpleNamespace(pool_lengths=pools, deposited_lengths=pools.sum(0), max_length=100)
+    pi = np.linspace(0.0, 1.0, 101)
+    m = build_fl_models(payload, sj_opportunity=pi, prior_ess=0.0)
+    raw = pools[POOL_RNA_SPLICED]
+    law = np.divide(raw, pi, out=np.zeros(101), where=pi > 0)
+    law /= law.sum()
+    np.testing.assert_allclose(
+        m.rna_pmf_var, np.divide(law * law, raw, out=np.zeros(101), where=raw > 0), rtol=1e-12
+    )
+
+
+def test_the_contrasts_variance_falls_as_its_evidence_grows():
+    """The two-pool contrast's per-length variance runs through its own coefficients: ten times the contained
+    counts, at the same purities and the same shapes, is a tenth of the variance."""
+    import dataclasses
+
+    from rigel.calibration.fl import _deconvolved_gdna_counts
+
+    payload, opp, regions, _rna_pmf, _uniform = _payload_fixture(boundary_excess=1.0)
+    counts, var, diag = _deconvolved_gdna_counts(payload, opp, regions)
+    assert diag.applied and counts is not None
+    assert np.all(np.isfinite(var)) and np.all(var >= 0.0) and var.sum() > 0.0
+    scaled = dataclasses.replace(
+        payload,
+        pool_lengths=np.asarray(payload.pool_lengths, dtype=np.float64) * 10.0,
+        region_contained_count=np.asarray(payload.region_contained_count, dtype=np.float64) * 10.0,
+    )
+    counts10, var10, diag10 = _deconvolved_gdna_counts(scaled, opp, regions)
+    assert diag10.applied
+    np.testing.assert_allclose(
+        counts10 / counts10.sum(), counts / counts.sum(), rtol=1e-9, atol=1e-15
+    )
+    np.testing.assert_allclose(var10, var / 10.0, rtol=1e-9, atol=1e-30)
+
+
+def _clipping_contrast_payload(scale: float = 1.0):
+    """The fixture with RNA in BOTH contained pools at different shares and with different laws, so the two-pool
+    inversion's premise (one contaminant shape) fails and it runs negative, and clips, at the intron's RNA lengths:
+    intergenic region 0 carries RNA, region 4 is the clean object the one-sided rate reads, the intron carries more and
+    longer RNA."""
+    import dataclasses
+
+    from _fl_realized_fixture import MAX_SIZE, RHO
+
+    payload, opp, regions, _rna_pmf, _uniform = _payload_fixture(boundary_excess=1.0)
+    L = np.arange(MAX_SIZE + 1, dtype=np.float64)
+    g_law = np.exp(-0.5 * ((L - 45.0) / 10.0) ** 2)
+    r_ig = np.exp(-0.5 * ((L - 55.0) / 10.0) ** 2)
+    r_in = np.exp(-0.5 * ((L - 80.0) / 10.0) ** 2)
+    g_law[0] = r_ig[0] = r_in[0] = 0.0
+    g_law, r_ig, r_in = g_law / g_law.sum(), r_ig / r_ig.sum(), r_in / r_in.sum()
+    counts = np.array(payload.region_contained_count, dtype=np.float64, copy=True) * 400.0
+    gdna_ig = float(counts[0].sum() + counts[4].sum())
+    gdna_in = float(counts[2].sum())
+    rna_ig, rna_in = 0.25 * gdna_ig, 1.0 * gdna_in
+    counts[0] += rna_ig / 2.0
+    counts[2] += rna_in / 2.0
+    pools = np.array(payload.pool_lengths, dtype=np.float64, copy=True)
+    pools[0] = g_law * gdna_ig + r_ig * rna_ig
+    pools[1] = g_law * gdna_in + r_in * rna_in
+    expected = dataclasses.replace(
+        payload, pool_lengths=pools * scale, region_contained_count=counts * scale
+    )
+    return expected, opp, regions, RHO
+
+
+def test_the_contrasts_variance_is_its_own_estimators_through_the_clip():
+    """Drawn again and again from the pools' own Poisson counts and pushed through the contrast itself, the law's
+    per-length variance is the plug-in the contrast reports: the inverse's coefficient where the inversion is open, the
+    mixture's alone where the clip holds it at zero. Charging the inverse's coefficient through the clip overstates a
+    clipped length's variance many times over."""
+    import dataclasses
+
+    from rigel.calibration.fl import _deconvolved_gdna_counts
+
+    payload, opp, regions, _rho = _clipping_contrast_payload()
+    counts, var, diag = _deconvolved_gdna_counts(payload, opp, regions)
+    assert diag.applied and diag.separation > 0.0
+    law = counts / counts.sum()
+    a0, a1 = diag.intergenic_gdna_share, diag.intronic_gdna_share
+    pools = np.asarray(payload.pool_lengths, dtype=np.float64)
+    inverse = (1.0 - a1) * pools[0] / pools[0].sum() - (1.0 - a0) * pools[1] / pools[1].sum()
+    open_ = (inverse > 0.0) & (law > 1e-3)
+    clipped = (inverse < -1e-3) & (pools[1] > 0.0)  # well inside the clip, away from the kink
+    assert clipped.sum() >= 3 and open_.sum() >= 5, (
+        "the fixture must clip somewhere and stay open elsewhere"
+    )
+
+    rng = np.random.default_rng(17)
+    draws = []
+    for _ in range(400):
+        drawn = pools.copy()
+        drawn[:2] = rng.poisson(pools[:2]).astype(np.float64)
+        c, _v, d = _deconvolved_gdna_counts(
+            dataclasses.replace(payload, pool_lengths=drawn), opp, regions
+        )
+        assert d.applied
+        draws.append(c / c.sum())
+    mc = np.var(np.array(draws), axis=0, ddof=1)
+    ratio = mc[open_] / var[open_]
+    assert np.all((ratio > 0.6) & (ratio < 1.6)), (
+        f"Monte Carlo over plug-in where open: {np.round(ratio, 2)}"
+    )
+    # through the clip only the mixture's small share is left, and the plug-in says so: both are at the law's own
+    # scale there, many orders below what the inverse's coefficient would charge
+    assert np.all(var[clipped] <= 4.0 * mc[clipped] + 1e-15) and np.all(
+        mc[clipped] <= 4.0 * var[clipped] + 1e-15
+    )
 
 
 # ── the realized estimator's own invariants, on constructed payloads ─────────────────────────────
@@ -598,7 +740,7 @@ def test_a_purity_tie_returns_the_contained_pairs_own_mixture():
 
     payload, opp, regions, L = _tie_fixture(0.0)
     with np.errstate(divide="raise", invalid="raise"):  # a tie never divides by its zero separation
-        counts, contrast = _deconvolved_gdna_counts(payload, opp, regions)
+        counts, _var, contrast = _deconvolved_gdna_counts(payload, opp, regions)
     assert contrast.intergenic_gdna_share == contrast.intronic_gdna_share == 1.0
     assert contrast.separation == 0.0
     assert counts is not None and contrast.applied
@@ -614,7 +756,7 @@ def test_the_uniform_law_is_continuous_through_a_purity_tie():
     means, seps = [], []
     for rna in (0.0005, 0.001):
         payload, opp, regions, L = _tie_fixture(rna)
-        seps.append(_deconvolved_gdna_counts(payload, opp, regions)[1].separation)
+        seps.append(_deconvolved_gdna_counts(payload, opp, regions)[2].separation)
         m = build_fl_models(payload, gdna_opportunity=opp, regions=regions)
         means.append(_mean_length(m.gdna_pmf, L))
     assert seps[0] == 0.0 < seps[1]  # the fixture straddles the tie
@@ -637,7 +779,7 @@ def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
 
     payload, opp, regions, L = _tie_fixture(0.005, 0.005)
     with np.errstate(divide="raise", invalid="raise"):
-        counts, contrast = _deconvolved_gdna_counts(payload, opp, regions)
+        counts, _var, contrast = _deconvolved_gdna_counts(payload, opp, regions)
     assert contrast.separation == 0.0 and contrast.intergenic_gdna_share < 1.0
     assert counts is not None and contrast.applied and np.isfinite(counts).all()
     pools = np.asarray(payload.pool_lengths)
@@ -878,7 +1020,7 @@ def test_the_one_sided_rate_and_the_purities_read_observable_support():
     from rigel.calibration.gdna_density import one_sided_rate
 
     payload, opportunity, regions, _L = _masked_fixture(rna_intergenic=0.005)
-    _counts, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
+    _counts, _var, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
     pooled = _normalized(_pool_sum(payload, (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)))
     support = np.array([contained_eff_length(np.array(ps, float), pooled).sum() for ps in _PIECES])
     counts = payload.region_contained_count[:8].sum(axis=1)
@@ -907,7 +1049,7 @@ def test_over_observable_bases_the_contrast_recovers_the_uniform_law():
     from rigel.calibration.fl import _deconvolved_gdna_counts
 
     payload, opportunity, regions, L = _masked_fixture(rna_intergenic=0.0)
-    counts, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
+    counts, _var, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
     assert contrast.applied
     assert contrast.intergenic_gdna_share == 1.0
     assert _mean_length(counts, L) == pytest.approx(150.0, abs=0.1)

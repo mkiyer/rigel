@@ -562,11 +562,11 @@ histograms they are built from.
 Run-level QC manifest. It is a small, human-readable index — the bulky raw
 fragment-length histograms live in the `fragment_lengths.feather` companion
 (see above), not in the JSON. `schema_version` (integer) identifies the layout;
-the current version is **4**. Top-level keys:
+the current version is **6**. Top-level keys:
 
 | Key | Contents |
 |-----|----------|
-| `schema_version` | Manifest schema version (currently `5`) |
+| `schema_version` | Manifest schema version (currently `6`) |
 | `rigel_version`, `timestamp` | Version and run time |
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
@@ -578,6 +578,7 @@ the current version is **4**. Top-level keys:
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_em_effective_length` | Summary of the loci table's column of that name: its `min`, `median`, `p95`, `max` |
 | `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna` and the five pools. The raw per-bin histograms are in `fragment_lengths.feather` |
+| `length_tables` | The EM's two fragment-length tables and the decision behind them (see below) |
 | `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` or `--mismatch-alpha 0` — which no pool holds), and three pools, each a `count_*` beside its `fraction_*` of the three together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans) and `count_gdna` (gDNA: the EM's plus the intergenic fragments, which reach no locus and are unspliced, since a spliced alignment is used only when a transcript holds its junctions), so `fraction_annotated + fraction_nascent + fraction_gdna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, so the intergenic gDNA is `count_gdna − count_gdna_em`, and `fraction_intergenic` its share; their count is `fragment_stats.intergenic` |
 
 The **`calibration`** block holds exactly the library-wide calibration
@@ -620,10 +621,32 @@ from RNA only through the neighbouring regions and the fragment counts, and some
 it as nascent RNA, so the gDNA fraction is underestimated. Stranded capture libraries, and unstranded libraries
 without capture, do not share this.
 
-The RNA and gDNA fragment-length models used by scoring/calibration are
+The RNA and gDNA fragment-length models calibration reads are
 reported under the top-level **`fragment_length`** key (as
 `fragment_length.rna` and `fragment_length.gdna`), alongside the global model
-and the five pools. The `calibration` block above is the complete set of
+and the five pools. The EM scores both origins with two tables built from them:
+RNA's law for both, unless the two laws differ by more than hybrid capture can
+make, when gDNA keeps its own law brought into RNA's captured frame. The
+**`length_tables`** block says which:
+
+```jsonc
+{
+  "length_tables": {
+    "weight":               <float>,  // 0 = one shared law, 1 = gDNA's own law; continuous between
+    "kappa":                <float>,  // RNA's captured fraction, from calibration's capture efficiencies; 0 off capture
+    "captured":             <float>,  // the fraction of gDNA's law the capture mixture size-biases, in [0, kappa]
+    "contrast":             <float>,  // the two laws' Hellinger distance less their sampling noise
+    "bound":                <float>,  // the most hybrid capture at kappa can make; weight = clip(contrast/bound - 1, 0, 1)
+    "noise":                <float>,  // the squared distance sampling noise alone adds
+    "rna_table_mean":       <float>,  // the RNA table's mean, bp
+    "gdna_table_mean":      <float>,  // the gDNA table's mean, bp
+    "gdna_uncaptured_mean": <float>   // gDNA's off-target law's mean, bp
+  }
+}
+```
+
+Off capture `bound` is 0, and any difference the noise does not explain keeps each
+origin's own law. The `calibration` block above is the complete set of
 calibration keys; a manifest from an older release may carry keys this manual
 does not list, which the current version no longer writes.
 

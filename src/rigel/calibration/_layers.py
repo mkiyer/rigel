@@ -56,6 +56,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # else.
         # `gdna_density` is the gDNA background RATE — a count divided by an opportunity, which is this
         # layer's job: the contamination-robust one-sided rate, reported beside the naive pooled one.
+        # `shared_length_law` decides the EM's two length tables from the two laws `fl` measures.
         (
             "effective_length",
             "capture_eff_length",
@@ -63,6 +64,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "gdna_opportunity",
             "gdna_density",
             "fl",
+            "shared_length_law",
         ),
     ),
     (

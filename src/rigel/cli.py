@@ -207,8 +207,9 @@ def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noq
 
 #: summary.json schema version, which a consumer should read before parsing. The fragment-length
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
-#: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name.
-SUMMARY_SCHEMA_VERSION = 5
+#: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name;
+#: ``length_tables`` is the EM's two length tables and the decision behind them.
+SUMMARY_SCHEMA_VERSION = 6
 
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
@@ -236,6 +237,31 @@ _POOL_REPORT_NAMES = (
     "pool_gdna_intergenic_exon",
     "pool_rna_spliced",
 )
+
+
+def _length_tables_summary(tables) -> dict | None:
+    """The EM's two length tables and the decision behind them (`calibration.shared_length_law`): ``weight`` 0 is one
+    shared law for both origins, 1 gDNA's own law brought into RNA's captured frame, continuous between. ``kappa`` is
+    RNA's captured fraction, ``captured`` the capture mixture's fraction, ``contrast`` and ``bound`` the Hellinger
+    distances the weight compares, ``noise`` the squared distance sampling noise alone adds; the three means are the
+    two tables' and gDNA's uncaptured law's, in bp."""
+    if tables is None:
+        return None
+    import numpy as np
+
+    d = tables.decision
+    L = np.arange(tables.rna.size, dtype=np.float64)
+    return {
+        "weight": round(float(d.weight), SUMMARY_DECIMALS),
+        "kappa": round(float(d.kappa), SUMMARY_DECIMALS),
+        "captured": round(float(d.captured), SUMMARY_DECIMALS),
+        "contrast": round(float(d.contrast), SUMMARY_DECIMALS),
+        "bound": round(float(d.bound), SUMMARY_DECIMALS),
+        "noise": round(float(d.noise), SUMMARY_DECIMALS),
+        "rna_table_mean": round(float(tables.rna @ L), 2),
+        "gdna_table_mean": round(float(tables.gdna @ L), 2),
+        "gdna_uncaptured_mean": round(float(tables.anchor @ L), 2),
+    }
 
 
 def _fragment_length_report(fl_models):
@@ -676,6 +702,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "calibration": cal_dict,
         "gdna_em_effective_length": _df_series_summary(loci_df, "gdna_em_effective_length"),
         "fragment_length": fl_summary,
+        "length_tables": _length_tables_summary(result.length_tables),
         "quantification": {
             # the annotated transcripts, single-exon included; ``n_nascent`` counts the synthetic spans
             "n_transcripts": int(is_synthetic.size) - n_nascent,

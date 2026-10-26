@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from .calibration import CalibrationResult
     from .calibration.fl import FLModels
     from .calibration.region_arrays import RegionArrays
+    from .calibration.shared_length_law import LengthTables
     from .scored_fragments import ScoredFragments
 
 logger = logging.getLogger(__name__)
@@ -86,9 +87,11 @@ class PipelineResult:
     estimator: AbundanceEstimator
     pipeline_config: "PipelineConfig" = None
     calibration: "CalibrationResult" = None
-    # Library-wide FL distributions actually built + used for scoring/calibration
-    # (global / RNA / gDNA); the empirical views feed the summary QC report.
+    # Library-wide FL distributions actually built + used for calibration (global / RNA / gDNA); the
+    # empirical views feed the summary QC report.
     fl_models: "FLModels" = None
+    # The EM's two length tables and the decision behind them (`calibration.shared_length_law`).
+    length_tables: "LengthTables" = None
     # Per-region genome-wide gDNA track (ref/start/end + gDNA mass/density/frac),
     # built from the calibration result; feeds the report's genome track + bedGraph.
     calibration_track: "object" = None
@@ -515,6 +518,25 @@ def library_fl_models(payload, index: TranscriptIndex) -> "FLModels":
     )
 
 
+def length_tables(
+    fl_models: "FLModels", calibration: "CalibrationResult", region_arrays: "RegionArrays"
+) -> "LengthTables":
+    """The EM's two length tables, exactly as production decides them: the two measured laws and their sampling
+    variances, against RNA's captured fraction under calibration's capture efficiencies
+    (`calibration.shared_length_law`, `calibration.capture_eff_length.rna_captured_fraction`). The scorer and RNA's
+    normaliser read the result, and so must any instrument that stands in for either."""
+    from .calibration.capture_eff_length import rna_captured_fraction
+    from .calibration.shared_length_law import shared_length_law
+
+    return shared_length_law(
+        fl_models.rna_pmf,
+        fl_models.gdna_pmf,
+        fl_models.rna_pmf_var,
+        fl_models.gdna_pmf_var,
+        rna_captured_fraction(calibration, region_arrays),
+    )
+
+
 def _drain_side_buffer(
     payload, index: TranscriptIndex, strand_models, *, seed: int, _lift: dict | None = None
 ):
@@ -645,18 +667,18 @@ def _setup_geometry_and_estimator(
     index: TranscriptIndex,
     rna_fl,
     em_config: EMConfig,
-    calibration: "CalibrationResult | None" = None,
-    region_arrays: "RegionArrays | None" = None,
+    calibration: "CalibrationResult",
+    region_arrays: "RegionArrays",
+    tables: "LengthTables",
 ) -> AbundanceEstimator:
     """Compute the transcripts' effective lengths and create the AbundanceEstimator.
 
-    When ``calibration`` + ``region_arrays`` are given, the EM effective lengths
-    (``effective_lengths_em``) are capture-contracted by the rule the gDNA component's length takes too —
-    each transcript's conserved share of every region, boundary and junction its fragments deposit on, at
-    that object's capture efficiency — so every component competes on one contracted footing under
-    capture. The output ``effective_lengths`` (used for TPM) stay the full FL-marginal length. No
-    reference (capture off, or no gDNA) ⇒ ``effective_lengths_em`` == ``effective_lengths`` (bit-identical).
-    See ``calibration/capture_eff_length.py``.
+    The EM effective lengths (``effective_lengths_em``) are capture-contracted by the rule the gDNA component's
+    length takes too — each transcript's conserved share of every region, boundary and junction its fragments
+    deposit on, at that object's capture efficiency carried to the EM's two length tables — so every component
+    competes on one contracted footing under capture. The output ``effective_lengths`` (used for TPM) stay the full
+    FL-marginal length. No reference (capture off, or no gDNA) ⇒ ``effective_lengths_em`` ==
+    ``effective_lengths`` (bit-identical). See ``calibration/capture_eff_length.py``.
     """
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
     if rna_fl.n_observations <= 0:
@@ -669,7 +691,7 @@ def _setup_geometry_and_estimator(
     from .calibration.capture_eff_length import transcript_capture_eff_lengths
 
     effective_lengths_em = transcript_capture_eff_lengths(
-        calibration, region_arrays, index, effective_lengths, rna_fl.pmf
+        calibration, region_arrays, index, effective_lengths, tables
     )
 
     geometry = TranscriptGeometry(
@@ -957,7 +979,7 @@ def quant_from_buffer(
     buffer: FragmentBuffer,
     index: TranscriptIndex,
     strand_models: StrandModels,
-    fl_models: "FLModels",
+    tables: "LengthTables",
     region_arrays: "RegionArrays",
     stats: PipelineStats,
     calibration: "CalibrationResult",
@@ -970,7 +992,7 @@ def quant_from_buffer(
 ) -> AbundanceEstimator:
     """Quantify buffered fragments: calibration prior → per-locus EM.
 
-    Scores the buffer (RNA/gDNA FL models built from the calibrated pmfs),
+    Scores the buffer with the EM's two length tables (:func:`length_tables`),
     builds connected-component loci, turns the per-region ``CalibrationResult``
     into each locus's gDNA count and gDNA length (``assemble_priors``), partitions
     the global CSR, and runs the per-locus EM, whose pseudocounts read that count
@@ -984,17 +1006,14 @@ def quant_from_buffer(
     em_config = em_config or EMConfig()
     scoring_cfg = scoring or FragmentScoringConfig()
 
-    # Scorer FL models from the calibrated pmfs.
-    # The SCORER eats the REALIZED (library-census) law, not the uniform-frame one. The per-fragment
-    # length term conditions on "this fragment is IN the library", so capture's selection belongs in
-    # its pmf; the opportunity/prior mathematics assumes uniform placement and keeps `gdna_pmf`.
-    # Routing the realized law into geometry instead costs a large number of misassigned transcripts.
-    # Off capture the two laws are the same array.
-    rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
-    gdna_fl = FragmentLengthModel.from_pmf(fl_models.gdna_realized_pmf, fl_models.max_size)
+    # The scorer's two tables: one shared law unless the data show a difference capture cannot make. The
+    # transcripts' geometry and RNA's normaliser read the same tables; calibration and the priors keep `gdna_pmf`.
+    max_size = int(tables.rna.size) - 1
+    rna_fl = FragmentLengthModel.from_pmf(tables.rna, max_size)
+    gdna_fl = FragmentLengthModel.from_pmf(tables.gdna, max_size)
 
     estimator = _setup_geometry_and_estimator(
-        index, rna_fl, em_config, calibration=calibration, region_arrays=region_arrays
+        index, rna_fl, em_config, calibration, region_arrays, tables
     )
 
     em_data = _score_fragments(
@@ -1152,6 +1171,22 @@ def run_pipeline(
         float(calibration.count_rna_sj.sum()),
     )
 
+    # -- The EM's two length tables: one shared law unless the data show a difference capture cannot make --
+    tables = length_tables(fl_models, calibration, region_arrays)
+    decision = tables.decision
+    logger.info(
+        "[FL] length tables: kappa=%.4f captured=%.4f contrast=%.4f bound=%.4f noise=%.3g weight=%.3f "
+        "rna_mean=%.1f gdna_table_mean=%.1f",
+        decision.kappa,
+        decision.captured,
+        decision.contrast,
+        decision.bound,
+        decision.noise,
+        decision.weight,
+        float(np.dot(_bins, tables.rna)),
+        float(np.dot(_bins, tables.gdna)),
+    )
+
     # -- Quantification: calibration prior → per-locus EM --
     # Annotation table for the optional annotated-BAM pass (opt-in).
     annotations = None
@@ -1170,7 +1205,7 @@ def run_pipeline(
             buffer,
             index,
             strand_models,
-            fl_models,
+            tables,
             region_arrays,
             stats,
             calibration,
@@ -1196,6 +1231,7 @@ def run_pipeline(
         pipeline_config=config,
         calibration=calibration,
         fl_models=fl_models,
+        length_tables=tables,
         calibration_track=calibration_track,
     )
     if before_annotated_bam is not None:

@@ -22,6 +22,12 @@ shares total the fl-marginal length exactly, however many cuts one fragment cros
 scales the fl-marginal ``fl_eff_lengths`` the pipeline built. A piece prices at its region's efficiency
 and a contiguous cut at its boundary's: there the transcript's fragments are gDNA's.
 
+THE EFFICIENCIES ARE gDNA's, CARRIED TO THE EM'S TABLES. Each ``c`` is gDNA's yield at the object, read on
+gDNA's uncaptured law ``g``; the EM scores both origins with its own two tables
+(:mod:`rigel.calibration.shared_length_law`), so each object's efficiency enters as ``c · share(g) /
+share(T_G)``, ``T_G`` the scorer's gDNA table. When the two tables are one law the per-fragment capture weight
+cancels from the E-step, and RNA's length is ``Σ_o c_o share_o(g)``: the null model, exactly.
+
 A JUNCTION IS PRICED BY CONSERVATION OF BASES. gDNA never deposits on a junction, and capture is local, so
 a junction's efficiency comes from the objects within a fragment of it. In genomic order, a fragment across
 a junction holds bases of the exon below it and of the exon above it; a gDNA fragment across the junction's
@@ -65,13 +71,20 @@ import pandas as pd
 from ..types import IntervalType
 from .effective_length import conserved_cut_shares, contained_eff_length
 from .region_arrays import overlapping_region_runs, region_right_boundary
+from .signature import RegionType, coarse_type_array
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
     from .region_arrays import RegionArrays
     from .result import CalibrationResult
+    from .shared_length_law import LengthTables
 
-__all__ = ["TranscriptObjects", "transcript_capture_eff_lengths", "transcript_objects"]
+__all__ = [
+    "TranscriptObjects",
+    "rna_captured_fraction",
+    "transcript_capture_eff_lengths",
+    "transcript_objects",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,16 +106,27 @@ class TranscriptObjects:
     n_transcripts: int
 
 
-def transcript_objects(
-    index: "TranscriptIndex", region_arrays: "RegionArrays", rna_fl_pmf: np.ndarray
-) -> TranscriptObjects:
-    """Every transcript's :class:`TranscriptObjects` on the RNA pmf: the regions its exons (or an unspliced
-    entity's span) cover, and between consecutive ones a cut — a junction where they belong to different
-    exons with a region between them. A zero-length fragment places nowhere — the accumulator deposits
-    none — so the pmf's mass at ``w = 0`` is dropped, and the shares partition the fl-marginal length the
-    pipeline builds, which excludes it too."""
-    pmf = np.asarray(rna_fl_pmf, dtype=np.float64).copy()
-    pmf[0] = 0.0
+@dataclass(frozen=True, slots=True)
+class _TranscriptPieces:
+    """The pmf-free half of :class:`TranscriptObjects`: every transcript's pieces, each piece's length, and at each
+    cut the bases of the transcript left of it (``through``) and right of it (``rest``)."""
+
+    t: np.ndarray
+    piece: np.ndarray
+    length: np.ndarray
+    cut_row: np.ndarray
+    through: np.ndarray
+    rest: np.ndarray
+    is_junction: np.ndarray
+    n_transcripts: int
+
+
+def _transcript_pieces(
+    index: "TranscriptIndex", region_arrays: "RegionArrays"
+) -> _TranscriptPieces:
+    """The regions every transcript's exons (or an unspliced entity's span) cover, in transcript then genomic order,
+    and between consecutive ones a cut — a junction where they belong to different exons with a region between
+    them. Annotation only: no length law enters."""
     starts = np.asarray(region_arrays.start, dtype=np.int64)
     ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
@@ -156,18 +180,45 @@ def transcript_objects(
         csum[first] - length[first], np.diff(np.r_[np.flatnonzero(first), tk.size])
     )
     cut = np.flatnonzero(np.r_[tk[1:] == tk[:-1], False]) if tk.size else np.zeros(0, np.int64)
-    left, right = conserved_cut_shares(
-        pmf, length[cut], length[cut + 1], through[cut], total[tk[cut]] - through[cut]
-    )
-    return TranscriptObjects(
+    return _TranscriptPieces(
         t=tk,
         piece=piece,
-        contained=contained_eff_length(length, pmf),
+        length=length,
         cut_row=cut,
-        cut_share=left + right,
+        through=through[cut],
+        rest=total[tk[cut]] - through[cut],
         is_junction=(k[cut] != k[cut + 1]) & (piece[cut + 1] > piece[cut] + 1),
         n_transcripts=n_t,
     )
+
+
+def _objects(pieces: _TranscriptPieces, pmf: np.ndarray) -> TranscriptObjects:
+    """The pieces' contained shares and the cuts' conserved shares on one pmf. A zero-length fragment places
+    nowhere — the accumulator deposits none — so the pmf's mass at ``w = 0`` is dropped, and the shares partition
+    the fl-marginal length the pipeline builds, which excludes it too."""
+    pmf = np.asarray(pmf, dtype=np.float64).copy()
+    pmf[0] = 0.0
+    cut = pieces.cut_row
+    left, right = conserved_cut_shares(
+        pmf, pieces.length[cut], pieces.length[cut + 1], pieces.through, pieces.rest
+    )
+    return TranscriptObjects(
+        t=pieces.t,
+        piece=pieces.piece,
+        contained=contained_eff_length(pieces.length, pmf),
+        cut_row=cut,
+        cut_share=left + right,
+        is_junction=pieces.is_junction,
+        n_transcripts=pieces.n_transcripts,
+    )
+
+
+def transcript_objects(
+    index: "TranscriptIndex", region_arrays: "RegionArrays", rna_fl_pmf: np.ndarray
+) -> TranscriptObjects:
+    """Every transcript's :class:`TranscriptObjects` on one pmf: its pieces, its cuts, and its conserved share of
+    each."""
+    return _objects(_transcript_pieces(index, region_arrays), rna_fl_pmf)
 
 
 def _cut_efficiencies(
@@ -219,15 +270,20 @@ def transcript_capture_eff_lengths(
     region_arrays: "RegionArrays",
     index: "TranscriptIndex",
     fl_eff_lengths: np.ndarray,
-    rna_fl_pmf: np.ndarray,
+    tables: "LengthTables",
 ) -> np.ndarray:
-    """``eff_em_t = fl_t · Σ_o share_o c_o / Σ_o share_o`` over the transcript's pieces and cuts (gate:
+    """``eff_em_t = fl_t · Σ_o share_o(T_R) ĉ_o / Σ_o share_o(T_R)`` over the transcript's pieces and cuts (gate:
     ``tests/calibration/test_capture_eff_length.py``).
 
-    The efficiencies are the result's: a piece's region's, a contiguous cut's boundary's, a junction's from
-    the objects beside it. With no landscape every efficiency is 1 and ``fl`` is returned verbatim; a
-    transcript with no share on any object (shorter than every fragment) keeps ``fl``. The efficiencies are
-    relative yields against the bulk, so ``eff_em`` exceeds ``fl`` where capture enriched the transcript.
+    The efficiencies are the result's: a piece's region's, a contiguous cut's boundary's, a junction's from the
+    objects beside it. They are gDNA's yields, read on gDNA's uncaptured law ``g`` (``tables.anchor``), and RNA's
+    normaliser carries each to the EM's own tables: ``ĉ_o = c_o · share_o(g) / share_o(T_G)``, the scorer's gDNA
+    table ``T_G`` (``tables.gdna``). Where the two tables are one law the per-fragment capture weight cancels and
+    this is ``Σ_o c_o share_o(g)``, RNA's capture-weighted length on the uncaptured law, the null model exactly; where
+    ``T_G`` is ``g`` itself it is the efficiencies as read. An object ``T_G`` cannot reach keeps ``c_o``. With no
+    landscape ``fl`` is returned verbatim; a transcript with no share on any object (shorter than every fragment)
+    keeps ``fl``. The efficiencies are relative yields against the bulk, so ``eff_em`` exceeds ``fl`` where capture
+    enriched the transcript.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     if calibration.gdna_bulk_density is None:
@@ -235,7 +291,9 @@ def transcript_capture_eff_lengths(
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     gdna_contained = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
-    obj = transcript_objects(index, region_arrays, rna_fl_pmf)
+    pieces = _transcript_pieces(index, region_arrays)
+    obj = _objects(pieces, tables.rna)
+    c_piece = c_region[obj.piece]
     c_cut = _cut_efficiencies(
         obj,
         region_arrays,
@@ -244,12 +302,42 @@ def transcript_capture_eff_lengths(
         gdna_contained,
         calibration.gdna_capture_saturation,
     )
+    if not np.array_equal(tables.gdna, tables.anchor):
+        on_anchor = _objects(pieces, tables.anchor)
+        on_table = obj if np.array_equal(tables.gdna, tables.rna) else _objects(pieces, tables.gdna)
+        c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)
+        c_cut = _carried(c_cut, on_anchor.cut_share, on_table.cut_share)
     num = np.zeros(fl.shape[0])
     den = np.zeros(fl.shape[0])
-    np.add.at(num, obj.t, obj.contained * c_region[obj.piece])
+    np.add.at(num, obj.t, obj.contained * c_piece)
     np.add.at(den, obj.t, obj.contained)
     cut_t = obj.t[obj.cut_row]
     np.add.at(num, cut_t, obj.cut_share * c_cut)
     np.add.at(den, cut_t, obj.cut_share)
     factor = np.divide(num, den, out=np.ones_like(num), where=den > 0.0)
     return fl * factor
+
+
+def _carried(c: np.ndarray, share_anchor: np.ndarray, share_table: np.ndarray) -> np.ndarray:
+    """``c · share(g) / share(T_G)`` per object; ``c`` where ``T_G`` has no share there."""
+    reach = share_table > 0.0
+    return np.where(reach, c * share_anchor / np.where(reach, share_table, 1.0), c)
+
+
+def rna_captured_fraction(calibration: "CalibrationResult", region_arrays: "RegionArrays") -> float:
+    """``kappa``: the fraction of RNA's fragments that capture added, ``Σ_exons n_RNA (1 − 1/c)₊ / Σ_exons n_RNA``.
+
+    ``c`` is each exon region's gDNA capture efficiency against the bulk: of an object's fragments at yield ``c`` the
+    uncaptured background accounts for ``1/c`` and capture for the rest. RNA's count weights the exons, because the
+    question is what capture did to RNA's census. 0 with no landscape, or with no RNA at an exon.
+    """
+    if calibration.gdna_bulk_density is None:
+        return 0.0
+    c = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
+    n = np.clip(np.asarray(calibration.count_rna_region, dtype=np.float64), 0.0, None)
+    exon = coarse_type_array(region_arrays.signature) == int(RegionType.EXON)
+    n = np.where(exon, n, 0.0)
+    if n.sum() <= 0.0:
+        return 0.0
+    gain = np.where(c > 1.0, 1.0 - 1.0 / np.where(c > 1.0, c, 1.0), 0.0)
+    return float((n * gain).sum() / n.sum())

@@ -562,8 +562,8 @@ def install_ruler_arm(arm: str, factor: np.ndarray):
     orig_ruler = CEL.transcript_capture_eff_lengths
     fired = {"n": 0, "ruler": 0, "max_abs_delta": 0.0, "truth_delta": 0.0}
 
-    def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths, rna_fl_pmf):
-        shipped = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, rna_fl_pmf)
+    def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths, tables):
+        shipped = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, tables)
         base = np.asarray(shipped, dtype=np.float64)
         truth = np.asarray(fl_eff_lengths, dtype=np.float64) * factor
         out = truth if substitute else shipped

@@ -51,16 +51,10 @@ RNA excess — is summed over those pieces. A region masked whole carries no exp
 its whole length it would be the cleanest object of all, a zero count against a large exposure, and the rate it
 pulls down collapses the purities and hands the contrast's noise to the law.
 
-TWO gDNA ESTIMANDS, and routing them apart is the point:
-
-* ``gdna_pmf`` is the UNIFORM-FRAME law, what a gDNA fragment looks like before capture selects it.
-  This is the one the opportunity and prior mathematics assumes, and the only one geometry may read.
-* ``gdna_realized_pmf`` is the LIBRARY-CENSUS law, what a SEQUENCED gDNA fragment looks like,
-  capture selection included. This is the one the EM's per-fragment scorer conditions on.
-
-Off capture the two coincide exactly, and the realized field is never ``None``, so the scorer reads
-it unconditionally. Feeding the realized law to geometry is a large regression; one name over the
-two quantities is how that happens.
+``gdna_pmf`` is the UNIFORM-FRAME law, what a gDNA fragment looks like before capture selects it: the one the
+opportunity and prior mathematics assumes. The EM's two length tables are not built here. They are decided after
+calibration, from this law, ``rna_pmf`` and their sampling variances (:mod:`rigel.calibration.shared_length_law`),
+because whether the two origins' laws differ by more than capture can make needs calibration's capture efficiencies.
 
 The pool axis itself lives in :mod:`rigel.scan_payload`, with the schema, because it is the
 accumulator's own enum and a private copy here is how three files come to disagree about which row
@@ -172,6 +166,11 @@ class FLModels:
     :func:`build_fl_models` builds it: the two-pool contrast when the region inputs are given, else the
     de-tilted four-pool sum, or the contained pair with no opportunity at all. ``rna_counts`` is the
     annotated-sj histogram (:func:`rna_fl_mass`).
+
+    ``rna_pmf_var`` and ``gdna_pmf_var`` are each pmf's per-length sampling variance: its raw law's plug-in
+    variance, scaled by the square of the empirical-Bayes weight ``n / (n + prior_ess)`` its counts carry
+    against the anchor, and 0 at a length the raw law has no count at. The EM's two length tables read
+    them (:mod:`rigel.calibration.shared_length_law`) to tell a difference from sampling noise.
     """
 
     global_pmf: np.ndarray  # unconditional anchor (no prior)
@@ -189,13 +188,8 @@ class FLModels:
     #: carried separately so the report can show each pool on its own, which is what makes the
     #: off-target / on-target length comparison an output rather than an assumption.
     pool_counts: np.ndarray = None
-    #: The second estimand — the LIBRARY-CENSUS law: what a sequenced gDNA fragment looks like,
-    #: capture selection included. ``gdna_pmf`` above is the UNIFORM-FRAME law the opportunity and
-    #: prior mathematics assumes; this one is what the EM's per-fragment scorer conditions on. Off
-    #: capture the two coincide and this field equals ``gdna_pmf`` exactly; it is never ``None``, so
-    #: the scorer reads it unconditionally. Feeding this law to GEOMETRY is a large regression, and
-    #: one name over the two quantities is how that happens.
-    gdna_realized_pmf: np.ndarray = None
+    rna_pmf_var: np.ndarray = None
+    gdna_pmf_var: np.ndarray = None
 
     def _empirical(self, counts: np.ndarray) -> "FragmentLengthModel":
         """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``.
@@ -340,13 +334,16 @@ def _deconvolved_gdna_counts(
     payload: "AccumulatorPayload",
     gdna_opportunity: "GdnaOpportunity",
     regions: "RegionArrays",
-) -> "tuple[np.ndarray | None, GdnaContrast]":
+) -> "tuple[np.ndarray | None, np.ndarray | None, GdnaContrast]":
     """The two-pool contrast: the gDNA length histogram with the contaminant divided out.
 
-    Returns ``(counts_or_None, diagnostics)``. ``None`` means DECLINED and the caller must fall back
-    to the four-pool sum; declining is a real answer here, not a failure, and every decline is named
-    in the returned :class:`GdnaContrast`, so a run that corrected nothing cannot be mistaken for
-    one that corrected everything.
+    Returns ``(counts_or_None, variance_or_None, diagnostics)``. ``None`` means DECLINED and the caller
+    must fall back to the four-pool sum; declining is a real answer here, not a failure, and every
+    decline is named in the returned :class:`GdnaContrast`, so a run that corrected nothing cannot be
+    mistaken for one that corrected everything. ``variance`` is the normalised law's per-length plug-in
+    variance through the contrast's own coefficients: each de-tilted pool's ``f_p² / c_p`` (de-tilting
+    rescales a length, it adds no evidence; a length with no count carries none), the inversion and the
+    mixture combined coefficient by coefficient, so their covariance is in it.
 
     The declines, each derived rather than chosen:
 
@@ -397,8 +394,10 @@ def _deconvolved_gdna_counts(
     support = observable_contained_eff_length(regions, _pool_sum(payload, _GDNA_CONTAINED_POOLS))
     fit = one_sided_rate(counts[is_ig | is_in], support[is_ig | is_in])
     if not fit.informative:
-        return None, GdnaContrast(
-            False, "no gDNA density", fit.rate, fit.rate_over_pooled, 0.0, 0.0, 0.0
+        return (
+            None,
+            None,
+            GdnaContrast(False, "no gDNA density", fit.rate, fit.rate_over_pooled, 0.0, 0.0, 0.0),
         )
 
     weights, totals = [], []
@@ -409,8 +408,10 @@ def _deconvolved_gdna_counts(
         totals.append(n_p)
     a0, a1 = weights
     if totals[0] <= 0.0 or totals[1] <= 0.0:
-        return None, GdnaContrast(
-            False, "an empty pool", fit.rate, fit.rate_over_pooled, a0, a1, 0.0
+        return (
+            None,
+            None,
+            GdnaContrast(False, "an empty pool", fit.rate, fit.rate_over_pooled, a0, a1, 0.0),
         )
 
     sep = a0 - a1
@@ -431,25 +432,42 @@ def _deconvolved_gdna_counts(
         np.divide(opp, total, out=prob, where=total > 0.0)
         f.append(_normalized(detilt_pool(raw[pool], prob)))
     mixture = _normalized(totals[0] * f[0] + totals[1] * f[1])
+    # The law's per-length coefficients on the two pools, for its variance: the estimator differentiated as it is,
+    # the mixture's weight everywhere and the inverse's only where the clip leaves it open, through the renormalisation.
+    w0, w1 = totals[0] / (totals[0] + totals[1]), totals[1] / (totals[0] + totals[1])
+    c0, c1 = np.full(f[0].size, w0), np.full(f[0].size, w1)
     if sep == 0.0:
         # the fade's own limit: at zero separation the resolution weight is zero
         g = mixture
     else:
-        g = ((1.0 - a1) * f[0] - (1.0 - a0) * f[1]) / sep
+        inverse = ((1.0 - a1) * f[0] - (1.0 - a0) * f[1]) / sep
         # The negative excursions are sampling noise on a quantity that is a density; clipping is the
         # cheapest projection back onto the cone, and measures no worse than a least-squares one.
-        g = np.clip(g, 0.0, None)
+        g = np.clip(inverse, 0.0, None)
         s = g.sum()
+        if s > 0.0:
+            open_ = (inverse > 0.0) * (lam_sep / (s * sep))
+            c0 = (1.0 - lam_sep) * w0 + open_ * (1.0 - a1)
+            c1 = (1.0 - lam_sep) * w1 - open_ * (1.0 - a0)
         g = mixture + lam_sep * (_normalized(g) - mixture) if s > 0.0 else mixture
     g = np.clip(g, 0.0, None)
     if not g.sum() > 0.0:
-        return None, GdnaContrast(
-            False, "empty after the contrast", fit.rate, fit.rate_over_pooled, a0, a1, sep
+        return (
+            None,
+            None,
+            GdnaContrast(
+                False, "empty after the contrast", fit.rate, fit.rate_over_pooled, a0, a1, sep
+            ),
         )
+    variance = c0 * c0 * _plugin_variance(
+        f[0], raw[_GDNA_CONTAINED_POOLS[0]]
+    ) + c1 * c1 * _plugin_variance(f[1], raw[_GDNA_CONTAINED_POOLS[1]])
     # Rescaled to the pool mass the four-pool path would have carried, because the EB shrinkage reads
     # the TOTAL as "how much evidence stands behind this shape".
-    return _normalized(g) * float(raw[list(_GDNA_POOLS)].sum()), GdnaContrast(
-        True, "", fit.rate, fit.rate_over_pooled, a0, a1, sep
+    return (
+        _normalized(g) * float(raw[list(_GDNA_POOLS)].sum()),
+        variance,
+        GdnaContrast(True, "", fit.rate, fit.rate_over_pooled, a0, a1, sep),
     )
 
 
@@ -702,6 +720,16 @@ def _normalized(v: np.ndarray) -> np.ndarray:
     return v / s if s > 0.0 else np.full(v.size, 1.0 / v.size, dtype=np.float64)
 
 
+def _plugin_variance(law: np.ndarray, raw: np.ndarray) -> np.ndarray:
+    """A normalised law's per-length plug-in variance ``law² / raw``: a length's relative variance is one over the raw
+    count behind it, which de-tilting rescales and does not add to. A length with no raw count carries none."""
+    law = np.asarray(law, dtype=np.float64)
+    n = min(law.size, np.asarray(raw).size)
+    c = np.zeros(law.size)
+    c[:n] = np.asarray(raw, dtype=np.float64)[:n]
+    return np.divide(law * law, c, out=np.zeros(law.size), where=c > 0.0)
+
+
 def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):
     """Smooth EB pmf: ``(counts + prior_ess·global_pmf) / (total + prior_ess)``.
 
@@ -762,37 +790,40 @@ def build_fl_models(
     For the EB kernel over three free histograms — the shape a unit test needs and production never
     has — see :func:`_fl_models_from_histograms`.
     """
-    rna_counts = rna_fl_mass(payload)
+    rna_raw = rna_fl_mass(payload)
+    rna_counts = rna_raw
     # One de-tilt implementation, shared: it preserves the pool TOTAL (the EB shrinkage reads that as
     # "how much evidence stands behind this shape") and drops bins the opportunity says are impossible.
     if sj_opportunity is not None:
         rna_counts = detilt_pool(rna_counts, sj_opportunity)
 
-    realized_counts = None
     if gdna_opportunity is None:
         gdna_counts = gdna_contained_fl_mass(payload)
+        gdna_var = _plugin_variance(_normalized(gdna_counts), gdna_counts)
     else:
-        gdna_counts = detilt_pool(gdna_fl_mass(payload), gdna_opportunity.combined_probability())
+        gdna_raw = gdna_fl_mass(payload)
+        gdna_counts = detilt_pool(gdna_raw, gdna_opportunity.combined_probability())
+        gdna_var = _plugin_variance(_normalized(gdna_counts), gdna_raw)
         if regions is not None:
-            deconvolved, _contrast = _deconvolved_gdna_counts(payload, gdna_opportunity, regions)
+            deconvolved, deconvolved_var, _contrast = _deconvolved_gdna_counts(
+                payload, gdna_opportunity, regions
+            )
             if deconvolved is not None:
-                gdna_counts = deconvolved
-            # the SECOND estimand: the library-census law for the scorer. It reads the uniform-frame
-            # result, the same banks and the RNA law — the EB pmf FLModels carries, built exactly as the
-            # kernel below builds it, so the tool reads one RNA law; on decline the two estimands
-            # coincide, which is the honest off-capture answer rather than a degraded one.
+                gdna_counts, gdna_var = deconvolved, deconvolved_var
+            # The coupling: when the contained stratum is starved the uniform law borrows the boundary
+            # stratum's, read off the same banks and the RNA law (the EB pmf the kernel below builds). Its
+            # variance stays the contrast's. The census the estimator also returns is read by nothing since the
+            # EM's tables became the shared length law; it goes with the coupling.
             max_size = int(payload.max_length)
             global_pmf = _normalized(_aligned(payload.deposited_lengths, max_size))
             rna_pmf, _ = _smooth_eb(_aligned(rna_counts, max_size), global_pmf, prior_ess)
-            realized_counts, coupled_uniform, _realized = _realized_gdna_counts(
+            _census, coupled_uniform, _realized = _realized_gdna_counts(
                 payload,
                 gdna_opportunity,
                 regions,
                 rna_pmf,
                 gdna_counts,
             )
-            # the coupling can move the UNIFORM law too, and that is the point: when the contained
-            # stratum is starved the chemistry law is not estimable and must borrow the one that is.
             if coupled_uniform is not None:
                 gdna_counts = coupled_uniform
 
@@ -803,7 +834,8 @@ def build_fl_models(
         max_size=int(payload.max_length),
         prior_ess=prior_ess,
         pool_counts=payload.pool_lengths,
-        gdna_realized_counts=realized_counts,
+        rna_var=_plugin_variance(_normalized(rna_counts), rna_raw),
+        gdna_var=gdna_var,
     )
 
 
@@ -815,13 +847,16 @@ def _fl_models_from_histograms(
     max_size: int,
     prior_ess: float = CONSTANTS.fragment_length.pool_prior_ess,
     pool_counts: np.ndarray | None = None,
-    gdna_realized_counts: np.ndarray | None = None,
+    rna_var: np.ndarray | None = None,
+    gdna_var: np.ndarray | None = None,
 ) -> FLModels:
-    """The smooth-EB kernel: three histograms in, three pmfs out.
+    """The smooth-EB kernel: three histograms in, three pmfs out, with each component pmf's sampling variance.
 
     Not a production entry point. Production has exactly one source for all three histograms and
     reaches it through :func:`build_fl_models`; this exists so the shrinkage policy itself can be
-    exercised over anchors and pools that no real payload would produce.
+    exercised over anchors and pools that no real payload would produce. ``rna_var`` / ``gdna_var`` are
+    each normalised raw law's per-length variance (:func:`build_fl_models` passes the estimators' own);
+    given none, a histogram is read as raw counts.
     """
     global_aligned = _aligned(global_counts, max_size)
     rna_aligned = _aligned(rna_counts, max_size)
@@ -829,15 +864,16 @@ def _fl_models_from_histograms(
     global_pmf = _normalized(global_aligned)
     rna_pmf, n_rna = _smooth_eb(rna_aligned, global_pmf, prior_ess)
     gdna_pmf, n_gdna = _smooth_eb(gdna_aligned, global_pmf, prior_ess)
-    # the realized law is shrunk exactly like its sibling; with no realized estimate the two
-    # estimands COINCIDE — same array values, so an off-capture or input-starved build behaves
-    # byte-identically to a build with a single law.
-    if gdna_realized_counts is not None:
-        gdna_realized_pmf, _ = _smooth_eb(
-            _aligned(gdna_realized_counts, max_size), global_pmf, prior_ess
+
+    def pmf_var(var, aligned, n):
+        raw = (
+            _plugin_variance(_normalized(aligned), aligned)
+            if var is None
+            else _aligned(var, max_size)
         )
-    else:
-        gdna_realized_pmf = gdna_pmf.copy()
+        weight = n / (n + prior_ess) if n + prior_ess > 0.0 else 0.0
+        return weight * weight * raw
+
     return FLModels(
         global_pmf=global_pmf,
         rna_pmf=rna_pmf,
@@ -854,5 +890,6 @@ def _fl_models_from_histograms(
         n_rna=n_rna,
         n_gdna=n_gdna,
         max_size=int(max_size),
-        gdna_realized_pmf=gdna_realized_pmf,
+        rna_pmf_var=pmf_var(rna_var, rna_aligned, n_rna),
+        gdna_pmf_var=pmf_var(gdna_var, gdna_aligned, n_gdna),
     )

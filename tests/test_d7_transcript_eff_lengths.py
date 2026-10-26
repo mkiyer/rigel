@@ -162,4 +162,6 @@ def test_an_rna_length_model_with_NO_observations_is_REFUSED_not_defaulted(mini_
     from rigel.pipeline import _setup_geometry_and_estimator
 
     with pytest.raises(ValueError, match="no RNA fragment-length observation"):
-        _setup_geometry_and_estimator(mini_index, FragmentLengthModel(), EMConfig(n_threads=1))
+        _setup_geometry_and_estimator(
+            mini_index, FragmentLengthModel(), EMConfig(n_threads=1), None, None, None
+        )
