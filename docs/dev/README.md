@@ -36,7 +36,10 @@ the STAR rung, real data, the strand-specificity spectrum, the refused arm CRr a
 (`CENSUS_LAW_HANDOFF.md`, 2026-10-25), the diagnosis of why the census law did not converge and the shared-length-law
 design that follows it, with its measured record (`SHARED_LENGTH_LAW.md`, 2026-10-25), a separate agent's
 alternative — one reference law and a regularized log-contrast fitted to the raw strand counts, not yet fitted or run
-(`LENGTH_EVIDENCE_PLAN.md`, 2026-10-25), the
+(`LENGTH_EVIDENCE_PLAN.md`, 2026-10-25), the frame correction for gDNA's length table — derived, checked against the
+simulator's truth, what the data can measure and the defects it exposed (`FRAME_CORRECTION.md`, 2026-10-26), the
+strand frame's design draft — both origins measured at the same placements by a conditional fit, its offline record
+and what remains (`STRAND_FRAME.md`, 2026-10-26), the
 owner's notes (`my_notes.md`, `TWO_PROBLEMS.md`) and the session handoff (`SESSION_HANDOFF.md`). The notes of every settled
 campaign were deleted on 2026-10-21, their findings already in the permanent docs: `git show f763270c:docs/dev/<name>`
 recovers one. The review evidence that was never tracked is in `$RIGEL_RUNS/archive/docs_dev_untracked_2026-10-21/`.

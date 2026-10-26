@@ -714,20 +714,8 @@ class FragmentLengthConstants:
     #: 0 the anchor exactly. ⚠ Not derived; weighting the pools by their own precision would replace it.
     pool_prior_ess: float = 1000.0
 
-    #: The boundary gDNA law and its mean are refined jointly: at most this many passes (one refresh of the mean
-    #: from the boundary law, measured stable) ...
-    gdna_mean_passes: int = 2
-
-    #: ... stopping early once the mean moves by less than this many bp.
-    gdna_mean_tolerance_bp: float = 0.25
-
     def __post_init__(self) -> None:
-        _check_ranges(
-            self,
-            pool_prior_ess=self.pool_prior_ess >= 0.0,
-            gdna_mean_passes=self.gdna_mean_passes >= 1,
-            gdna_mean_tolerance_bp=self.gdna_mean_tolerance_bp > 0.0,
-        )
+        _check_ranges(self, pool_prior_ess=self.pool_prior_ess >= 0.0)
 
 
 @dataclass(frozen=True)

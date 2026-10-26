@@ -70,9 +70,10 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   one law, stranded × capture-ON genes −4.6 %, the deferred unstranded × capture-ON −6.8 % with its pools at the
   previous scorer's, measured pinned and fractional against the previous scorer —
   `$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`prod_arm.py`, `score.py`), `quant_accuracy.py` per stratum; the
-  strand frame on top is `ISSUES: the-strand-frame-under-the-shared-law`; the coupled uniform law is
-  `ISSUES: the-coupled-gdna-law`; the boundary inversion's second wave stays open; the RNA law trains on spliced
-  fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
+  coupled gDNA law was deleted 2026-10-26 with its gDNA-long regression recorded, and the frame correction that
+  recovers it is the strand frame, `ISSUES: the-strand-frame-under-the-shared-law`; the boundary inversion's second
+  wave stays open; the RNA law trains on spliced fragments that carry splice artifacts (`ISSUES: splicing-artifacts`)
+  — `calibration/fl.py`,
   `calibration/shared_length_law.py`, `gdna_density.py`, `calibration_vs_oracle.py`; watch
   `ISSUES: capture-degeneracy-standing-risk`.
 - **Fragment-length gaps** (re-recorded 2026-10-26 under the shared length law, pinned and fractional): the shared law
@@ -149,9 +150,11 @@ starts at the index.
    genome from mappability, a mask first; the mask is approved: with an `alignable` store its zero-mappability set at
    the store's longest read length, N included; without one, the N runs; the existing GRCh38 store serves for now.
    Built 2026-10-22, one step at a time: the index records the mask, the second pass and the length law read it, and
-   every in-scope row reads its gDNA at 0.96–1.00 of truth; the costs are traced in the entry. Next, one at a time: the
-   census law's boundary reads, calibration's geometry (the oracle's gdna-field gate must pass after it), the RNA
-   lengths, and the report.
+   every in-scope row reads its gDNA at 0.96–1.00 of truth; the costs are traced in the entry. Next, one at a time:
+   calibration's geometry (the oracle's gdna-field gate must pass after it; the census law's boundary reads went with
+   the coupled law, 2026-10-26), the RNA lengths, and the report. Calibration's own count error is the larger half
+   of the gDNA count's (`ISSUES: the-pooled-q-in-the-gdna-count`, the day's split): unstranded capture-OFF −4.0 %
+   net on the ladder, g98 P/O 0.945.
 
 **The index.**
 2. `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`: the cluster's manifest checked before any cluster
@@ -177,13 +180,14 @@ starts at the index.
 9. `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`, read again on the repaired reader.
 
 **After calibration, before the EM**: the scores, the priors and the lengths the EM is handed.
-10. `ISSUES: the-coupled-gdna-law`: the realized estimator and the coupling, now read by nothing but the uniform law,
-    deleted together with a frame correction for gDNA's table where RNA's census is shorter than gDNA's law, as one
-    A/B (the deletion alone, measured 2026-10-26, gives back the gDNA-long panel's gains); then
-    `ISSUES: the-pooled-q-in-the-gdna-count` in a form that leaves the capture-off count where it is (measured on the
-    shared length law 2026-10-26: the pools improve under capture and worsen off it, and the VCaP mix moves 0.41 points
-    from its truth). The shared length law itself landed 2026-10-26 (`DESIGN.md` §3.6b), closing
-    `ISSUES: the-scorer-reads-a-census-length-law`; its strand increment is `ISSUES: the-strand-frame-under-the-shared-law`.
+10. In this order (owner, 2026-10-26): `ISSUES: the-pooled-q-in-the-gdna-count` — re-scoped the same day: the share
+    is the small half (≤ 0.3 % of gDNA), calibration's own count error the large one and of the other sign, so the
+    share lands with step 1's calibration geometry; then
+    `ISSUES: the-strand-frame-under-the-shared-law`, the frame correction for stranded capture libraries, which must
+    recover the coupling deletion's recorded gDNA-long regression; then
+    `ISSUES: the-capture-likelihood-leans-toward-rna`, read beside it. The shared length law landed 2026-10-26
+    (`DESIGN.md` §3.6b), closing `ISSUES: the-scorer-reads-a-census-length-law`, and the coupled gDNA law was deleted
+    the same day (`ISSUES: the-coupled-gdna-law`).
 11. `ISSUES: merge-keeps-least-overhang`.
 12. `ISSUES: the-gdna-term-is-a-mean-over-places`, with `ISSUES: mismatch-gate-nan-in-multimapper-gdna` and the scorer
     half of `ISSUES: multimapper-intergenic-alignments`.

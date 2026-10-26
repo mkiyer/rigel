@@ -909,9 +909,10 @@ ramp reaches full trust once the guaranteed-real part `D − B` is as large as t
 never partly shrunk. The ramp's form is the design's one choice (owner, 2026-10-26).
 
 **What it does not read.** No strand: where the chemistry truly differs under capture it keeps the cross-frame
-difference less what capture can make, never the frame-matched one (`ISSUES: the-strand-frame-under-the-shared-law`).
-The noise term reads each law's plug-in variance, and the coupled uniform law's is not its own
-(`ISSUES: the-coupled-gdna-law`).
+difference less what capture can make, never the frame-matched one; and where RNA's census is shorter than gDNA's
+law the capture mixture gives `c = 0`, so gDNA's table stays off-target against an on-target census. The strand frame
+is the correction for both (`ISSUES: the-strand-frame-under-the-shared-law`). `gdna_pmf` is the two-pool contrast's
+law alone since the coupled law went (2026-10-26), so the noise term reads each law's own variance.
 
 **Measured** (production, pinned and fractional, against the previous scorer, on the census-law decision set, the STAR
 rung, the strand spectrum on both rungs, the test chromosome at three depths and the ladder's second seed; Σ genes /

@@ -1737,8 +1737,8 @@ weight), so its per-length coefficients are `c₀ = (1 − λ) w₀ + [i > 0] λ
 in it. Through the clip the inverse is pinned at zero and carries no variance: charging its coefficient there overstated
 a clipped length's variance by about ten orders on the gate's fixture, and on the VCaP mix it read the noise at 0.38
 against a squared distance of 0.20 (`test_the_contrasts_variance_is_its_own_estimators_through_the_clip`, which holds
-the plug-in to a Monte Carlo of the estimator itself). The plug-in reads a sparse law's noise low. Where the coupling has moved the uniform law (`DESIGN.md` §3.6)
-the law is not the contrast whose variance this is (`ISSUES: the-coupled-gdna-law`).
+the plug-in to a Monte Carlo of the estimator itself). The plug-in reads a sparse law's noise low. Since the coupling
+went (2026-10-26) `gdna_pmf` is the contrast's own law, so this is its variance.
 
 ### 14.8 RNA's normaliser carries gDNA's efficiencies to the EM's tables
 

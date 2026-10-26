@@ -429,30 +429,8 @@ shipped numbers are the reader's until it is fixed; its own are the efficiencies
 Instruments: `quant_accuracy.py` on the STAR panel, pinned and fractional; the per-gene dissection, two builds side by
 side, in `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/`.
 
-### the-coupled-gdna-law
-`priority: now — 0.8.0, after the shared length law · stage: pre-EM · kind: defect · 2026-10-26`
-The uniform gDNA law `gdna_pmf` is coupled to the realized (library-census) estimator (`fl._realized_gdna_counts`,
-`fl._couple_estimands`): where the contained stratum is starved it borrows the boundary stratum's law, read beside the
-probes and through RNA's law. Since the shared length law (`DESIGN.md` §3.6b) nothing reads the realized census
-itself, and the coupling costs twice: it mixes a partly captured stratum into the law the shared law reads as
-uncaptured, and the shared law's noise term reads the two-pool contrast's variance on a law that is not the contrast
-(drawn at the null and pushed through the contrast, the contrast's own noise reads 1.4–2.5× the observed
-equal-chemistry contrast on every row; `EQUATIONS.md` §14.7). Deleting the realized law and the coupling moves
-`gdna_pmf`, calibration's input, so it is its own A/B. MEASURED (2026-10-26, pinned and fractional, the 111 conditions
-and five real libraries against the shared law with the coupling): it passes the bar set before the run — stranded ×
-capture-ON genes −1.5 %, unstranded × capture-OFF −2.0 %, the deferred stratum +0.6 %, no pool worse by more than 2 %,
-the VCaP mix 0.09 points nearer its truth, real genes within 0.51 % — and it is NOT LANDED, because it gives back the
-shared law's gains on the test chromosome's gDNA-long panel (four rows, genes +9 to +30 % against the coupled law; the
-worst, g50 ss0.99, ends behind the previous scorer). The mechanism is the frame, not starvation: where RNA's census is
-shorter than gDNA's law the capture mixture rightly does nothing (`c = 0`), yet RNA's census is captured and gDNA's
-off-target law is not, and the coupling — borrowing the boundary stratum, read beside the probes — was carrying part of
-the captured frame into gDNA's law (g50 ss0.99: 265.9 bp coupled, 259.9 uncoupled, the sequenced gDNA census 282.6). The
-deletion lands with a stated frame correction for that direction, measured as one A/B; it then also makes the noise
-term's variance the law's own. Instruments: `$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`prod_ab_arm.py --arm NOC`,
-`prod_compare.py`, `real_compare.py`, `nd_mc.py`).
-
 ### the-strand-frame-under-the-shared-law
-`priority: next — the increment after the shared length law · stage: pre-EM · kind: gap · 2026-10-26`
+`priority: now — 0.8.0: the frame correction for stranded capture libraries (owner, 2026-10-26), after the gDNA count · stage: pre-EM · kind: gap · 2026-10-26`
 The shared length law reads no strand. Where the chemistry truly differs under capture it keeps the cross-frame
 difference less what capture can make, never the frame-matched one, so the stranded gap rows keep less than revision
 4.2's strand frame does (genes against the previous scorer): test gDNA-long g50 ss0.99 ON −19.5 % against the frame's
@@ -469,8 +447,40 @@ of genes). The frame's estimator should fit the raw sense and antisense counts w
 divide the strand contrast by `2p − 1` and clip. Instruments: `$RIGEL_RUNS/prototypes/2026-10-25_shared_law/`
 (`shared_law_arm.py --arm SLCD`), `$RIGEL_RUNS/prototypes/2026-10-22_census_law/` (`census_frame.py`).
 
+THE FRAME CORRECTION IT CARRIES (2026-10-26). The
+E-step needs `T_R / T_G = p_R / p_G`, and `T_R` is RNA's census in its capture mix, `r = p_R · H`, so gDNA's table
+must carry the same tilt: `T_G = g · H`. Where RNA's census is shorter than gDNA's law the capture mixture gives
+`c = 0` and `T_G = g`, off-target gDNA against on-target RNA; that frame is what the coupled law had been carrying in
+part, and its deletion's recorded regression (`ISSUES: the-coupled-gdna-law`, CLOSED) is what this entry must
+recover. Checked on the test chromosome: the census's tilt `r / p_R` follows the best-single-probe overlap of its
+125 bp tiles (gDNA inside probe blocks, on against off capture, 0.49 at 50–75 bp and 1.12 at 400–500 bp, as the curve
+predicts), the implied table is 271 bp at gDNA-long g50 ss.99 (the coupled law 266, the uncoupled 260), and fed that
+frame with no coupling the gDNA-long capture-on rows read −34.6 % genes against the previous scorer (the coupled law
+−16.4 %). The tilt's shape is the probe layout's — saturating for tiles, linear for the suite's sparse probes — and an
+assumed shape is harmful (linear on the test chromosome: −10.3 %, one row +114 %); the exon-boundary crossing pools
+read gDNA's on-target law but bind probes with the exon part only, so they run 12 bp long and cost the stranded g50
+row +77 %. The strand split at one-strand exons measures both origins at the same placements and needs no shape:
+the route for stranded × capture-ON (owner, 2026-10-26). Unstranded × capture-ON, deferred, has no model-free route
+and keeps the shared law's endpoint. With the right frame the stranded rows still over-call RNA under a perfect
+count (`ISSUES: the-capture-likelihood-leans-toward-rna`), so its A/B reads the EM's lean beside it. Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`exact_frame_arm.py`, `mf_arm.py`, `capture_response_truth.py`,
+`frame_dump.py`).
+
+### the-capture-likelihood-leans-toward-rna
+`priority: now — 0.8.0, the third of the three (owner, 2026-10-26) · stage: EM · kind: defect · 2026-10-26`
+Under capture the EM leans toward RNA even with a right calibration: with no prior it leaves −35.5k gDNA at
+`g98 ss.99 ON` under an exact calibration (`ISSUES: the-pseudocount-strength-is-not-derived`, 2026-09-24), and on the
+test chromosome's gDNA-long g50 ss.99 ON, with the oracle's gDNA count and gDNA's table in the census's own capture
+frame (both from the simulator's truth), RNA is over-called by 5.7k fragments, 0.5–1.7 % in every captured gene
+(genes −9.9 % against the previous scorer, where the shipped table under the same count reads −32.9 %). The shipped
+table, under-tilted in that direction, has been cancelling it, so the strand frame's A/B will show it. Not yet
+dissected: which object class and which lengths carry it — RNA's normaliser under capture prices each object at one
+length-independent efficiency, exact only at one law or a flat capture response (the exact form, which a measured
+response would price, moved this row by under a point), and RNA's smoothed law keeps a tail far past its support. Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`exact_frame_arm.py --oracle-prior`), `quant_accuracy.py --arm oracle`.
+
 ### the-pooled-q-in-the-gdna-count
-`priority: now — 0.8.0; measured on the shared length law (2026-10-26) and not landed · stage: pre-EM · kind: defect · 2026-09-24`
+`priority: now — 0.8.0, the first of the three (owner, 2026-10-26); re-scoped by the day's split below: the share is the small half · stage: pre-EM · kind: defect · 2026-09-24`
 Calibration's per-locus gDNA count (`priors.assemble_priors`) converts each boundary's gDNA mass to fragments by
 `boundary_mass_per_crossing`, pooled over gDNA and RNA, so where RNA dominates a boundary gDNA is over-stated even
 under a perfect calibration (`prior_vs_oracle.py` O − S: +33.7k at `g50 ss.99 ON`, +2.9k at g98 ON, +1.9k off
@@ -487,6 +497,17 @@ nascent +11 %), and the VCaP mix's gDNA moves 0.41 points further from its truth
 alone 0.2578). It failed the bar set before the run on both counts and is not landed; what it corrects under capture is
 real, so the next form must leave the capture-off count where it is. Instruments:
 `$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`prod_ab_arm.py --arm OWNQ`, `prod_compare.py`, `real_compare.py`).
+TODAY'S SPLIT (2026-10-26, `prior_vs_oracle.py` on caches rebuilt that day, pinned): the pooled share is now the small
+half. O − S, gDNA's count over-stated by the pooled share: the ladder +11.3k off capture and +47.0k on (+0.13 %,
++0.31 % of the stratum's gDNA), the test gap panels +0.5k / +2.9k (gDNA-long) and −0.1k / −0.7k (RNA-long) — the
++33.7k above predates the scan's 2026-10-19 to 10-22 changes. P − O, calibration's own error, is larger and runs the
+other way: the ladder's stranded strata −60.5k off and −60.3k on capture (net; Σ|Δ| 1.18 / 0.93 %), unstranded
+capture-OFF −365.6k (Σ|Δ| 4.8 %; g98 P/O 0.945), the deferred stratum −3.0M; the gap panels' stranded capture-on rows
+P/O 0.99–1.03 with Σ|Δ| 1.1–6.4 % per condition, errors of both signs cancelling across loci. That per-locus error is
+what the oracle count removes: with calibration's count replaced by the oracle's (`quant_accuracy.py`'s injection, the
+shared law with the coupling) the gap rows gained 12–40 points of genes against the previous scorer (gDNA-long g98
+ss.99 ON −4.6 → −44.4 %, where 1 % of the gDNA is half the RNA). So the share fix alone deepens a net under-call —
+why the own-share arm read worse off capture — and lands only with calibration's own count repaired, its other half.
 
 ### merge-keeps-least-overhang
 `priority: now — the combination rule, the paired-end repair's second wave (the code-health review, 2026-10-16), on the fix order's release path after calibration (owner, 2026-10-18) · stage: pre-EM · kind: defect · 2026-10-16`
@@ -1217,9 +1238,9 @@ the panel; it also blocks `ISSUES: crossing-pool-contrast`. ⛔ Not priced on th
 arm reaches the locus gDNA length (the oracle overrides only calibration's count arrays;
 `ISSUES: end-to-end-error-unattributed` records why no length arm prices it). A price needs the simulator's per-locus gDNA opportunity
 as the truth.
-It absorbs `ISSUES: crossing-pool-contrast` (2026-10-14): the census law already ships a crossing-pool contrast
-in its boundary stratum (`fl._realized_gdna_counts`); what remains, a second contrast for the uniform law, waits on this
-entry.
+It absorbs `ISSUES: crossing-pool-contrast` (2026-10-14): the census law's boundary-stratum contrast was deleted with
+the coupled law (2026-10-26, `ISSUES: the-coupled-gdna-law`); a crossing-pool contrast for the uniform law waits on
+this entry.
 
 ### eb-shrinkage-magic-ess
 `priority: later — Tier 2, the fl second wave: replaced on the re-simulated fl-gap panels · stage: calibration · kind: defect · 2026-08-31`
@@ -1577,8 +1598,9 @@ What the reviews left, each its own commit; content-only changes keep the collec
 (c) PRODUCTION-DEAD, KEPT AS TEST OR INSTRUMENT SURFACE: the resolver's `intron_bp`, the tested half of its overlap
 profile; `rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package;
 `region_init.has_own_composition_evidence`, which tests use as a check; `priors._project_regions_to_loci`, kept for
-`prior_vs_oracle.py` (`assemble_priors` calls `_region_locus_shares` directly); `fl`'s `GdnaContrast` and
-`GdnaRealized`, computed and discarded, settled 2026-09-30 as test surface and taken out of `__all__`;
+`prior_vs_oracle.py` (`assemble_priors` calls `_region_locus_shares` directly); `fl`'s `GdnaContrast`, computed and
+discarded, settled 2026-09-30 as test surface and taken out of `__all__` (`GdnaRealized` went with the coupled law,
+2026-10-26);
 the vendored `_cgranges_impl` extension, still compiled, optimised, LTO'd and shipped for a test-only `query()`, while
 `index.py`'s docstrings present it as a quantification facility.
 (d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
@@ -1818,6 +1840,24 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-coupled-gdna-law
+CLOSED 2026-10-26: the realized (library-census) estimator and the coupling are deleted (owner: land it and record the
+regression). `gdna_pmf` is the two-pool contrast's law alone, nothing read beside the probes mixed in, so the shared
+law's noise term reads that law's own variance. MEASURED before landing (pinned and fractional, the 111 conditions and
+five real libraries, against the shared law with the coupling, the bar set before the run): stranded × capture-ON genes
+−1.5 %, unstranded × capture-OFF −2.0 %, the deferred stratum +0.6 %, no pool worse by more than 2 %, the VCaP mix 0.09
+points nearer its truth, real genes within 0.51 %; production reproduces the measured arm exactly (gDNA-long g50 ss.99
+and g05 ss.99 ON, every transcript). THE RECORDED REGRESSION: the test chromosome's gDNA-long panel, four capture-on
+rows, genes +9 to +30 % against the coupled law (the worst, g50 ss.99, behind the previous scorer). It comes through a
+later stage, the missing frame correction where RNA's census is shorter than gDNA's law: the coupling was carrying part
+of the captured frame into gDNA's law (g50 ss.99: 265.9 bp coupled, 259.9 uncoupled, the frame the E-step needs 271).
+Given that frame from the simulator's truth and no coupling, the four rows read −34.6 % against the previous scorer,
+the coupled law −16.4 % (`ISSUES: the-strand-frame-under-the-shared-law` carries the correction). Goldens: gdna_light,
+gdna_heavy, combo_moderate and combo_extreme moved (counts ≤ 0.28 %, the EM's lengths ≤ 3.4 %; against read-name truth
+their transcript error moved −0.08, +0.01, +0.09 and +0.32 fragments of 1,000). Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`prod_ab_arm.py --arm NOC`, `prod_compare.py`, `real_compare.py`,
+`exact_frame_arm.py`).
 
 ### the-scorer-reads-a-census-length-law
 CLOSED 2026-10-26 by the shared length law (`DESIGN.md` §3.6b, `EQUATIONS.md` §14; owner: "keep your SLD plan,

@@ -156,8 +156,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,439 passed / 0 skipped / 0 xfail, 3,439 collected** — re-derived
-2026-10-26 on the shared length law (35 gates added, four deleted: 23 for the decision, seven for the length laws'
+**The standing baseline: 0 failed / 3,422 passed / 0 skipped / 0 xfail, 3,422 collected** — re-derived
+2026-10-26 on deleting the coupled gDNA law (its seventeen gates deleted with the realized estimator and the
+coupling; 3,439 on the shared length law, 35 gates added, four deleted: 23 for the decision, seven for the length laws'
 variances and the contrast's Monte Carlo, five for the carried normaliser and κ, the realized field's four gone; 3,408 on one
 contained-support formula in place of two, three gates deleted with the duplicate, one added for
 the length law's partition refusal; 3,410 after deleting the two index wrappers production no longer calls, four

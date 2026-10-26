@@ -1,24 +1,18 @@
-"""gDNA / RNA fragment-length laws: the pools, the smooth-EB build, each law's sampling variance, and the
-realized estimator the uniform law is coupled to.
+"""gDNA / RNA fragment-length laws: the pools, the smooth-EB build, the gDNA law's two-pool contrast, and each law's
+sampling variance.
 
 The pools are defined by structure and none is pure: only the RNA pool is certified, since gDNA
 cannot splice, while RNA inside introns and unannotated transcription reach the gDNA pools too. The
 partition gates hold the pool accessors exhaustive and disjoint, the build gates hold that a sparse
 pool shrinks smoothly toward the global anchor with no threshold anywhere, and the accessor gates
 hold the raw empirical views the QC report reads. ``gdna_pmf`` is the UNIFORM-FRAME law the chemistry
-makes and the opportunity and prior mathematics assume; the realized (library-census) estimator below it
-survives only through the coupling, which moves the uniform law where the contained stratum is starved,
-and the on-target correction vanishes identically with no enrichment excess. Each component pmf
+makes and the opportunity and prior mathematics assume: the contrast's alone. Each component pmf
 carries its per-length sampling variance — its raw law's plug-in variance at its empirical-Bayes weight
 squared — which the EM's two length tables read to tell a difference from noise
 (``tests/calibration/test_shared_length_law.py``).
 
-PERTURBATION (`TRAPS: perturb-every-gate`): dropping the excess's ``-1`` fires two gates; dropping the
-variance's EB weight, reading a de-tilted law's own counts as its evidence, or giving an empty length a
-variance each fire their own. Removing the estimator's early no-density guard fires NOTHING — at
-``rho_off = 0`` every mass term multiplies to zero and the mass-zero decline catches it downstream — so
-that guard is kept for its diagnostic string and its near-unreachable unbracketed-fit branch, and this
-note stands in place of a gate that cannot fire.
+PERTURBATION (`TRAPS: perturb-every-gate`): dropping the variance's EB weight, reading a de-tilted law's own counts
+as its evidence, or giving an empty length a variance each fire their own gate.
 """
 
 from __future__ import annotations
@@ -267,40 +261,6 @@ def _models(**kw):
 # ── the field exists and is never None: the scorer must be able to read it unconditionally ───────
 
 
-def test_the_adjacent_pair_table_IS_the_reference_major_walk():
-    """The census used to walk every adjacent region pair of every reference in Python. The table it
-    walked is a property of the partition, so it is built once as arrays — and this asserts that the
-    arrays are the SAME pairs in the SAME order, because the order is what makes the sums over them
-    reproduce the loop's arithmetic bit for bit.
-
-    Three references on purpose: one ordinary, one with a single region, which contributes no pair, and
-    one whose boundary count disagrees with its region count, which the walk skipped rather than
-    guessed at. PERTURBATION: dropping the usable mask emits pairs for the malformed reference, and
-    ordering by anything but reference-major changes which sums land where.
-    """
-    from rigel.calibration.fl import _adjacent_pairs
-
-    # ref 0: regions 0..3, boundaries 0..2 (3 = 4 - 1) — usable
-    # ref 1: one region, no boundary — no pair
-    # ref 2: regions 5..8, but only 2 boundaries where 3 are needed — skipped
-    region_offsets = np.array([0, 4, 5, 9], dtype=np.int64)
-    boundary_offsets = np.array([0, 3, 3, 5], dtype=np.int64)
-    left, boundary = _adjacent_pairs(region_offsets, boundary_offsets)
-    assert left.tolist() == [0, 1, 2]
-    assert boundary.tolist() == [0, 1, 2]
-
-    # and the plain case: two usable references, concatenated in reference order
-    left, boundary = _adjacent_pairs(
-        np.array([0, 3, 6], dtype=np.int64), np.array([0, 2, 4], dtype=np.int64)
-    )
-    assert left.tolist() == [0, 1, 3, 4]
-    assert boundary.tolist() == [0, 1, 2, 3]
-    # an empty partition is legal and gives empty arrays, not an error
-    for empty in (np.array([0], np.int64), np.array([0, 1], np.int64)):
-        got_left, got_boundary = _adjacent_pairs(empty, np.zeros(empty.size, np.int64))
-        assert got_left.size == 0 and got_boundary.size == 0
-
-
 def test_each_pmf_carries_its_raw_laws_variance_at_its_eb_weight_squared():
     """``Var(pmf_l) = (n / (n + prior_ess))² · law_l² / count_l``: a length's relative variance is one over its
     count, and the EB step shrinks the variance with the law."""
@@ -383,9 +343,11 @@ def test_the_contrasts_variance_falls_as_its_evidence_grows():
     counts, at the same purities and the same shapes, is a tenth of the variance."""
     import dataclasses
 
+    from _fl_fixture import build_fixture
+
     from rigel.calibration.fl import _deconvolved_gdna_counts
 
-    payload, opp, regions, _rna_pmf, _uniform = _payload_fixture(boundary_excess=1.0)
+    payload, opp, regions = build_fixture()
     counts, var, diag = _deconvolved_gdna_counts(payload, opp, regions)
     assert diag.applied and counts is not None
     assert np.all(np.isfinite(var)) and np.all(var >= 0.0) and var.sum() > 0.0
@@ -409,9 +371,9 @@ def _clipping_contrast_payload(scale: float = 1.0):
     longer RNA."""
     import dataclasses
 
-    from _fl_realized_fixture import MAX_SIZE, RHO
+    from _fl_fixture import MAX_SIZE, RHO, build_fixture
 
-    payload, opp, regions, _rna_pmf, _uniform = _payload_fixture(boundary_excess=1.0)
+    payload, opp, regions = build_fixture()
     L = np.arange(MAX_SIZE + 1, dtype=np.float64)
     g_law = np.exp(-0.5 * ((L - 45.0) / 10.0) ** 2)
     r_ig = np.exp(-0.5 * ((L - 55.0) / 10.0) ** 2)
@@ -477,184 +439,7 @@ def test_the_contrasts_variance_is_its_own_estimators_through_the_clip():
     )
 
 
-# ── the realized estimator's own invariants, on constructed payloads ─────────────────────────────
-
-
-def _payload_fixture(boundary_excess: float):
-    """A two-reference toy: intergenic/intron/exon regions with uniform-consistent contained counts,
-    and intron|exon + intergenic|exon boundaries whose counts carry ``boundary_excess`` TIMES the
-    uniform expectation. At 1.0 the boundaries say "no capture"."""
-    from _fl_realized_fixture import build_fixture
-
-    return build_fixture(boundary_excess)
-
-
-def test_the_two_boundary_CLASSES_are_told_apart_by_what_flanks_the_exon():
-    """A boundary's class is the NON-exon side: an exon against an INTRON is one estimand, an exon
-    against anything else the other, and the two are inverted against different crossing pools. The
-    fixture's symmetric form cannot see the difference — every off-target region carries exactly the
-    uniform expectation, so both classes get the same weight and swapping their labels swaps two equal
-    sums.
-
-    So this breaks the symmetry: the intron carries RNA-side excess and the intergenic flanks do not,
-    which pushes the intron-flanking class's weight below 1 while the intergenic one stays at it.
-    PERTURBATION: swapping the two class labels fires this and nothing else in the file.
-    """
-    import dataclasses
-
-    from rigel.calibration.fl import _realized_gdna_counts
-
-    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
-    counts = np.array(payload.region_contained_count, dtype=np.float64, copy=True)
-    counts[2] *= 40.0  # the INTRON alone reads far above the uniform field: RNA, not gDNA
-    payload = dataclasses.replace(payload, region_contained_count=counts)
-
-    _counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, regions, rna_pmf, uniform)
-    assert diag.applied
-    assert diag.intron_exon_share < diag.intergenic_exon_share, (
-        "the intron-flanking class carries the RNA-diluted weight; the intergenic one does not"
-    )
-    # not vacuous: the intergenic class is essentially undiluted, so the gap is the intron's doing
-    assert diag.intergenic_exon_share > 0.99
-
-
-def test_no_enrichment_excess_means_no_on_target_correction():
-    """The closure property: boundaries consistent with the uniform field ⇒ the (eps−1)+ term is
-    identically zero and the realized law is the sampled blend alone."""
-    from rigel.calibration.fl import _realized_gdna_counts
-
-    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
-    counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, regions, rna_pmf, uniform)
-    assert diag.applied
-    assert diag.ontarget_share == pytest.approx(0.0, abs=1e-9)
-
-
 # ── the RNA law the census reads: a law, whatever its scale, and the one FLModels carries ───────────
-
-
-def test_the_census_reads_the_rna_law_whatever_its_scale():
-    """The boundary odds are linear in the RNA law, so a histogram handed in as a law divides every
-    boundary's RNA odds by its total and each exon-flanking boundary reads as pure gDNA
-    (`ISSUES: the-realized-gdna-length-law-reads-rna-counts`). The estimator normalises the law it is
-    handed: the census is the same at any scale, from a pmf to a 10⁶-fragment spliced census.
-
-    PERTURBATION: dropping the normalisation fires this gate alone. The off-capture gate below cannot see
-    that break: without the normalisation the RNA mean length scales up exactly as the RNA rate scales
-    down, and the two cancel in the boundary's expected count."""
-    from rigel.calibration.fl import _realized_gdna_counts
-    from _fl_realized_fixture import RHO, build_fixture
-
-    payload, opp, regions, rna_pmf, uniform = build_fixture(boundary_excess=5.0, rna_rate=RHO)
-    ref_realized, ref_uniform, ref_diag = _realized_gdna_counts(
-        payload, opp, regions, rna_pmf, uniform
-    )
-    assert ref_diag.intron_exon_share < 1.0  # not vacuous: the intron's RNA dilutes its boundaries
-    for scale in (30.0, 1e3, 1e6):
-        realized, uniform_out, diag = _realized_gdna_counts(
-            payload, opp, regions, scale * rna_pmf, uniform
-        )
-        np.testing.assert_allclose(realized, ref_realized, rtol=1e-12)
-        np.testing.assert_allclose(uniform_out, ref_uniform, rtol=1e-12)
-        assert diag.intron_exon_share == pytest.approx(ref_diag.intron_exon_share, rel=1e-12)
-
-
-def test_off_capture_rna_crossing_a_boundary_is_not_captured_gdna():
-    """The closure property with RNA present. Off capture, an intron's RNA crosses the two boundaries it
-    flanks at exactly the count the odds assume, so every boundary holds its expected gDNA and RNA and
-    nothing more: no enrichment, an on-target share of 0, and a realized law equal to the uniform one.
-    Handed the spliced census at its own scale, as `build_fl_models` once did, the crossing RNA reads as
-    captured gDNA and an on-target excess appears where there is no capture.
-
-    PERTURBATION: the original defect (the law's mean length normalised, its opportunity not) fires this."""
-    from rigel.calibration.fl import _realized_gdna_counts
-    from _fl_realized_fixture import RHO, build_fixture
-
-    payload, opp, regions, rna_pmf, uniform = build_fixture(boundary_excess=1.0, rna_rate=RHO / 2.0)
-    realized, uniform_out, diag = _realized_gdna_counts(
-        payload, opp, regions, 1e5 * rna_pmf, uniform
-    )
-    assert diag.applied
-    assert diag.intron_exon_share < 1.0  # the intron's RNA is priced at its boundaries
-    assert diag.ontarget_share == 0.0
-    np.testing.assert_allclose(
-        realized / realized.sum(), uniform_out / uniform_out.sum(), atol=1e-12
-    )
-
-
-def test_the_census_reads_the_rna_law_FLModels_carries(monkeypatch):
-    """One RNA law in the tool: `build_fl_models` hands the census exactly `FLModels.rna_pmf`, the
-    EB-smoothed law the scorer reads, never the raw spliced histogram. With no spliced fragment that law
-    is the global anchor, so the census never invents a law of its own.
-
-    PERTURBATION: handing the census the spliced counts again fires this."""
-    import rigel.calibration.fl as fl
-    from _fl_realized_fixture import RHO, build_fixture
-
-    payload, opp, regions, _rna_pmf, _uniform = build_fixture(boundary_excess=5.0, rna_rate=RHO)
-    seen = []
-    original = fl._realized_gdna_counts
-
-    def spy(payload_, opportunity, regions_, rna_law, uniform_counts):
-        seen.append(np.array(rna_law, copy=True))
-        return original(payload_, opportunity, regions_, rna_law, uniform_counts)
-
-    monkeypatch.setattr(fl, "_realized_gdna_counts", spy)
-    models = fl.build_fl_models(payload, gdna_opportunity=opp, regions=regions)
-    assert len(seen) == 1
-    np.testing.assert_array_equal(seen[0], models.rna_pmf)
-
-
-def test_enriched_boundaries_raise_the_on_target_share():
-    """At 50x enrichment the fixture's own arithmetic puts the excess classes near
-    ``rho·49·E_contained(200)·2`` of a ~2.6k total — about 0.27. Gate the ORDER, derived, not a guess:
-    well clear of the no-excess case's exact 0, and the boundary share alive beside it."""
-    from rigel.calibration.fl import _realized_gdna_counts
-
-    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
-    counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, regions, rna_pmf, uniform)
-    assert diag.applied
-    assert diag.ontarget_share > 0.2
-    assert diag.boundary_share > 0.05
-
-
-def test_the_on_target_correction_rises_smoothly_with_enrichment():
-    """The capture SPECTRUM, not a switch: the correction is EXACTLY 0 with no excess and rises
-    monotonically from there. Its weight is its OWN resolution — how far an exon's enrichment sits
-    from 1 against its own sampling error — and NOT the strata-split weight `lam`, which asks whether
-    the two strata's LAWS differ. That is a different question, and gating on it suppresses a
-    correction that is genuinely resolved."""
-    from rigel.calibration.fl import _realized_gdna_counts
-
-    shares = [
-        _realized_gdna_counts(*_payload_fixture(boundary_excess=x))[2].ontarget_share
-        for x in (1.0, 2.0, 5.0, 10.0, 25.0, 50.0)
-    ]
-    assert shares[0] == 0.0
-    assert all(b > a for a, b in zip(shares, shares[1:]))
-
-
-def test_an_unresolved_enrichment_weight_collapses_with_its_precision():
-    """The excess's own weight, gated at the MECHANISM rather than end to end, and the reason is worth
-    recording. PERTURBATION: every way of starving the enrichment's precision in the fixture —
-    thinning the boundaries, or the whole library at fixed enrichment — also trips an EARLIER guard,
-    so the end-to-end share reads 0 whether or not this weight exists and cannot isolate it. What can
-    be isolated is the weight itself, which is where the logic lives.
-
-    The two arms below hold the same enrichment ratio on a well-populated crossing pool and on an
-    almost empty one, and the weight must go to ~1 and to ~0 respectively. The ratio alone would fire
-    identically at both.
-    """
-    from rigel.calibration.fl import _resolution_weight
-
-    eps = 10.0
-    strong = _resolution_weight((eps - 1.0) ** 2, eps * eps / 98.0)
-    weak = _resolution_weight((eps - 1.0) ** 2, eps * eps / 1e-3)
-    assert strong > 0.95
-    assert weak < 0.01
-    # and it is monotone in the evidence, with no step anywhere along it
-    ws = [_resolution_weight((eps - 1.0) ** 2, eps * eps / n) for n in np.logspace(-4, 4, 200)]
-    assert all(b >= a for a, b in zip(ws, ws[1:]))
-    assert max(abs(b - a) for a, b in zip(ws, ws[1:])) < 0.05
 
 
 def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
@@ -667,7 +452,7 @@ def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
     tie; the same amount in both pools (``rna_in_intergenic``, its own RNA law, mean 100) keeps the
     purities tied at a value below 1 with the two pools' shapes apart.
     Returns ``(payload, opportunity, regions, L)``."""
-    from _fl_realized_fixture import regions_of
+    from _fl_fixture import regions_of
 
     from rigel.calibration.effective_length import contained_eff_length
 
@@ -711,9 +496,6 @@ def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
     payload = SimpleNamespace(
         pool_lengths=pools,
         region_contained_count=counts,
-        boundary_unspliced_count=np.zeros((0, 2)),
-        ref_region_offsets=np.array([0, 12]),
-        ref_boundary_offsets=np.array([0, 0]),
         max_length=n,
         deposited_lengths=pools.sum(axis=0),
     )
@@ -792,69 +574,6 @@ def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
     np.testing.assert_allclose(counts / counts.sum(), mixture / mixture.sum(), atol=1e-12)
 
 
-def test_zero_gdna_declines_rather_than_fabricating_a_law():
-    from rigel.calibration.fl import _realized_gdna_counts
-
-    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
-    import dataclasses
-
-    rc = np.zeros_like(np.asarray(payload.region_contained_count))
-    pl = np.asarray(payload.pool_lengths, dtype=np.float64).copy()
-    pl[:4] = 0.0
-    starved = dataclasses.replace(payload, region_contained_count=rc, pool_lengths=pl)
-    counts, _uniform_out, diag = _realized_gdna_counts(starved, opp, regions, rna_pmf, uniform)
-    assert counts is None and not diag.applied
-
-
-def test_at_zero_gdna_an_uncrossed_boundary_class_drops_the_boundary_stratum():
-    """The zero-gDNA library: RNA alone in the contained regions, so the rate reads a small positive floor,
-    and nothing crosses an exon|intergenic edge. The boundary stratum is dropped and the uniform law comes
-    back as handed in. No frozen identity reference reaches this path.
-
-    PERTURBATION: deleting the empty-class break divides 0 by 0."""
-    import dataclasses
-
-    from rigel.calibration.fl import _realized_gdna_counts
-
-    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
-    counts = np.array(payload.region_contained_count, dtype=np.float64, copy=True)
-    counts[[0, 4]] = 0.0  # no gDNA and no RNA in intergenic space
-    counts[2] *= 40.0  # the intron holds nascent RNA alone
-    bnd = np.array(payload.boundary_unspliced_count, dtype=np.float64, copy=True)
-    bnd[[0, 3]] = 0.0  # RNA never crosses an exon|intergenic edge
-    pools = np.array(payload.pool_lengths, dtype=np.float64, copy=True)
-    pools[[POOL_DNA_INTERGENIC, POOL_DNA_INTERGENIC_EXON]] = 0.0
-    pools[POOL_DNA_INTRONIC] *= 40.0
-    payload = dataclasses.replace(
-        payload, region_contained_count=counts, boundary_unspliced_count=bnd, pool_lengths=pools
-    )
-    with np.errstate(divide="raise", invalid="raise"):
-        realized, uniform_out, diag = _realized_gdna_counts(payload, opp, regions, rna_pmf, uniform)
-    assert diag.applied and diag.boundary_share == 0.0
-    assert np.isfinite(realized).all()
-    np.testing.assert_allclose(uniform_out / uniform_out.sum(), uniform / uniform.sum(), rtol=1e-12)
-
-
-def test_with_no_spliced_fragments_the_boundary_odds_stay_finite():
-    """``N_s = 0`` handed straight to the estimator: an empty RNA law. In production the census reads the
-    EB law, which at ``N_s = 0`` is the global anchor (`test_the_census_reads_the_rna_law_FLModels_carries`);
-    handed an empty law directly, the estimator normalises it like any other and the odds stay finite. No
-    region beside a boundary here holds RNA above the uniform field, so both boundary classes are pure gDNA
-    whatever the RNA law: the 1.0 is the fixture's truth. No frozen identity reference reaches this path.
-
-    PERTURBATION: normalising by a plain division divides 0 by 0."""
-    from rigel.calibration.fl import _realized_gdna_counts
-
-    payload, opp, regions, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
-    with np.errstate(divide="raise", invalid="raise"):
-        realized, uniform_out, diag = _realized_gdna_counts(
-            payload, opp, regions, np.zeros_like(rna_pmf), uniform
-        )
-    assert diag.applied
-    assert diag.intron_exon_share == diag.intergenic_exon_share == 1.0
-    assert np.isfinite(realized).all() and np.isfinite(uniform_out).all()
-
-
 # ── the CONVERGENCE law: no cliffs, and the two estimands merge when the split is unresolvable ───
 
 
@@ -871,67 +590,6 @@ def test_resolution_weight_is_a_smooth_signal_to_noise_ratio():
         lam = _resolution_weight(float(s), 1.0)
         assert 0.0 <= lam <= 1.0 and lam >= prev
         prev = lam
-
-
-def test_the_estimands_converge_when_the_boundary_stratum_is_starved():
-    """The capture-OFF side: sparse boundary data must not let the two laws diverge. The difference is
-    unmeasurable there, so the honest answer is that they agree."""
-    from rigel.calibration.fl import _couple_estimands
-
-    rng = np.random.default_rng(3)
-    g_c = np.abs(rng.random(60)) + 0.01
-    g_c /= g_c.sum()
-    g_b = np.roll(g_c, 6)  # a real shift, but measured on almost nothing
-    uni, real, lam = _couple_estimands(g_c, 1e6, g_b, 1e-3)
-    assert lam < 1e-3
-    # The guarantee is that the residual disagreement is BOUNDED BY lam times the split, not that it
-    # is bitwise zero — asserting equality would be asserting more than the mathematics gives.
-    assert float(np.abs(uni - real).sum()) <= lam * float(np.abs(g_b - g_c).sum()) + 1e-12
-
-
-def test_the_estimands_converge_when_the_CONTAINED_stratum_is_starved():
-    """The infinite-capture side: with no off-target data the chemistry law is not estimable, so it
-    must borrow the only law that IS rather than hold a stale value."""
-    from rigel.calibration.fl import _couple_estimands
-
-    rng = np.random.default_rng(4)
-    g_c = np.abs(rng.random(60)) + 0.01
-    g_c /= g_c.sum()
-    g_b = np.roll(g_c, 6)
-    uni, real, lam = _couple_estimands(g_c, 1e-3, g_b, 1e6)
-    assert lam < 1e-3
-    assert float(np.abs(uni - real).sum()) <= lam * float(np.abs(g_b - g_c).sum()) + 1e-12
-    # and the common law it converged on is the well-measured one, not the starved one
-    assert float(np.abs(uni - g_b).sum()) < float(np.abs(uni - g_c).sum())
-
-
-def test_a_well_measured_split_keeps_the_two_estimands_apart():
-    from rigel.calibration.fl import _couple_estimands
-
-    rng = np.random.default_rng(5)
-    g_c = np.abs(rng.random(60)) + 0.01
-    g_c /= g_c.sum()
-    g_b = np.roll(g_c, 6)
-    uni, real, lam = _couple_estimands(g_c, 1e7, g_b, 1e7)
-    assert lam > 0.99
-    # lam -> 1 recovers the uncoupled behaviour, to within (1 - lam) times the split
-    assert float(np.abs(uni - g_c).sum()) <= (1.0 - lam) * float(np.abs(g_b - g_c).sum()) + 1e-12
-    assert float(np.abs(uni - real).sum()) > 0.1
-
-
-def test_there_is_no_cliff_anywhere_along_the_capture_spectrum():
-    """The anti-cliff gate: sweep the boundary stratum's mass over eight orders of magnitude and
-    assert the uniform law moves CONTINUOUSLY — a binary decline would show as a step."""
-    from rigel.calibration.fl import _couple_estimands
-
-    rng = np.random.default_rng(6)
-    g_c = np.abs(rng.random(60)) + 0.01
-    g_c /= g_c.sum()
-    g_b = np.roll(g_c, 6)
-    masses = np.logspace(-4, 4, 200)
-    unis = np.array([_couple_estimands(g_c, 1e3, g_b, float(m))[0] for m in masses])
-    steps = np.abs(np.diff(unis, axis=0)).sum(axis=1)
-    assert steps.max() < 0.05, f"a step of {steps.max():.3f} is a cliff, not a fade"
 
 
 # ── the length law over observable bases ───────────────────────────────────────────────────────────
@@ -953,7 +611,7 @@ def _masked_fixture(rna_intergenic: float, rna_intronic: float = 0.05, mask=_UNK
     intergenic regions, so the contrast's premise — one contaminant law in both pools — holds exactly. The opportunity is the
     frame's own (`observable_gdna_opportunity`), so each contained pool is its exact expectation. Returns
     ``(payload, opportunity, regions, L)``."""
-    from _fl_realized_fixture import regions_of
+    from _fl_fixture import regions_of
 
     from rigel.calibration.effective_length import contained_eff_length
     from rigel.calibration.gdna_opportunity import observable_gdna_opportunity
@@ -994,9 +652,6 @@ def _masked_fixture(rna_intergenic: float, rna_intronic: float = 0.05, mask=_UNK
     payload = SimpleNamespace(
         pool_lengths=pools,
         region_contained_count=counts,
-        boundary_unspliced_count=np.zeros((0, 2)),
-        ref_region_offsets=np.array([0, 12]),
-        ref_boundary_offsets=np.array([0, 0]),
         max_length=n,
         deposited_lengths=pools.sum(axis=0),
     )
@@ -1055,27 +710,6 @@ def test_over_observable_bases_the_contrast_recovers_the_uniform_law():
     assert _mean_length(counts, L) == pytest.approx(150.0, abs=0.1)
 
 
-def test_the_census_law_prices_a_boundary_off_observable_bases():
-    """The census law prices each exon-flanking boundary from the regions beside it: gDNA at the one-sided rate,
-    RNA at the adjacent region's own excess over it. Here the first intergenic region is N end to end and the
-    intron's middle half is N, and the intron|exon boundaries' gDNA share reads what the unmasked genome's does —
-    ``RHO / (RHO + r)`` at ``r = RHO`` — only when both are read over observable bases: the all-N region collapses
-    a rate read over its whole length, and the intron read whole halves its RNA excess."""
-    from _fl_realized_fixture import RHO, build_fixture
-
-    from rigel.calibration.fl import _realized_gdna_counts
-
-    _counts, _uniform, unmasked = _realized_gdna_counts(
-        *build_fixture(boundary_excess=1.0, rna_rate=RHO)
-    )
-    _counts, _uniform, masked = _realized_gdna_counts(
-        *build_fixture(boundary_excess=1.0, rna_rate=RHO, mask=[(0, 10_000), (12_200, 16_200)])
-    )
-    assert unmasked.applied and masked.applied
-    assert unmasked.intron_exon_share == pytest.approx(0.5, abs=0.02)
-    assert masked.intron_exon_share == pytest.approx(unmasked.intron_exon_share, abs=0.02)
-
-
 def test_the_length_law_reads_the_index_mask(tmp_path, monkeypatch):
     """`pipeline.library_fl_models` hands `build_fl_models` the index's frame, carrying its unobservable mask, and
     the gDNA opportunity over that observable genome: an index whose genome holds an N run gets both, and the
@@ -1110,7 +744,7 @@ def test_the_length_law_reads_the_index_mask(tmp_path, monkeypatch):
 def test_a_frame_of_another_partition_is_refused():
     """The contrast reads each region's count against that region's support, so the frame must be the partition the
     payload was deposited into: one with another region count is refused, never truncated to the shorter of the two."""
-    from _fl_realized_fixture import regions_of
+    from _fl_fixture import regions_of
 
     from rigel.calibration.fl import _deconvolved_gdna_counts
 
