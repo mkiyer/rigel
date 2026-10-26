@@ -503,6 +503,20 @@ module's index arithmetic, and `::test_a_zero_length_fragment_places_nowhere` ho
 `w = 0` out of every share. `test_priors.py` holds the gDNA component's length to gDNA's own conserved share
 and never the count's `q`; `test_capture_efficiency.py` holds each region and boundary to its own count.
 
+**The EM's two length tables are gated on the design's own argument** (`DESIGN.md` §3.6b).
+`tests/calibration/test_shared_length_law.py` holds that equal chemistry under capture is one table bit for bit at every
+captured fraction up to `κ` and under saturating responses, and that sampling noise alone stays one table; that a real
+gap in either direction is never partly shrunk (`w = 1`, the table the capture mixture exactly); that an RNA census no
+longer than gDNA's law moves nothing; that the mixture is the maximum-likelihood fraction within `[0, κ]` and more capture
+never widens what is left; that the bound is the worst case over 300 random responses rewarding length at most
+proportionally, in Hellinger, KL and χ² alike, and that a response outside that class breaks it; and that the weight and
+the mixture are continuous in every input. Nine deliberate breaks each fire a gate: the James–Stein weight, no capture
+read as one law, the mixture without its sign or always at `κ`, half the bound, no noise, the decision on the tilted
+contrast, the path's ends through a logarithm, a squared-length family. `test_capture_eff_length.py` holds the carried
+factor against brute force and at its null form `Σ_o c_o share_o(g)`, and `κ`'s weighting; `test_fl.py` holds each pmf's
+variance — its EB weight squared, none where there is no count, a tenth of it for ten times the evidence, and the
+contrast's through its own coefficients.
+
 ---
 
 ## 6. Development discipline for test substrates

@@ -55,10 +55,12 @@ robustness (2026-10-07); it does not replace the three in-scope release targets.
 takes the worst IN-SCOPE scenario. Every score is read per stratum, never pooled.
 
 Fragment length is back in scope for 0.8.0 (owner, 2026-10-02): the composition channel, the capture-length
-frame and every other length item that waited for the release (`docs/DESIGN.md` §0b); the census length law itself
-moved to 0.8.1 (owner, 2026-10-14; `ISSUES: the-scorer-reads-a-census-length-law`). The ladder still gives gDNA and RNA EQUAL fragment lengths on purpose:
-a gap would let the EM split origins on length alone and mask calibration bugs. So a length mechanism is
-judged on the gap panels beside it, in both directions, against the equal-length control.
+frame and every other length item that waited for the release (`docs/DESIGN.md` §0b), and the EM's two length tables
+are one shared law unless the data show a difference capture cannot make (owner, 2026-10-26; `docs/DESIGN.md` §3.6b,
+closing `ISSUES: the-scorer-reads-a-census-length-law`). The ladder still gives
+gDNA and RNA EQUAL fragment lengths on purpose: a gap would let the EM split origins on length alone and mask
+calibration bugs. So a length mechanism is judged on the gap panels beside it, in both directions, against the
+equal-length control.
 
 ## The docs
 
@@ -154,8 +156,10 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,408 passed / 0 skipped / 0 xfail, 3,408 collected** — re-derived
-2026-10-22 on one contained-support formula in place of two (three gates deleted with the duplicate, one added for
+**The standing baseline: 0 failed / 3,439 passed / 0 skipped / 0 xfail, 3,439 collected** — re-derived
+2026-10-26 on the shared length law (35 gates added, four deleted: 23 for the decision, seven for the length laws'
+variances and the contrast's Monte Carlo, five for the carried normaliser and κ, the realized field's four gone; 3,408 on one
+contained-support formula in place of two, three gates deleted with the duplicate, one added for
 the length law's partition refusal; 3,410 after deleting the two index wrappers production no longer calls, four
 gates deleted; 3,414 after the
 observable genome's first four steps, 39 gates added: the index's mask, the geometry, the second pass and the length

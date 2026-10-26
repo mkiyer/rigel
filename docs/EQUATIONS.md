@@ -1649,3 +1649,104 @@ of the counts still owed — drawing without replacement from an urn holding eac
 the first or the last, goes to `c` with probability `q_c / m`, and none strands. Stranding comes only from fragments
 with DIFFERENT candidate sets, where the mass of a fragment still to come is counted for a component that the
 fragments drawn before it may already have filled (`test_the_first_fragment_and_the_last_are_drawn_with_the_same_odds`).
+
+## 14. The EM's two length tables — one shared law unless the data show a difference capture cannot make (`shared_length_law`, `capture_eff_length.rna_captured_fraction`, the carried factor in `capture_eff_length.transcript_capture_eff_lengths`, `fl._plugin_variance`)
+
+### 14.1 Capture cancels from the length odds, and enters only the normalisers
+
+A fragment `x` of origin `X` at placement `s` with length `l` has `P(x | X) = f_X(l) · w(s, l) / Z_X`, with `f_X` the
+origin's pre-capture law and `w` the capture weight of the placement, the same for both origins (probes bind
+sequence). For an unspliced fragment both hypotheses share `s` and `l`, so the E-step's odds are
+
+    θ_R / θ_G · f_R(l) / f_G(l) · Z_G / Z_t            w(s, l) cancels.
+
+The per-fragment term is the chemistry ratio alone, and a factor common to the two tables cancels with it. Capture
+enters only through the normalisers (§11). Under the null `f_R = f_G`, equal tables are exact at every capture strength.
+
+### 14.2 The two measured laws are read in different frames
+
+`g` (`FLModels.gdna_pmf`) is gDNA's off-target contained law: uncaptured. `r` (`FLModels.rna_pmf`) is the spliced
+census: captured wherever RNA is. A law `f` captured under a response `m(l)` — the placement's weight `1 + β m` averaged
+over the placements of length `l` — is
+
+    f_m = f (1 + β m) / Z = (1 − κ') f + κ' f m / ⟨m⟩_f,        κ' = β⟨m⟩ / (1 + β⟨m⟩),
+
+a mixture of the law and its `m`-biased version at the captured fraction `κ'`. Overlap with probes grows with length and
+saturates, so `m` is non-decreasing with `m(l)/l` non-increasing; summed over unbounded placements it is exactly
+proportional to `l`. On equal chemistry `r = g_m`, which differs from `g`: the false gap.
+
+### 14.3 κ, RNA's captured fraction
+
+An object whose gDNA yield against the bulk is `c` owes `1/c` of its fragments to the uncaptured background and the rest,
+`(1 − 1/c)₊`, to capture. RNA's census is weighted by RNA's own counts at the exons:
+`κ = Σ_exons n_RNA (1 − 1/c)₊ / Σ_exons n_RNA`. `κ < 1` always, and `κ = 0` with no landscape.
+
+### 14.4 The capture mixture
+
+`G_c = (1 − c) g + c g l / μ_g`. Its log-likelihood under RNA's census, `ℓ(c) = Σ_l r(l) log G_c(l)`, is concave: each term
+is the logarithm of an affine function of `c`, and `G_c` is normalised for every `c`. On the common support
+
+    ℓ'(0) = Σ_l r(l) (l / μ_g − 1) = μ_r / μ_g − 1,
+
+so `c = 0` and `G_c = g` whenever RNA's census is no longer than gDNA's law: capture only lengthens. Otherwise `c` is
+`ℓ`'s maximiser on `[0, κ]`, found by bisection on the decreasing slope; `G_c > 0` because `c ≤ κ < 1`.
+
+### 14.5 The bound is the worst case over every proportional response (convex order)
+
+Write `ρ_m = dg_m/dg = 1 − κ + κ m(L)/⟨m⟩`. If `m ≥ 0` is non-decreasing and `m(l)/l` is non-increasing, then `m(L)` is
+smaller than `L` in the Lorenz order under any law of `L` (Jakobsson–Fellman), that is,
+`m(L)/E m(L) ≤_cx L/E L`. The convex order survives the affine map to `ρ`, so for every convex `φ`
+
+    E_g φ(ρ_m) ≤ E_g φ(ρ_lin),        ρ_lin = 1 − κ + κ L / μ_g,
+
+and every f-divergence `D_φ(g_m ‖ g) = E_g φ(ρ_m)` is at most the size-biased mixture's at the same `κ`. Hellinger's is
+`φ(t) = (√t − 1)²`, so `H(g, g_m) ≤ B`, `B² = H²(g, g_κ)`, `g_κ = (1 − κ) g + κ g l/μ_g`. `B` is non-decreasing in `κ`: along
+the mixture `H²` is convex in `κ` and 0 at `κ = 0`. The premise is necessary. A response that only takes fragments above
+a length breaks it 24-fold (`test_a_response_that_rewards_length_faster_than_proportionally_can_exceed_the_bound`).
+
+### 14.6 The decision, on a metric
+
+`H²(a, b) = Σ_l (√a_l − √b_l)²` is the squared L2 distance between `√a` and `√b`, so `H` is a metric. It is `J/4` to second order
+in the difference, where `J` is the symmetrised KL; `√J` itself fails the triangle inequality. On equal chemistry
+`H(g, r) ≤ B` (§14.5). Any difference: the chemistry distance between `g` and RNA's uncaptured law is at least
+`D − H(r, r_uncaptured) ≥ D − B`. The bound on `r`'s own capture is computed on `g`, which is exact under the null. So with
+`D² = (H²(g, r) − N)₊`,
+
+    w = clip(D / B − 1, 0, 1)          (D = 0: w = 0;  B = 0 < D: w = 1)
+
+is the guaranteed-real part `D − B` as a fraction of the largest artifact `B`, whole once it equals `B`. The table is
+`T_G = normalize(r^(1 − w) G_c^w)`, exactly `r` at `w = 0` and `G_c` at `w = 1`; `T_R = r`.
+
+### 14.7 The noise term
+
+The decision asks what two noisy estimates of ONE law would show, so the expansion is at the null's common law
+`M = (g + r)/2`: `√ĝ_l − √r̂_l ≈ (ĝ_l − r̂_l) / 2√M_l`, and
+
+    N = Σ_l (Var ĝ_l + Var r̂_l) / (4 M_l).
+
+Each law's own delta method, `Σ_l Var ĝ_l / 4ĝ_l + …`, is the wrong reference. Where one law is all but empty and the
+other is not, it divides that law's noise by nearly nothing: on cfRNA-B it read the noise at 0.99 against a squared
+distance near 1 and called a 160-bp gap noise
+(`test_a_noisy_near_empty_tail_of_one_law_does_not_hide_a_real_gap`). Each pmf's variance is its raw law's plug-in variance at its empirical-Bayes weight squared, `(n/(n + ν))² · law_l² / raw_l`.
+A length's relative variance is one over the raw count behind it, which de-tilting rescales and does not add to; a
+length with no raw count carries none. The two-pool contrast (`fl._deconvolved_gdna_counts`) is differentiated as it
+is: `g = (1 − λ) m + λ i⁺ / Σ i⁺`, the mixture `m = w₀ f₀ + w₁ f₁` (`w_p` the pools' count shares) and the inverse
+`i = ((1 − a₁) f₀ − (1 − a₀) f₁) / s` clipped at zero and renormalised (`s = a₀ − a₁`, `λ` the separation's resolution
+weight), so its per-length coefficients are `c₀ = (1 − λ) w₀ + [i > 0] λ (1 − a₁) / (s Σ i⁺)` and
+`c₁ = (1 − λ) w₁ − [i > 0] λ (1 − a₀) / (s Σ i⁺)`, and `Var = c₀² Var f₀ + c₁² Var f₁`, the mixture–inverse covariance
+in it. Through the clip the inverse is pinned at zero and carries no variance: charging its coefficient there overstated
+a clipped length's variance by about ten orders on the gate's fixture, and on the VCaP mix it read the noise at 0.38
+against a squared distance of 0.20 (`test_the_contrasts_variance_is_its_own_estimators_through_the_clip`, which holds
+the plug-in to a Monte Carlo of the estimator itself). The plug-in reads a sparse law's noise low. Where the coupling has moved the uniform law (`DESIGN.md` §3.6)
+the law is not the contrast whose variance this is (`ISSUES: the-coupled-gdna-law`).
+
+### 14.8 RNA's normaliser carries gDNA's efficiencies to the EM's tables
+
+§11's efficiencies are gDNA's yields, read on `g`. RNA's normaliser scores with `T_R` and `T_G`, so each object's
+efficiency enters as `ĉ_o = c_o · S_o(g) / S_o(T_G)` (`c_o` where `S_o(T_G) = 0`):
+
+    eff_t = fl_t · Σ_o S_o(T_R) ĉ_o / Σ_o S_o(T_R).
+
+`fl_t = Σ_o S_o(T_R)` (§11), so at one table (`T_G = T_R`) `eff_t = Σ_o c_o S_o(g)`, RNA's capture-weighted length on the
+uncaptured law: under the null the per-fragment weight cancels (§14.1) and this is the normaliser exactly. At `T_G = g` the
+factor is 1 and §11's rule stands as read.

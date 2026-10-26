@@ -65,19 +65,21 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   at diminishing returns (owner, 2026-09-26) — then the capture likelihood's lean toward RNA (the synthetic spans
   over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` beside `--arm
   oracle_ruler` and `--arm oracle`, `ISSUES: the-capture-length-owns-stranded-capture-on`.
-- **Fragment lengths**: the scorer's two length tables are censuses that average capture over different placements,
-  and the capture ruler counts capture a second time on RNA's; one uncaptured frame is the largest lever measured on
-  stranded × capture ON, but it loses on real length gaps until the ruler prices RNA's capture from gDNA's
-  length-resolved mass, which Rigel does not collect — 0.8.1 (owner, 2026-10-14),
-  `ISSUES: the-scorer-reads-a-census-length-law`; the boundary inversion's second wave stays open; the RNA law trains on
-  spliced fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
-  `gdna_density.py`, `calibration_vs_oracle.py`; watch `ISSUES: capture-degeneracy-standing-risk`.
-- **Fragment-length gaps** (re-recorded 2026-10-03 on the re-simulated suite arms, pinned and fractional): the test
-  RNA-short OFF regression is repaired by the component-opportunity maps and maintained by the count foundation;
-  captured RNA-short and deferred unstranded RNA-long remain material robustness concerns —
-  `quant_accuracy.py` on both gap panels beside the equal-length ladder,
-  `ISSUES: the-deferred-rna-long-regression-after-factory-removal` and
-  `ISSUES: the-scorer-reads-a-census-length-law`.
+- **Fragment lengths**: the EM's two length tables are one shared law unless the data show a difference capture
+  cannot make (`DESIGN.md` §3.6b, landed 2026-10-26): every gap row kept whole and every full-depth equal-chemistry row
+  one law, stranded × capture-ON genes −4.6 %, the deferred unstranded × capture-ON −6.8 % with its pools at the
+  previous scorer's, measured pinned and fractional against the previous scorer —
+  `$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`prod_arm.py`, `score.py`), `quant_accuracy.py` per stratum; the
+  strand frame on top is `ISSUES: the-strand-frame-under-the-shared-law`; the coupled uniform law is
+  `ISSUES: the-coupled-gdna-law`; the boundary inversion's second wave stays open; the RNA law trains on spliced
+  fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
+  `calibration/shared_length_law.py`, `gdna_density.py`, `calibration_vs_oracle.py`; watch
+  `ISSUES: capture-degeneracy-standing-risk`.
+- **Fragment-length gaps** (re-recorded 2026-10-26 under the shared length law, pinned and fractional): the shared law
+  keeps every gap row's difference whole (suite RNA-long and RNA-short, test gDNA-long and RNA-long, capture on); the
+  stranded gap rows keep less than a strand frame would (`ISSUES: the-strand-frame-under-the-shared-law`), and the RNA-long
+  rows at g05 credit capture with as much of the gap as capture could make (+8 % genes) — `quant_accuracy.py` on both gap
+  panels beside the equal-length ladder, `ISSUES: the-deferred-rna-long-regression-after-factory-removal`.
 - **Strand model**: od = 0 by policy (`DESIGN.md` §3.3a) and κ from the genuine junctions (§3.3b), both landed
   2026-10-01 after their VCaP A/Bs; `summary.json` reports the junction fit behind κ (landed 2026-10-14) —
   `ISSUES: strand-overdispersion-one-shared-value`; the splice-artifact pruning the fit points at is the strand prong
@@ -175,14 +177,21 @@ starts at the index.
 9. `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`, read again on the repaired reader.
 
 **After calibration, before the EM**: the scores, the priors and the lengths the EM is handed.
-10. `ISSUES: merge-keeps-least-overhang`.
-11. `ISSUES: the-gdna-term-is-a-mean-over-places`, with `ISSUES: mismatch-gate-nan-in-multimapper-gdna` and the scorer
+10. `ISSUES: the-coupled-gdna-law`: the realized estimator and the coupling, now read by nothing but the uniform law,
+    deleted together with a frame correction for gDNA's table where RNA's census is shorter than gDNA's law, as one
+    A/B (the deletion alone, measured 2026-10-26, gives back the gDNA-long panel's gains); then
+    `ISSUES: the-pooled-q-in-the-gdna-count` in a form that leaves the capture-off count where it is (measured on the
+    shared length law 2026-10-26: the pools improve under capture and worsen off it, and the VCaP mix moves 0.41 points
+    from its truth). The shared length law itself landed 2026-10-26 (`DESIGN.md` §3.6b), closing
+    `ISSUES: the-scorer-reads-a-census-length-law`; its strand increment is `ISSUES: the-strand-frame-under-the-shared-law`.
+11. `ISSUES: merge-keeps-least-overhang`.
+12. `ISSUES: the-gdna-term-is-a-mean-over-places`, with `ISSUES: mismatch-gate-nan-in-multimapper-gdna` and the scorer
     half of `ISSUES: multimapper-intergenic-alignments`.
-12. `ISSUES: the-em-prior-share-excludes-drawn-multimappers`.
-13. `ISSUES: pruning-uses-three-references`.
+13. `ISSUES: the-em-prior-share-excludes-drawn-multimappers`.
+14. `ISSUES: pruning-uses-three-references`.
 
 **The release.**
-14. `ISSUES: the-release-builds`, then `docs/PUBLISHING.md`'s procedure: the deliverable measured per stratum, the zero
+15. `ISSUES: the-release-builds`, then `docs/PUBLISHING.md`'s procedure: the deliverable measured per stratum, the zero
     rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a real-data smoke run,
     the standing risks re-read, and the manual and the changelog true of what ships.
 
@@ -193,8 +202,7 @@ starts at the index.
 `ISSUES: an-anchor-only-landscape-reads-as-capture` · `ISSUES: the-sparse-capture-losses` with
 `ISSUES: the-efficiency-posterior-floor-on-empty-pieces` · `ISSUES: the-transfer-price-arithmetic` ·
 `ISSUES: the-transfer-policy-loses-to-silence-on-unstranded-capture-off` with
-`ISSUES: the-intron-own-solve-on-unstranded-capture-off`. Before the EM: `ISSUES: the-scorer-reads-a-census-length-law`
-with `ISSUES: the-pooled-q-in-the-gdna-count` · `ISSUES: the-pseudocount-strength-is-not-derived`. The EM:
+`ISSUES: the-intron-own-solve-on-unstranded-capture-off`. Before the EM: `ISSUES: the-pseudocount-strength-is-not-derived`. The EM:
 `ISSUES: the-em-stops-before-it-converges`. Across the stages: `ISSUES: latent-defects` · `ISSUES: instrument-ledger`.
 
 **Later**, each with its entry, in the tool's order. The index: `ISSUES: overlapping-synthetic-shadows`. The scan:

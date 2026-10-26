@@ -24,11 +24,19 @@ Everything in this directory is provisional and nothing in it is settled.
 
 A stale dev doc is harmless. A dev doc that something else depends on is not.
 
-## What is here (2026-10-21)
+## What is here (2026-10-25)
 
 The paired-end repair's roadmap and its wave-1 plan, the splice-artifact design trail (`GDNA_SPLICE_ARTIFACTS_*` and
 `SPLICE_ARTIFACTS_*`), the region-length dissection and its design (`OBSERVABLE_OPPORTUNITY_DESIGN.md`, 2026-10-22), the
-owner's notes (`my_notes.md`, `TWO_PROBLEMS.md`) and the session handoff (`SESSION_HANDOFF.md`). The notes of every
-settled campaign were deleted on 2026-10-21, their findings already in the permanent docs: `git show
-f763270c:docs/dev/<name>` recovers one. The review evidence that was never tracked is in
-`$RIGEL_RUNS/archive/docs_dev_untracked_2026-10-21/`.
+census length law's design (revision 4.2, the frozen candidate), its reviewer prompt and the five reviews
+(`CENSUS_LAW_DESIGN.md`, `CENSUS_LAW_REVIEW_PROMPT.md`, `CENSUS_LAW_INDEPENDENT_REVIEW.md`,
+`CENSUS_LAW_REVISION_REVIEW.md`, `CENSUS_LAW_APPROVAL_PATH.md`, `CENSUS_LAW_INTEGRATION_REVIEW.md`,
+`CENSUS_LAW_WINDOW_REVIEW.md`, 2026-10-23), the census law's handoff with everything measured after revision 4.2 —
+the STAR rung, real data, the strand-specificity spectrum, the refused arm CRr and the composition-signal feasibility
+(`CENSUS_LAW_HANDOFF.md`, 2026-10-25), the diagnosis of why the census law did not converge and the shared-length-law
+design that follows it, with its measured record (`SHARED_LENGTH_LAW.md`, 2026-10-25), a separate agent's
+alternative — one reference law and a regularized log-contrast fitted to the raw strand counts, not yet fitted or run
+(`LENGTH_EVIDENCE_PLAN.md`, 2026-10-25), the
+owner's notes (`my_notes.md`, `TWO_PROBLEMS.md`) and the session handoff (`SESSION_HANDOFF.md`). The notes of every settled
+campaign were deleted on 2026-10-21, their findings already in the permanent docs: `git show f763270c:docs/dev/<name>`
+recovers one. The review evidence that was never tracked is in `$RIGEL_RUNS/archive/docs_dev_untracked_2026-10-21/`.
