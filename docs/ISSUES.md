@@ -278,12 +278,26 @@ Calibration's region lengths count bases on which no fragment can be observed.
   isoform churn in the capture reader's false-gDNA regime (3.02 → 3.02 % with every efficiency at 1;
   `ISSUES: the-reader-reads-false-gdna-as-capture`), and the step-3 BCR flip costs stranded off 0.24 points. At g98
   stranded off the rung's annotated RNA reads 0.87 where it read 1.04, while its transcripts improve 36.5 → 32.7 %.
-- **Left.** The census law's boundary odds and its exon classes' on-target shape still read whole lengths (16 of the
-  suite's 22,230 exon-flanking boundaries have a masked base within a fragment; 1,455 boundaries on GRCh38's store
-  mask). Calibration's own geometry — the slot divisors, the landscape's anchors, the capture reader's supports, the
-  priors' gDNA lengths — and the transcripts' RNA lengths read whole regions until they read the observable genome, one
-  at a time; the oracle's gdna-field gate (above) must pass after calibration's step. The STAR rung needs a store of
-  its own (the GRCh38 store masks only 29 kb beyond N on chr21 and chr22).
+- **Step 5, calibration's geometry** (2026-10-26): every slot's divisor is its placements over the observable genome
+  (a region's contained support over its observable pieces, a boundary's crossing support within its reaches to the
+  nearest masked base, both components) and gDNA's conserved share at each boundary is its observable one; the
+  landscape, the capture reader's supports, the published lengths and the priors' gDNA lengths read them. The
+  oracle's gdna-field gate now passes on every ladder capture-OFF gDNA row (slot flags about 1e-4, 3–11 % before) and
+  the fitted density is one number on both references (0.0631 at g50, 0.0543 / 0.0491 before). Calibration's region
+  |error| −5.0 % unstranded × OFF and within ±0.8 % elsewhere (`calibration_vs_oracle.py`); its count error barely
+  moves (`prior_vs_oracle.py` P − O, unstranded × OFF −366k → −345k), so that error is not the geometry's. End to end,
+  pinned and fractional (genes / transcripts against the shipped tree): unstranded × OFF −4.0 / −12.4 % on the
+  simulator's BAMs and −33.2 / −53.8 % on the STAR rung, stranded × OFF −0.3 / +0.1 % and −20.0 / −16.3 %; the g00
+  rows' false gDNA falls or holds on every row but one (unstranded × OFF on the simulator's BAMs, 1,135 → 1,160); the VCaP mix
+  unmoved (0.2569). RECORDED REGRESSION, the capture reader's: stranded × capture-ON genes +1.2 % with |gDNA| +3.8 % on
+  the simulator's BAMs, the STAR rung's pools +20 / +28 % (its g00 row), and on the fl-gap panels RNA-long transcripts
+  +20.8 % (genes −1.4 %) and RNA-short genes +4.2 %. With every capture efficiency at 1 the step is a no-op on every
+  capture-ON row of the ladder, the rung and both fl-gap panels (within ±0.3 %): the reader amplifies the supports'
+  change (`ISSUES: the-reader-reads-false-gdna-as-capture`). Receipts: `$RIGEL_RUNS/prototypes/2026-10-26_observable_step5/`
+  (`BAR.md`, written before the run; `cal_observable.py`; `run_arm.py`; `sweep_score.py`).
+- **Left.** The transcripts' RNA lengths read whole regions until they read the observable genome (step 6), then the
+  report (step 7); the census law's boundary reads went with the coupled law (2026-10-26). The STAR rung needs a store
+  of its own (the GRCh38 store masks only 29 kb beyond N on chr21 and chr22).
 Instruments: `quant_accuracy.py` (the library rows), `calibration_oracle.py --build` (the field gate), the A/B's
 unmasked arm, `$RIGEL_RUNS/prototypes/2026-10-21_mask_ab/` (its config, the runner that switches the mask off and
 re-simulates its two BAMs, deleted 2026-10-22, and its scan and oracle caches), and the dissection's harness,
@@ -324,6 +338,9 @@ Instrument: the aligned panel, with the gDNA law injected from the oracle BAM; t
 
 ### the-reader-reads-false-gdna-as-capture
 `priority: now — release-blocking (owner, 2026-10-19); a chronic problem, approached only once the stages before it are resolved (owner, 2026-10-21); found on aligned input as "calibration's strand bug" · stage: calibration · kind: defect · 2026-10-14`
+AMPLIFIES SMALL CHANGES (2026-10-26): calibration's geometry over the observable genome is a no-op on every capture-ON
+row with every efficiency at 1, yet moves stranded × capture-ON genes +1.2 % through the reader
+(`ISSUES: region-lengths-count-unobservable-bases`, step 5).
 MEASURED 2026-10-19 on the STAR panel at the recommended parameters, pinned and fractional, against truth: on aligned
 input the capture efficiencies are most of the error of every capture-OFF condition. With every efficiency held at 1
 (the landscape kept; `capture_efficiency.capture_efficiencies` answering nothing):

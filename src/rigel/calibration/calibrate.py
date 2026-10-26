@@ -34,7 +34,8 @@ density clue, landscape input and the result's gDNA effective lengths (``gdna_re
 Computing a second length model anywhere below is how a consumer comes to divide by a length the
 solver never used.
 
-A contiguous boundary is a 0-bp boundary with one count and one divisor, ``crossing_eff_length``;
+A contiguous boundary is a 0-bp boundary with one count and one divisor, its crossing placements over the
+observable genome (``effective_length.observable_crossing_eff_length``);
 there is no per-face machinery and no ½. A zero-gDNA library (``gdna_density_global == 0``, per-object
 gDNA mass ``0``) is a valid, graceful output.
 
@@ -64,9 +65,8 @@ from .region_geometry import (
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .derive import gdna_density_global
 from .capture_efficiency import CaptureReading, capture_efficiencies
-from .effective_length import UNBOUNDED_REACH, conserved_cut_shares
+from .effective_length import observable_cut_shares
 from .blocks import SweepCapture
-from .region_arrays import boundary_region_indices
 from .region_chain import build_region_chain
 from .result import CalibrationResult
 from .landscape import DensityLandscape, fit_landscape
@@ -108,8 +108,8 @@ def _empty_sj_geometry() -> "SpliceJunctionGeometry":
 def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     """Split a per-SLOT divisor back onto the region and contiguous-boundary axes.
 
-    ⛔ A projection, not a recomputation. ``build_region_geometry`` already applied
-    ``contained_eff_length`` at REGION slots and ``crossing_eff_length`` at BOUNDARY slots; calling
+    ⛔ A projection, not a recomputation. ``build_region_geometry`` already applied the observable
+    contained support at REGION slots and the observable crossing support at BOUNDARY slots; calling
     those again here would put two implementations of one quantity in the tree, and two
     implementations of one divisor are how a factor of ½ survives unnoticed. Whatever the solver
     divided by is what the result reports.
@@ -462,16 +462,10 @@ def _result(
 
 
 def _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf: np.ndarray) -> np.ndarray:
-    """gDNA's conserved share at every boundary (`effective_length.conserved_cut_shares`): the boundary's
-    two flanking regions are the pieces beside the cut, and gDNA's template does not end."""
-    lo, hi = boundary_region_indices(np.asarray(region_arrays.ref_id))
-    length = np.asarray(region_arrays.end, dtype=np.float64) - np.asarray(
-        region_arrays.start, dtype=np.float64
-    )
-    left, right = conserved_cut_shares(
-        gdna_fl_pmf, length[lo], length[hi], UNBOUNDED_REACH, UNBOUNDED_REACH
-    )
-    return left + right
+    """gDNA's conserved share at every boundary over the observable genome (`effective_length.observable_cut_shares`):
+    the pieces beside the cut are its two flanking regions up to the nearest masked base, and gDNA's template does not
+    end, so where nothing is masked the reaches are unbounded."""
+    return observable_cut_shares(region_arrays, gdna_fl_pmf)
 
 
 def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> None:

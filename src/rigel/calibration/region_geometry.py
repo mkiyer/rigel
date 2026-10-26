@@ -39,7 +39,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..types import Strand
-from .effective_length import UNBOUNDED_REACH, contained_eff_length, crossing_eff_length
+from .effective_length import (
+    crossing_eff_length,
+    observable_contained_eff_length,
+    observable_crossing_eff_length,
+)
 from .region_chain import BOUNDARY, REGION, RegionChain
 from .signature import (
     TS_AMBIG,
@@ -147,13 +151,20 @@ def build_region_geometry(
     The divisors:
 
     ================  ==========================================================================
-    REGION, both      ``contained_eff_length(region_len, pmf)`` — no reach argument exists
-    BOUNDARY, gDNA    ``UNBOUNDED_REACH`` both sides ⇒ ``mu_g − 1``. gDNA's template is the
-                      chromosome, so ``taper_g = 1``: physics, not a choice
-    BOUNDARY, RNA     ``UNBOUNDED_REACH`` by ruling ⇒ ``mu_r − 1``. An unspliced crossing is a
-                      MIXTURE whose RNA half alone is bounded, so reach there is per COMPONENT;
-                      the untapered form carries a known genome-wide gDNA over-call of about a
-                      tenth. A per-boundary taper would be an A/B, never run
+    REGION, both      the contained placements over the region's OBSERVABLE pieces
+                      (``effective_length.observable_contained_eff_length``) — no reach argument
+                      exists. No fragment is observed on a masked base, so a region masked whole
+                      has no support
+    BOUNDARY, gDNA    the crossing placements within the bases to the nearest masked base either
+                      side, ``UNBOUNDED_REACH`` where there is none ⇒ ``mu_g − 1``
+                      (``observable_crossing_eff_length``). gDNA's template is the chromosome,
+                      so ``taper_g = 1``: physics, not a choice
+    BOUNDARY, RNA     the same reaches by ruling ⇒ ``mu_r − 1`` with nothing masked. An unspliced
+                      crossing is a MIXTURE whose RNA half alone is bounded by its transcript, so
+                      that reach would be per COMPONENT; the untapered form carries a known
+                      genome-wide gDNA over-call of about a tenth. A per-boundary taper would be an
+                      A/B, never run. The mask bounds both components alike: it is where nothing
+                      is observed
     sj, RNA           the real exonic per-strand reach. A sj is used only by a molecule that
                       spliced across it, so its divisor is the spliced one
     ================  ==========================================================================
@@ -187,21 +198,16 @@ def build_region_geometry(
     ]
 
     # ── the two per-component divisors ───────────────────────────────────────────────────────────
-    region_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    n_regions = region_len.shape[0]
-    unbounded = np.full(1, UNBOUNDED_REACH)
+    n_regions = int(region_arrays.n_regions)
 
     def divisor(pmf: np.ndarray) -> np.ndarray:
-        """Per-slot effective length: contained at a REGION, crossing at a BOUNDARY, the crossing at
-        :data:`UNBOUNDED_REACH` on both sides for either component."""
-        contained = contained_eff_length(region_len, pmf) if n_regions else np.zeros(0)
-        n_boundaries = max(int(chain.n_boundaries_total), 1)
-        crossing = np.full(n_boundaries, float(crossing_eff_length(pmf, unbounded, unbounded)[0]))
+        """Per-slot effective length over the observable genome: the contained placements at a REGION, the
+        crossing placements at a BOUNDARY, for either component."""
         out = np.zeros(n, dtype=np.float64)
         if n_regions:
-            out[is_region] = contained[obj[is_region]]
+            out[is_region] = observable_contained_eff_length(region_arrays, pmf)[obj[is_region]]
         if is_boundary.any():
-            out[is_boundary] = crossing[np.clip(obj[is_boundary], 0, crossing.shape[0] - 1)]
+            out[is_boundary] = observable_crossing_eff_length(region_arrays, pmf)[obj[is_boundary]]
         return out
 
     # gDNA takes NO reach argument, ever: its template is the chromosome, so ``taper_g = 1``. That is

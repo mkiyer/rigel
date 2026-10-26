@@ -267,13 +267,23 @@ def make_chain_parts(
         boundary_spliced=SimpleNamespace(count=pair(boundary_spliced, 0.0, n_boundaries)),
         sj=SimpleNamespace(count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)),
     )
-    region_arrays = SimpleNamespace(
+    # a real frame, nothing masked: each reference's regions tile it from 0, so every reader of the observable genome
+    # (the slot divisors among them) reads the partition itself
+    if not np.array_equal(region_sz, np.round(region_sz)):
+        raise ValueError("make_chain_parts: region sizes are whole bases")
+    start = np.zeros(n_regions, dtype=np.int64)
+    for r in range(rno.shape[0] - 1):
+        sizes = region_sz[rno[r] : rno[r + 1]].astype(np.int64)
+        start[rno[r] : rno[r + 1]] = np.concatenate([[0], np.cumsum(sizes)[:-1]])
+    region_arrays = RegionArrays(
+        ref_id=ref_id.astype(np.int32),
+        start=start,
+        end=start + region_sz.astype(np.int64),
         signature=sig,
         strand_class=transcript_strand_class(sig.astype(np.int64)),
         region_size_bp=region_sz,
-        ref_id=ref_id,
-        ref_offsets=rno,
-        n_regions=n_regions,
+        ref_offsets=rno.astype(np.int32),
+        n_refs=int(rno.shape[0] - 1),
     )
     chain = build_region_chain(rno, reo)
     geometry = build_region_geometry(

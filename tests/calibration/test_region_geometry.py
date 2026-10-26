@@ -271,6 +271,59 @@ def test_a_CONTIGUOUS_BOUNDARY_divisor_is_the_UNBOUNDED_crossing_count__the_A7_R
         assert geometry.eff_gdna[slot] == pytest.approx(brute_crossing(GDNA_PMF, 1e12, 1e12))
 
 
+#: Inside region 0, touching boundary 1 from the left, and all of region 2.
+MASK_RUNS = pd.DataFrame({"ref": ["chr1"] * 3, "start": [20, 190, 200], "end": [40, 200, 300]})
+
+
+def _masked_parts(parts):
+    """The fixture's partition with ``MASK_RUNS`` unobservable, and its substrate on that frame."""
+    payload, region_arrays, _substrate, chain, sj = parts
+    frame = pd.DataFrame(
+        {
+            "ref_name": ["chr1"] * 3,
+            "start": [0, 100, 200],
+            "end": [100, 200, 300],
+            "signature": np.asarray(region_arrays.signature),
+        }
+    )
+    masked = RegionArrays.from_frame(frame, {"chr1": 0}, MASK_RUNS)
+    return masked, CalibrationSubstrate.from_payload(payload, masked), chain, sj
+
+
+def test_every_divisor_counts_only_placements_that_touch_no_masked_base(parts):
+    """No fragment is observed on a masked base, so a slot's divisor is its placements over the observable genome: a
+    region's contained starts over its observable pieces (region 0 holds two, [0, 20) and [40, 100); region 2 is
+    masked whole and holds none), a boundary's crossing starts within the bases to the nearest masked base either side
+    (boundary 0 reaches 60 left and 90 right; a masked base touches boundary 1, which nothing observable crosses). For
+    both components, against the enumerator; with nothing masked the two unbounded-crossing gates above hold."""
+    masked, substrate, chain, sj = _masked_parts(parts)
+    g = build_region_geometry(chain, substrate, masked, sj, GDNA_PMF, RNA_PMF)
+    region = {
+        0: lambda p: brute_contained(20, p) + brute_contained(60, p),
+        1: lambda p: brute_contained(90, p),
+        2: lambda p: 0.0,
+    }
+    boundary = {0: lambda p: brute_crossing(p, 60, 90), 1: lambda p: 0.0}
+    kind, obj = np.asarray(chain.kind), np.asarray(chain.obj_idx)
+    for slot in range(chain.n_slots):
+        want = (region if kind[slot] == REGION else boundary)[int(obj[slot])]
+        assert g.eff_gdna[slot] == pytest.approx(want(GDNA_PMF), abs=1e-12)
+        assert g.eff_rna[slot] == pytest.approx(want(RNA_PMF), abs=1e-12)
+
+
+def test_gdnas_conserved_share_at_a_boundary_counts_only_observable_placements(parts):
+    """The share the priors' gDNA length reads at each boundary (`calibrate._gdna_boundary_conserved_len`) is gDNA's
+    over the observable genome, `effective_length.observable_cut_shares`, which `test_effective_length.py` enumerates
+    against the deposit rule; a boundary a masked base touches holds none of it."""
+    from rigel.calibration.calibrate import _gdna_boundary_conserved_len
+    from rigel.calibration.effective_length import observable_cut_shares
+
+    masked, _substrate, _chain, _sj = _masked_parts(parts)
+    got = _gdna_boundary_conserved_len(masked, GDNA_PMF)
+    np.testing.assert_allclose(got, observable_cut_shares(masked, GDNA_PMF), rtol=0.0, atol=1e-12)
+    assert got[1] == 0.0 and got[0] > 0.0
+
+
 def test_the_SJ_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
     """The other half of the same ruling: a sj boundary is used only by a molecule that spliced
     across it, so what remains either side is exonic and the reach is real. Leaving the sj divisor
