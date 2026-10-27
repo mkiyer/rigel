@@ -63,6 +63,22 @@ locus's gDNA length. Unmeasurable on the ladder (`NH` 1); the STAR panel at the 
 alternatives as multimappers, and `tests/scenarios_aligned/test_multimap_counting.py` are where it is seen. Taken
 with `ISSUES: multimapper-blind-support`. How the group's gDNA term combines its places is
 `ISSUES: the-gdna-term-is-a-mean-over-places`, which lands with it.
+MEASURED (2026-10-27, places by mate pairing, genic where a place overlaps an annotated transcript's span). On the STAR
+rung at g50 ss.99 case 5 is 88,274 gDNA fragments off capture (1.8 % of gDNA; 1,654 with a spliced genic place only,
+certified RNA today) and 80,360 on, against 26,251 and 23,243 mature RNA; on the VCaP mix it is 5,631 DNA against 31,364
+RNA, so on a real library its risk is RNA read as gDNA. Today, pinned and fractional, gDNA multimappers read 65–68 %
+gDNA off capture, case 5 or all places genic alike, against 94.9 % for unique gDNA, the rest mostly nascent RNA: about
+57 k fragments, 1.2 % of the condition's gDNA. Mature RNA multimappers read 97.9–98.6 % annotated. At g98 the bleed is
+the multimappers': a third of the RNA calls are gDNA (57,751 of 172,250), and gDNA multimappers carry 72 % of them (case 5
+alone 47 %), while unique gDNA reads 99.8 % gDNA. The derivation (`P(fragment | o) = Σ_p κ_p P_o(p, ℓ_p)`, `κ_p` the
+place's capture weight) gives one rule: every candidate at a place, RNA's and gDNA's, carries that place's capture
+weight, and gDNA sums over its places; for a unique fragment it is one constant on every candidate and changes nothing.
+THE OWNER'S GOAL AND FRAMING (2026-10-27): mitigate gDNA called RNA, worst at extremely high gDNA and where gDNA aligns
+as spliced, RNA pulled into gDNA the accepted risk. Intergenic regions are not captured, and an intergenic fragment
+belongs to no locus. Two models to explore in a session of their own: one intergenic meta-component at a global rate
+(the intergenic fragments over the observable intergenic effective length), or every intergenic region modelled, the
+accumulator depositing a multimapper's intergenic alignment as it deposits a genic one. Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-27_mm_intergenic/` (`mm_census.py`, `assign_by_class.py`).
 
 ### splicing-artifacts
 `priority: now — release-blocking (owner, 2026-10-14), and the goal the scan's repair serves (owner, 2026-10-21): the recommended STAR parameters' competing alignments and the multimapper handling are to carry through to it; 0.8.0 waits for the mechanism AND its validation on independent artifact-containing evidence (the cluster); the design is externally reviewed, its derivation next · stage: scan · kind: defect · 2026-09-24`
@@ -462,7 +478,7 @@ Instruments: `quant_accuracy.py` on the STAR panel, pinned and fractional; the p
 side, in `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/`.
 
 ### the-strand-frame-under-the-shared-law
-`priority: now — 0.8.0: the frame correction for stranded capture libraries (owner, 2026-10-26), after the gDNA count · stage: pre-EM · kind: gap · 2026-10-26`
+`priority: now — 0.8.0: the frame correction for stranded capture libraries (owner, 2026-10-26), after the gDNA count; paused 2026-10-27 for a session of its own · stage: pre-EM · kind: gap · 2026-10-26`
 The shared length law reads no strand. Where the chemistry truly differs under capture it keeps the cross-frame
 difference less what capture can make, never the frame-matched one, so the stranded gap rows keep less than revision
 4.2's strand frame does (genes against the previous scorer): test gDNA-long g50 ss0.99 ON −19.5 % against the frame's

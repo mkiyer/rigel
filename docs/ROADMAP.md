@@ -167,7 +167,8 @@ starts at the index.
 **The scan and its buffer.** The scan's repair landed between 2026-10-18 and 2026-10-21
 (`ISSUES: the-scanner-builds-fragments-from-one-mate`, closed); what it leaves:
 3. `ISSUES: multimapper-intergenic-alignments`: a multimapper's intergenic hits buffered and given a gDNA term, so its
-   valid intergenic and genic alignments compete in the EM; release-blocking.
+   valid intergenic and genic alignments compete in the EM; release-blocking, and the next session's (owner,
+   2026-10-27): at g98 gDNA multimappers carry most of the gDNA called RNA.
 4. `ISSUES: splicing-artifacts`: the derivation, then the scan's infrastructure (junction ids on buffered fragments, the
    contiguous reading of a spliced fragment), the fixtures, a prototype and the VCaP A/B; the release waits for its
    validation on the cluster.
@@ -194,7 +195,7 @@ starts at the index.
     the same day (`ISSUES: the-coupled-gdna-law`). RNA's own-count length law landed after them (`DESIGN.md` §3.6;
     `ISSUES: eb-shrinkage-magic-ess` keeps gDNA's half), and the strand frame recovers its gDNA-long regression under
     capture; the frame's native build waits for an unbiased decomposition at weak strandedness (the four-arm A/B,
-    2026-10-27).
+    2026-10-27), paused for a session of its own.
 11. `ISSUES: merge-keeps-least-overhang`.
 12. `ISSUES: the-gdna-term-is-a-mean-over-places`, with `ISSUES: mismatch-gate-nan-in-multimapper-gdna` and the scorer
     half of `ISSUES: multimapper-intergenic-alignments`.
