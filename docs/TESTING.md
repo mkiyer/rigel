@@ -40,8 +40,9 @@ The panel says how much error there is and where.
 Wiped and re-simulated 2026-10-21 on that simulator, with both fl-gap panels, so a number measured on the panel before
 is not comparable; its text receipts, arms included, are in `$RIGEL_RUNS/archive/suite_before_resim_2026-10-21/`. The
 panel before drew gDNA over the `N` runs, where the region lengths count bases too, and read the gDNA fraction
-exactly; on this one the oracle's gDNA-field gate fails on every gDNA capture-OFF row, which then certifies its
-composition only, and Rigel under-calls gDNA (`ISSUES: region-lengths-count-unobservable-bases`).
+exactly. On this one, the oracle's gDNA-field gate failed on every gDNA capture-OFF row and Rigel under-called gDNA
+until the tool read the observable genome (`ISSUES: region-lengths-count-unobservable-bases`). Since calibration's
+geometry read it (2026-10-26), the gate passes on every row of the ladder and both fl-gap panels.
 
 The 0.8.0 scope — three strata in scope, unstranded × capture-ON deferred but reported on every table,
 fragment length back in scope, and why the ladder still gives gDNA and RNA equal fragment lengths —
