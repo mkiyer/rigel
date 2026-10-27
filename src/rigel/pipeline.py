@@ -678,18 +678,21 @@ def _setup_geometry_and_estimator(
     length takes too — each transcript's conserved share of every region, boundary and junction its fragments
     deposit on, at that object's capture efficiency carried to the EM's two length tables — so every component
     competes on one contracted footing under capture. The output ``effective_lengths`` (used for TPM) stay the full
-    FL-marginal length. No reference (capture off, or no gDNA) ⇒ ``effective_lengths_em`` ==
-    ``effective_lengths`` (bit-identical). See ``calibration/capture_eff_length.py``.
+    FL-marginal length over the template's observable starts (a fragment touching the index's unobservable mask is
+    never observed). No reference (capture off, or no gDNA) ⇒ ``effective_lengths_em`` == ``effective_lengths``
+    (bit-identical). See ``calibration/capture_eff_length.py``.
     """
-    exonic_lengths = index.t_df["length"].values.astype(np.float64)
     if rna_fl.n_observations <= 0:
         raise ValueError(
             "the library carries no RNA fragment-length observation, so no transcript has an "
             "effective length; nothing can be quantified."
         )
-    effective_lengths = rna_fl.compute_all_transcript_eff_lens(exonic_lengths.astype(np.int64))
+    from .calibration.capture_eff_length import (
+        observable_fl_eff_lengths,
+        transcript_capture_eff_lengths,
+    )
 
-    from .calibration.capture_eff_length import transcript_capture_eff_lengths
+    effective_lengths = observable_fl_eff_lengths(index, region_arrays, rna_fl)
 
     effective_lengths_em = transcript_capture_eff_lengths(
         calibration, region_arrays, index, effective_lengths, tables

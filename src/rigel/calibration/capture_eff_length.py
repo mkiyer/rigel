@@ -57,6 +57,11 @@ Where the saturated level is 1 and no object reads above it, the bound is 1. A l
 returns ``fl_eff_lengths`` bit-identically, and so does one whose efficiencies are all exactly 1: only the
 captured case contracts. The unit is the bulk, so a captured transcript's length rises above ``fl``; the EM
 reads every component's length in the same unit, and a factor common to all of them cancels.
+
+THE LENGTHS ARE OVER THE OBSERVABLE GENOME. A fragment touching a base of the index's unobservable mask is never
+observed, so a template's pieces are cut at the mask and no cut joins two pieces a masked base separates; its
+fl-marginal length (:func:`observable_fl_eff_lengths`) is the sum of its runs', the stretches no masked base
+interrupts. A template the mask does not touch is unchanged to the bit.
 """
 
 from __future__ import annotations
@@ -81,6 +86,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TranscriptObjects",
+    "observable_fl_eff_lengths",
     "rna_captured_fraction",
     "transcript_capture_eff_lengths",
     "transcript_objects",
@@ -109,7 +115,9 @@ class TranscriptObjects:
 @dataclass(frozen=True, slots=True)
 class _TranscriptPieces:
     """The pmf-free half of :class:`TranscriptObjects`: every transcript's pieces, each piece's length, and at each
-    cut the bases of the transcript left of it (``through``) and right of it (``rest``)."""
+    cut the bases of the transcript left of it (``through``) and right of it (``rest``), counted to the nearest
+    masked base. ``run_t`` and ``run_length`` are each transcript's runs — its stretches no masked base interrupts —
+    and ``masked`` the bases the mask took from each transcript."""
 
     t: np.ndarray
     piece: np.ndarray
@@ -119,14 +127,67 @@ class _TranscriptPieces:
     rest: np.ndarray
     is_junction: np.ndarray
     n_transcripts: int
+    run_t: np.ndarray
+    run_length: np.ndarray
+    masked: np.ndarray
+
+
+def _observable_parts(
+    t: np.ndarray,
+    piece: np.ndarray,
+    k: np.ndarray,
+    ref: np.ndarray,
+    a: np.ndarray,
+    b: np.ndarray,
+    u: np.ndarray,
+    mask: np.ndarray,
+):
+    """Each piece ``[a, b)`` on reference ``ref`` cut at the mask's runs into its observable parts: a run inside it
+    splits it, one over an end trims it, one over the whole of it drops it. Each part keeps its transcript, region
+    and exon and its start ``u`` in the transcript's full coordinates, masked bases included. Returns ``(t, piece,
+    k, length, u)`` for the parts, in the pieces' order."""
+    length = (b - a).astype(np.float64)
+    mask = np.asarray(mask, dtype=np.int64)
+    if mask.shape[0] == 0 or t.size == 0:
+        return t, piece, k, length, u
+    # the first masked run ending past each piece's start, on one ascending key: reference, then position
+    span = np.int64(1) << np.int64(40)
+    first = np.searchsorted(mask[:, 0] * span + mask[:, 2], ref * span + a, side="right")
+    at = np.minimum(first, mask.shape[0] - 1)
+    hit = (first < mask.shape[0]) & (mask[at, 0] == ref) & (mask[at, 1] < b)
+    if not hit.any():
+        return t, piece, k, length, u
+    rows, lo, hi = [], [], []
+    for i in np.flatnonzero(hit):
+        pos, m = int(a[i]), int(first[i])
+        while m < mask.shape[0] and mask[m, 0] == ref[i] and mask[m, 1] < b[i]:
+            if mask[m, 1] > pos:
+                rows.append(i)
+                lo.append(pos)
+                hi.append(int(mask[m, 1]))
+            pos = max(pos, int(mask[m, 2]))
+            m += 1
+        if pos < b[i]:
+            rows.append(i)
+            lo.append(pos)
+            hi.append(int(b[i]))
+    keep = np.flatnonzero(~hit)
+    row = np.concatenate([keep, np.asarray(rows, dtype=np.int64)])
+    pa = np.concatenate([a[keep], np.asarray(lo, dtype=np.int64)])
+    pb = np.concatenate([b[keep], np.asarray(hi, dtype=np.int64)])
+    order = np.lexsort((pa, row))
+    row, pa, pb = row[order], pa[order], pb[order]
+    return t[row], piece[row], k[row], (pb - pa).astype(np.float64), u[row] + (pa - a[row])
 
 
 def _transcript_pieces(
     index: "TranscriptIndex", region_arrays: "RegionArrays"
 ) -> _TranscriptPieces:
-    """The regions every transcript's exons (or an unspliced entity's span) cover, in transcript then genomic order,
-    and between consecutive ones a cut — a junction where they belong to different exons with a region between
-    them. Annotation only: no length law enters."""
+    """The observable parts of the regions every transcript's exons (or an unspliced entity's span) cover, in
+    transcript then genomic order, and between consecutive parts a cut — a junction where they belong to different
+    exons with a region between them. No part holds a base of the index's unobservable mask
+    (``region_arrays.unobservable``) and no cut joins two parts a masked base separates: a fragment touching one is
+    never observed. With nothing masked the parts are the pieces. Annotation only: no length law enters."""
     starts = np.asarray(region_arrays.start, dtype=np.int64)
     ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
@@ -168,28 +229,79 @@ def _transcript_pieces(
         np.arange(int(width.sum()), dtype=np.int64) - np.repeat(np.cumsum(width) - width, width)
     )
     tk = t[k]
-    length = (np.minimum(ends[piece], b[k]) - np.maximum(starts[piece], a[k])).astype(np.float64)
+    seg_a = np.maximum(starts[piece], a[k])
+    seg_b = np.minimum(ends[piece], b[k])
+    length = (seg_b - seg_a).astype(np.float64)
 
-    # transcript coordinates: the bases left of each cut and right of it
+    # each piece's start in the transcript's full coordinates, masked bases included
     n_t = int(tdf.shape[0])
-    total = np.zeros(n_t)
-    np.add.at(total, tk, length)
+    whole = np.zeros(n_t)
+    np.add.at(whole, tk, length)
     first = np.r_[True, tk[1:] != tk[:-1]] if tk.size else np.zeros(0, dtype=bool)
     csum = np.cumsum(length)
-    through = csum - np.repeat(
-        csum[first] - length[first], np.diff(np.r_[np.flatnonzero(first), tk.size])
+    full_start = (
+        csum
+        - np.repeat(csum[first] - length[first], np.diff(np.r_[np.flatnonzero(first), tk.size]))
+        - length
     )
-    cut = np.flatnonzero(np.r_[tk[1:] == tk[:-1], False]) if tk.size else np.zeros(0, np.int64)
+    tk, piece, k, length, full_start = _observable_parts(
+        tk, piece, k, rid[k], seg_a, seg_b, full_start, region_arrays.unobservable
+    )
+
+    # the runs: consecutive parts of one transcript with no masked base between them; a cut joins two parts of one run
+    full_end = full_start + length
+    joined = (
+        np.r_[(tk[1:] == tk[:-1]) & (full_start[1:] == full_end[:-1]), False]
+        if tk.size
+        else np.zeros(0, dtype=bool)
+    )
+    run_first = np.r_[True, ~joined[:-1]] if tk.size else np.zeros(0, dtype=bool)
+    run_id = np.cumsum(run_first) - 1
+    run_lo = full_start[run_first]
+    run_hi = full_end[np.r_[np.flatnonzero(run_first)[1:] - 1, tk.size - 1]] if tk.size else run_lo
+    cut = np.flatnonzero(joined)
+    kept = np.zeros(n_t)
+    np.add.at(kept, tk, length)
     return _TranscriptPieces(
         t=tk,
         piece=piece,
         length=length,
         cut_row=cut,
-        through=through[cut],
-        rest=total[tk[cut]] - through[cut],
+        through=full_end[cut] - run_lo[run_id[cut]],
+        rest=run_hi[run_id[cut]] - full_end[cut],
         is_junction=(k[cut] != k[cut + 1]) & (piece[cut + 1] > piece[cut] + 1),
         n_transcripts=n_t,
+        run_t=tk[run_first],
+        run_length=run_hi - run_lo,
+        masked=whole - kept,
     )
+
+
+def observable_fl_eff_lengths(
+    index: "TranscriptIndex", region_arrays: "RegionArrays", rna_fl
+) -> np.ndarray:
+    """Every template's fl-marginal length over the starts the index's mask leaves (gate:
+    ``tests/calibration/test_capture_eff_length.py``): ``Σ_runs Σ_w f(w) (run − w + 1)₊`` over its runs, the stretches
+    no masked base interrupts, since a fragment touching a masked base is never observed. A template the mask does not
+    touch keeps the closed form of its whole length, to the bit; every template keeps the closed form's floor of one
+    base, as one shorter than every fragment does."""
+    lengths = index.t_df["length"].to_numpy(np.int64)
+    eff = rna_fl.compute_all_transcript_eff_lens(lengths)
+    pieces = _transcript_pieces(index, region_arrays)
+    touched = pieces.masked > 0.0
+    if not touched.any():
+        return eff
+    on = touched[pieces.run_t]
+    over_runs = np.zeros(lengths.size)
+    np.add.at(
+        over_runs,
+        pieces.run_t[on],
+        rna_fl.compute_all_transcript_eff_lens(
+            pieces.run_length[on].astype(np.int64), min_value=0.0
+        ),
+    )
+    eff[touched] = np.maximum(over_runs[touched], 1.0)
+    return eff
 
 
 def _objects(pieces: _TranscriptPieces, pmf: np.ndarray) -> TranscriptObjects:

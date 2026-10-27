@@ -72,7 +72,9 @@ def write_fasta(
     return path
 
 
-def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx", refs=None):
+def build_test_index(
+    tmp_path_factory, gtf_text, genome_size=2000, name="idx", refs=None, unknown=None
+):
     """Build a TranscriptIndex from a GTF string (session/module-scoped helper).
 
     Parameters
@@ -90,6 +92,9 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx", r
         the single ``chr1`` of ``genome_size`` bp that every existing caller expects, so this parameter
         is purely additive. The splice-graph matrix needs it: region and boundary ids must stay
         contiguous per reference, and no boundary may cross references.
+    unknown : dict[str, list[tuple[int, int]]] | None
+        ``N`` written over these ``[start, end)`` runs (:func:`write_fasta`), which the index then masks as
+        unobservable. ``None`` writes known sequence everywhere.
 
     Returns
     -------
@@ -100,7 +105,7 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx", r
     gtf_path = base / "test.gtf"
     gtf_path.write_text(gtf_text)
 
-    fasta_path = write_fasta(base / "genome.fa", refs or {"chr1": genome_size})
+    fasta_path = write_fasta(base / "genome.fa", refs or {"chr1": genome_size}, unknown)
 
     idx_dir = base / "index"
     TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)

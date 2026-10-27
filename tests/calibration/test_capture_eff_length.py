@@ -811,3 +811,116 @@ def test_rna_captured_fraction_is_zero_with_no_landscape_or_no_enrichment(multie
         )
         == 0.0
     )
+
+
+# --- the observable genome: a template's length is over the starts the mask leaves -----------------------------
+
+# a spliced transcript with N inside its first exon and over its last exon's last 10 bases, its gene's nascent span N
+# inside the intron too, and a single-exon transcript N end to end
+_MASKED_GTF = (
+    'chr1\ttest\texon\t1001\t1500\t.\t+\t.\tgene_id "gm"; transcript_id "tm";\n'
+    'chr1\ttest\texon\t3001\t3600\t.\t+\t.\tgene_id "gm"; transcript_id "tm";\n'
+    'chr1\ttest\texon\t4001\t4300\t.\t+\t.\tgene_id "gz"; transcript_id "tz";\n'
+)
+_MASKED_RUNS = {"chr1": [(1200, 1230), (2000, 2100), (3590, 3600), (4000, 4300)]}
+
+
+@pytest.fixture(scope="module")
+def masked_index(tmp_path_factory):
+    return build_test_index(
+        tmp_path_factory, _MASKED_GTF, genome_size=6000, name="masked", unknown=_MASKED_RUNS
+    )
+
+
+def _observable_starts(idx, t: int, pmf=PMF) -> float:
+    """Brute force: every start of every length along template ``t``'s exons, walked through the exon structure into
+    genomic bases and refused if its fragment touches a masked base, weighed by the pmf."""
+    row = idx.t_df.iloc[t]
+    exons = (
+        np.array([[int(row["start"]), int(row["end"])]])
+        if bool(row["is_synthetic"])
+        else idx.get_exon_intervals(t)
+    )
+    genomic = np.concatenate([np.arange(a, b) for a, b in exons])
+    masked = np.zeros(genomic.size, dtype=bool)
+    for a, b in _MASKED_RUNS["chr1"]:
+        masked |= (genomic >= a) & (genomic < b)
+    touched = np.concatenate([[0], np.cumsum(masked)])
+    total = 0.0
+    for w in range(1, min(genomic.size, pmf.size - 1) + 1):
+        s = np.arange(genomic.size - w + 1)
+        total += pmf[w] * np.count_nonzero(touched[s + w] == touched[s])
+    return total
+
+
+def test_the_fixture_masks_what_it_says(masked_index):
+    """Every template holds masked bases, the single-exon one end to end; the spliced transcript's nascent span is
+    there to be read."""
+    idx = masked_index
+    assert idx.t_df["is_synthetic"].sum() == 1
+    assert len(idx.unobservable_df) == len(_MASKED_RUNS["chr1"])
+
+
+def test_a_templates_length_counts_only_the_starts_the_mask_leaves(masked_index):
+    """THE GATE, through the pipeline's own geometry step: each template's effective length is the pmf-weighted count
+    of its starts whose fragment touches no masked base, and one wholly masked keeps today's floor of one base (a
+    transcript shorter than every fragment does too)."""
+    from rigel.config import EMConfig
+    from rigel.frag_length_model import FragmentLengthModel
+    from rigel.pipeline import _setup_geometry_and_estimator
+
+    idx = masked_index
+    ra = RegionArrays.from_index(idx)
+    fl = FragmentLengthModel.from_pmf(PMF)
+    est = _setup_geometry_and_estimator(
+        idx, fl, EMConfig(), _cal(ra, np.ones(ra.n_regions), None), ra, _one_law(PMF)
+    )
+    for t in range(len(idx.t_df)):
+        assert est.effective_lengths[t] == pytest.approx(
+            max(_observable_starts(idx, t), 1.0), rel=1e-12
+        ), idx.t_df["t_id"].iat[t]
+    tz = _tidx(idx, "tz")
+    assert _observable_starts(idx, tz) == 0.0 and est.effective_lengths[tz] == 1.0
+    # the EM's yield too, before the estimator's own floor on its output: no landscape hands it over verbatim
+    from rigel.calibration.capture_eff_length import observable_fl_eff_lengths
+
+    assert observable_fl_eff_lengths(idx, ra, fl)[tz] == 1.0
+
+
+def test_a_masked_templates_shares_partition_its_observable_starts(masked_index):
+    """Σ contained + Σ cut shares over a template's objects is its observable start count: no piece holds a masked
+    base and no cut joins two pieces a masked base separates, so a fragment across the mask deposits nowhere."""
+    idx = masked_index
+    obj = transcript_objects(idx, RegionArrays.from_index(idx), PMF)
+    total = np.zeros(len(idx.t_df))
+    np.add.at(total, obj.t, obj.contained)
+    np.add.at(total, obj.t[obj.cut_row], obj.cut_share)
+    for t in range(len(idx.t_df)):
+        assert total[t] == pytest.approx(_observable_starts(idx, t), rel=1e-9, abs=1e-12), idx.t_df[
+            "t_id"
+        ].iat[t]
+
+
+def test_with_nothing_masked_the_lengths_and_shares_are_todays_bit_for_bit(multiexon_index):
+    """The fixed point: an index whose genome holds no unknown base gives every template the closed-form length and
+    the partition's pieces and cuts, to the bit."""
+    from rigel.config import EMConfig
+    from rigel.frag_length_model import FragmentLengthModel
+    from rigel.pipeline import _setup_geometry_and_estimator
+
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    assert len(idx.unobservable_df) == 0
+    fl = FragmentLengthModel.from_pmf(PMF)
+    est = _setup_geometry_and_estimator(
+        idx, fl, EMConfig(), _cal(ra, np.ones(ra.n_regions), None), ra, _one_law(PMF)
+    )
+    lengths = idx.t_df["length"].to_numpy(np.int64)
+    np.testing.assert_array_equal(
+        est.effective_lengths, np.maximum(fl.compute_all_transcript_eff_lens(lengths), 1.0)
+    )
+    obj = transcript_objects(idx, ra, PMF)
+    total = np.zeros(len(idx.t_df))
+    np.add.at(total, obj.t, obj.contained)
+    np.add.at(total, obj.t[obj.cut_row], obj.cut_share)
+    np.testing.assert_allclose(total, _fl(lengths), rtol=1e-12)

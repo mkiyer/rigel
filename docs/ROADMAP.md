@@ -156,7 +156,7 @@ starts at the index.
    Built 2026-10-22, one step at a time: the index records the mask, the second pass and the length law read it, and
    every in-scope row reads its gDNA at 0.96–1.00 of truth; the costs are traced in the entry. Calibration's geometry
    followed 2026-10-26 (the oracle's gdna-field gate passes; off capture a large gain, the capture-ON regression the
-   reader's, recorded). Next, one at a time: the RNA lengths, and the report. Calibration's own count error is the larger half
+   reader's, recorded), and the templates' RNA lengths 2026-10-27 (near-neutral). Next: the report. Calibration's own count error is the larger half
    of the gDNA count's (`ISSUES: the-pooled-q-in-the-gdna-count`, the day's split): unstranded capture-OFF −4.0 %
    net on the ladder, g98 P/O 0.945.
 

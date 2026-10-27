@@ -295,9 +295,20 @@ Calibration's region lengths count bases on which no fragment can be observed.
   capture-ON row of the ladder, the rung and both fl-gap panels (within ±0.3 %): the reader amplifies the supports'
   change (`ISSUES: the-reader-reads-false-gdna-as-capture`). Receipts: `$RIGEL_RUNS/prototypes/2026-10-26_observable_step5/`
   (`BAR.md`, written before the run; `cal_observable.py`; `run_arm.py`; `sweep_score.py`).
-- **Left.** The transcripts' RNA lengths read whole regions until they read the observable genome (step 6), then the
-  report (step 7); the census law's boundary reads went with the coupled law (2026-10-26). The STAR rung needs a store
-  of its own (the GRCh38 store masks only 29 kb beyond N on chr21 and chr22).
+- **Step 6, the templates' RNA lengths** (2026-10-27): a fragment touching a masked base is never observed, so every
+  template's pieces are cut at the mask, no cut joins two pieces a masked base separates, and its fl-marginal length is
+  the sum of its runs', the stretches no masked base interrupts (`capture_eff_length.observable_fl_eff_lengths`); a
+  template the mask does not touch is unchanged to the bit, and one wholly masked keeps the closed form's floor of one
+  base, as one shorter than every fragment does. It touches 20 of the suite index's 6,919 nascent spans and none of
+  its transcripts, and on GRCh38 183 of 254,319 transcripts and 1,500 of 203,052 spans (46 wholly masked). Pinned and
+  fractional against the tree before it: the ladder's transcripts and genes move at most 0.11 %, the moved mass the
+  masked chr22 locus's (18.42–18.50 Mb, its two spans 64 and 77 % masked), whose split with gDNA is near a tie and so
+  depends on the build (156 fragments on the editable build, 1,675 on the wheel); the VCaP mix reads its genes 2.276
+  → 2.277 % from its RNA-only half and gDNA 0.2569 on both; cfRNA genes move 0.001–0.79 %. The simulator already masks
+  every template (`ISSUES: the-simulator-draws-over-unknown-sequence`), so the panels' truth agreed with it before Rigel
+  did. Receipts: `$RIGEL_RUNS/prototypes/2026-10-27_observable_step6/`.
+- **Left.** The report (step 7); the census law's boundary reads went with the coupled law (2026-10-26). The STAR rung
+  needs a store of its own (the GRCh38 store masks only 29 kb beyond N on chr21 and chr22).
 Instruments: `quant_accuracy.py` (the library rows), `calibration_oracle.py --build` (the field gate), the A/B's
 unmasked arm, `$RIGEL_RUNS/prototypes/2026-10-21_mask_ab/` (its config, the runner that switches the mask off and
 re-simulates its two BAMs, deleted 2026-10-22, and its scan and oracle caches), and the dissection's harness,

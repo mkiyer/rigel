@@ -258,7 +258,7 @@ supports, the published lengths and the priors' `S_r`; gDNA's conserved shares a
   rung, efficiencies at 1 beside shipped; the reader's depleted objects off capture back to the unmasked arm's (117
   regions and 5 boundaries below 0.9 now, 63 and 0 unmasked).
 
-**Step 6 — the RNA side before the EM**: every transcript's length over its template's observable pieces
+**Step 6 — the RNA side before the EM** (BUILT 2026-10-27, `ISSUES: region-lengths-count-unobservable-bases`): every transcript's length over its template's observable pieces
 (`pipeline.py:660-672`, `capture_eff_length.py:96-170`); the simulator masks RNA templates at their N too
 (`sampler.py:219-228`).
 - *Test*: a transcript and a synthetic span whose templates hold a masked run take the enumeration of their observable
