@@ -307,8 +307,12 @@ Calibration's region lengths count bases on which no fragment can be observed.
   → 2.277 % from its RNA-only half and gDNA 0.2569 on both; cfRNA genes move 0.001–0.79 %. The simulator already masks
   every template (`ISSUES: the-simulator-draws-over-unknown-sequence`), so the panels' truth agreed with it before Rigel
   did. Receipts: `$RIGEL_RUNS/prototypes/2026-10-27_observable_step6/`.
-- **Left.** The report (step 7); the census law's boundary reads went with the coupled law (2026-10-26). The STAR rung
-  needs a store of its own (the GRCh38 store masks only 29 kb beyond N on chr21 and chr22).
+- **Step 7, the report** (2026-10-27): `summary.json`'s `observable_genome` block (schema 7) carries the index's record
+  of its mask — its rule, the store's read-length bin, the store itself (aligner, bins, fragment model, the references
+  it lacks) or none — and the observable and unobservable bases over the genome and per reference; the global gDNA
+  density already read fragments per observable base of effective length since step 5. No number moves.
+- **Left.** The STAR rung needs a store of its own (the GRCh38 store masks only 29 kb beyond N on chr21 and chr22); the
+  census law's boundary reads went with the coupled law (2026-10-26).
 Instruments: `quant_accuracy.py` (the library rows), `calibration_oracle.py --build` (the field gate), the A/B's
 unmasked arm, `$RIGEL_RUNS/prototypes/2026-10-21_mask_ab/` (its config, the runner that switches the mask off and
 re-simulates its two BAMs, deleted 2026-10-22, and its scan and oracle caches), and the dissection's harness,

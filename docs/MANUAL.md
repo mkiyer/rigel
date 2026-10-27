@@ -348,9 +348,10 @@ records two things:
   over it was placed back, at the store's longest read length — the reference's
   N runs and the repeats an aligner cannot place. No fragment is observed there,
   so wherever Rigel divides a count by the number of places a fragment could
-  have come from, it counts only the places that avoid these bases; read over
-  them, an N-filled region looks like an empty one and drags the library's gDNA
-  estimate down. A reference the store does not hold falls back to its N runs,
+  have come from — gDNA's opportunity and every transcript's effective length —
+  it counts only the places that avoid these bases; read over them, an N-filled
+  region looks like an empty one and drags the library's gDNA estimate down.
+  `summary.json`'s `observable_genome` block reports the mask each run read. A reference the store does not hold falls back to its N runs,
   with a warning. Partial mappability (bases an aligner places only some of the
   time) is not read.
 
@@ -412,7 +413,7 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 | `gene_quant.feather` | Per-gene abundance, summed over each gene's annotated transcripts |
 | `nascent_quant.feather` | Nascent RNA: one row per synthetic span Rigel adds to model a multi-exon transcript's unspliced RNA |
 | `loci.feather` | Per-locus EM summary |
-| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 4) |
+| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 7) |
 | `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
 | `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, count_gdna, count_rna, gdna_density, fraction_gdna)` |
 | `calibration_track.bedgraph` | Per-region gDNA density as a genome-browser track (IGV / UCSC) |
@@ -562,15 +563,16 @@ histograms they are built from.
 Run-level QC manifest. It is a small, human-readable index — the bulky raw
 fragment-length histograms live in the `fragment_lengths.feather` companion
 (see above), not in the JSON. `schema_version` (integer) identifies the layout;
-the current version is **6**. Top-level keys:
+the current version is **7**. Top-level keys:
 
 | Key | Contents |
 |-----|----------|
-| `schema_version` | Manifest schema version (currently `6`) |
+| `schema_version` | Manifest schema version (currently `7`) |
 | `rigel_version`, `timestamp` | Version and run time |
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
+| `observable_genome` | The observable genome the run read: what the index's unobservable mask is and where it came from, and the bases a fragment can and cannot be observed on, over the genome and per reference (see below) |
 | `alignment_stats` | The alignment records: `total_reads`; `mapped_reads`, `unmapped_reads`, `secondary_reads`, `supplementary_reads`, `duplicate_reads`, `qc_fail_reads`, each the records carrying its flag; and `proper_pairs`, the primary records flagged as a proper pair. A `records` sub-block gives each record one status, summing to `total_reads`: `filtered` (unmapped, QC-failed, or a duplicate when duplicates are skipped), `used` (an alignment of a read pair's placement), `unused` (in a placed read pair but in none of its usable alignments: one the pair rule rejected, one that pairs with nothing, a supplementary record) and `unplaced` (in a read pair withheld or excluded by `--no-include-multimap`). An `sj_strand_tag` sub-block counts the spliced records the scan read (secondary and supplementary included) by what their junction-strand tags gave: `tagged` (a strand), `untagged` (none) and `conflicting` (XS and ts disagree, read as ambiguous), with `invalid` the tag values that were neither `+` nor `-`, each read as absent. `nm_tag` and `nh_tag` count the records without the tag (`missing`) and with it held as anything but an integer (`invalid`), each read as absent (`NM` 0, `NH` 1); `nm_tag.conflicting` counts the alignments whose records disagree on `NM`, each read with the largest |
 | `read_pairs` | One outcome per read pair (a read name's records), summing to `total`, decided in this order: `excluded` (every record filtered, as a pair whose mates are both unmapped is); `withheld`, with no usable alignment, by reason: `off_index` when one of its alignments lies on a reference the index does not hold, else `chimeric` when one of its alignments has a mate aligned in pieces, else `unannotated_splice` when one of its alignments is a molecule whose junctions no one annotated transcript holds, else `unpaired`, which `unpaired_by_reason` splits by the furthest check of the pair rule any of its alignments reached (`missing_mate`, `reference`, `strand`, `outward`, `length`); `excluded_by_option` (`--no-include-multimap`: more than one usable alignment); and `placed`, `unique` (one usable alignment) or `multimapping` (more). The report's read-fate bar shows every read pair by outcome |
 | `fragment_stats` | The fragments (the placed read pairs): total, genic and intergenic counts; the annotated SJ count; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_implicit`, `splice_artifact`; a spliced fragment's junctions are always annotated) plus `sj_blacklisted` (blacklisted junctions × records, multimapper records included: the annotated BAM's `ZB` summed), and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found"); `hits_rejected`, the pairings of an R1 alignment with an R2 alignment tried and dropped, by reason (`missing_mate`, `reference`, `strand`, `outward`, `length`: the two mates are not one molecule; `contradictory`, `novel_junction`, `unsupported`: no one annotated transcript overlapping both mates holds the junctions it observes; `off_index`: both mates on one reference the index does not hold; `chimeric`: a mate aligned in pieces); and `nh_above_reported`, the read pairs whose `NH` exceeds the records reported for a mate (a truncated output, whose multiplicity is read from the alignments present) |
@@ -587,7 +589,7 @@ scalars (it is `null` if calibration did not run):
 ```jsonc
 {
   "calibration": {
-    "gdna_density_global":        <float>,       // library-average gDNA density (QC scalar)
+    "gdna_density_global":        <float>,       // library-average gDNA density, per observable base of effective length (QC scalar)
     "gdna_bulk_density":          <float|null>,  // the uncaptured gDNA level capture is read against, gDNA fragments/bp; null = no landscape
     "gdna_capture_saturation":    <float>,       // the saturated gDNA level over that bulk; 1 = nothing above it
     "fraction_rna_sense":         <float>,       // kappa: sense-strand RNA fraction
@@ -620,6 +622,23 @@ a saturation near 10 and lengthen every `em_effective_length` by a few percent.
 from RNA only through the neighbouring regions and the fragment counts, and some of it is read as RNA, most of
 it as nascent RNA, so the gDNA fraction is underestimated. Stranded capture libraries, and unstranded libraries
 without capture, do not share this.
+
+The **`observable_genome`** block is the index's unobservable mask as the run read it (see
+[Mappability](#mappability-and-the-splice-artifact-blacklist)): every count Rigel divides by the places a fragment
+could have come from, gDNA's and every transcript's alike, counts only the places that avoid these bases.
+
+```jsonc
+{
+  "observable_genome": {
+    "rule":               <str>,       // what the mask is: the alignable store's zero set, or the reference's N runs
+    "read_length":        <int|null>,  // the store's read-length bin the mask reads; null without a store
+    "observable_bases":   <int>,       // the genome's bases a fragment can be observed on
+    "unobservable_bases": <int>,       // its masked bases
+    "store":              <obj|null>,  // the store the mask came from: aligner, aligner_version, read_length_bins, frag_len_mean, frag_len_sd, error_rate, references_from_fasta (references it lacks, masked at their N runs); null without one
+    "by_reference":       <obj>        // per reference: observable_bases, unobservable_bases
+  }
+}
+```
 
 The RNA and gDNA fragment-length models calibration reads are
 reported under the top-level **`fragment_length`** key (as

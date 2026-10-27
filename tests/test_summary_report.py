@@ -196,14 +196,14 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     def schema_warnings(run_dir):
         return [w for w in load_substrate(run_dir).warnings if "schema_version" in w]
 
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 6
+    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 7
     assert schema_warnings(out) == []
     bumped = tmp_path / "bumped"
     bumped.mkdir()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
         cli._write_quant_outputs(pr, result.index, bumped, args)
-        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 7
+        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 8
         assert schema_warnings(bumped) == [] and schema_warnings(out) != []
     assert summary["quantification"]["n_gated_out"] == 0  # the default alphas gate nothing
 
@@ -315,6 +315,17 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     listed = re.search(r'"calibration": \{\n(.*?)\n  \}', manual, re.S)
     assert listed, "docs/MANUAL.md lists no summary.json calibration block"
     assert set(re.findall(r'^\s+"(\w+)":', listed.group(1), re.M)) == written
+
+    # The observable genome the run read: the index's record of its mask, every reference's bases, and the MANUAL's
+    # listing of the block, the same set.
+    observable = summary["observable_genome"]
+    assert observable == cli._observable_genome_summary(result.index)
+    assert observable["observable_bases"] + observable["unobservable_bases"] == sum(
+        result.index.ref_lengths.values()
+    )
+    listed = re.search(r'"observable_genome": \{\n(.*?)\n  \}', manual, re.S)
+    assert listed, "docs/MANUAL.md lists no summary.json observable_genome block"
+    assert set(re.findall(r'^    "(\w+)":', listed.group(1), re.M)) == set(observable)
 
     # The EM's two length tables: the decision the pipeline made, as written, and the MANUAL's listing of it.
     tables = summary["length_tables"]

@@ -301,3 +301,61 @@ def test_an_index_without_the_mask_is_refused(tmp_path):
     (out / MANIFEST_JSON).write_text(json.dumps(manifest))
     with pytest.raises(IndexLoadError, match="format_version=10"):
         TranscriptIndex.load(out)
+
+
+# ── what a run reports of it ──────────────────────────────────────────────────────────────────────
+
+
+def _per_reference(index) -> dict[str, dict[str, int]]:
+    """The enumeration: each reference's masked bases, one run at a time, against its length."""
+    df = index.unobservable_df
+    masked = {ref: 0 for ref in index.ref_lengths}
+    for ref, s, e in zip(df["ref"].astype(str), df["start"], df["end"], strict=True):
+        masked[ref] += int(e - s)
+    return {
+        ref: {"observable_bases": int(n) - masked[ref], "unobservable_bases": masked[ref]}
+        for ref, n in index.ref_lengths.items()
+    }
+
+
+def test_a_run_reports_the_mask_without_a_store(tmp_path):
+    """`summary.json`'s observable genome: the index's own record of what the mask is, its bases per reference as an
+    enumeration counts them, and no store."""
+    from rigel import cli
+
+    fasta, gtf = _write_genome(tmp_path)
+    TranscriptIndex.build(fasta, gtf, tmp_path / "idx", write_tsv=False)
+    index = TranscriptIndex.load(tmp_path / "idx")
+    block = cli._observable_genome_summary(index)
+    record = _manifest(tmp_path / "idx")["observable"]
+    assert block["rule"] == record["rule"] and block["read_length"] is None
+    assert block["store"] is None
+    assert block["by_reference"] == _per_reference(index)
+    assert (
+        block["observable_bases"]
+        == record["observable_bases"]
+        == sum(v["observable_bases"] for v in block["by_reference"].values())
+    )
+    assert block["unobservable_bases"] == record["unobservable_bases"]
+
+
+def test_a_run_reports_the_mask_and_its_store(tmp_path, store_build):
+    """With a store, the block names the store the mask was read from: its aligner, the bins and the bin read, the
+    fragment model it tiled, and the references it lacks, masked at their unknown bases."""
+    from rigel import cli
+
+    index = store_build(_store(), tmp_path / "idx")
+    block = cli._observable_genome_summary(index)
+    record = _manifest(tmp_path / "idx")["observable"]
+    assert block["rule"] == record["rule"] and block["read_length"] == 100
+    assert block["store"] == {
+        "aligner": "star",
+        "aligner_version": "2.7.11b",
+        "read_length_bins": [50, 100],
+        "frag_len_mean": 250,
+        "frag_len_sd": 50,
+        "error_rate": 0.01,
+        "references_from_fasta": ["chr3"],
+    }
+    assert block["by_reference"] == _per_reference(index)
+    assert block["unobservable_bases"] == record["unobservable_bases"]

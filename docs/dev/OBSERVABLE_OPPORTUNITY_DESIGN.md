@@ -266,7 +266,7 @@ supports, the published lengths and the priors' `S_r`; gDNA's conserved shares a
 - *Measured*: `quant_accuracy.py`'s nascent pool and transcript table, `ruler_vs_truth.py`; on the ladder one span holds
   N (chr22:18,428,561-18,486,998, 50 kb of 58 kb, whose locus reads 0.936 of its gDNA off capture with the law fixed).
 
-**Step 7 — the report**: `summary.json` carries the observable bases per reference and genome and the mask's sources;
+**Step 7 — the report** (BUILT 2026-10-27): `summary.json` carries the observable bases per reference and genome and the mask's sources;
 `gdna_density_global` reads fragments per observable base; the MANUAL's mappability section says what the store now
 gives. *Measured*: the summary schema's gates; no number moves but the density.
 

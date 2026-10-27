@@ -209,7 +209,7 @@ def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noq
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
 #: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name;
 #: ``length_tables`` is the EM's two length tables and the decision behind them.
-SUMMARY_SCHEMA_VERSION = 6
+SUMMARY_SCHEMA_VERSION = 7
 
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
@@ -237,6 +237,45 @@ _POOL_REPORT_NAMES = (
     "pool_gdna_intergenic_exon",
     "pool_rna_spliced",
 )
+
+
+#: What a store-built index records of the store its unobservable mask was read from (`rigel.observable`).
+_MASK_STORE_KEYS = (
+    "aligner",
+    "aligner_version",
+    "read_length_bins",
+    "frag_len_mean",
+    "frag_len_sd",
+    "error_rate",
+    "references_from_fasta",
+)
+
+
+def _observable_genome_summary(index) -> dict:
+    """The observable genome the run read (`rigel.observable`): the index's record of what its unobservable mask is —
+    ``rule``, and the store's ``read_length`` bin it reads (``None`` without a store) — the observable and unobservable
+    bases over the genome and ``by_reference``, and the ``store`` the mask was read from (``None`` without one, when the
+    mask is the reference's unknown bases)."""
+    from .index import load_manifest
+
+    record = (load_manifest(index.index_dir) or {}).get("observable") or {}
+    df = index.unobservable_df
+    masked = {ref: 0 for ref in index.ref_lengths}
+    if df is not None and len(df):
+        for ref, n in (df["end"] - df["start"]).groupby(df["ref"].astype(str)).sum().items():
+            masked[str(ref)] += int(n)
+    by_reference = {
+        ref: {"observable_bases": int(n) - masked[ref], "unobservable_bases": masked[ref]}
+        for ref, n in index.ref_lengths.items()
+    }
+    return {
+        "rule": record.get("rule"),
+        "read_length": record.get("read_length"),
+        "observable_bases": sum(v["observable_bases"] for v in by_reference.values()),
+        "unobservable_bases": sum(v["unobservable_bases"] for v in by_reference.values()),
+        "store": {k: record[k] for k in _MASK_STORE_KEYS} if "aligner" in record else None,
+        "by_reference": by_reference,
+    }
 
 
 def _length_tables_summary(tables) -> dict | None:
@@ -586,6 +625,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "bam_file": str(Path(args.bam_file).resolve()),
             "index_dir": str(Path(args.index_dir).resolve()),
         },
+        # the observable genome every opportunity of the run was read over: the index's mask and where it came from
+        "observable_genome": _observable_genome_summary(index),
         "alignment_stats": {
             # Records, each counter every record carrying its flag; ``proper_pairs`` the primary records flagged as a
             # proper pair

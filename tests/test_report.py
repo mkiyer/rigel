@@ -52,7 +52,7 @@ from rigel.sim import ReadSimConfig, Scenario
 _HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
 
 #: The ``summary.json`` schema the synthesized substrate mirrors, and the one the real writer must write.
-_SCHEMA = 6
+_SCHEMA = 7
 
 #: The output convention's four pools, as the report names them.
 _POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic gDNA")
