@@ -483,6 +483,69 @@ count (`ISSUES: the-capture-likelihood-leans-toward-rna`), so its A/B reads the 
 `$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`exact_frame_arm.py`, `mf_arm.py`, `capture_response_truth.py`,
 `frame_dump.py`).
 
+THE STRAND FIT AND ITS TABLE, AFTER THREE REVIEW ROUNDS (2026-10-26). The split is one binomial likelihood over
+one-strand-exon × length cells, `π = ½ + (p − ½) σ(a_e + d_b)`. The contrast `d` is centred and smoothed inside the
+likelihood (a first-difference prior, its step at the Laplace evidence maximum). It is flat on equal chemistry, and
+stable where RNA is 2 % of the cells: on a synthetic library its rms error is 0.39 against the unsmoothed fit's 6.1.
+gDNA's table is its exon-frame law from that fit where the cells read gDNA, and the shipped anchor times a random-walk
+tilt where they are blind. Pinned and fractional, Σ genes against today's tree: test gDNA-long −20.2 %, suite
+RNA-short −16.4 %, test RNA-long −0.3 / −0.5 %, suite RNA-long +3.5 %, and the ladder's g00 +0.2 % with no capture gate
+(the unsmoothed fit's table +9.6 %).
+Refused by their own measurements:
+- the fit's law used directly, unsmoothed: suite RNA-short +2,147 %;
+- the census frame `normalize(r e^{−d})`, three forms. Where an origin is absent the contrast is identified only
+  one-sidedly, so the reading puts gDNA's mass in the wrong place. With three readings: RNA-long g98 +81.6 / +172.1 %,
+  suite RNA-short +146.3 %. With a frame factor read only where both origins are measured: RNA-long g98 ss0.70
+  +1,349 %;
+- fixed-strength probability mixing of the two tables as the uncertainty control. On production's tables at RNA-long
+  g98, s = 0.5 gives +22.3 %, and gDNA's table alone at λ = 0.25 gives +55.1 %; at DNA-long g50, s = 0.92 gives +42.5 %.
+  Where one origin is absent it floors the minority's share, or caps it at its own mode.
+
+Instruments: `$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`penalized_fit.py`, `pen_inputs.py`, `sf12_arm.py`,
+`mix_arm.py`).
+
+THE FOUR-ARM A/B AND THE GO/NO-GO (2026-10-27): NO-GO for the native banks. Frozen trees (the tree before and after
+RNA's own-count law), each without and with this frame, the frame at production's own strandedness
+(`StrandModels.strand_specificity` from spliced reads; the cells kept label-free), pinned and fractional. At ss 0.99
+production's strandedness changes nothing that matters: gDNA's exon-frame law is within H² 7·10⁻⁶–6.5·10⁻⁴ of the
+labels' (means within 0.3 bp). Where the frame acts (the shared law's `w > 0`), both changes against the tree before,
+Σ genes / transcripts outside the terminus-cluster genes / |gDNA|: under capture gDNA-long stranded −23.7 / −3.0 /
+−35.0 %, RNA-long stranded −10.2 / −17.4 / −6.5 %; off capture gDNA-long −2.4 / +11.4 / +11.0 %, RNA-long −4.0 /
++11.8 / −12.7 %. The off-capture cost is one mechanism, and it reaches under capture where the minority is scarce: at
+weak strandedness the free exon odds invent the minority origin at exons where it is absent, the invented counts carry
+the majority's length law, and the blend trusts them because their variance is read as Poisson counts'. At gDNA-long
+g05 ss0.70 off capture the fit's gDNA law reads 116 bp against the labels' 259 (H² 0.70) and transcripts cost +85 %;
+RNA-long g05 ss0.70 is the mirror (256 against 113, +64 %); under capture the same rows read H² 0.02–0.04, capture
+enriching gDNA at the probed exons, and gDNA-long g05 ss0.70 still costs +18 % transcripts. At g00, with no gDNA and
+`κ = 0`, the shared law keeps two laws and the frame builds gDNA's table from RNA read as gDNA (+9 % transcripts on
+the equal panel's g00 capture-ON rows, +25 % on RNA-long's). A capture gate would hide it, not fix it: `κ` off capture
+is noise around zero (3·10⁻⁴ at g00), and the weak-strand row under capture keeps its cost. The exon odds integrated
+under a normal prior are worse, not better: the invented RNA at g98 rises from 1.08–1.17× the labels' to 1.17–1.29×,
+since a normal prior on the log-odds cannot hold an exon with no minority and pulls exactly those toward the library's
+level, and gDNA's law moves no nearer the labels'. On equal laws (the second equal panel, depth ×0.1 and ×0.01, five
+mechanism panels, the second seed) the frame is the tree wherever the shared law keeps one law, and moves transcripts
+outside the clusters −0.8 to +1.9 % where it keeps two. At a small real gap, 25 bp either way (two new test-chromosome
+panels, `scenarios_fl_smallgap_gdna25` and `_rna25`), the frame costs transcripts outside the clusters +0.8 to +3.4 %
+per stranded stratum, genes within 0.4 %: the frame error a small gap carries whole.
+Open, in order: the decomposition — gDNA's per-length count at the one-strand exons has an unbiased moment estimator,
+`N_l − (S_l − N_l/2)/(p − ½)` pooled over exons, with an exact binomial variance, so no cell is clipped and a minority
+the cells do not measure carries the variance that says so; gDNA's table `g e^t`, `t` a first-difference walk fitted to
+those counts at their variances, is `g` itself where the cells say nothing and the exon frame where they resolve it;
+then the four arms again, the small-gap panels read first; then the native banks. Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-27_four_arm/` (`cells_observed.py`, `frame_observed.py`, `four_arm.py`),
+`$RIGEL_RUNS/prototypes/2026-10-27_strand_frame/` (`integrated_fit.py`, `compare_fits.py`, `gon_vs_oracle.py`).
+
+THE REGRESSION RNA'S OWN-COUNT LAW EXPOSES (2026-10-26, recorded with `ISSUES: eb-shrinkage-magic-ess`'s RNA half). The
+shrunk RNA table kept 0.45 % of RNA's mass past 300 bp, where the labels hold 0.01 %, and that tail had been paying
+back gDNA's off-target frame at every captured gene. Without it, the gap panel's gDNA-long capture-ON rows regress
+(genes against the tree before it): stranded ss0.99 g05 / g25 / g50 +4.4 / +16.0 / +23.5 %, ss0.70 +6.3 / +9.8 /
++12.1 %; unstranded g05 / g25 / g50 +3.1 / +1.9 / +2.9 %. The g98 rows gain 29–33 %. It is this entry's: the scorer
+alone carries it (calibration +0.2 %, the second pass and the effective-length geometry 0), and it is not
+calibration's count, which under the oracle's still leaves +12.9 % at g50. With this entry's table beside the
+own-count law, gDNA-long ss0.99 ON reads −17.5 / −43.8 / −50.2 % at g05 / g50 / g98. Unstranded capture-ON, deferred,
+has no strand frame and keeps its +2–3 %. Instruments: `$RIGEL_RUNS/prototypes/2026-10-26_length_prior/`
+(`law_arm2.py --gdna-sf12a`).
+
 ### the-capture-likelihood-leans-toward-rna
 `priority: now — 0.8.0, the third of the three (owner, 2026-10-26) · stage: EM · kind: defect · 2026-10-26`
 Under capture the EM leans toward RNA even with a right calibration: with no prior it leaves −35.5k gDNA at
@@ -989,6 +1052,14 @@ capture-OFF identity and a capture-ON row, and re-read the ceiling.
 (j) The capture-efficiencies-at-1 arm that every scan change is read with (`TESTING.md` §0d) is a harness copied
 between arm directories under `$RIGEL_RUNS/arms/` (`run_cond.py`), not an arm of `quant_accuracy.py`, which since
 2026-10-21 scores an aligned input (`--bam`, the ladder's STAR rung) but only as shipped.
+(k) The gdna-field-uniformity gate (`calibration_oracle.py`) z-scores every slot as an independent Poisson draw, but a
+fragment deposits +1 on every boundary it crosses, so the boundaries of a run of regions shorter than a fragment hold
+one draw between them. On the test chromosome nine exon regions of 1–10 bp at one locus (staggered transcript ends)
+put the same 27–29 gDNA fragments on ten boundaries at g50 ss.50 capture OFF, against 13.4 expected at each: one high
+draw flags five slots and fails the row (slot flags 1.54e-3 against the 1e-3 bar). g05 ss.99 fails on one intron slot
+(16 against 42.1, z −4.0; 36 and 34 at ss.50 and ss.70), not yet explained. Seven capture-OFF rows across four of the
+test chromosome's configs certify composition only (the re-cache of 2026-10-26, unchanged by calibration's geometry).
+The fix: z-score a run of slots that share their fragments once, on its total.
 
 ### latent-defects
 `priority: next — 0.8.1; its 0.8.0 user-path items landed 2026-10-14 · stage: several · kind: defect · 2026-09-28`
@@ -1277,6 +1348,58 @@ overstated too: the contrast law's per-length variance, through the deconvolutio
 times its Poisson count's (8–10 % roughness per length on the ladder against about 2 %). Two replacements failed there:
 the raw law is too noisy on a small library, and a linear-scale random walk through it flattens the peak; a log-scale
 smoother at each law's own measured dispersion is the next candidate.
+LANDED FOR RNA (2026-10-26, `DESIGN.md` §3.6, derivation `EQUATIONS.md` §4.5). RNA's law is the spliced pool's own counts
+read as counts (`fl.own_count_law`); the all-fragment law is only what an empty pool returns. It is nearer the labels
+than the shrink on every test-chromosome condition (the g98 gap rows H² 0.006–0.008 against 0.24) and the same on the
+deep ladder. Pinned and fractional, Σ genes against the tree before it, per stratum (stranded OFF / ON, unstranded
+OFF / ON):
+- test equal panel: −0.4 / 0.0 / −0.3 / −0.2 %;
+- RNA-long: −4.9 / −5.2 / −6.3 / −6.0 %;
+- gDNA-long: −5.0 / +0.2 / −4.7 / −2.0 %;
+- the ladder: +0.4 / 0.0 / +0.1 / 0.0 % (no condition beyond 0.73 %);
+- the suite's fl-gap rows: −1.6 % to +0.3 %.
+
+The g98 gap rows gain 25–58 %. The goldens move 20.4 of 18,070 fragments, each moved pool toward the oracle's truth
+(Σ transcript |error| 265.1 → 253.7). Its regression, gDNA-long capture-ON g05–g50, is the shrunk RNA table's tail
+having paid back gDNA's off-target frame, and is recorded against `ISSUES: the-strand-frame-under-the-shared-law`.
+REVIEWED AND CORRECTED (2026-10-27). Two defects, each now a gate: the variance was the deviation's, `law² [H⁻¹]_ll`,
+which carries the level only the pool's total fixes (a one-length law read 0.01, not 0), and is now the normalised
+law's (`EQUATIONS.md` §4.5); and an empty pool's anchor-with-zero-variance read in the length decision as a precise RNA
+law, where it is now no measurement and one law (`DESIGN.md` §3.6b). Neither moves a panel row: the variance changes the
+decision on 0 of 114 rows (RNA's noise is a median 1.6 % of the decision's, gDNA's the rest), no panel pool is near
+empty (the smallest 1,614 spliced fragments), and the goldens are unchanged. Replicate libraries: at an exact null the
+normalised variance predicts the replicates' squared Hellinger error within 0.9–1.7× (the deviation's overstated it
+2.5–4.7×, its level 56–69 % of the prediction), and the evidence sits at the search's lower bound, so RNA's variance
+there is the bound's while the law is the anchor's for any bound (≤ 6·10⁻⁵ across 10⁻¹² to 10⁻⁸). Built laws from
+nested pools, decided as the pipeline decides: equal chemistry under capture is one law at every pool size and a gap
+measured by 1,000 RNA fragments is kept whole; off capture at an exact null the decision keeps two laws in 2–7 % of
+libraries (0–3 % with the deviation's variance, whose level had stood in as a margin). The four-arm A/B on frozen
+trees, pinned and fractional, Σ genes (transcripts outside the test chromosome's twelve terminus-cluster genes, whose
+isoform split the EM's start decides: two runs whose tables agree to 10⁻¹² differ there by 1,585 fragments with genes
+unchanged, `ISSUES: the-em-answer-depends-on-where-it-starts`), stranded OFF / ON, unstranded OFF / ON:
+- the ladder: +0.2 (−0.0) / −0.0 (−0.1) / −0.1 (−0.0) / −0.0 (−0.1) %, all transcripts;
+- the suite's fl-gap rows: genes −1.6 to +0.2 %, transcripts −0.3 to +0.1 %;
+- test equal panel: −0.4 (−0.2) / −0.0 (−0.0) / −0.3 (+0.1) / −0.2 (−0.1) %;
+- test gDNA-long: −5.0 (−0.9) / +0.2 (−1.5) / −4.7 (−1.0) / −2.0 (−1.8) %;
+- test RNA-long: −4.9 (−1.1) / −5.2 (−1.4) / −6.3 (−1.6) / −6.0 (−1.7) %;
+- equal laws at depth ×0.1 and ×0.01, five mechanism panels, the second seed: genes −1.4 to +0.6 %, transcripts −0.5
+  to +0.3 %; at ×0.01 depth gDNA is under-called by about one more point of its truth at g25–g50 (−146 → −202 of 5,850);
+- a 25 bp gap either way (two test-chromosome panels built for the strand frame): genes −0.8 to +0.3 %, transcripts −0.1
+  to +0.3 %.
+
+The worst row stays gDNA-long g50 ss.99 capture-ON: genes +23.5 %, 0.31 points of true RNA (7,671 → 9,472 fragments),
+transcripts +2.8 % outside the clusters (+18.2 % with them); the strand frame beside it reads −44.2 % and −5.0 %.
+Held out, the real libraries: the VCaP mix is unmoved (gDNA 0.2569 against 0.2518, genes 2.28 % from its RNA-only half,
+on both trees); cfRNA-A and cfRNA-C genes move 0.09 % and 0.05 %; cfRNA-B (94 % gDNA) reads RNA's table 268.7 → 280.5 bp
+and moves genes 4.3 %, the minority-RNA regime where the g98 rows gain 25–58 %, unverifiable there.
+Instruments: `$RIGEL_RUNS/prototypes/2026-10-27_four_arm/` (`four_arm.py`, `score_four.py`, `summ_four.py`,
+`real_four.py`), the review's
+checks in `$RIGEL_RUNS/prototypes/2026-10-26_length_prior/review_2026-10-27/`.
+What remains is gDNA's half: the same pull acts on gDNA's law where gDNA is the minority, at g05 under capture on the
+gap panels. gDNA-long reads 246.6–248.2 bp against a uniform-frame truth of 261 (the contrast itself 252–254); RNA-long
+125.9–127.9 against 114 (the contrast 115–118). The contrast is itself noisy there (H² 0.05–0.22 against truth), so
+gDNA's own-count law has to read the two contained pools as counts at their purity weights. Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-26_length_prior/` (`law_arm.py`, `law_arm2.py`, `gdna_offline.py`, `score_ab.py`).
 
 ### intron-seeds-near-probes-are-capture-enriched
 `priority: later — Tier 2, the od research tail; answered before any purity weight or background repair that treats intron regions as off target · stage: calibration · kind: question · 2026-09-28`

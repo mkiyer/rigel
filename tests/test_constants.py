@@ -49,6 +49,11 @@ BROKEN = {
     },
     "fragment_length": {
         "pool_prior_ess": -1.0,
+        "law_step_min": 0.0,
+        "law_step_max": CONSTANTS.fragment_length.law_step_min,
+        "law_step_tolerance": 0.0,
+        "law_newton_steps": 0,
+        "law_newton_tolerance": 0.0,
     },
     "scoring": {"strand_probability_floor": 0.5, "pruning_floor": 0.0},
     "qc": {

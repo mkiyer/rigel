@@ -5,8 +5,13 @@ strong the capture, because a captured census of gDNA's law sits inside the boun
 partly shrunk; capture only lengthens, so an RNA census no longer than gDNA's law moves nothing; the mixture stays
 within RNA's captured fraction and more capture never widens what is left; the bound is the worst case over every
 capture response that rewards length at most proportionally, and only over those; the weight and the mixture are
-continuous in every input; with no capture each origin keeps its own law; and the geometric path is exact at both
-ends.
+continuous in every input; with no capture each origin keeps its own law; an RNA law no spliced fragment measured is
+one law; and the geometric path is exact at both ends. On laws BUILT from nested pools and handed over as the pipeline
+hands them, equal chemistry under capture is one law at every RNA pool size, a gap the spliced fragments measure is
+kept whole, and RNA with no spliced fragment is one law.
+
+PERTURBATION (`TRAPS: perturb-every-gate`): the no-measurement branch deleted, that branch keeping gDNA's own law, and
+the pipeline reading every RNA law as measured each fire at least one gate.
 """
 
 from __future__ import annotations
@@ -46,7 +51,7 @@ G = _law(225.0, 82.0)
 
 
 def _tables(r, g, kappa, var_r=ZERO, var_g=ZERO):
-    return shared_length_law(r, g, var_r, var_g, kappa)
+    return shared_length_law(r, g, var_r, var_g, kappa, rna_measured=True)
 
 
 # ── one law where capture explains the difference ──────────────────────────────────────────────────────
@@ -274,6 +279,90 @@ def test_the_geometric_path_is_exact_at_both_ends_and_a_law_between():
     assert np.all(mid[(r > 0) | (g > 0)] > 0.0)
     expected = np.sqrt(r * g)
     np.testing.assert_allclose(mid, expected / expected.sum(), rtol=1e-12, atol=1e-300)
+
+
+def test_an_rna_law_no_spliced_fragment_measured_shows_no_difference():
+    """An empty spliced pool leaves RNA's law at the anchor, a fallback no count measured, and its zero variance is no
+    precision: the decision reads no RNA measurement as no difference and keeps one law, however far the anchor sits
+    from gDNA's law, capture or none."""
+    g, anchor = _law(200.0, 70.0), _law(260.0, 80.0)
+    for kappa in (0.0, 0.7):
+        t = shared_length_law(anchor, g, ZERO, ZERO, kappa, rna_measured=False)
+        d = t.decision
+        assert d.weight == 0.0 and d.contrast == 0.0 and d.captured == 0.0 and d.noise == 0.0
+        assert d.kappa == kappa and d.bound == pytest.approx(np.sqrt(capture_bound(g, kappa)))
+        np.testing.assert_array_equal(t.gdna, anchor)
+        np.testing.assert_array_equal(t.rna, anchor)
+        np.testing.assert_array_equal(t.anchor, g)
+
+
+# ── the decision on built laws: pools nested in the anchor as production's are ─────────────────────────────
+
+_BL = np.arange(601, dtype=np.float64)
+_PI = np.clip((_BL - 30.0) / 400.0, 0.0, 1.0)
+
+
+def _built_law(mean: float, sd: float) -> np.ndarray:
+    p = stats.gamma.pdf(_BL, a=(mean / sd) ** 2, scale=sd**2 / mean)
+    p[:20] = 0.0
+    return p / p.sum()
+
+
+def _built_tables(monkeypatch, g_law, r_law, n_rna, kappa, seed, *, spliced=True):
+    """``build_fl_models`` on a payload whose gDNA pool is every gDNA fragment, whose spliced pool is RNA's fragments
+    thinned by their junction-crossing chance (none with ``spliced`` False: RNA all unspliced), and whose anchor is
+    every fragment of both; then the decision exactly as the pipeline hands it over (``pipeline.length_tables``), at
+    a captured fraction ``kappa``."""
+    from types import SimpleNamespace
+
+    import rigel.calibration.capture_eff_length as cel
+    from rigel.calibration.fl import build_fl_models
+    from rigel.pipeline import length_tables
+    from rigel.scan_payload import N_FRAGMENT_POOLS, POOL_DNA_INTERGENIC, POOL_RNA_SPLICED
+
+    rng = np.random.default_rng(seed)
+    g_all = rng.multinomial(400_000, g_law).astype(np.float64)
+    r_all = rng.multinomial(n_rna, r_law).astype(np.float64)
+    pools = np.zeros((N_FRAGMENT_POOLS, _BL.size))
+    pools[POOL_DNA_INTERGENIC] = g_all
+    if spliced:
+        pools[POOL_RNA_SPLICED] = rng.binomial(r_all.astype(np.int64), _PI).astype(np.float64)
+    payload = SimpleNamespace(
+        pool_lengths=pools, deposited_lengths=g_all + r_all, max_length=_BL.size - 1
+    )
+    monkeypatch.setattr(cel, "rna_captured_fraction", lambda calibration, region_arrays: kappa)
+    return length_tables(build_fl_models(payload, sj_opportunity=_PI), None, None)
+
+
+def test_equal_chemistry_under_capture_is_one_law_at_every_rna_pool_size(monkeypatch):
+    """RNA's census gDNA's law captured at half the captured fraction, from an empty spliced pool to a deep one: the
+    built laws' own variances keep it one law in every library."""
+    g = _built_law(225.0, 82.0)
+    for n_rna in (0, 1_000, 10_000, 100_000):
+        for seed in range(6):
+            t = _built_tables(monkeypatch, g, size_biased(g, 0.3), n_rna, 0.6, seed)
+            assert t.decision.weight == 0.0, (n_rna, seed)
+
+
+@pytest.mark.parametrize("kappa", [0.0, 0.6])
+def test_a_real_gap_measured_by_spliced_fragments_is_kept_whole(monkeypatch, kappa):
+    g = _built_law(225.0, 82.0)
+    for r_law in (_built_law(130.0, 50.0), _built_law(300.0, 90.0)):
+        for n_rna in (1_000, 100_000):
+            for seed in range(3):
+                assert (
+                    _built_tables(monkeypatch, g, r_law, n_rna, kappa, seed).decision.weight == 1.0
+                )
+
+
+@pytest.mark.parametrize("kappa", [0.0, 0.6])
+def test_rna_with_no_spliced_fragment_shows_no_length_difference(monkeypatch, kappa):
+    """RNA in the library but none of it spliced: its law is the anchor, which carries unspliced RNA of another length,
+    and nothing measured RNA's own law — so one law, never the anchor read as RNA's census against gDNA's law."""
+    g = _built_law(225.0, 82.0)
+    t = _built_tables(monkeypatch, g, _built_law(130.0, 50.0), 200_000, kappa, 0, spliced=False)
+    assert t.decision.weight == 0.0
+    np.testing.assert_array_equal(t.gdna, t.rna)
 
 
 def test_the_decision_reports_what_it_read():

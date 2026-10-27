@@ -67,7 +67,7 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   oracle_ruler` and `--arm oracle`, `ISSUES: the-capture-length-owns-stranded-capture-on`.
 - **Fragment lengths**: the EM's two length tables are one shared law unless the data show a difference capture
   cannot make (`DESIGN.md` §3.6b, landed 2026-10-26): every gap row kept whole and every full-depth equal-chemistry row
-  one law, stranded × capture-ON genes −4.6 %, the deferred unstranded × capture-ON −6.8 % with its pools at the
+  under capture one law, stranded × capture-ON genes −4.6 %, the deferred unstranded × capture-ON −6.8 % with its pools at the
   previous scorer's, measured pinned and fractional against the previous scorer —
   `$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`prod_arm.py`, `score.py`), `quant_accuracy.py` per stratum; the
   coupled gDNA law was deleted 2026-10-26 with its gDNA-long regression recorded, and the frame correction that
@@ -80,7 +80,11 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   keeps every gap row's difference whole (suite RNA-long and RNA-short, test gDNA-long and RNA-long, capture on); the
   stranded gap rows keep less than a strand frame would (`ISSUES: the-strand-frame-under-the-shared-law`), and the RNA-long
   rows at g05 credit capture with as much of the gap as capture could make (+8 % genes) — `quant_accuracy.py` on both gap
-  panels beside the equal-length ladder, `ISSUES: the-deferred-rna-long-regression-after-factory-removal`.
+  panels beside the equal-length ladder, `ISSUES: the-deferred-rna-long-regression-after-factory-removal`. RNA's length
+  law is its own counts' since 2026-10-26 (`DESIGN.md` §3.6; its variance and empty-pool reading corrected 2026-10-27),
+  flat on the ladder, and the gDNA-long capture-ON rows regress until the strand frame lands; the frame's prototype
+  recovers them under capture and fails at weak strandedness where one origin is scarce, so its native build waits
+  (`ISSUES: the-strand-frame-under-the-shared-law`, the four-arm A/B).
 - **Strand model**: od = 0 by policy (`DESIGN.md` §3.3a) and κ from the genuine junctions (§3.3b), both landed
   2026-10-01 after their VCaP A/Bs; `summary.json` reports the junction fit behind κ (landed 2026-10-14) —
   `ISSUES: strand-overdispersion-one-shared-value`; the splice-artifact pruning the fit points at is the strand prong
@@ -122,10 +126,10 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   capture has no memory bound, so one real-genome job runs at a time (`ISSUES: debug-capture-memory-is-unbounded`).
 - **Panels**: the 16-condition ladder and both fl-gap side panels were wiped and re-simulated on 2026-10-21 on the fair
   simulator (no fragment over an `N` run, errors at 0.002 per base with NM, rounded lengths), cached and certified, one
-  realization per condition (the gDNA capture-OFF rows certify composition only: their field gate reads the region
-  lengths' unknown bases), and the ladder aligned by rustar for its STAR rung; the test chromosome and the
-  junction-probed twin, which hold no `N`, are cached and certified as before — `panel.py status`, `docs/TESTING.md`,
-  `ISSUES: expand-the-gdna-spectrum`.
+  realization per condition, every row of the three panels field-certified since calibration's geometry read the
+  observable genome (2026-10-26), and the ladder aligned by rustar for its STAR rung; the test chromosome and the
+  junction-probed twin, which hold no `N`, are cached and certified, seven capture-OFF rows composition only
+  (`ISSUES: instrument-ledger` (k)) — `panel.py status`, `docs/TESTING.md`, `ISSUES: expand-the-gdna-spectrum`.
 - **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae` / Σ|err| over every
   object with mass (`calibration_vs_oracle.py`), never an intermediate (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
@@ -187,7 +191,10 @@ starts at the index.
     recover the coupling deletion's recorded gDNA-long regression; then
     `ISSUES: the-capture-likelihood-leans-toward-rna`, read beside it. The shared length law landed 2026-10-26
     (`DESIGN.md` §3.6b), closing `ISSUES: the-scorer-reads-a-census-length-law`, and the coupled gDNA law was deleted
-    the same day (`ISSUES: the-coupled-gdna-law`).
+    the same day (`ISSUES: the-coupled-gdna-law`). RNA's own-count length law landed after them (`DESIGN.md` §3.6;
+    `ISSUES: eb-shrinkage-magic-ess` keeps gDNA's half), and the strand frame recovers its gDNA-long regression under
+    capture; the frame's native build waits for an unbiased decomposition at weak strandedness (the four-arm A/B,
+    2026-10-27).
 11. `ISSUES: merge-keeps-least-overhang`.
 12. `ISSUES: the-gdna-term-is-a-mean-over-places`, with `ISSUES: mismatch-gate-nan-in-multimapper-gdna` and the scorer
     half of `ISSUES: multimapper-intergenic-alignments`.

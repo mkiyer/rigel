@@ -1,18 +1,24 @@
-"""gDNA / RNA fragment-length laws: the pools, the smooth-EB build, the gDNA law's two-pool contrast, and each law's
-sampling variance.
+"""gDNA / RNA fragment-length laws: the pools, RNA's own-count law, gDNA's smooth-EB build and two-pool contrast, and
+each law's sampling variance.
 
 The pools are defined by structure and none is pure: only the RNA pool is certified, since gDNA
 cannot splice, while RNA inside introns and unannotated transcription reach the gDNA pools too. The
-partition gates hold the pool accessors exhaustive and disjoint, the build gates hold that a sparse
-pool shrinks smoothly toward the global anchor with no threshold anywhere, and the accessor gates
-hold the raw empirical views the QC report reads. ``gdna_pmf`` is the UNIFORM-FRAME law the chemistry
-makes and the opportunity and prior mathematics assume: the contrast's alone. Each component pmf
-carries its per-length sampling variance — its raw law's plug-in variance at its empirical-Bayes weight
-squared — which the EM's two length tables read to tell a difference from noise
+partition gates hold the pool accessors exhaustive and disjoint. RNA's gates hold that its law is its own counts',
+read as counts at their junction-crossing chance: a small pool is not pulled toward the majority's law, a length the
+pool could reach and did not is evidence, an unreachable one is not, and an empty pool is the global anchor exactly.
+gDNA's build gates hold that a sparse pool shrinks smoothly toward the global anchor with no threshold anywhere, and
+the accessor gates hold the raw empirical views the QC report reads. ``gdna_pmf`` is the UNIFORM-FRAME law the
+chemistry makes and the opportunity and prior mathematics assume: the contrast's alone. Each component pmf carries
+its per-length sampling variance (RNA's its posterior's, gDNA's its raw law's plug-in at its empirical-Bayes weight
+squared), which the EM's two length tables read to tell a difference from noise
 (``tests/calibration/test_shared_length_law.py``).
 
 PERTURBATION (`TRAPS: perturb-every-gate`): dropping the variance's EB weight, reading a de-tilted law's own counts
-as its evidence, or giving an empty length a variance each fire their own gate.
+as its evidence, or giving an empty length a variance each fire their own gate. For RNA's law, each of these fires
+at least one gate: reading an unreached length as no evidence, dropping the selection, a pseudo-count toward the
+anchor, no variance, an empty pool other than the anchor, reading an unreachable length as reached, the builder
+handing over de-tilted counts, the deviation's variance in place of the normalised law's, the normalisation's sign
+flipped, and the Cholesky factor's band misaligned.
 """
 
 from __future__ import annotations
@@ -190,9 +196,9 @@ def test_build_fl_just_below_5000_is_not_a_cliff():
 
 def test_build_fl_stores_raw_aligned_counts():
     """Raw (unsmoothed) counts are stored aligned to max_size, totals = n_*."""
-    glob = _spike(100, 500.0)
     rna = _spike(200, 300.0)
     gdna = _spike(300, 40.0)
+    glob = _spike(100, 160.0) + rna + gdna  # every pool count is a deposited fragment
     fl = _fl_models_from_histograms(
         global_counts=glob, rna_counts=rna, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
     )
@@ -225,7 +231,7 @@ def test_build_fl_counts_overflow_folds_into_last_bin():
 def test_accessors_return_empirical_models():
     """rna_model()/gdna_model()/global_model() expose the raw empirical FL."""
     fl = _fl_models_from_histograms(
-        global_counts=_spike(100, 500.0),
+        global_counts=_spike(100, 500.0) + _spike(200, 300.0) + _spike(325, 40.0),
         rna_counts=_spike(200, 300.0),
         gdna_counts=_spike(325, 40.0),
         max_size=1000,
@@ -261,20 +267,18 @@ def _models(**kw):
 # ── the field exists and is never None: the scorer must be able to read it unconditionally ───────
 
 
-def test_each_pmf_carries_its_raw_laws_variance_at_its_eb_weight_squared():
+def test_gdnas_pmf_carries_its_raw_laws_variance_at_its_eb_weight_squared():
     """``Var(pmf_l) = (n / (n + prior_ess))² · law_l² / count_l``: a length's relative variance is one over its
     count, and the EB step shrinks the variance with the law."""
     m = _models()
-    for counts, var, n in (
-        (m.rna_counts, m.rna_pmf_var, m.n_rna),
-        (m.gdna_counts, m.gdna_pmf_var, m.n_gdna),
-    ):
-        law = counts / counts.sum()
-        weight = n / (n + 1000.0)
-        np.testing.assert_allclose(var, weight * weight * law * law / counts, rtol=1e-12)
+    law = m.gdna_counts / m.gdna_counts.sum()
+    weight = m.n_gdna / (m.n_gdna + 1000.0)
+    np.testing.assert_allclose(
+        m.gdna_pmf_var, weight * weight * law * law / m.gdna_counts, rtol=1e-12
+    )
 
 
-def test_a_length_with_no_count_carries_no_variance():
+def test_a_gdna_length_with_no_count_carries_no_variance():
     counts = np.zeros(101)
     counts[[20, 40, 60]] = (5.0, 50.0, 500.0)
     m = _fl_models_from_histograms(
@@ -284,8 +288,8 @@ def test_a_length_with_no_count_carries_no_variance():
         max_size=100,
         prior_ess=0.0,
     )
-    assert np.count_nonzero(m.rna_pmf_var) == 3
-    np.testing.assert_array_equal(m.rna_pmf_var == 0.0, counts == 0.0)
+    assert np.count_nonzero(m.gdna_pmf_var) == 3
+    np.testing.assert_array_equal(m.gdna_pmf_var == 0.0, counts == 0.0)
 
 
 def test_more_evidence_carries_proportionally_less_variance():
@@ -301,26 +305,24 @@ def test_more_evidence_carries_proportionally_less_variance():
         max_size=100,
         prior_ess=0.0,
     )
-    np.testing.assert_allclose(ten.rna_pmf_var, one.rna_pmf_var / 10.0, rtol=1e-12)
     np.testing.assert_allclose(ten.gdna_pmf_var, one.gdna_pmf_var / 10.0, rtol=1e-12)
+    # RNA's is its posterior's: more evidence, less variance at every length its law holds
+    on = one.rna_pmf > 1e-4
+    assert np.all(ten.rna_pmf_var[on] < one.rna_pmf_var[on])
 
 
-def test_an_estimators_own_variance_is_carried_at_its_eb_weight():
+def test_the_contrasts_own_variance_is_carried_at_its_eb_weight():
     rng = np.random.default_rng(4)
     supplied = rng.random(101) * 1e-6
-    m = _models(rna_var=supplied, gdna_var=2.0 * supplied)
-    for var, own, n in (
-        (m.rna_pmf_var, supplied, m.n_rna),
-        (m.gdna_pmf_var, 2.0 * supplied, m.n_gdna),
-    ):
-        weight = n / (n + 1000.0)
-        np.testing.assert_allclose(var, weight * weight * own, rtol=1e-12)
+    m = _models(gdna_var=supplied)
+    weight = m.n_gdna / (m.n_gdna + 1000.0)
+    np.testing.assert_allclose(m.gdna_pmf_var, weight * weight * supplied, rtol=1e-12)
 
 
-def test_de_tilting_adds_no_evidence_to_the_rna_laws_variance():
-    """The RNA law is the spliced pool divided by its sj opportunity, which rescales a length and adds no evidence:
-    its relative variance stays one over the RAW count."""
-    from rigel.calibration.fl import build_fl_models
+def test_de_tilting_adds_no_evidence_to_the_rna_law():
+    """The builder reads the spliced pool's RAW counts at their sj opportunity: de-tilting rescales a length and adds
+    no evidence, so the law and its variance are the own-count law of the raw counts, never of the de-tilted ones."""
+    from rigel.calibration.fl import build_fl_models, own_count_law
 
     rng = np.random.default_rng(8)
     pools = np.zeros((N_FRAGMENT_POOLS, 101))
@@ -330,12 +332,197 @@ def test_de_tilting_adds_no_evidence_to_the_rna_laws_variance():
     payload = SimpleNamespace(pool_lengths=pools, deposited_lengths=pools.sum(0), max_length=100)
     pi = np.linspace(0.0, 1.0, 101)
     m = build_fl_models(payload, sj_opportunity=pi, prior_ess=0.0)
-    raw = pools[POOL_RNA_SPLICED]
-    law = np.divide(raw, pi, out=np.zeros(101), where=pi > 0)
-    law /= law.sum()
-    np.testing.assert_allclose(
-        m.rna_pmf_var, np.divide(law * law, raw, out=np.zeros(101), where=raw > 0), rtol=1e-12
+    law, var, _ = own_count_law(pools[POOL_RNA_SPLICED], pi, m.global_pmf)
+    np.testing.assert_array_equal(m.rna_pmf, law)
+    np.testing.assert_array_equal(m.rna_pmf_var, var)
+
+
+# ── RNA's law from its own counts, read as counts ─────────────────────────────────────────────────────────────
+
+_L = np.arange(501, dtype=np.float64)
+
+
+def _gauss(mu: float, sd: float, lo: int = 50) -> np.ndarray:
+    p = np.exp(-0.5 * ((_L - mu) / sd) ** 2)
+    p[:lo] = 0.0
+    return p / p.sum()
+
+
+def _rna_payload(n_rna: int, seed: int = 20261026, *, anchor_from: int = 50):
+    """A 98 %-gDNA library: the all-fragment law is mostly gDNA's N(250, 150), RNA's own is N(100, 50), and the
+    spliced pool is RNA's law drawn through a junction-crossing chance that rises with length and is zero below 30 bp."""
+    rng = np.random.default_rng(seed)
+    truth = _gauss(100.0, 50.0)
+    anchor = 0.98 * _gauss(250.0, 150.0, anchor_from) + 0.02 * truth
+    pi = np.clip((_L - 30.0) / 400.0, 0.0, 1.0)
+    pools = np.zeros((N_FRAGMENT_POOLS, 501))
+    if n_rna:
+        pools[POOL_RNA_SPLICED] = rng.multinomial(n_rna, (truth * pi) / (truth * pi).sum())
+    pools[POOL_DNA_INTERGENIC] = np.round(anchor * 1e6)
+    payload = SimpleNamespace(
+        pool_lengths=pools, deposited_lengths=np.round(anchor * 5e6), max_length=500
     )
+    return payload, pi, truth
+
+
+def _h2(a: np.ndarray, b: np.ndarray) -> float:
+    return float(((np.sqrt(a / a.sum()) - np.sqrt(b / b.sum())) ** 2).sum())
+
+
+def test_a_small_rna_pool_reads_its_own_law_not_the_all_fragment_one():
+    """2,000 spliced fragments in a 98 %-gDNA library: RNA's law is its own counts', not gDNA's shape at a weight no
+    measurement supplied (`ISSUES: eb-shrinkage-magic-ess`: the shrink read 175.6 bp against a census of 123.6)."""
+    from rigel.calibration.fl import build_fl_models
+
+    payload, pi, truth = _rna_payload(2_000)
+    m = build_fl_models(payload, sj_opportunity=pi)
+    assert abs(m.rna_pmf @ _L - truth @ _L) < 3.0
+    assert _h2(m.rna_pmf, truth) < 0.02
+
+
+def test_an_empty_rna_pool_is_the_all_fragment_law_exactly():
+    from rigel.calibration.fl import build_fl_models
+
+    payload, pi, _ = _rna_payload(0)
+    m = build_fl_models(payload, sj_opportunity=pi)
+    np.testing.assert_array_equal(m.rna_pmf, m.global_pmf)
+
+
+def test_a_deep_rna_pool_is_its_own_law():
+    from rigel.calibration.fl import build_fl_models
+
+    payload, pi, truth = _rna_payload(2_000_000)
+    m = build_fl_models(payload, sj_opportunity=pi)
+    assert _h2(m.rna_pmf, truth) < 1e-3
+
+
+def test_a_length_the_pool_could_reach_and_did_not_is_evidence():
+    """Past RNA's support the pool reached every length (its crossing chance is high there) and drew nothing, so the law
+    is low there. The all-fragment law's long tail is gDNA's and says nothing about RNA."""
+    from rigel.calibration.fl import build_fl_models
+
+    payload, pi, truth = _rna_payload(2_000)
+    m = build_fl_models(payload, sj_opportunity=pi)
+    assert m.rna_pmf[300:].sum() < 10.0 * truth[300:].sum() + 1e-3
+
+
+def test_where_the_pool_cannot_reach_the_law_keeps_the_anchors_shape():
+    """A length no spliced fragment can have (crossing chance zero) carries no evidence: the law there is the
+    all-fragment law's shape, held at one ratio."""
+    from rigel.calibration.fl import build_fl_models
+
+    payload, pi, _ = _rna_payload(2_000, anchor_from=10)
+    m = build_fl_models(payload, sj_opportunity=pi)
+    dark = (pi == 0.0) & (m.global_pmf > 0.0)
+    assert dark.sum() >= 10
+    ratio = m.rna_pmf[dark] / m.global_pmf[dark]
+    np.testing.assert_allclose(ratio, ratio[0], rtol=1e-9)
+
+
+def test_a_one_length_law_is_certain():
+    """Normalised, a law of one length holds probability one whatever its count: no variance. The deviation's level,
+    which only the pool's total fixes, is not a property of the law and must not reach its variance."""
+    from rigel.calibration.fl import own_count_law
+
+    law, var, _ = own_count_law(np.array([100.0]), np.array([1.0]), np.array([1.0]))
+    np.testing.assert_array_equal(law, [1.0])
+    np.testing.assert_array_equal(var, [0.0])
+
+
+def test_a_two_length_laws_two_variances_are_equal():
+    """``f_1 + f_2 = 1``, so ``Var f_1 = Var f_2``: the normalised law's variances, not the deviation's."""
+    from rigel.calibration.fl import own_count_law
+
+    _law, var, _ = own_count_law(np.array([30.0, 70.0]), None, np.array([0.5, 0.5]))
+    assert var[0] > 0.0
+    assert var[0] == pytest.approx(var[1], rel=1e-12)
+
+
+def test_the_rna_laws_variance_is_its_normalised_delta_method():
+    """Brute force: the posterior's Hessian rebuilt densely at the returned mode, ``H = diag(mu) + K / step`` with ``K``
+    the path's first-difference precision and ``mu`` the fitted Poisson means (at the mode they sum to the pool's
+    total, since the walk's penalty has no level), its inverse pushed through the normalisation's Jacobian
+    ``J = diag(f) - f f'``: the reported variance is ``diag(J H^-1 J')`` at every length, over a window holding an
+    unreachable length and an empty one, and zero outside the window."""
+    from rigel.calibration.fl import own_count_law
+
+    raw = np.array([0, 0, 4, 9, 0, 15, 22, 18, 11, 6, 2, 1, 0, 0], dtype=np.float64)
+    reach = np.array([1, 1, 0.0, 0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1, 1, 1, 1], dtype=np.float64)
+    reach[2] = 0.0
+    raw[2] = 0.0
+    anchor = np.array([0, 0.02, 0.05, 0.08, 0.1, 0.12, 0.14, 0.13, 0.11, 0.09, 0.07, 0.05, 0.04, 0])
+    law, var, step = own_count_law(raw, reach, anchor)
+    lo, hi = 1, 13
+    f = law[lo:hi]
+    live = (reach[lo:hi] > 0.0) & (anchor[lo:hi] > 0.0)
+    exposure = np.where(live, reach[lo:hi] * f, 0.0)
+    mu = raw.sum() * exposure / exposure.sum()
+    n = hi - lo
+    walk = 2.0 * np.eye(n) - np.eye(n, k=1) - np.eye(n, k=-1)
+    walk[0, 0] = walk[-1, -1] = 1.0
+    covariance = np.linalg.inv(np.diag(mu) + walk / step)
+    jacobian = np.diag(f) - np.outer(f, f)
+    np.testing.assert_allclose(var[lo:hi], np.diag(jacobian @ covariance @ jacobian.T), rtol=1e-6)
+    assert np.all(var[:lo] == 0.0) and np.all(var[hi:] == 0.0)
+
+
+def test_the_rna_laws_variance_predicts_what_replicate_libraries_show():
+    """Repeated libraries at one law: the Hellinger noise the variance predicts, ``Σ Var f / 4 f``, against the replicate
+    mean of ``H²(f̂, f)`` — what the length decision reads it for. At an exact null (RNA's law the anchor's, so the
+    deviation is flat) the deviation's level variance would be most of the prediction; away from it the posterior
+    stays on the safe side of what replicates show."""
+    from rigel.calibration.fl import own_count_law
+
+    pi = np.clip((_L - 30.0) / 400.0, 0.0, 1.0)
+    rng = np.random.default_rng(20261027)
+    for truth, anchor, bounds in (
+        (_gauss(200.0, 60.0), _gauss(200.0, 60.0), (0.5, 2.0)),
+        (_gauss(100.0, 50.0), 0.98 * _gauss(250.0, 150.0) + 0.02 * _gauss(100.0, 50.0), (0.8, 2.5)),
+    ):
+        draw = truth * pi / (truth * pi).sum()
+        for n in (300, 10_000):
+            seen, predicted = [], []
+            for _ in range(40):
+                law, var, _ = own_count_law(rng.multinomial(n, draw).astype(np.float64), pi, anchor)
+                on = law > 0.0
+                seen.append(float(((np.sqrt(law) - np.sqrt(truth)) ** 2).sum()))
+                predicted.append(float((var[on] / (4.0 * law[on])).sum()))
+            ratio = np.mean(predicted) / np.mean(seen)
+            assert bounds[0] < ratio < bounds[1], (n, ratio)
+
+
+def test_the_crossing_chance_is_an_exposure_up_to_a_constant():
+    from rigel.calibration.fl import build_fl_models
+
+    payload, pi, _ = _rna_payload(2_000)
+    a = build_fl_models(payload, sj_opportunity=pi)
+    b = build_fl_models(payload, sj_opportunity=0.5 * pi)
+    np.testing.assert_allclose(a.rna_pmf, b.rna_pmf, rtol=1e-6, atol=1e-12)
+
+
+def test_the_smoothing_is_read_off_the_data():
+    """The random walk's step is the evidence maximum, inside its search range on an ordinary pool: neither the flat
+    deviation (the anchor's shape) nor no smoothing at all."""
+    from rigel.calibration.fl import own_count_law
+    from rigel.config import CONSTANTS
+
+    payload, pi, _ = _rna_payload(2_000)
+    anchor = np.asarray(payload.deposited_lengths, dtype=np.float64)
+    _pmf, _var, step = own_count_law(
+        np.asarray(payload.pool_lengths)[POOL_RNA_SPLICED], pi, anchor / anchor.sum()
+    )
+    fl = CONSTANTS.fragment_length
+    assert fl.law_step_min * 10.0 < step < fl.law_step_max / 10.0
+
+
+def test_a_pool_count_the_anchor_does_not_hold_is_refused():
+    """The anchor is every deposited fragment and the pool is drawn from it: a pool count at a length the anchor has
+    none at means the two came from different payloads, and the law refuses rather than drop it."""
+    from rigel.calibration.fl import own_count_law
+
+    anchor = _spike(100, 1.0)
+    with pytest.raises(ValueError, match="different payloads"):
+        own_count_law(_spike(200, 5.0), None, anchor)
 
 
 def test_the_contrasts_variance_falls_as_its_evidence_grows():

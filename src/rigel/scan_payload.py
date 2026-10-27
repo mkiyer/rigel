@@ -574,8 +574,8 @@ class AccumulatorPayload:
     #: uint32[max_length + 1] — EVERY deposited fragment, binned at its own L, with no purity condition
     #: (a purity filter is a length filter). The five pools above are deliberately CONDITIONED (an
     #: impure pool is worse than a missing one), so none of them is an unconditional anchor; this bank is
-    #: the unconditional anchor the empirical-Bayes shrinkage in `calibration.fl` shrinks a pool towards,
-    #: measured in the accumulator's own frame.
+    #: the unconditional anchor `calibration.fl` builds the length laws against (gDNA's pool is shrunk toward it,
+    #: and it is the law an empty RNA pool returns), measured in the accumulator's own frame.
     #: "Unconditional GIVEN DEPOSIT": it excludes what the accumulator rejects (too long, ambiguous
     #: path, strand-undefined, empty), each counted in ``qc``. That is exactly the population the pools
     #: are drawn from, which is what makes it the right anchor rather than merely a convenient one.

@@ -709,13 +709,40 @@ class CalibrationConstants:
 class FragmentLengthConstants:
     """The fragment-length laws (``calibration.fl``)."""
 
-    #: Dirichlet pseudo-count of the smooth empirical-Bayes shrink of each pool's length law toward the global
-    #: law. Not a cliff: a pool total far above it gives the empirical law, far below it the global anchor, and
-    #: 0 the anchor exactly. ⚠ Not derived; weighting the pools by their own precision would replace it.
+    #: Dirichlet pseudo-count of the smooth empirical-Bayes shrink of gDNA's pool law toward the global law. Not a
+    #: cliff: a pool total far above it gives the empirical law, far below it the global anchor, and 0 the anchor
+    #: exactly. ⚠ Not derived. RNA's law no longer uses it: it is read from its own counts
+    #: (``calibration.fl.own_count_law``), which is what replaces it for gDNA too.
     pool_prior_ess: float = 1000.0
 
+    #: The own-count law smooths its deviation from the all-fragment law by a random walk whose step variance (per
+    #: base, on the log scale) is the evidence maximum between these two bounds. The lower is a deviation flat across
+    #: any pool's range (a standard deviation of 2e-4 over 500 bp: the anchor's own shape), the upper no smoothing
+    #: at all (10 per base), so the two limits are bracketed and the maximum lies between them.
+    law_step_min: float = 1e-10
+    law_step_max: float = 1e2
+
+    #: The evidence search stops when its bracket on the log step is this narrow: the evidence is flat at its maximum,
+    #: and a thousandth in the log step moves no law measurably.
+    law_step_tolerance: float = 1e-3
+
+    #: Newton's method on the deviation takes at most this many steps (a termination bound; the objective is convex
+    #: with a tridiagonal Hessian and converges in tens) ...
+    law_newton_steps: int = 200
+
+    #: ... and stops when a step changes the penalised objective by less than this share of it.
+    law_newton_tolerance: float = 1e-12
+
     def __post_init__(self) -> None:
-        _check_ranges(self, pool_prior_ess=self.pool_prior_ess >= 0.0)
+        _check_ranges(
+            self,
+            pool_prior_ess=self.pool_prior_ess >= 0.0,
+            law_step_min=self.law_step_min > 0.0,
+            law_step_max=self.law_step_max > self.law_step_min,
+            law_step_tolerance=self.law_step_tolerance > 0.0,
+            law_newton_steps=self.law_newton_steps >= 1,
+            law_newton_tolerance=0.0 < self.law_newton_tolerance < 1.0,
+        )
 
 
 @dataclass(frozen=True)

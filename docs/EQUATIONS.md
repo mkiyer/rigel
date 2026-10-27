@@ -642,6 +642,35 @@ weight. ⛔ It is not the same as pooling the four histograms and applying one d
 uniformly over its template. Under hybrid capture gDNA is not: placement is proportional to a capture
 landscape the tool cannot see. That residual is a placement model, not a better divisor.
 
+**4.5 RNA's law from its own counts** (`fl.own_count_law`). The sj pool's raw count at length `l` is Poisson,
+
+    c(l) ~ Poisson(N π(l) law(l)),     law(l) = m(l) e^{d(l)} / Σ_u m(u) e^{d(u)},
+
+with `π` §4.2's crossing chance (an exposure: it enters only up to a constant, which `d`'s level absorbs), `m` the
+all-fragment law (`payload.deposited_lengths`), and `d` a first-order random walk over the lengths `m` holds,
+`d(l+1) − d(l) ~ N(0, q)`. The MAP of `d` at a given `q` minimises
+
+    f(d) = Σ_{l: π>0, m>0} [μ(l) − c(l) log μ(l)] + Σ_l (d(l+1) − d(l))² / 2q,    μ(l) = N π(l) m(l) e^{d(l)},
+
+which is convex with the tridiagonal Hessian `H = diag(μ) + K/q`, `K` the path's first-difference precision. Newton
+with step halving solves it. `q` is the Laplace evidence maximum,
+
+    log p(c | q) ≈ −f(d̂) + ½ [log n − (n − 1) log q] − ½ log |H|,
+
+with `n` the path's length. `log n` is `K`'s pseudo-determinant, and its constant mode is the likelihood's to fix. A
+length with `π > 0` and no count is evidence (its `μ` is pushed down), a length with `π = 0` is not (`d` there is the
+smoothest path, its neighbour's value), and an empty pool leaves `d = 0`, so the law is `m` itself. `m` never enters as
+counts. The variance is the normalised law's, by the delta method at the fitted `q`: with `J = diag(law) − law lawᵀ`
+the normalisation's Jacobian,
+
+    Var law(l) ≈ [J H⁻¹ Jᵀ]_ll = law(l)² (e_l − law)ᵀ H⁻¹ (e_l − law) = law(l)² |U⁻ᵀ (e_l − law)|²,    H = UᵀU.
+
+`d`'s level, which only `N` fixes, is in `H⁻¹` and cancels (`J 1 = 0`), so a one-length law carries none; read
+`law(l)² [H⁻¹]_ll` instead and the level's `≈ 1/N` stands in every length's variance. The variance is conditional on
+`q`: at an exact null the evidence sits at its lower search bound and `H⁻¹`'s shape part is the bound's, while the law
+is `m` there whatever the bound. An empty pool measures nothing, and its zero variance is no precision (§14.7). Every
+property is a gate in `tests/calibration/test_fl.py`.
+
 ---
 
 ## 5. Strand
@@ -1727,9 +1756,13 @@ The decision asks what two noisy estimates of ONE law would show, so the expansi
 Each law's own delta method, `Σ_l Var ĝ_l / 4ĝ_l + …`, is the wrong reference. Where one law is all but empty and the
 other is not, it divides that law's noise by nearly nothing: on cfRNA-B it read the noise at 0.99 against a squared
 distance near 1 and called a 160-bp gap noise
-(`test_a_noisy_near_empty_tail_of_one_law_does_not_hide_a_real_gap`). Each pmf's variance is its raw law's plug-in variance at its empirical-Bayes weight squared, `(n/(n + ν))² · law_l² / raw_l`.
-A length's relative variance is one over the raw count behind it, which de-tilting rescales and does not add to; a
-length with no raw count carries none. The two-pool contrast (`fl._deconvolved_gdna_counts`) is differentiated as it
+(`test_a_noisy_near_empty_tail_of_one_law_does_not_hide_a_real_gap`). RNA's pmf variance is its own-count law's
+normalised posterior at the fitted smoothing (§4.5); an RNA law no spliced fragment measured is the anchor, no
+measurement, and the decision is one law without reading a noise
+(`test_an_rna_law_no_spliced_fragment_measured_shows_no_difference`). gDNA's is its raw law's plug-in variance at its
+empirical-Bayes weight squared,
+`(n/(n + ν))² · law_l² / raw_l`: a length's relative variance is one over the raw count behind it, which de-tilting
+rescales and does not add to, and a length with no raw count carries none. The two-pool contrast (`fl._deconvolved_gdna_counts`) is differentiated as it
 is: `g = (1 − λ) m + λ i⁺ / Σ i⁺`, the mixture `m = w₀ f₀ + w₁ f₁` (`w_p` the pools' count shares) and the inverse
 `i = ((1 − a₁) f₀ − (1 − a₀) f₁) / s` clipped at zero and renormalised (`s = a₀ − a₁`, `λ` the separation's resolution
 weight), so its per-length coefficients are `c₀ = (1 − λ) w₀ + [i > 0] λ (1 − a₁) / (s Σ i⁺)` and

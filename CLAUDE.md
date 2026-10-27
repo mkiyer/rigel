@@ -156,8 +156,11 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,424 passed / 0 skipped / 0 xfail, 3,424 collected** — re-derived
-2026-10-26 on calibration's geometry over the observable genome (two gates added); 3,422 on deleting the coupled
+**The standing baseline: 0 failed / 3,442 passed / 0 skipped / 0 xfail, 3,442 collected** — re-derived
+2026-10-27 on the RNA law's normalised variance and the decision's reading of an RNA law no count measured (ten gates
+added, one deleted: four for the variance in place of a one-curve coverage gate, six for the decision, five of them on built laws);
+3,433 on RNA's own-count length law (nine gates added: eight for the law, one for its refusal of a pool count the
+anchor does not hold); 3,424 on calibration's geometry over the observable genome (two gates added); 3,422 on deleting the coupled
 gDNA law (its seventeen gates deleted with the realized estimator and the coupling; 3,439 on the shared length law, 35 gates added, four deleted: 23 for the decision, seven for the length laws'
 variances and the contrast's Monte Carlo, five for the carried normaliser and κ, the realized field's four gone; 3,408 on one
 contained-support formula in place of two, three gates deleted with the duplicate, one added for

@@ -491,13 +491,13 @@ def library_fl_models(payload, index: TranscriptIndex) -> "FLModels":
     """The fragment-length models from one payload, exactly as production builds them.
 
     All three histograms come from the PAYLOAD — one frame, one definition of length. A fragment
-    enters a pool when exactly one hypothesis survived, so its ``L`` is not in doubt. The RNA pool is
-    de-tilted by its own sj opportunity ("used an annotated sj" is a length-dependent selection), and
+    enters a pool when exactly one hypothesis survived, so its ``L`` is not in doubt. The RNA pool is read at
+    its own sj opportunity ("used an annotated sj" is a length-dependent selection), and
     the gDNA pools — none of them pure — are deconvolved by the two-pool contrast, which needs the
     partition the scanner deposits into (`calibration.fl`). Every gDNA opportunity is read over the
     index's observable genome: the pools' and the regions' (`gdna_opportunity.observable_gdna_opportunity`,
-    the frame's `region_arrays.observable_pieces`). Both components are smooth-EB shrunk toward the
-    unconditional anchor.
+    the frame's `region_arrays.observable_pieces`). RNA's law is its own counts', the unconditional anchor only
+    the law an empty pool returns; gDNA's is smooth-EB shrunk toward that anchor.
 
     The one home for this call: the second pass scores on pass one's payload, calibration fits on the
     drained one, and an instrument that measured a different length model than production's would be
@@ -534,6 +534,7 @@ def length_tables(
         fl_models.rna_pmf_var,
         fl_models.gdna_pmf_var,
         rna_captured_fraction(calibration, region_arrays),
+        rna_measured=fl_models.n_rna > 0.0,
     )
 
 

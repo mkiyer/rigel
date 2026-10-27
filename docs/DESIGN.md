@@ -871,11 +871,19 @@ The gDNA model is fitted from all four gDNA pools, each divided by its own oppor
 divided out by a two-pool CONTRAST whose weights come from `gdna_density`'s one-sided rate
 (`fl._deconvolved_gdna_counts`, which falls back to the de-tilted four-pool sum where it declines). The law is
 `gdna_pmf`, the uniform frame every opportunity reads; the EM's two length tables are decided from it and the RNA law
-after calibration (§3.6b). The RNA model is the sj pool divided by its own — `calibration/sj_opportunity.py`. ⛔ The four gDNA pools must never be pooled raw
+after calibration (§3.6b). The RNA model is the sj pool's own counts, read as counts at its own opportunity
+(`calibration/sj_opportunity.py`): Poisson at `N π(l) law(l)`, the law the all-fragment law times a deviation smoothed
+by a random walk at its evidence maximum (`fl.own_count_law`, derivation `EQUATIONS.md` §4.5). The all-fragment law is
+only the neutral an empty pool returns, never evidence about RNA (owner, 2026-10-26). Its variance is the normalised
+law's posterior at the fitted smoothing, and an empty pool's zero variance is no precision: the length decision reads
+it as no RNA measurement (§3.6b). It replaced a shrink toward that
+law at 1,000 pseudo-fragments: the all-fragment law is mostly the majority origin's, so a 2,005-fragment RNA pool at
+98 % gDNA read 175.6 bp against its own census's 123.6 (`ISSUES: eb-shrinkage-magic-ess`, whose gDNA half is open).
+⛔ The four gDNA pools must never be pooled raw
 (`TRAPS: opposite-tilts-must-not-pool`), and every divisor is a probability, not a count
 (`TRAPS: divide-by-a-probability`). The contained pair dominates off capture; the crossing pair dominates
 under it, because the surviving off-target gDNA sits beside a probe and reaches the exon boundary. The
-second pass scores a spliced hypothesis with the de-tilted RNA law and a genomic one with the unconditional
+second pass scores a spliced hypothesis with the RNA law and a genomic one with the unconditional
 anchor (`global_pmf`, every deposited fragment), both from pass one's payload (§4).
 
 ### 3.6b The EM's two length tables are one shared law unless the data show a difference capture cannot make (owner, 2026-10-26)
@@ -895,7 +903,9 @@ a difference capture cannot have made (`calibration/shared_length_law.py`; `EQUA
 2. **the decision** `w = clip(D/B − 1, 0, 1)`: `D` the Hellinger distance between the two measured laws less their
    sampling noise, `B` the most capture at `κ` can make, which is the worst case over every capture response that
    rewards length at most proportionally; `T_G = normalize(r^(1−w) G_c^w)`, exactly `rna_pmf` at `w = 0` and `G_c` at
-   `w = 1`. Off capture `B = 0` and a resolved difference keeps each origin's own law.
+   `w = 1`. Off capture `B = 0` and a resolved difference keeps each origin's own law. An RNA law no spliced fragment
+   measured is the anchor, a fallback and not a measurement, so it shows no difference: one law, the anchor for both
+   (`rna_measured`), never a pure-gDNA library's deposit-frame anchor read as RNA's census against gDNA's law.
 
 RNA's normaliser carries gDNA's capture efficiencies to the two tables (`EQUATIONS.md` §14.8): at one table it is
 `Σ_o c_o share_o(g)`, the null model exactly. Calibration, the priors and the second pass keep the laws they read, and
@@ -919,8 +929,10 @@ rung, the strand spectrum on both rungs, the test chromosome at three depths and
 transcripts / |gDNA| / |nascent|): stranded × capture-ON −4.6 / −0.8 / −24 / −11 % (revision 4.2's frame, CR, −5.4 /
 −2.4 / −25 / −13); the deferred unstranded × capture-ON −6.8 / −2.4 / −2 / +1 % (CR −3.8 / −1.0 / +20 / +27); the weak
 band under capture −10.1 / −4.4 / −14 / −6 % (CR −9.3 / −4.2 / −1 / +9); the capture-off strata at the previous scorer.
-Every one of the 15 gap rows keeps its gap whole (`w = 1`), every full-depth equal-chemistry row is one law (`w = 0`),
-and the decisions replicate on the second seed. The scale-free test is the decision itself: equal chemistry's raw
+Every one of the 15 gap rows keeps its gap whole (`w = 1`), every full-depth equal-chemistry row under capture is one
+law (`w = 0`), and the decisions replicate on the second seed; off capture `B = 0`, and the ladder's capture-OFF rows
+keep two laws over a resolved 5 bp difference between the measured laws (RNA's census 212 bp, gDNA's law 217, the
+squared distance 3–15 times its noise). The scale-free test is the decision itself: equal chemistry's raw
 contrast is at most 0.18 of `B²`, the smallest real gap 4.5 times it. On real libraries every gap is kept: cfRNA-B's gDNA table reads 101 bp against RNA's 269 (equal tables would move its genes 28 %); the VCaP mix reads gDNA 0.2578 against its read-name truth 0.2518 (the previous scorer 0.2526; its DNA library alone was captured, against §14.1's premise of one capture weight) with genes 2.24 % from its RNA-only half (2.20 %); cfRNA-A, cfRNA-C and VCaP's RNA-only half move genes 0.02–0.54 % from the previous scorer. Gates:
 `tests/calibration/test_shared_length_law.py` (one law where capture explains the difference, a real gap never partly
 shrunk, capture only lengthens, the bound the worst case over proportional responses and only over those, continuous in

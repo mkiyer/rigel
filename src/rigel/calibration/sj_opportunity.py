@@ -165,7 +165,7 @@ def crossing_probability_from_index(index: "TranscriptIndex", max_length: int) -
 def detilt_pool(counts: np.ndarray, crossing_probability: np.ndarray) -> np.ndarray:
     """Divide a sj-pool histogram by its own opportunity, keeping its evidence weight.
 
-    The total is preserved on purpose. ``build_fl_models`` shrinks each pool toward the anchor with
+    The total is preserved on purpose. ``build_fl_models`` shrinks gDNA's pool toward the anchor with
     a Dirichlet pseudo-count whose strength is the pool total, and that total means "how many
     fragments stand behind this shape". De-tilting changes the shape, not how much evidence there
     is; letting the total move would weaken the shrinkage as an accidental side effect.

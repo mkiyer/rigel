@@ -39,7 +39,9 @@ alternative — one reference law and a regularized log-contrast fitted to the r
 (`LENGTH_EVIDENCE_PLAN.md`, 2026-10-25), the frame correction for gDNA's length table — derived, checked against the
 simulator's truth, what the data can measure and the defects it exposed (`FRAME_CORRECTION.md`, 2026-10-26), the
 strand frame's design draft — both origins measured at the same placements by a conditional fit, its offline record
-and what remains (`STRAND_FRAME.md`, 2026-10-26), the
+and what remains (`STRAND_FRAME.md`, 2026-10-26), its second-round reviewer prompt (`STRAND_FRAME_REVIEW_PROMPT.md`,
+2026-10-26), the length laws' prior — each origin's law from its own counts instead of the all-fragment law, and the
+strand frame's gDNA table as its other half (`LENGTH_LAW_PRIOR.md`, 2026-10-26), the
 owner's notes (`my_notes.md`, `TWO_PROBLEMS.md`) and the session handoff (`SESSION_HANDOFF.md`). The notes of every settled
 campaign were deleted on 2026-10-21, their findings already in the permanent docs: `git show f763270c:docs/dev/<name>`
 recovers one. The review evidence that was never tracked is in `$RIGEL_RUNS/archive/docs_dev_untracked_2026-10-21/`.

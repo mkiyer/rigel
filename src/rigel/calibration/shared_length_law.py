@@ -31,8 +31,10 @@ than proportionally lies outside that premise and can exceed it.
 
 The decision is a ramp to full trust and never a blend weighted by evidence: a real gap partly shrunk shifts the
 balance between the two origins as surely as a false gap kept. Off capture ``kappa = 0``, so ``B = 0``, ``c = 0`` and
-any resolved difference is kept whole: each origin's own law. The sampling noise is the plug-in variance of each
-law's own estimator, scaled by its empirical-Bayes weight, read at the null's common law.
+any resolved difference is kept whole: each origin's own law. The sampling noise is each law's own estimator's
+variance (RNA's the own-count law's normalised posterior at its fitted smoothing, gDNA's its plug-in at its
+empirical-Bayes weight), read at the null's common law. An RNA law no spliced fragment measured is the anchor, a
+fallback rather than a measurement, so it shows no difference: one law.
 """
 
 from __future__ import annotations
@@ -185,15 +187,31 @@ def shared_length_law(
     rna_var: np.ndarray,
     gdna_var: np.ndarray,
     kappa: float,
+    rna_measured: bool,
 ) -> LengthTables:
     """The EM's two length tables from the two measured laws, their sampling variances and RNA's captured fraction.
 
     ``rna_pmf`` is the RNA table untouched. gDNA's is ``rna_pmf`` itself where the laws differ by no more than capture
     can make (``w = 0``), the capture mixture ``G_c`` once the difference is twice that (``w = 1``), and the geometric
-    path between them. Both laws are normalised already (``FLModels``) and are read as given.
+    path between them. Both laws are normalised already (``FLModels``) and are read as given. ``rna_measured`` False
+    (no spliced fragment) is one law, ``rna_pmf`` for both, with no contrast, mixture or noise read.
     """
     r = np.asarray(rna_pmf, dtype=np.float64)
     g = np.asarray(gdna_pmf, dtype=np.float64)
+    if not rna_measured:
+        return LengthTables(
+            rna=r,
+            gdna=r.copy(),
+            anchor=g,
+            decision=LengthDecision(
+                kappa=float(kappa),
+                captured=0.0,
+                contrast=0.0,
+                bound=float(np.sqrt(capture_bound(g, kappa))),
+                noise=0.0,
+                weight=0.0,
+            ),
+        )
     tilted, captured = capture_mixture(g, r, kappa)
     noise = sampling_noise(
         g, r, np.asarray(gdna_var, dtype=np.float64), np.asarray(rna_var, dtype=np.float64)

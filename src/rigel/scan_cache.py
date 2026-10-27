@@ -27,7 +27,7 @@ against an index load that happens anyway, and a stored copy is how a cache goes
 thing it describes.
 
 There is no separate fragment-length row. Every fragment-length
-histogram — the five length pools and the unconditional anchor they are EB-shrunk toward — is a field OF
+histogram — the five length pools and the unconditional anchor the length laws are built against — is a field OF
 the payload, so caching the payload caches them, in one frame, by construction. `build_fl_models`
 remains the single source of truth for the derived pmfs, which are still not cached: freezing its
 output would mean a change to the fl model silently does not reach a cached scan.
@@ -399,7 +399,7 @@ class ScanCache:
     provenance: dict  # the key, the BAM, the scan config, the counts
 
     # No fragment-length row is stored here. Every fragment-length histogram comes off `payload` — the
-    # five length pools and the unconditional anchor they are EB-shrunk toward — so caching the payload
+    # five length pools and the unconditional anchor the length laws are built against — so caching the payload
     # caches them in one frame.
 
 

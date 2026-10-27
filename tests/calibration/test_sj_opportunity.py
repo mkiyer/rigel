@@ -364,8 +364,8 @@ def test_build_fl_models_WITHOUT_the_divisor_is_unchanged():
     pools[POOL_RNA_SPLICED, 20] = 300
     pools[POOL_RNA_SPLICED, 40] = 100
     pools[POOL_DNA_INTERGENIC, 30] = 500
-    anchor = np.zeros(51, dtype=np.int64)
-    anchor[25] = 900
+    anchor = pools.sum(axis=0)  # every pool count is a deposited fragment
+    anchor[25] += 900
     payload = SimpleNamespace(pool_lengths=pools, deposited_lengths=anchor, max_length=50)
 
     plain = build_fl_models(payload)
