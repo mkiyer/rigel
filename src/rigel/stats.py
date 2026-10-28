@@ -46,7 +46,9 @@ class PipelineStats:
 
     # --- Resolution-level ---
     n_fragments: int = 0
-    n_intergenic: int = 0  # templates that reach no locus: unspliced, gDNA by construction
+    # templates that reach no locus: unspliced, gDNA by construction — the scan's, none of whose hits resolves, and
+    # the router's, a multimapper whose only places the gates left are intergenic
+    n_intergenic: int = 0
     n_with_exon: int = 0
     n_with_annotated_sj: int = 0
     n_same_strand: int = 0

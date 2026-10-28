@@ -924,3 +924,114 @@ def test_with_nothing_masked_the_lengths_and_shares_are_todays_bit_for_bit(multi
     np.add.at(total, obj.t, obj.contained)
     np.add.at(total, obj.t[obj.cut_row], obj.cut_share)
     np.testing.assert_allclose(total, _fl(lengths), rtol=1e-12)
+
+
+# --- the place weight: a multimapper's place weighs its candidates by the deposit masses this length is built from --
+
+
+def _path_placements(exons, w):
+    """Every placement of a ``w``-base fragment on the path through ``exons`` (genomic ``[s, e)``, ascending): its
+    genomic start and end, the introns it crosses, and the genomic blocks it covers."""
+    cum = np.concatenate([[0], np.cumsum([e - s for s, e in exons])])
+    for u in range(int(cum[-1]) - w + 1):
+        k0 = int(np.searchsorted(cum, u, side="right")) - 1
+        k1 = int(np.searchsorted(cum, u + w - 1, side="right")) - 1
+        start = exons[k0][0] + u - int(cum[k0])
+        end = exons[k1][0] + u + w - int(cum[k1])
+        blocks = [(max(s, start), min(e, end)) for s, e in exons[k0 : k1 + 1]]
+        yield start, end, [(exons[k][1], exons[k + 1][0]) for k in range(k0, k1)], blocks
+
+
+@pytest.mark.parametrize("fixture", ["multiexon_index", "masked_index"])
+def test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law(fixture, request):
+    """``Σ_x g(ℓ_x) w(x) = eff_em_t`` over every observable placement of a template on its own path, junctions
+    included: ``w(x) = Σ_o m_o(x) c_o`` the native deposit's masses at the reader's efficiencies (a junction at its
+    price), the weight a multimapper's place carries (``place_log_weights``), and ``g`` the law the efficiencies are
+    read on (``tables.anchor``) — not the scorer's table, here another law (one law, ``T_R = T_G ≠ g``). So the weight
+    and the length the EM divides a transcript by are one rule, in the frame calibration measures capture in. A
+    placement touching a masked base is never observed and weighs nothing."""
+    from rigel.calibration.capture_eff_length import (
+        observable_fl_eff_lengths,
+        place_efficiencies,
+        place_log_weights,
+    )
+    from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
+    from rigel.frag_length_model import FragmentLengthModel
+    from rigel.native import Accumulator
+    from rigel.types import Strand
+
+    idx = request.getfixturevalue(fixture)
+    ra = RegionArrays.from_index(idx)
+    rng = np.random.default_rng(5)
+    n_boundaries = boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0]
+    cal = _cal(
+        ra,
+        rng.uniform(0.3, 6.0, ra.n_regions),
+        1.0,
+        boundary=rng.uniform(0.3, 6.0, n_boundaries),
+        saturation=4.0,
+    )
+    g = np.zeros(PMF.shape[0])
+    g[[120, 190, 260]] = [0.4, 0.35, 0.25]
+    fl = observable_fl_eff_lengths(idx, ra, FragmentLengthModel.from_pmf(PMF))
+    eff = transcript_capture_eff_lengths(cal, ra, idx, fl, LengthTables(PMF, PMF, g, None))
+
+    bounds, _ref_offsets, types = build_region_partition_arrays(idx)
+    acc = Accumulator(
+        region_bounds=np.ascontiguousarray(bounds, dtype=np.int64),
+        region_types=np.ascontiguousarray(types, dtype=np.uint8),
+        max_length=PMF.shape[0],
+        ref=0,
+    )
+    sj = build_sj_arrays(idx)
+    acc.set_sj(
+        np.ascontiguousarray(sj.offsets, dtype=np.int32),
+        np.ascontiguousarray(sj.boundary_right, dtype=np.int32),
+        np.ascontiguousarray(sj.strand, dtype=np.int8),
+    )
+    c_region, c_boundary, c_sj = place_efficiencies(cal, ra, idx)
+    masked = [(int(a), int(b)) for _ref, a, b in np.asarray(ra.unobservable)]
+
+    checked = 0
+    for t in range(len(idx.t_df)):
+        row = idx.t_df.iloc[t]
+        exons = (
+            [(int(row["start"]), int(row["end"]))]
+            if bool(row["is_synthetic"])
+            else [(int(a), int(b)) for a, b in idx.get_exon_intervals(t)]
+        )
+        offsets, kinds, ids, masses, f = [0], [], [], [], []
+        for w in np.flatnonzero(g):
+            for start, end, introns, blocks in _path_placements(exons, int(w)):
+                if any(a < mb and ma < b for a, b in blocks for ma, mb in masked):
+                    continue
+                k, i, m = acc.placement_masses(
+                    start=start, end=end, observed_introns=tuple(introns), sj_strand=int(Strand.POS)
+                )
+                kinds += list(k)
+                ids += list(i)
+                masses += list(m)
+                offsets.append(len(kinds))
+                f.append(g[w])
+        if not f:
+            continue  # wholly masked: no placement is observed
+        log_w = np.asarray(
+            place_log_weights(
+                np.asarray(offsets, dtype=np.int64),
+                np.asarray(kinds, dtype=np.int8),
+                np.asarray(ids, dtype=np.int64),
+                np.asarray(masses, dtype=np.float64),
+                intergenic=np.zeros(len(f), dtype=bool),
+                c_region=c_region,
+                c_boundary=c_boundary,
+                c_sj=c_sj,
+            ),
+            dtype=np.float64,
+        )
+        # ``log w`` is float32, as the scorer reads it: half an ulp of each moves the sum by at most that share
+        tolerance = 0.5 * float(np.finfo(np.float32).eps) * float(np.max(np.abs(log_w)))
+        assert float(np.sum(np.asarray(f) * np.exp(log_w))) == pytest.approx(
+            eff[t], rel=max(tolerance, 1e-12)
+        ), row["t_id"]
+        checked += 1
+    assert checked >= 2

@@ -229,7 +229,11 @@ def run_benchmark(
     stats = pipeline_result.stats
 
     # Pipeline gDNA count: intergenic (deterministic) + EM-assigned genic gDNA.
-    n_gdna_pipeline = float(stats.n_intergenic + pipeline_result.estimator.gdna_em_count)
+    n_gdna_pipeline = float(
+        stats.n_intergenic
+        + pipeline_result.estimator.gdna_em_count
+        + pipeline_result.estimator.gdna_intergenic_em_count
+    )
 
     # Pipeline nRNA count: the synthetic spans' unambiguous and EM counts.
     n_nrna_pipeline = float(pipeline_result.estimator.synthetic_count)

@@ -556,6 +556,10 @@ struct AssembledFragment {
 struct WorkerState {
     ResolverScratch scratch;
     FragmentAccumulator accumulator;
+    // A multimapper's genic place's deposit masses, for its capture weight (`AccumulatorSet::placement_masses`).
+    rigel::accumulator::DepositScratch mass_scratch;
+    std::vector<IntronBlock> mass_observed;
+    std::vector<rigel::accumulator::PlaceMass> masses;
     BamScanStats stats;
     StrandObservations strand_obs;
     std::vector<char> record_used;  // `records_used`, per template
@@ -1951,6 +1955,29 @@ private:
             ws.acc_set->offer(ws.placements.data(), ws.placements.size(), ws.offer_scratch);
         };
 
+        // ── a place's deposit masses: what its capture weight reads ───────────────────────────────────
+        // The deposit rule's mass at every object the hit's observed path deposits on, on the flat axes. The
+        // path is the one `collect_placement` offers: the molecule's extent with the CIGAR's introns cut.
+        const auto add_place_masses = [&ws, &accumulator](const AssembledFragment& f, const RawResolveResult& cr) {
+            if (!ws.acc_set || f.exons.empty()) return;
+            auto& observed = ws.mass_observed;
+            observed.clear();
+            for (const auto& intron : f.introns) {
+                if (!observed.empty() && observed.back().start == intron.start && observed.back().end == intron.end)
+                    continue;
+                observed.push_back(intron);
+            }
+            std::int64_t start = f.exons.front().start, end = f.exons.front().end;
+            for (const auto& block : f.exons) {
+                start = std::min<std::int64_t>(start, block.start);
+                end = std::max<std::int64_t>(end, block.end);
+            }
+            rigel::accumulator::OfferedFragment off{start, end, observed.data(), observed.size(),
+                                                    cr.align_strand, cr.sj_strand, nullptr, 0};
+            ws.acc_set->placement_masses(f.exons.front().ref_id, off, ws.mass_scratch, ws.masses);
+            for (const auto& m : ws.masses) accumulator.add_place_mass(m.kind, m.index, m.mass);
+        };
+
         // Per-worker state refs
         ws.pending.clear();
         ws.pending_hypotheses.clear();
@@ -2031,6 +2058,11 @@ private:
         // Count ONE fragment per physical molecule, not per hit.
         stats.n_fragments++;
 
+        // A multimapper's intergenic hits wait for the last hit: the EM receives them only beside a hit that
+        // resolves (case 5, a place gDNA can be at outside every locus); a template none of whose hits resolves
+        // stays certified gDNA and reaches no unit (case 3).
+        std::vector<ResolvedFragment> held_intergenic;
+
         for (const auto& hit : all_hits) {
             AssembledFragment frag;
             RawResolveResult cr;
@@ -2052,16 +2084,17 @@ private:
                 // consistent.  The C++ scorer skips empty-t_inds
                 // fragments silently (n_cand <= 0 early skip) so they
                 // don't increment stat_gated either.
+                ResolvedFragment ig_result = ResolvedFragment::from_core(cr);
+                ig_result.num_hits = num_hits;
+                ig_result.nm = frag.nm;
                 if (is_unique_mapper) {
-                    ResolvedFragment ig_result = ResolvedFragment::from_core(cr);
-                    ig_result.num_hits = num_hits;
-                    ig_result.nm = frag.nm;
                     accumulator.append(ig_result, frag_id);
+                } else {
+                    held_intergenic.push_back(std::move(ig_result));
                 }
 
                 // An intergenic hit is a placement for calibration whatever the fragment's other hits:
-                // gDNA sits anywhere, and a repeat's gDNA often sits exactly here (the EM never sees a
-                // multimapper's intergenic hits, and that is unchanged).
+                // gDNA sits anywhere, and a repeat's gDNA often sits exactly here.
                 collect_placement(frag, cr);
 
                 continue;
@@ -2137,9 +2170,19 @@ private:
             // whole after its last hit (`offer_placements`).
             collect_placement(frag, cr);
 
+            // A multimapper's genic place carries its deposit masses, which its capture weight reads; a unique
+            // fragment's would be common to its candidates, and an intergenic place weighs 1.
+            if (!is_unique_mapper) add_place_masses(frag, cr);
             accumulator.append(result, frag_id);
 
             if (!is_unique_mapper) {
+                n_buffered_mm++;
+            }
+        }
+
+        if (any_hit_resolved) {
+            for (const auto& ig : held_intergenic) {
+                accumulator.append(ig, frag_id);
                 n_buffered_mm++;
             }
         }
@@ -2896,6 +2939,11 @@ NB_MODULE(_bam_impl, m) {
               "Provides BamScanner (pass 1: BAM → resolve → buffer) and\n"
               "BamAnnotationWriter (pass 2: stamp tags → write BAM).";
 
+    // The kinds of object a placement's mass lands on (`Accumulator.placement_masses`, the buffer's place masses).
+    m.attr("PLACE_REGION")   = static_cast<int>(rigel::accumulator::kPlaceRegion);
+    m.attr("PLACE_BOUNDARY") = static_cast<int>(rigel::accumulator::kPlaceBoundary);
+    m.attr("PLACE_SJ")       = static_cast<int>(rigel::accumulator::kPlaceSj);
+
     // ----------------------------------------------------------------
     // Accumulator — ONE REFERENCE, bound as the parity surface
     // ----------------------------------------------------------------
@@ -3128,6 +3176,37 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("sj_strand") = STRAND_NONE,
                  nb::arg("hypotheses") = nb::tuple(),
                  nb::arg("hypothesis_index") = 0)
+
+            // ⭐ The deposit rule's mass at every object the placement's observed path deposits on, without
+            // depositing: `(kinds, ids, masses)`, ids ref-local, one entry per object. A multimapper's place weighs
+            // its candidates by these masses at the objects' capture efficiencies.
+            .def("placement_masses",
+                 [](const Accumulator& a,
+                    int64_t start,
+                    int64_t end,
+                    nb::iterable introns,
+                    int32_t align_strand,
+                    int32_t sj_strand) {
+                     MarshalledFragment m(start, end, introns, align_strand, sj_strand, nb::tuple());
+                     std::vector<rigel::accumulator::PlaceMass> out;
+                     a.placement_masses(m.offered, binding_scratch, out);
+                     std::vector<int8_t> kinds;
+                     std::vector<int64_t> ids;
+                     std::vector<double> masses;
+                     for (const auto& x : out) {
+                         kinds.push_back(x.kind);
+                         ids.push_back(x.index);
+                         masses.push_back(x.mass);
+                     }
+                     return nb::make_tuple(rigel::vec_to_ndarray(std::move(kinds)),
+                                           rigel::vec_to_ndarray(std::move(ids)),
+                                           rigel::vec_to_ndarray(std::move(masses)));
+                 },
+                 nb::arg("start"),
+                 nb::arg("end"),
+                 nb::arg("observed_introns") = nb::tuple(),
+                 nb::arg("align_strand") = STRAND_POS,
+                 nb::arg("sj_strand") = STRAND_NONE)
 
             // ⭐ The annotated sj id for MANY introns at once — `sj_edge_id`, the deposit's own lookup,
             // applied per element. The second pass asks it once per hypothesis intron, which as a numpy

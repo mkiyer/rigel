@@ -87,6 +87,8 @@ if TYPE_CHECKING:
 __all__ = [
     "TranscriptObjects",
     "observable_fl_eff_lengths",
+    "place_efficiencies",
+    "place_log_weights",
     "rna_captured_fraction",
     "transcript_capture_eff_lengths",
     "transcript_objects",
@@ -351,29 +353,108 @@ def _cut_efficiencies(
     out = c_boundary[np.maximum(right_of[A], 0)]
     j = np.flatnonzero(objects.is_junction)
     if j.size:
-        junction_lo, junction_hi = right_of[A[j]], right_of[B[j] - 1]
-        intron_lo, intron_hi = A[j] + 1, B[j] - 1
-        # an intron piece too short to contain a gDNA fragment reads the boundary on its far side
-        c_intron_lo = np.where(
-            gdna_contained[intron_lo] > 0.0, c_region[intron_lo], c_boundary[right_of[intron_lo]]
-        )
-        c_intron_hi = np.where(
-            gdna_contained[intron_hi] > 0.0,
-            c_region[intron_hi],
-            c_boundary[right_of[intron_hi - 1]],
-        )
         out = out.copy()
-        bound = np.maximum(
-            saturation,
-            np.maximum.reduce(
-                [c_region[A[j]], c_region[B[j]], c_boundary[junction_lo], c_boundary[junction_hi]]
-            ),
+        out[j] = _junction_prices(
+            A[j], B[j], right_of, c_region, c_boundary, gdna_contained, saturation
         )
-        out[j] = np.clip(
-            c_boundary[junction_lo] + c_boundary[junction_hi] - 0.5 * (c_intron_lo + c_intron_hi),
-            0.0,
-            bound,
-        )
+    return out
+
+
+def _junction_prices(
+    A, B, right_of, c_region, c_boundary, gdna_contained, saturation
+) -> np.ndarray:
+    """The junction between exon pieces ``A`` (below it, in genomic order) and ``B`` (above it), by conservation of
+    bases: ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``, at least 0 and at most the larger of the saturated level
+    and the best object the junction touches."""
+    junction_lo, junction_hi = right_of[A], right_of[B - 1]
+    intron_lo, intron_hi = A + 1, B - 1
+    # an intron piece too short to contain a gDNA fragment reads the boundary on its far side
+    c_intron_lo = np.where(
+        gdna_contained[intron_lo] > 0.0, c_region[intron_lo], c_boundary[right_of[intron_lo]]
+    )
+    c_intron_hi = np.where(
+        gdna_contained[intron_hi] > 0.0,
+        c_region[intron_hi],
+        c_boundary[right_of[intron_hi - 1]],
+    )
+    bound = np.maximum(
+        saturation,
+        np.maximum.reduce(
+            [c_region[A], c_region[B], c_boundary[junction_lo], c_boundary[junction_hi]]
+        ),
+    )
+    return np.clip(
+        c_boundary[junction_lo] + c_boundary[junction_hi] - 0.5 * (c_intron_lo + c_intron_hi),
+        0.0,
+        bound,
+    )
+
+
+def place_efficiencies(
+    calibration: "CalibrationResult", region_arrays: "RegionArrays", index: "TranscriptIndex"
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(c_region, c_boundary, c_sj)``: the efficiencies a multimapper's place weight reads
+    (:func:`place_log_weights`), on the accumulator's flat object axes: calibration's own at a region and a boundary,
+    and at an annotated junction the price the transcripts' lengths give it (``_junction_prices``), from its two exon
+    regions. A junction reads 1 with no landscape, as every object does."""
+    from .splice_graph import build_sj_geometry_arrays
+
+    c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
+    c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
+    geo = build_sj_geometry_arrays(index)
+    src = np.asarray(geo.src_region, dtype=np.int64)
+    if calibration.gdna_bulk_density is None or src.size == 0:
+        return c_region, c_boundary, np.ones(src.size, dtype=np.float64)
+    c_sj = _junction_prices(
+        src,
+        np.asarray(geo.dst_region, dtype=np.int64),
+        region_right_boundary(np.asarray(region_arrays.ref_id)),
+        c_region,
+        c_boundary,
+        np.asarray(calibration.gdna_region_eff_len, dtype=np.float64),
+        calibration.gdna_capture_saturation,
+    )
+    return c_region, c_boundary, c_sj
+
+
+def place_log_weights(
+    object_offsets: np.ndarray,
+    object_kind: np.ndarray,
+    object_index: np.ndarray,
+    object_mass: np.ndarray,
+    *,
+    intergenic: np.ndarray,
+    c_region: np.ndarray,
+    c_boundary: np.ndarray,
+    c_sj: np.ndarray,
+) -> np.ndarray:
+    """``log w`` per buffered row: a multimapper's place's capture weight, ``w(x) = Σ_o m_o(x) c_o``, the deposit
+    rule's mass of the place at every object it deposits on (CSR over rows, ``rigel.native.PLACE_*`` kinds, flat
+    ids) times the object's capture efficiency (:func:`place_efficiencies`). Its sum over a component's placements,
+    on the law the efficiencies are read on, is the component's capture-contracted length (gate:
+    ``tests/calibration/test_capture_eff_length.py``), so every candidate at the place carries it.
+
+    A row with no object (a unique fragment's, on which the weight is common to every candidate) reads 0, and so does
+    an intergenic place: intergenic sequence is uncaptured (owner, 2026-10-27). float32, as the scorer reads it.
+    """
+    from ..native import PLACE_BOUNDARY, PLACE_REGION, PLACE_SJ
+
+    offsets = np.asarray(object_offsets, dtype=np.int64)
+    n_rows = offsets.size - 1
+    kind = np.asarray(object_kind)
+    index = np.asarray(object_index, dtype=np.int64)
+    mass = np.asarray(object_mass, dtype=np.float64)
+    c = np.ones(mass.size, dtype=np.float64)
+    for code, eff in ((PLACE_REGION, c_region), (PLACE_BOUNDARY, c_boundary), (PLACE_SJ, c_sj)):
+        sel = kind == code
+        c[sel] = np.asarray(eff, dtype=np.float64)[index[sel]]
+    per_row = np.diff(offsets)
+    w = np.zeros(n_rows, dtype=np.float64)
+    np.add.at(w, np.repeat(np.arange(n_rows), per_row), mass * c)
+    out = np.zeros(n_rows, dtype=np.float32)
+    weighted = (per_row > 0) & ~np.asarray(intergenic, dtype=bool)
+    with np.errstate(divide="ignore"):
+        out[weighted] = np.log(w[weighted])
     return out
 
 

@@ -666,14 +666,14 @@ candidate asserts its likelihood is zero, so the owner ruled against a yes/no cu
 earlier form limited implicit splices to the maximum fragment length, and the same parameter that prunes RNA
 candidates replaces it — a footprint the gDNA length law cannot produce is pruned at any label. It also keeps
 the prior's strength honest, since the strength counts units that have a gDNA candidate (§3.1c). A multimapper's
-gDNA term is the mean over the alignments gDNA can explain. What this replaced: every label but "unspliced" was
+gDNA term sums over its places (§3.1g). What this replaced: every label but "unspliced" was
 denied gDNA, and one spliced hit removed gDNA from a multimapper's every hit; the implicit fragments that were
 truly gDNA went to the synthetic spans and the transcripts, and on a one-gene toy that put +6 % to +62 % on an
 annotated transcript at short introns, under every prior (`ISSUES: calibration-and-the-em-disagree-on-what-can-be-gdna`).
 
 A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA. One with an alignment in a
 gene is solved by the EM, and it is compatible with gDNA if any alignment is unspliced — including an intergenic
-one (an unannotated pseudogene), which the scanner does not yet buffer (`ISSUES: multimapper-intergenic-alignments`).
+one (an unannotated pseudogene), which the EM reads as the intergenic background (§3.1g).
 Calibration holds artifact fragments out of its SAMPLE, never in the other class (editing an artifact's alignment
 is `ISSUES: splicing-artifacts`); a multimapper enters it at the placement the second pass draws (§4.2; CLOSED
 `ISSUES: multimapper-blind-support`). The prior's share is still read over the unique units (§3.1c), so a locus
@@ -733,6 +733,82 @@ fractional). The counts are the rounded fractional counts whatever the seed; the
 goes where, and for identical fragments the re-weighted draw is an urn, so the first fragment and the last are
 drawn with the same odds. An assignment optimised for reads assigned correctly was derived, prototyped, priced and
 refused (`ISSUES: whole-counts-optimised-assignment`).
+
+### 3.1g A multimapper sums over its places, and its intergenic places are one background at the bulk rate (owner, 2026-10-27; landed 2026-10-28)
+
+> **A fragment's likelihood under a component is the sum, over the places that component can be at, of each place's
+> term times its capture weight. Hits whose genomic extents overlap on one reference are one place, read at its most
+> likely hit; distinct places sum, for a transcript and for the locus's gDNA alike. A place's weight is the deposit
+> rule's mass at the reader's efficiencies, `w = Σ_o m_o c_o`, on every candidate there; a unique fragment's weight is
+> common to all its candidates and is not applied. A hit with no transcript candidate is an intergenic place:
+> uncaptured (`κ = 1`), read at calibration's bulk gDNA rate as a per-unit background that no locus carries, with the
+> locus's own total re-estimated beside it, and never pruned.** (`scoring.cpp`'s `merge_places`,
+> `capture_eff_length.place_log_weights`, `em_solver.cpp`'s `IntergenicTerm`; the derivation is `EQUATIONS.md` §15.)
+
+This is the owner's case 5 (2026-10-19): a multimapper with genic and intergenic alignments, spliced or not, keeps its
+valid transcript alignments and its unspliced intergenic ones, and they compete in the EM. The scan buffers its
+intergenic hits after its genic ones. The rulings that fixed the form (owner, 2026-10-27):
+- **Intergenic is uncaptured**: `κ = 1` at the bulk rate (`gdna_bulk_density`), not each region's reader efficiency.
+  On the STAR rung the intergenic regions that read captured hold captured genic fragments that the aligner and the
+  second pass put on intergenic copies, 25 times what truly sits there, so reading their efficiency would turn an
+  alignment artifact into gDNA evidence at exactly those copies.
+- **An intergenic place is a hit with no transcript candidate**, so an intronic place stays its locus's: its synthetic
+  span is a candidate there. The scorer knows no reference for a hit without a transcript, so each such hit is its own
+  place; two overlapping unspliced alternatives occur in 0.38 % of the STAR rung's mates with two or more.
+- **The rate is fixed from calibration**, never re-estimated across loci, which would couple every locus's EM to every
+  other's. Each locus re-estimates its own total.
+- **The second pass's draw is unchanged**: changing it is its own arm, after this one
+  (`ISSUES: the-second-pass-corrections`).
+- **A case-5 fragment whose only genic place is spliced** competes as RNA there against its intergenic places. It has no
+  locus gDNA candidate, so it adds nothing to the prior's strength (§3.1c).
+- **The background's mass is intergenic gDNA** in `summary.json` (`count_gdna − count_gdna_em`), never in the loci
+  table. A unit it wins is stamped `ZF 0x25` on every record and none `ZH 1`, since a sum over places names no place.
+
+A multimapper whose genic places all fail their gates (a zero place weight, `--mismatch-alpha 0`) beside a surviving
+intergenic one is intergenic gDNA, counted with the templates no hit of which resolves (`fragment_stats.intergenic`);
+one with no surviving place is gated.
+
+**Why this form.** Alternatives at one place count once and distinct places sum (owner, 2026-10-16). The place
+definition replaced two rules: gDNA's mean over its hits, which halved gDNA's term at a second place and so biased
+every multimapper toward RNA (`ISSUES: the-gdna-term-is-a-mean-over-places`), and RNA's least-overhang choice of one
+hit per transcript, which counted overhang twice and kept a gated hit at `α = 0` (`ISSUES: merge-keeps-least-overhang`).
+The weight is the place's, so it goes on every candidate there, RNA's too: capture acts on the sequence whatever its
+origin, and a sum arm with no weights, reading a captured RNA place no stronger than an uncaptured intergenic one,
+moved 33.6 k RNA multimappers to gDNA (2026-10-15). A component
+with a fixed `θ` would fix a locus's intergenic share, not its rate (`EQUATIONS.md` §15.3). No score difference bounds
+the background's posterior, which turns on a rate and lengths the scores do not carry: a prune moved 14.26 of 50 units
+off it when a transcript's place weight and length were scaled together, a change that leaves the transcript's rate as
+it was.
+
+**Measured** on the STAR rung (all 16 conditions, pinned and fractional, against the previous tree `db656a81`, scored
+against the read names; Σ|error| over g05–g98 per stratum):
+
+| stratum | transcripts | genes |
+|---|---:|---:|
+| stranded capture-OFF | ×0.850 | ×0.791 |
+| stranded capture-ON | ×0.651 | ×0.492 |
+| unstranded capture-OFF | ×0.899 | ×0.926 |
+| unstranded capture-ON (deferred) | ×0.742 | ×0.654 |
+
+Most of the gene gain comes with the place weights (without them ×0.92–1.01); RNA's place merge adds 5–7 points of
+transcripts in every stratum. At g98 the gDNA called RNA falls 57,751 → 18,428 off capture and 161,446 → 8,261 under
+it, for 170 and 2,936 more true RNA called gDNA; at g50 about two gDNA calls are saved per RNA call lost, the accepted
+direction (owner, 2026-10-27). On the zero-gDNA controls transcripts improve on three of the four (×0.950–0.987).
+THE RECORDED REGRESSION is genes on three controls, all arriving with the place weights: g00 ss.50 capture-OFF ×1.365
+(transcripts ×1.070), where the weights carry that condition's degenerate reader to the multimappers
+(`ISSUES: the-reader-reads-false-gdna-as-capture`; the same with the background's rate at 0, and with every efficiency
+at 1 the sum alone costs it ×1.15 against the previous tree at 1), and the two capture-ON controls ×1.039–1.041, not
+dissected. On the simulator's alignments, which hold no
+multimapper, the result is the previous tree's bit for bit on the four conditions checked (two ladder rows, one row of
+each fl-gap panel). On the VCaP mix (pinned and fractional) gDNA reads 0.2576 against its read-name truth 0.2518
+(0.2569 before) and genes sit 2.252 % from its RNA-only half (2.277 %): stable, not improved. The EM's default budget
+suffices: converged, the background's mass at g98 capture-ON moves 0.14 of 132,589 fragments. Gates: `tests/test_multimapper_places.py` (the owner's five cases on hand-built records; the sum
+against the per-place terms in every hit order at `α = 0`; overlapping and distinct places for a transcript and for
+gDNA; the background never pruned and unmoved by a common scaling; an independent plain-iteration reference of
+`(θ, M)` matched under MAP and VBEM, with and without the prior; the accounting across a chunk boundary, a spill to
+disk and the annotated BAM) and the place weights' sum over the native deposit
+(`tests/calibration/test_capture_eff_length.py`). Instruments: `$RIGEL_RUNS/prototypes/2026-10-27_mm_intergenic/`
+(`ab/strata.py`, `ab/qa_rate0.py`, `measure/repeat_places.py`).
 
 ### 3.2 One strand convention
 
@@ -1026,8 +1102,8 @@ probabilistically best placement by the abundance of uniquely aligned fragments 
   considered, as its own mechanism).
 * **The drain re-enters `deposit` at the chosen placement's reference**, so there is still one tally path;
   `DrainQC.offered_multimapper` says how many records were held on their placements.
-* **The EM is untouched.** It still receives every genic hit of a multimapper (an intergenic hit never
-  reaches it, `ISSUES: multimapper-intergenic-alignments`) and allocates it by
+* **The EM is untouched.** It still receives every genic hit of a multimapper (and, since 2026-10-28, its
+  intergenic hits as §3.1g's background) and allocates it by
   abundance and the locus priors; what changes is that the locus prior now holds the fragment where the second
   pass drew it. The second pass's placement and the EM's allocation of the same fragment are not reconciled —
   different questions, at different stages, exactly as the gap-held population's drawn path and the EM's

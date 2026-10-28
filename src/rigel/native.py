@@ -25,6 +25,9 @@ from ._bam_impl import BamAnnotationWriter
 # banks the accumulator actually exports.
 from ._bam_impl import Accumulator, AccumulatorSet
 
+# the kinds of object a placement's mass lands on, which the place weight reads
+from ._bam_impl import PLACE_REGION, PLACE_BOUNDARY, PLACE_SJ
+
 # -- Fragment resolution ----------------------------------------------------
 from ._resolve_impl import FragmentResolver
 from ._resolve_impl import FragmentAccumulator
@@ -58,6 +61,9 @@ from ._em_impl import WARM_START_COVERAGE
 from ._em_impl import WARM_START_PRIOR
 from ._em_impl import WARM_START_UNIFORM
 
+# the winner code a unit the intergenic term wins carries, beside -2 for the locus's own gDNA
+from ._em_impl import EM_WINNER_INTERGENIC
+
 # -- The calibration solve: the sweep's block pipeline, ψ, the transfer kernels for the gates -----
 from ._solve_impl import solve_blocks
 from ._solve_impl import psi_solve
@@ -84,6 +90,9 @@ __all__ = [
     "BamAnnotationWriter",
     # The accumulator
     "Accumulator",
+    "PLACE_REGION",
+    "PLACE_BOUNDARY",
+    "PLACE_SJ",
     "AccumulatorSet",
     # Resolution
     "FragmentResolver",
@@ -111,6 +120,7 @@ __all__ = [
     "WARM_START_COVERAGE",
     "WARM_START_PRIOR",
     "WARM_START_UNIFORM",
+    "EM_WINNER_INTERGENIC",
     # The solve
     "solve_blocks",
     "transfer_prepare",

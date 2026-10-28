@@ -134,6 +134,10 @@ class FragmentScorer:
         # (``is_single_exon``), even one that covers a multi-exon transcript's span,
         # is an annotated transcript and is pruned with them.
         t_is_synthetic_arr = index.t_df["is_synthetic"].values.astype(np.uint8)
+        # Each transcript's reference, as a code: a multimapper's genic places are told apart on it
+        t_ref_arr = np.unique(index.t_df["ref"].astype(str).to_numpy(), return_inverse=True)[
+            1
+        ].astype(np.int32)
 
         native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
@@ -154,6 +158,7 @@ class FragmentScorer:
             exon_ends=np.ascontiguousarray(exon_ends, dtype=np.int32),
             exon_cumsum=np.ascontiguousarray(exon_cumsum, dtype=np.int32),
             t_is_synthetic_arr=np.ascontiguousarray(t_is_synthetic_arr),
+            t_ref_arr=np.ascontiguousarray(t_ref_arr),
             pruning_max_ll_delta=max_ll_delta,
         )
         object.__setattr__(ctx, "_native_ctx", native_ctx)

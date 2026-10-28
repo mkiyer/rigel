@@ -11,13 +11,14 @@ import logging
 
 import numpy as np
 
-from .buffer import FragmentBuffer, FRAG_UNAMBIG
+from .buffer import FragmentBuffer, FRAG_MULTIMAPPER, FRAG_UNAMBIG
+from .calibration.capture_eff_length import place_log_weights
 from .estimator import AbundanceEstimator
 from .scored_fragments import ScoredFragments
 from .index import TranscriptIndex
 from .scoring import FragmentScorer
 from .stats import PipelineStats
-from .annotate import AF_UNRESOLVED, winner_flag
+from .annotate import AF_GDNA_INTERGENIC, AF_UNRESOLVED, winner_flag
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,10 @@ class FragmentRouter:
         Reference index.
     annotations : AnnotationTable or None
         If provided, deterministic-unambig fragments are annotated as they are routed.
+    place_efficiencies : tuple or None
+        ``(c_region, c_boundary, c_sj)`` (``capture_eff_length.place_efficiencies``): each multimapper's place weighs
+        its candidates by its deposit masses at them (``capture_eff_length.place_log_weights``). ``None`` weighs every
+        place 1.
     """
 
     def __init__(
@@ -52,12 +57,14 @@ class FragmentRouter:
         stats: PipelineStats,
         index: TranscriptIndex,
         annotations=None,
+        place_efficiencies=None,
     ):
         self.ctx = ctx
         self.estimator = estimator
         self.stats = stats
         self.index = index
         self.annotations = annotations
+        self.place_efficiencies = place_efficiencies
 
     # ------------------------------------------------------------------
     # The routing pass
@@ -95,6 +102,21 @@ class FragmentRouter:
         n_total = buffer.total_fragments
         for chunk in buffer.iter_chunks_consuming():
             arrays = chunk.to_scoring_arrays()
+            if self.place_efficiencies is not None and chunk.place_offsets is not None:
+                c_region, c_boundary, c_sj = self.place_efficiencies
+                arrays = (
+                    *arrays,
+                    place_log_weights(
+                        chunk.place_offsets,
+                        chunk.place_kind,
+                        chunk.place_index,
+                        chunk.place_mass,
+                        intergenic=np.diff(chunk.t_offsets) == 0,
+                        c_region=c_region,
+                        c_boundary=c_boundary,
+                        c_sj=c_sj,
+                    ),
+                )
             scorer.score_chunk(arrays)
             n_processed += chunk.size
             if n_processed % log_every < chunk.size:
@@ -124,6 +146,8 @@ class FragmentRouter:
             n_em_ao,
             n_gated,
             n_mm,
+            intergenic_log_liks,
+            intergenic_fids,
         ) = result
 
         stats.deterministic_unambig_units += int(n_det)
@@ -132,6 +156,9 @@ class FragmentRouter:
         stats.em_routed_ambig_opp_strand_units += int(n_em_ao)
         stats.n_gated_out += int(n_gated)
         stats.em_routed_multimapper_units += int(n_mm)
+        # A multimapper whose only places the gates left are intergenic is intergenic, as one none of whose hits
+        # resolves
+        stats.n_intergenic += len(intergenic_fids)
 
         # Det-unambig annotations
         if annotations is not None and len(det_tids) > 0:
@@ -162,6 +189,17 @@ class FragmentRouter:
                 frag_classes=np.asarray(gated_classes, dtype=np.int8),
                 n_candidates=np.zeros(n, dtype=np.int16),
             )
+        if annotations is not None and len(intergenic_fids) > 0:
+            n = len(intergenic_fids)
+            annotations.add_batch(
+                frag_ids=np.asarray(intergenic_fids, dtype=np.int64),
+                best_tids=np.full(n, -1, dtype=np.int32),
+                best_gids=np.full(n, -1, dtype=np.int32),
+                tx_flags=np.full(n, AF_GDNA_INTERGENIC, dtype=np.uint8),
+                posteriors=np.ones(n, dtype=np.float32),
+                frag_classes=np.full(n, FRAG_MULTIMAPPER, dtype=np.int8),
+                n_candidates=np.zeros(n, dtype=np.int16),
+            )
 
         return ScoredFragments(
             offsets=offsets,
@@ -171,6 +209,7 @@ class FragmentRouter:
             coverage_weights=coverage_weights,
             is_spliced=np.asarray(is_spliced_raw, dtype=np.int8).astype(bool),
             gdna_log_liks=gdna_log_liks,
+            intergenic_log_liks=intergenic_log_liks,
             frag_ids=frag_ids,
             frag_class=frag_classes,
             splice_type=splice_types,

@@ -186,11 +186,11 @@ footer code{background:none;padding:0;word-break:break-all}
     the reference does not know: assembly gaps (<code>N</code>) are 18.8&nbsp;% of the panel&rsquo;s genome, and the
     panel before drew about a fifth of its gDNA there as all-<code>N</code> reads, which no aligner places and the
     simulator&rsquo;s own alignments placed by truth. Every read now carries substitution errors at 0.2&nbsp;% per
-    base, and fragment lengths follow the configured law exactly. The fair panel exposes a defect the old one hid:
-    Rigel&rsquo;s region lengths count those unknown bases, so it under-calls gDNA (by 6&ndash;21&nbsp;% on the
-    contaminated rungs of the three in-scope strata) and books the rest as nascent RNA &mdash; an open, release-blocking
-    issue (<code>region-lengths-count-unobservable-bases</code>). Every number here is on the new reads; set beside an
-    earlier card, it compares across simulations.</p>
+    base, and fragment lengths follow the configured law exactly. The fair panel exposed a defect the old one hid:
+    Rigel&rsquo;s region lengths counted those unknown bases, so it under-called gDNA by 6&ndash;21&nbsp;% on the
+    contaminated rungs of the three in-scope strata and booked the rest as nascent RNA. Since 2026-10-22 the length law
+    and calibration read only the observable genome (<code>region-lengths-count-unobservable-bases</code>, still open).
+    Every number here is on the new reads; set beside an earlier card, it compares across simulations.</p>
     <p style="margin-top:10px" id="star-lede"></p>
   </div>
 
@@ -286,8 +286,8 @@ footer code{background:none;padding:0;word-break:break-all}
     <p class="sec-sub">The number that ranks a calibration mechanism, upstream of the EM. <b>f<sub>gDNA</sub></b> is
       the library gDNA fraction calibration reads (P) against the origin-split truth (O). <b>MWAE</b> is the
       mass-weighted absolute error of the per-object gDNA split, on regions and on boundaries. It calibrates each
-      condition's cached scan, built 2026-10-16/17, before the scan's repair; the panels are re-cached once the scan
-      is final.</p>
+      condition's cached scan, built 2026-10-21 on the re-simulated reads; the panels are re-cached once the scan is
+      final.</p>
     <div class="scroll"><table class="mt" id="calib-table"></table></div>
   </section>
 

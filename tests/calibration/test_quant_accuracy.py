@@ -418,6 +418,7 @@ def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_n
 class _FakeEstimator:
     synthetic_count: float
     gdna_em_count: float
+    gdna_intergenic_em_count: float = 0.0
 
 
 @dataclasses.dataclass

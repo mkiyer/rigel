@@ -581,7 +581,7 @@ the current version is **7**. Top-level keys:
 | `gdna_em_effective_length` | Summary of the loci table's column of that name: its `min`, `median`, `p95`, `max` |
 | `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna` and the five pools. The raw per-bin histograms are in `fragment_lengths.feather` |
 | `length_tables` | The EM's two fragment-length tables and the decision behind them (see below) |
-| `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` or `--mismatch-alpha 0` — which no pool holds), and three pools, each a `count_*` beside its `fraction_*` of the three together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans) and `count_gdna` (gDNA: the EM's plus the intergenic fragments, which reach no locus and are unspliced, since a spliced alignment is used only when a transcript holds its junctions), so `fraction_annotated + fraction_nascent + fraction_gdna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, so the intergenic gDNA is `count_gdna − count_gdna_em`, and `fraction_intergenic` its share; their count is `fragment_stats.intergenic` |
+| `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` or `--mismatch-alpha 0` — which no pool holds), and three pools, each a `count_*` beside its `fraction_*` of the three together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans) and `count_gdna` (gDNA: the EM's genic gDNA plus the intergenic gDNA, which reaches no locus and is unspliced, since a spliced alignment is used only when a transcript holds its junctions: the fragments that reach no transcript, and the EM's share of the multimappers at their intergenic alignments), so `fraction_annotated + fraction_nascent + fraction_gdna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, so the intergenic gDNA is `count_gdna − count_gdna_em`, and `fraction_intergenic` its share; `fragment_stats.intergenic` counts the fragments that reach no transcript, so the multimappers' share is `count_gdna − count_gdna_em − fragment_stats.intergenic` |
 
 The **`calibration`** block holds exactly the library-wide calibration
 scalars (it is `null` if calibration did not run):
@@ -691,7 +691,7 @@ an error, so the input BAM must not change between the two passes.
 | `ZF` | int | Assignment flags bitfield (see below) |
 | `ZW` | float | Posterior probability of the assignment |
 | `ZC` | string | Input-ambiguity class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, or `.` for a fragment the EM never scored; `unused_alignment` on a placed read pair's record that is in none of its usable alignments (one the pair rule rejected, one that pairs with nothing, a supplementary record), with the fragment's other tags; for a read pair withheld with no usable alignment (`ZF` 0), `off_index` when one of its alignments lies on a reference the index does not hold, else `chimeric` when one of its alignments has a mate aligned in pieces, else `unannotated_splice` when one of its alignments is a molecule whose junctions no one annotated transcript holds, else `unpaired` |
-| `ZH` | int | Primary-hit flag: `1` on the records of the winning placement, `0` otherwise (reflects rigel's EM assignment, which may differ from the aligner's primary FLAG) |
+| `ZH` | int | Primary-hit flag: `1` on the records of the winning placement, `0` otherwise (reflects rigel's EM assignment, which may differ from the aligner's primary FLAG); a multimapper with an alignment in a gene that is given to gDNA names no placement, so all its records are `0` |
 | `ZN` | int | Number of competing candidate components |
 | `ZS` | string | The splice type of the record's own placement: `spliced_annot`, `spliced_implicit`, `splice_artifact` or `unspliced`; `unknown` on a record that is no usable alignment |
 | `ZL` | int | Locus ID (`-1` if no locus) |
@@ -709,7 +709,7 @@ kind of candidate won, named for the category the tables report it under:
 | 2 | 0x04 | `is_gdna` | Assigned to gDNA (the EM's gDNA component, or unspliced intergenic) |
 | 3 | 0x08 | — | Retired: never set, so no earlier `ZF` value is reused with a new meaning |
 | 4 | 0x10 | `is_nascent` | Assigned to a synthetic nascent span |
-| 5 | 0x20 | `is_intergenic` | No annotation overlap, so unspliced gDNA: always with `is_gdna` |
+| 5 | 0x20 | `is_intergenic` | Intergenic gDNA, in no locus: no alignment overlaps an annotated transcript, or a multimapper given to its intergenic alignments; always with `is_gdna` |
 | 6 | 0x40 | — | Retired: never set |
 | 7 | 0x80 | `is_multimapper_dropped` | A read pair with more than one usable alignment, dropped when `--include-multimap` is off |
 
@@ -721,7 +721,7 @@ Canonical `ZF` values (the only ones produced):
 | `0x03` |   3 | Annotated: assigned to a reference transcript, single-exon included |
 | `0x11` |  17 | Nascent: assigned to a synthetic nascent span |
 | `0x05` |   5 | gDNA, assigned by the EM (annotation-overlapping) |
-| `0x25` |  37 | Intergenic gDNA (unspliced, no annotation overlap) |
+| `0x25` |  37 | Intergenic gDNA: unspliced with no annotation overlap, or a multimapper given to its intergenic alignments |
 | `0x80` | 128 | A read pair with more than one usable alignment, dropped by `--no-include-multimap`, not scored |
 
 Pysam usage:

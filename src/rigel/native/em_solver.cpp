@@ -66,6 +66,32 @@ static constexpr int WARM_START_COVERAGE = 0;  // the shipped coverage-weighted 
 static constexpr int WARM_START_PRIOR    = 1;  // the prior alone: the seed is zeroed
 static constexpr int WARM_START_UNIFORM  = 2;  // every component equal
 
+// The winner code of a unit the intergenic term wins; -2 is the locus's own gDNA.
+static constexpr int32_t EM_WINNER_INTERGENIC = -3;
+
+// ================================================================
+// The intergenic term: a fixed rate no locus parameter carries
+// ================================================================
+//
+// A multimapper's place with no transcript candidate is in no locus, so its gDNA comes at the library's intergenic
+// rate `λ` (fragments per start, in the unit the capture efficiencies are read in), beside the locus's components,
+// whose absolute rates are `M θ_c / L̃_c`. `M` is the locus's own data count, re-estimated with θ: the maximiser of
+// `Σ_u log(Σ_c M θ_c q_uc / L̃_c + λ b_u) + Σ_d log(M θ_d) − M` under the grouped prior on θ gives
+// `M = Σ_u Σ_{c in locus} r_uc + N_det`. In the locus's frame the term is one more component, last, of weight
+// `log λ − log M`; it takes no share of the prior and none of θ's normalisation, and its slot of the EM's state holds
+// `M` so SQUAREM accelerates the two together: `M / N` under MAP, where the state is a share, and `M` under VBEM,
+// where it is a count. A locus with no intergenic place has no such component and is solved as it always was.
+struct IntergenicTerm {
+    int    idx = -1;        // its component index, the last one; -1: the locus has none
+    double log_rate = -std::numeric_limits<double>::infinity();
+    double n_all = 0.0;     // the locus's fragments: its units with a candidate and its deterministic ones
+};
+
+// The intergenic column's weight, from the locus's data count `M`.
+static inline double intergenic_log_weight(const IntergenicTerm& ig, double data_count) {
+    return ig.log_rate - std::log(std::max(data_count, EM_LOG_EPSILON));
+}
+
 // ================================================================
 // Profiling instrumentation — per-locus and aggregate statistics
 // ================================================================
@@ -760,13 +786,18 @@ static void map_em_step(
     const AggregatePrior& aggregate_prior,
     double*       em_totals,    // zeroed then accumulated
     double*       theta_new,    // output: normalized
-    int           n_components)
+    int           n_components,
+    const IntergenicTerm& ig = IntergenicTerm{})
 {
+    // The locus's own components; the intergenic term, if any, is the last and its slot holds M / N.
+    const int n_locus = ig.idx >= 0 ? ig.idx : n_components;
+
     // Compute log_weights = log(theta + epsilon) - log_eff_len
     std::vector<double> log_weights(static_cast<size_t>(n_components));
-    for (int i = 0; i < n_components; ++i) {
+    for (int i = 0; i < n_locus; ++i) {
         log_weights[i] = std::log(theta[i] + EM_LOG_EPSILON) - log_eff_len[i];
     }
+    if (ig.idx >= 0) log_weights[ig.idx] = intergenic_log_weight(ig, theta[ig.idx] * ig.n_all);
 
     // Zero em_totals
     std::fill(em_totals, em_totals + n_components, 0.0);
@@ -776,22 +807,24 @@ static void map_em_step(
 
     // Grouped MAP-EM: raw counts first, then aggregate prior projection.
     std::vector<double> raw_counts(static_cast<size_t>(n_components));
-    double total = 0.0;
+    double total = 0.0, data = 0.0;
     for (int i = 0; i < n_components; ++i) {
         raw_counts[i] = unambig_totals[i] + em_totals[i];
     }
+    for (int i = 0; i < n_locus; ++i) data += raw_counts[i];
     apply_grouped_prior_update(
-        raw_counts.data(), theta, aggregate_prior, theta_new, n_components);
-    for (int i = 0; i < n_components; ++i) {
+        raw_counts.data(), theta, aggregate_prior, theta_new, n_locus);
+    for (int i = 0; i < n_locus; ++i) {
         total += theta_new[i];
     }
 
     if (total > 0.0) {
         double inv_total = 1.0 / total;
-        for (int i = 0; i < n_components; ++i) {
+        for (int i = 0; i < n_locus; ++i) {
             theta_new[i] *= inv_total;
         }
     }
+    if (ig.idx >= 0) theta_new[ig.idx] = data / ig.n_all;
 }
 
 // ================================================================
@@ -806,21 +839,26 @@ static void vbem_step(
     const AggregatePrior& aggregate_prior,
     double*       em_totals,
     double*       alpha_new,
-    int           n_components)
+    int           n_components,
+    const IntergenicTerm& ig = IntergenicTerm{})
 {
+    // The locus's own components; the intergenic term, if any, is the last and its slot holds M.
+    const int n_locus = ig.idx >= 0 ? ig.idx : n_components;
+
     // Compute alpha_sum
     double alpha_sum = 0.0;
-    for (int i = 0; i < n_components; ++i) {
+    for (int i = 0; i < n_locus; ++i) {
         alpha_sum += alpha[i];
     }
 
     // Compute log_weights = digamma(max(alpha, eps)) - digamma(max(alpha_sum, eps)) - log_eff_len
     double dg_sum = digamma(std::max(alpha_sum, EM_LOG_EPSILON));
     std::vector<double> log_weights(static_cast<size_t>(n_components));
-    for (int i = 0; i < n_components; ++i) {
+    for (int i = 0; i < n_locus; ++i) {
         log_weights[i] = digamma(std::max(alpha[i], EM_LOG_EPSILON))
                         - dg_sum - log_eff_len[i];
     }
+    if (ig.idx >= 0) log_weights[ig.idx] = intergenic_log_weight(ig, alpha[ig.idx]);
 
     // Zero em_totals
     std::fill(em_totals, em_totals + n_components, 0.0);
@@ -830,11 +868,14 @@ static void vbem_step(
 
     // M-step: grouped count-space update (unnormalized alpha-like mass).
     std::vector<double> raw_counts(static_cast<size_t>(n_components));
+    double data = 0.0;
     for (int i = 0; i < n_components; ++i) {
         raw_counts[i] = unambig_totals[i] + em_totals[i];
     }
+    for (int i = 0; i < n_locus; ++i) data += raw_counts[i];
     apply_grouped_prior_update(
-        raw_counts.data(), alpha, aggregate_prior, alpha_new, n_components);
+        raw_counts.data(), alpha, aggregate_prior, alpha_new, n_locus);
+    if (ig.idx >= 0) alpha_new[ig.idx] = data;
 }
 
 // ================================================================
@@ -879,9 +920,13 @@ static void compute_grouped_warm_start(
     const double* unambig_totals,
     const AggregatePrior& aggregate_prior,
     double*       warm_counts_out,
-    int           n_components,
-    int           warm_mode)   // a WARM_START_* code
+    int           n_components_all,
+    int           warm_mode,   // a WARM_START_* code
+    int           ig_idx = -1) // the intergenic term's slot, which SQUAREM seeds itself
 {
+    // The seed and the prior are the locus's own components'; the intergenic slot starts at 0 here.
+    const int n_components = ig_idx >= 0 ? ig_idx : n_components_all;
+    std::fill(warm_counts_out, warm_counts_out + n_components_all, 0.0);
     // Warm start = unambig_totals (an INDEPENDENT, non-competing seed) + coverage-weighted shares of the
     // AMBIGUOUS (competing) fragments, then the grouped aggregate-prior projection.
     //
@@ -900,7 +945,7 @@ static void compute_grouped_warm_start(
     // and the EM's landing point is a property of the LIKELIHOOD rather than of where it was put down.
     // It is the control that separates "the shipped seed steers the solver into a bad basin" from "the
     // objective itself has one" — and it needs no weight vector, unlike `prior`.
-    std::vector<double> warm_raw(static_cast<size_t>(n_components), 0.0);
+    std::vector<double> warm_raw(static_cast<size_t>(n_components_all), 0.0);
     if (warm_mode == WARM_START_PRIOR) {
         apply_grouped_prior_update(
             warm_raw.data(), nullptr, aggregate_prior, warm_counts_out, n_components);
@@ -924,6 +969,7 @@ static void compute_grouped_warm_start(
             // Normalize coverage weights within the actual candidate set.
             double row_sum = 0.0;
             for (int j = 0; j < k; ++j) {
+                if (cidx[j] == ig_idx) continue;  // the intergenic term takes no warm-start share
                 double w = wt[i * k + j];
                 row_sum += w;
             }
@@ -931,6 +977,7 @@ static void compute_grouped_warm_start(
             double inv_row_sum = 1.0 / row_sum;
 
             for (int j = 0; j < k; ++j) {
+                if (cidx[j] == ig_idx) continue;
                 double share = wt[i * k + j] * inv_row_sum;
                 warm_raw[cidx[j]] += share;
             }
@@ -987,6 +1034,7 @@ static double backtracked_squarem_step(
 
 struct EMResult {
     std::vector<double> theta;
+    double data_count = 0.0;  // the locus's own data count M at convergence, when it has an intergenic term
     int squarem_iterations = 0;  // number of SQUAREM iterations completed
     double squarem_step_scale_mean = 0.0;
     double squarem_step_scale_max = 0.0;
@@ -1005,10 +1053,13 @@ static EMResult run_squarem(
     int           max_iterations,
     double        convergence_delta,
     bool          use_vbem,
-    rigel::ThreadPool* pool = nullptr)
+    rigel::ThreadPool* pool = nullptr,
+    const IntergenicTerm& ig = IntergenicTerm{})
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
+    // The locus's own components; the intergenic slot, if any, is the last and holds M (VBEM) or M / N (MAP).
+    const size_t n_locus = ig.idx >= 0 ? static_cast<size_t>(ig.idx) : nc;
     EStep estep(ec_data, pool);
 
     std::vector<double> em_totals(nc, 0.0);
@@ -1024,6 +1075,7 @@ static EMResult run_squarem(
 
     std::vector<double> theta(nc);
     std::vector<double> alpha_out(nc);
+    double data_count_out = 0.0;
     int completed_iterations = 0;
     double step_scale_sum = 0.0;
     double step_scale_max = 0.0;
@@ -1038,16 +1090,17 @@ static EMResult run_squarem(
         for (size_t i = 0; i < nc; ++i) {
             state0[i] = std::max(init_counts[i], VBEM_SQUAREM_PRIOR_FLOOR);
         }
+        if (ig.idx >= 0) state0[ig.idx] = ig.n_all;  // every fragment the locus's, to start
 
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two plain VBEM steps
             vbem_step(state0.data(), estep, log_eff_len,
                       unambig_totals, aggregate_prior, em_totals.data(),
-                      state1.data(), n_components);
+                      state1.data(), n_components, ig);
 
             vbem_step(state1.data(), estep, log_eff_len,
                       unambig_totals, aggregate_prior, em_totals.data(),
-                      state2.data(), n_components);
+                      state2.data(), n_components, ig);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -1091,7 +1144,7 @@ static EMResult run_squarem(
             // Stabilisation step
             vbem_step(state_extrap.data(), estep, log_eff_len,
                       unambig_totals, aggregate_prior, em_totals.data(),
-                      state_new.data(), n_components);
+                      state_new.data(), n_components, ig);
 
             // Floor-clamp + convergence check on normalized theta
             double sum_old = 0.0, sum_new = 0.0;
@@ -1105,18 +1158,21 @@ static EMResult run_squarem(
                 } else if (state_new[i] < floor_i) {
                     state_new[i] = floor_i;
                 }
-                sum_old += state0[i];
-                sum_new += state_new[i];
+                if (i < n_locus) {
+                    sum_old += state0[i];
+                    sum_new += state_new[i];
+                }
             }
             double delta = 0.0;
             if (sum_old > 0.0 && sum_new > 0.0) {
                 double inv_old = 1.0 / sum_old;
                 double inv_new = 1.0 / sum_new;
-                for (size_t i = 0; i < nc; ++i) {
+                for (size_t i = 0; i < n_locus; ++i) {
                     delta += std::abs(state_new[i] * inv_new
                                     - state0[i] * inv_old);
                 }
             }
+            if (ig.idx >= 0 && ig.n_all > 0.0) delta += std::abs(state_new[ig.idx] - state0[ig.idx]) / ig.n_all;
 
             std::swap(state0, state_new);
 
@@ -1130,38 +1186,43 @@ static EMResult run_squarem(
         // alpha_out = state0 (converged Dirichlet params)
         std::copy(state0.begin(), state0.end(), alpha_out.begin());
 
-        // theta = normalized alpha
+        // theta = normalized alpha, over the locus's own components
         double total = 0.0;
-        for (size_t i = 0; i < nc; ++i) total += alpha_out[i];
+        for (size_t i = 0; i < n_locus; ++i) total += alpha_out[i];
         if (total > 0.0) {
             double inv = 1.0 / total;
-            for (size_t i = 0; i < nc; ++i) theta[i] = alpha_out[i] * inv;
+            for (size_t i = 0; i < n_locus; ++i) theta[i] = alpha_out[i] * inv;
         } else {
-            std::copy(alpha_out.begin(), alpha_out.end(), theta.begin());
+            std::copy(alpha_out.begin(), alpha_out.begin() + n_locus, theta.begin());
+        }
+        if (ig.idx >= 0) {
+            theta[ig.idx] = 0.0;
+            data_count_out = alpha_out[ig.idx];
         }
 
     } else {
         // ---- MAP-EM with SQUAREM acceleration ----
         // state = normalized theta
         double total = 0.0;
-        for (size_t i = 0; i < nc; ++i) {
+        for (size_t i = 0; i < n_locus; ++i) {
             state0[i] = nonnegative_finite(init_counts[i]);
             total += state0[i];
         }
         if (total > 0.0) {
             double inv = 1.0 / total;
-            for (size_t i = 0; i < nc; ++i) state0[i] *= inv;
+            for (size_t i = 0; i < n_locus; ++i) state0[i] *= inv;
         }
+        if (ig.idx >= 0) state0[ig.idx] = 1.0;  // M = N: every fragment the locus's, to start
 
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two EM steps
             map_em_step(state0.data(), estep, log_eff_len,
                         unambig_totals, aggregate_prior, em_totals.data(),
-                        state1.data(), n_components);
+                        state1.data(), n_components, ig);
 
             map_em_step(state1.data(), estep, log_eff_len,
                         unambig_totals, aggregate_prior, em_totals.data(),
-                        state2.data(), n_components);
+                        state2.data(), n_components, ig);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -1198,10 +1259,10 @@ static EMResult run_squarem(
                     }
                 }
                 double s = 0.0;
-                for (size_t i = 0; i < nc; ++i) s += state_extrap[i];
+                for (size_t i = 0; i < n_locus; ++i) s += state_extrap[i];
                 if (s > 0.0) {
                     double inv = 1.0 / s;
-                    for (size_t i = 0; i < nc; ++i) state_extrap[i] *= inv;
+                    for (size_t i = 0; i < n_locus; ++i) state_extrap[i] *= inv;
                 } else {
                     std::copy(state2.begin(), state2.end(),
                               state_extrap.begin());
@@ -1211,7 +1272,7 @@ static EMResult run_squarem(
             // Stabilisation step
             map_em_step(state_extrap.data(), estep, log_eff_len,
                         unambig_totals, aggregate_prior, em_totals.data(),
-                        state_new.data(), n_components);
+                        state_new.data(), n_components, ig);
 
             for (size_t i = 0; i < nc; ++i) {
                 if (!std::isfinite(state_new[i])) {
@@ -1238,9 +1299,13 @@ static EMResult run_squarem(
 
         // theta = state0 (converged normalized theta)
         std::copy(state0.begin(), state0.end(), theta.begin());
+        if (ig.idx >= 0) {
+            data_count_out = state0[ig.idx] * ig.n_all;
+            theta[ig.idx] = 0.0;
+        }
     }
 
-    EMResult out{ std::move(theta), completed_iterations };
+    EMResult out{ std::move(theta), data_count_out, completed_iterations };
     out.squarem_step_scale_mean = step_scale_count > 0
         ? step_scale_sum / static_cast<double>(step_scale_count)
         : 0.0;
@@ -1268,6 +1333,7 @@ struct LocusSubProblem {
     int n_t;           // number of transcripts in locus
     int n_components;  // n_t + 1
     int gdna_idx;      // = n_t     (single gDNA component)
+    int ig_idx = -1;   // = n_t + 1 when a unit has an intergenic place (the intergenic term), else -1
     int n_local_units;
     bool has_gdna_candidate = false;
 
@@ -1341,7 +1407,11 @@ static void assign_posteriors(
     int32_t* out_winner_tid,   // [total_units] or nullptr
     float*   out_winner_post,  // [total_units] or nullptr
     int16_t* out_n_candidates, // [total_units] or nullptr
-    int      out_offset)       // write offset for this locus
+    int      out_offset,       // write offset for this locus
+    // The intergenic term: its weight from the locus's converged data count, and its mass, outside the locus
+    const IntergenicTerm& ig,
+    double   data_count,
+    double&  ig_total)
 {
     int n_t = sub.n_t;
     int nc  = sub.n_components;
@@ -1355,6 +1425,7 @@ static void assign_posteriors(
     for (int c = 0; c < nc; ++c) {
         log_weights[c] = std::log(theta[c] + EM_LOG_EPSILON) - log_eff_len[c];
     }
+    if (ig.idx >= 0) log_weights[ig.idx] = intergenic_log_weight(ig, data_count);
 
     // Every unit's posterior, candidate-aligned with sub.t_indices. A unit whose log-sum-exp is not finite keeps
     // all zeros and is assigned nothing, in either mode.
@@ -1606,6 +1677,7 @@ static void assign_posteriors(
 
     rna_total = 0.0;
     gdna_total = 0.0;
+    ig_total = 0.0;
     std::vector<double> weights;
 
     for (int ui = 0; ui < n_units; ++ui) {
@@ -1645,6 +1717,8 @@ static void assign_posteriors(
                 int32_t comp = sub.t_indices[s + ann_winner];
                 if (comp < n_t) {
                     out_winner_tid[write_idx] = local_to_global[comp];
+                } else if (comp == ig.idx) {
+                    out_winner_tid[write_idx] = EM_WINNER_INTERGENIC;
                 } else {
                     out_winner_tid[write_idx] = -2;  // gDNA
                 }
@@ -1676,6 +1750,9 @@ static void assign_posteriors(
                 // Confidence tracking (use original posteriors)
                 posterior_sum[global_t] += posteriors[j] * posteriors[j];
                 n_assigned[global_t] += posteriors[j];
+            } else if (comp == ig.idx) {
+                // the intergenic term: gDNA outside every locus
+                ig_total += p;
             } else {
                 // gDNA
                 gdna_total += p;
@@ -1874,6 +1951,7 @@ struct PartitionView {
     const uint8_t* count_cols;
     const uint8_t* is_spliced;
     const float*   gdna_log_liks;
+    const float*   intergenic_log_liks = nullptr;  // per unit; nullptr: no unit has an intergenic place
     int     n_units;
     int64_t n_candidates;
 
@@ -1917,9 +1995,16 @@ static void extract_locus_sub_problem_from_partition(
 
     sub.n_t = n_t;
     sub.n_local_units = n_u;
-    sub.n_components = n_t + 1;
     sub.gdna_idx = n_t;
     sub.has_gdna_candidate = false;
+    // The intergenic term is a component only where some unit has an intergenic place.
+    bool any_intergenic = false;
+    if (pv.intergenic_log_liks != nullptr) {
+        for (int ui = 0; ui < n_u && !any_intergenic; ++ui)
+            any_intergenic = std::isfinite(static_cast<double>(pv.intergenic_log_liks[ui]));
+    }
+    sub.ig_idx = any_intergenic ? n_t + 1 : -1;
+    sub.n_components = n_t + (any_intergenic ? 2 : 1);
     int nc = sub.n_components;
 
     // --- Build global→local mapping ---
@@ -1939,7 +2024,7 @@ static void extract_locus_sub_problem_from_partition(
     // --- Pre-allocate output arrays to worst-case size ---
     // Maximum output candidates = input RNA candidates + one gDNA per unit.
     size_t max_out = static_cast<size_t>(pv.n_candidates)
-                   + static_cast<size_t>(n_u);
+                   + static_cast<size_t>(n_u) * (any_intergenic ? 2 : 1);
 
     sub.t_indices.resize(max_out);
     sub.log_liks.resize(max_out);
@@ -1963,7 +2048,10 @@ static void extract_locus_sub_problem_from_partition(
         bool is_spliced = (pv.is_spliced[ui] != 0);
         double gdna_ll = static_cast<double>(pv.gdna_log_liks[ui]);
         bool has_gdna = (!is_spliced && std::isfinite(gdna_ll));
-        int width_out = width_in + (has_gdna ? 1 : 0);
+        double ig_ll = any_intergenic ? static_cast<double>(pv.intergenic_log_liks[ui])
+                                      : -std::numeric_limits<double>::infinity();
+        bool has_ig = std::isfinite(ig_ll);
+        int width_out = width_in + (has_gdna ? 1 : 0) + (has_ig ? 1 : 0);
 
         // Fill sort buffer with remapped candidates
         sort_buf.resize(width_out);
@@ -1986,6 +2074,11 @@ static void extract_locus_sub_problem_from_partition(
         if (has_gdna) {
             sort_buf[k++] = {sub.gdna_idx, gdna_ll, 1.0, 0};
             sub.has_gdna_candidate = true;
+        }
+        // The intergenic term (component n_t + 1, the largest): the unit's gDNA terms at its places outside every
+        // locus, which the EM reads at the intergenic rate.
+        if (has_ig) {
+            sort_buf[k++] = {sub.ig_idx, ig_ll, 1.0, 0};
         }
 
         // Trim to actual count (candidates may have been skipped above)
@@ -2075,7 +2168,8 @@ static std::tuple<
     nb::list,  // locus_stats
     nb::object,  // out_winner_tid (ndarray or None)
     nb::object,  // out_winner_post (ndarray or None)
-    nb::object   // out_n_candidates (ndarray or None)
+    nb::object,  // out_n_candidates (ndarray or None)
+    double       // total_intergenic_em: the intergenic term's mass, outside every locus
 >
 batch_locus_em_partitioned(
     // Per-locus partition data (list of 7-tuples)
@@ -2111,7 +2205,9 @@ batch_locus_em_partitioned(
     int    n_splice_strand_cols,
     int    n_threads,
     bool   emit_locus_stats,
-    bool   emit_assignments)
+    bool   emit_assignments,
+    // The intergenic gDNA rate, fragments per start in the efficiencies' unit; 0 reads no intergenic term.
+    double intergenic_rate)
 {
     // A code this module does not define is refused rather than read: an unknown assignment code would
     // index the per-unit draw that only ASSIGN_SAMPLE fills (`assign_posteriors`), and an unknown warm
@@ -2147,6 +2243,7 @@ batch_locus_em_partitioned(
         v.count_cols       = nb::cast<u8_1d>(tup[4]).data();
         v.is_spliced       = nb::cast<u8_1d>(tup[5]).data();
         v.gdna_log_liks    = nb::cast<f32_1d>(tup[6], false).data();
+        v.intergenic_log_liks = nb::len(tup) > 7 ? nb::cast<f32_1d>(tup[7], false).data() : nullptr;
         v.n_units = static_cast<int>(off_arr.shape(0)) - 1;
         v.n_candidates = v.offsets[v.n_units];
 
@@ -2226,8 +2323,12 @@ batch_locus_em_partitioned(
 
     std::vector<double> locus_rna_vec(n_loci, 0.0);
     std::vector<double> locus_gdna_vec(n_loci, 0.0);
+    std::vector<double> locus_ig_vec(n_loci, 0.0);
     double* locus_rna_data = locus_rna_vec.data();
     double* locus_gdna_data = locus_gdna_vec.data();
+    double* locus_ig_data = locus_ig_vec.data();
+    const double log_intergenic_rate = intergenic_rate > 0.0
+        ? std::log(intergenic_rate) : -std::numeric_limits<double>::infinity();
 
     std::vector<LocusProfile> locus_profiles(
         emit_locus_stats ? static_cast<size_t>(n_loci) : 0);
@@ -2316,6 +2417,18 @@ batch_locus_em_partitioned(
                 n_local_units);
             auto t4 = hrclock::now();
 
+            // The intergenic term, when a unit of the locus has an intergenic place.
+            IntergenicTerm ig;
+            if (sub.ig_idx >= 0) {
+                ig.idx = sub.ig_idx;
+                ig.log_rate = log_intergenic_rate;
+                double n_all = 0.0;
+                for (int u = 0; u < n_local_units; ++u)
+                    if (sub.offsets[u + 1] > sub.offsets[u]) n_all += 1.0;
+                for (int c = 0; c < nc; ++c) n_all += sub.unambig_totals[c];
+                ig.n_all = n_all;
+            }
+
             // 5. Grouped aggregate prior + coverage-weighted warm start.
             AggregatePrior aggregate_prior{
                 nonnegative_finite(gp_ptr[li]),
@@ -2330,7 +2443,7 @@ batch_locus_em_partitioned(
                 ec_data,
                 sub.unambig_totals.data(),
                 aggregate_prior,
-                init_counts.data(), nc, warm_start_mode);
+                init_counts.data(), nc, warm_start_mode, ig.idx);
             auto t5 = hrclock::now();
 
             // 6. SQUAREM
@@ -2341,12 +2454,12 @@ batch_locus_em_partitioned(
                 init_counts.data(),
                 nc, max_iterations, convergence_delta,
                 use_vbem,
-                pool);
+                pool, ig);
             auto t6 = hrclock::now();
 
             // 7. Assign posteriors
             SplitMix64 locus_rng(rng_seed ^ (static_cast<uint64_t>(li) * 0x9e3779b97f4a7c15ULL));
-            double locus_rna = 0.0, locus_gdna = 0.0;
+            double locus_rna = 0.0, locus_gdna = 0.0, locus_ig = 0.0;
             int stranded = 0, unrepaired = 0;
             assign_posteriors(
                 sub, result.theta.data(),
@@ -2357,11 +2470,13 @@ batch_locus_em_partitioned(
                 locus_rna, locus_gdna,
                 N_T, N_COLS,
                 out_tid_ptr, out_post_ptr, out_ncand_ptr,
-                locus_write_offsets[li]);
+                locus_write_offsets[li],
+                ig, result.data_count, locus_ig);
             auto t7 = hrclock::now();
 
             locus_rna_data[li] = locus_rna;
             locus_gdna_data[li] = locus_gdna;
+            locus_ig_data[li] = locus_ig;
 
             if (emit_locus_stats) {
                 auto us = [](auto a, auto b) {
@@ -2386,11 +2501,13 @@ batch_locus_em_partitioned(
                 prof.assignment_unrepaired = unrepaired;
                 prof.gdna_eff_len = gel_ptr[li];
                 {
-                    // Marginal data log-lik at the converged theta (which fixed point is the MLE).
+                    // Marginal data log-lik at the converged theta (which fixed point is the MLE). With an intergenic
+                    // term it is the conditional one, without the Poisson count terms or the prior: not that objective.
                     std::vector<double> lw(static_cast<size_t>(nc));
                     for (int c = 0; c < nc; ++c) {
                         lw[c] = std::log(result.theta[c] + EM_LOG_EPSILON) - log_eff_len_ptr[c];
                     }
+                    if (ig.idx >= 0) lw[ig.idx] = intergenic_log_weight(ig, result.data_count);
                     prof.final_data_loglik = marginal_data_loglik(ec_data, lw.data());
                 }
 
@@ -2461,8 +2578,9 @@ batch_locus_em_partitioned(
 
     // Summed in locus order once the solve is done, never as the workers finish: an arrival-order sum
     // re-associates from run to run, so the reported total would not be one number.
-    double total_gdna_em_val = 0.0;
+    double total_gdna_em_val = 0.0, total_ig_em_val = 0.0;
     for (int li = 0; li < n_loci; ++li) total_gdna_em_val += locus_gdna_data[li];
+    for (int li = 0; li < n_loci; ++li) total_ig_em_val += locus_ig_data[li];
 
     size_t shape[1] = {static_cast<size_t>(n_loci)};
     auto* rna_copy = new double[n_loci];
@@ -2549,7 +2667,8 @@ batch_locus_em_partitioned(
             std::memcpy(p, out_ncand_vec.data(), total_units * sizeof(int16_t));
             nb::capsule own(p, [](void* x) noexcept { delete[] static_cast<int16_t*>(x); });
             return nb::cast(nb::ndarray<nb::numpy, int16_t, nb::ndim<1>>(p, 1, u_shape, std::move(own)));
-        }()
+        }(),
+        total_ig_em_val
     );
 }
 // ================================================================
@@ -2834,6 +2953,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_threads") = 0,
           nb::arg("emit_locus_stats") = false,
           nb::arg("emit_assignments") = false,
+          nb::arg("intergenic_rate") = 0.0,
           "Run locus EM from per-locus partition data.\n\n"
           "Accepts a list of 7-tuples (one per locus) of partition arrays.\n"
           "Returns (total_gdna_em, locus_rna_total, locus_gdna, locus_stats,\n"
@@ -2864,6 +2984,7 @@ NB_MODULE(_em_impl, m) {
     m.attr("WARM_START_COVERAGE")    = WARM_START_COVERAGE;
     m.attr("WARM_START_PRIOR")       = WARM_START_PRIOR;
     m.attr("WARM_START_UNIFORM")     = WARM_START_UNIFORM;
+    m.attr("EM_WINNER_INTERGENIC")   = EM_WINNER_INTERGENIC;
 
     // ----------------------------------------------------------------
     // Test-only: expose the grouped prior update, so the one identity the

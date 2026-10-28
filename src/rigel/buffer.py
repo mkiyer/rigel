@@ -88,6 +88,13 @@ class _FinalizedChunk:
     nm: np.ndarray  # uint16[N]
     size: int
     _fragment_classes: np.ndarray | None = None  # cached uint8[N]
+    # Each row's place masses, CSR over rows: the deposit rule's mass at each object (region, boundary or sj, by
+    # ``rigel.native.PLACE_*``, flat ids) a multimapper's genic place deposits on, which its capture weight reads.
+    # Empty on every other row; ``None`` where a chunk carries none at all.
+    place_offsets: np.ndarray | None = None  # int64[N+1]
+    place_kind: np.ndarray | None = None  # int8[M_p]
+    place_index: np.ndarray | None = None  # int64[M_p]
+    place_mass: np.ndarray | None = None  # float32[M_p]
 
     @classmethod
     def from_raw(cls, raw: dict) -> "_FinalizedChunk":
@@ -109,6 +116,10 @@ class _FinalizedChunk:
             genomic_start=raw["genomic_start"],
             nm=raw["nm"],
             size=int(raw["size"]),
+            place_offsets=raw.get("place_offsets"),
+            place_kind=raw.get("place_kind"),
+            place_index=raw.get("place_index"),
+            place_mass=raw.get("place_mass"),
         )
 
     @property
@@ -130,6 +141,16 @@ class _FinalizedChunk:
                 self.genomic_footprint,
                 self.genomic_start,
                 self.nm,
+                *(
+                    a
+                    for a in (
+                        self.place_offsets,
+                        self.place_kind,
+                        self.place_index,
+                        self.place_mass,
+                    )
+                    if a is not None
+                ),
             )
         )
 
@@ -221,6 +242,21 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
             "genomic_footprint": chunk.genomic_footprint,
             "genomic_start": chunk.genomic_start,
             "nm": chunk.nm,
+            **(
+                {}
+                if chunk.place_offsets is None
+                else {
+                    "place_kind": pa.ListArray.from_arrays(
+                        chunk.place_offsets.astype(np.int32), chunk.place_kind
+                    ),
+                    "place_index": pa.ListArray.from_arrays(
+                        chunk.place_offsets.astype(np.int32), chunk.place_index
+                    ),
+                    "place_mass": pa.ListArray.from_arrays(
+                        chunk.place_offsets.astype(np.int32), chunk.place_mass
+                    ),
+                }
+            ),
         }
     )
 
@@ -259,7 +295,27 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         genomic_start=table.column("genomic_start").to_numpy().copy(),
         nm=table.column("nm").to_numpy().copy().astype(np.uint16),
         size=len(table),
+        **_load_place_masses(table),
     )
+
+
+def _load_place_masses(table) -> dict:
+    """The spilled chunk's place-mass CSR, or none where it carried none."""
+    if "place_kind" not in table.column_names:
+        return {}
+    kind = table.column("place_kind").combine_chunks()
+    return {
+        "place_offsets": kind.offsets.to_numpy().astype(np.int64),
+        "place_kind": kind.values.to_numpy().astype(np.int8),
+        "place_index": table.column("place_index")
+        .combine_chunks()
+        .values.to_numpy()
+        .astype(np.int64),
+        "place_mass": table.column("place_mass")
+        .combine_chunks()
+        .values.to_numpy()
+        .astype(np.float32),
+    }
 
 
 @dataclass(slots=True)

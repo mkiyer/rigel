@@ -209,10 +209,24 @@ public:
     std::vector<int32_t>  genomic_footprint_;
     std::vector<int32_t>  genomic_start_;
     std::vector<uint16_t> nm_;
+    // Each row's place masses, CSR: the deposit rule's mass at every object (region, boundary or sj, flat ids) a
+    // multimapper's genic place deposits on, which its capture weight reads. Empty on every other row.
+    std::vector<int64_t>  place_offsets_;
+    std::vector<int8_t>   place_kind_;
+    std::vector<int64_t>  place_index_;
+    std::vector<float>    place_mass_;
     int32_t size_ = 0;
 
     FragmentAccumulator() {
         t_offsets_.push_back(0);
+        place_offsets_.push_back(0);
+    }
+
+    /// One object of the NEXT appended row's place: call before `append`.
+    void add_place_mass(int8_t kind, int64_t index, double mass) {
+        place_kind_.push_back(kind);
+        place_index_.push_back(index);
+        place_mass_.push_back(static_cast<float>(mass));
     }
 
     /// Pre-allocate internal vectors to avoid repeated reallocation.
@@ -258,6 +272,7 @@ public:
         genomic_footprint_.push_back(r.genomic_footprint);
         genomic_start_.push_back(r.genomic_start);
         nm_.push_back(checked_u16_buffer_value(r.nm, "nm"));
+        place_offsets_.push_back(static_cast<int64_t>(place_kind_.size()));
         size_++;
     }
 
@@ -283,6 +298,10 @@ public:
         result["genomic_footprint"] = vec_to_ndarray(std::move(genomic_footprint_));
         result["genomic_start"]     = vec_to_ndarray(std::move(genomic_start_));
         result["nm"]                = vec_to_ndarray(std::move(nm_));
+        result["place_offsets"]     = vec_to_ndarray(std::move(place_offsets_));
+        result["place_kind"]        = vec_to_ndarray(std::move(place_kind_));
+        result["place_index"]       = vec_to_ndarray(std::move(place_index_));
+        result["place_mass"]        = vec_to_ndarray(std::move(place_mass_));
         result["size"]              = nb::cast(n);
 
         size_ = 0;

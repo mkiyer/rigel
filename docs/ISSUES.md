@@ -37,49 +37,6 @@ detection off — while an index built with no store loads quietly. Left: the cl
 (`ISSUES: the-format-changes-to-batch-before-release`) must name the store, since `rigel index` refuses a build that
 names neither `--alignable-zarr` nor `--no-mappability`.
 
-### multimapper-intergenic-alignments
-`priority: now — release-blocking (owner, 2026-10-19): a fragment's valid intergenic and genic alignments compete in the EM · stage: scan · kind: defect · 2026-09-24`
-THE OWNER'S CASES (2026-10-19). Rigel models RNA only as the reference annotation holds it, so an intergenic spliced
-alignment is a splice artifact or an unannotated transcript, and no "intergenic RNA" exists for it to be:
-1. intergenic only, unique, unspliced: certified gDNA;
-2. intergenic only, unique, spliced: withheld, neither gDNA nor RNA;
-3. a multimapper whose alignments are all intergenic and unspliced: certified gDNA, wherever it lies;
-4. a multimapper with intergenic spliced and unspliced alignments: the spliced ones rejected, the fragment certified
-   gDNA by its unspliced ones;
-5. a multimapper with genic and intergenic alignments, spliced or not: the valid transcript alignments and the
-   intergenic unspliced ones kept, competing in the EM.
-Cases 1–4 hold since the annotated-path rule (`tests/test_hit_verdict.py`), which rejects the spliced alignments no
-annotated transcript holds. Case 5 is this entry.
-A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA — correct. One with an
-alignment in a gene is solved by the EM, and the owner's rule is that it is compatible with gDNA if ANY alignment
-is unspliced. The scanner never buffers a multimapper's alignment that overlaps no transcript
-(the scan's intergenic path appends a unique mapper's hit alone, `bam_scanner.cpp`), so a gDNA read from an unannotated processed
-pseudogene whose other alignment splices across the parent gene reaches the EM with its spliced alignment alone
-and is certified RNA on the parent. The owner expects multimappers to matter most. The repair buffers those
-alignments, lets the scorer take a gDNA term from an alignment with no transcript candidate
-(`scoring.cpp`'s `n_cand > 0`) while an all-intergenic group still drops silently, keeps the fragment ledger
-exact, and decides which locus's gDNA component owns a gDNA reading at an intergenic position, outside that
-locus's gDNA length. Unmeasurable on the ladder (`NH` 1); the STAR panel at the recommended parameters, which report near-tied
-alternatives as multimappers, and `tests/scenarios_aligned/test_multimap_counting.py` are where it is seen. Taken
-with `ISSUES: multimapper-blind-support`. How the group's gDNA term combines its places is
-`ISSUES: the-gdna-term-is-a-mean-over-places`, which lands with it.
-MEASURED (2026-10-27, places by mate pairing, genic where a place overlaps an annotated transcript's span). On the STAR
-rung at g50 ss.99 case 5 is 88,274 gDNA fragments off capture (1.8 % of gDNA; 1,654 with a spliced genic place only,
-certified RNA today) and 80,360 on, against 26,251 and 23,243 mature RNA; on the VCaP mix it is 5,631 DNA against 31,364
-RNA, so on a real library its risk is RNA read as gDNA. Today, pinned and fractional, gDNA multimappers read 65–68 %
-gDNA off capture, case 5 or all places genic alike, against 94.9 % for unique gDNA, the rest mostly nascent RNA: about
-57 k fragments, 1.2 % of the condition's gDNA. Mature RNA multimappers read 97.9–98.6 % annotated. At g98 the bleed is
-the multimappers': a third of the RNA calls are gDNA (57,751 of 172,250), and gDNA multimappers carry 72 % of them (case 5
-alone 47 %), while unique gDNA reads 99.8 % gDNA. The derivation (`P(fragment | o) = Σ_p κ_p P_o(p, ℓ_p)`, `κ_p` the
-place's capture weight) gives one rule: every candidate at a place, RNA's and gDNA's, carries that place's capture
-weight, and gDNA sums over its places; for a unique fragment it is one constant on every candidate and changes nothing.
-THE OWNER'S GOAL AND FRAMING (2026-10-27): mitigate gDNA called RNA, worst at extremely high gDNA and where gDNA aligns
-as spliced, RNA pulled into gDNA the accepted risk. Intergenic regions are not captured, and an intergenic fragment
-belongs to no locus. Two models to explore in a session of their own: one intergenic meta-component at a global rate
-(the intergenic fragments over the observable intergenic effective length), or every intergenic region modelled, the
-accumulator depositing a multimapper's intergenic alignment as it deposits a genic one. Instruments:
-`$RIGEL_RUNS/prototypes/2026-10-27_mm_intergenic/` (`mm_census.py`, `assign_by_class.py`).
-
 ### splicing-artifacts
 `priority: now — release-blocking (owner, 2026-10-14), and the goal the scan's repair serves (owner, 2026-10-21): the recommended STAR parameters' competing alignments and the multimapper handling are to carry through to it; 0.8.0 waits for the mechanism AND its validation on independent artifact-containing evidence (the cluster); the design is externally reviewed, its derivation next · stage: scan · kind: defect · 2026-09-24`
 THE OWNER'S DESIGN (2026-10-14): spliced fragments are the most specific signal the tool has, so artifacts are
@@ -158,7 +115,8 @@ strands; mates disagreeing on an acceptor) reach neither stage. Its cost on the 
   paralogs: alignable records an artifact from every alignment, secondary and supplementary included, so a parent
   gene's junction is listed with long anchors on both sides and, under the OR rule, rejects every single-junction read
   up to about 2m aligned bases. Measuring it needs an unspliced end-to-end realignment, alignable's per-record origins
-  and a junction mappability table; the EM side needs `ISSUES: multimapper-intergenic-alignments`.
+  and a junction mappability table; the EM side, a multimapper's intergenic places competing with its genic ones,
+  landed 2026-10-28 (`DESIGN.md` §3.1g).
 - THE BUILDER applies `min_count` (2, underived) per (chrom, intron, strand, read_length) BEFORE aggregating over read
   lengths, so a junction seen once at each of several read lengths never enters. Fixed with the catalogue rebuild.
   Since index format 9 (2026-10-14) the feather keeps each junction's count, summed over the rows that built it, so
@@ -218,6 +176,10 @@ way; an emptied copy reads to `gdna_density.one_sided_rate` as an N run did (`IS
 region-lengths-count-unobservable-bases`). Instrument: per-region contained counts, the rung against the oracle BAM,
 and the rung's records of the reads drawn in a region (`$RIGEL_RUNS/prototypes/2026-10-22_region_length/`,
 `where_reads_went.py`).
+Since a multimapper's intergenic places reach the EM (2026-10-28, `DESIGN.md` §3.1g), the region form is what still sets
+calibration and the EM apart on such a fragment: the EM reads its intergenic places at the bulk rate, while the draw
+puts its gDNA at the genic copy, which sets the prior's centre and the reader's efficiencies there. Changing the draw is
+its own arm, after the places (owner, 2026-10-27).
 Instrument: pass 2's predicted probabilities and its draws against truth on the STAR panel; `calibration_vs_oracle.py`
 per arm, once the panels are re-cached on the repaired scan.
 
@@ -372,6 +334,14 @@ Instrument: the aligned panel, with the gDNA law injected from the oracle BAM; t
 AMPLIFIES SMALL CHANGES (2026-10-26): calibration's geometry over the observable genome is a no-op on every capture-ON
 row with every efficiency at 1, yet moves stranded × capture-ON genes +1.2 % through the reader
 (`ISSUES: region-lengths-count-unobservable-bases`, step 5).
+CARRIED TO THE MULTIMAPPERS (2026-10-28): every candidate at a multimapper's place carries that place's efficiency
+(`DESIGN.md` §3.1g), so the reader's false capture also splits multimappers. That is the landing's recorded regression:
+g00 ss.50 capture-OFF genes ×1.365 against the previous tree, the same with the intergenic background's rate at 0 and
+×1.007 without the place weights, the reader's efficiencies there reaching 1.74 M against a bulk of 5.6e-7. The two
+capture-ON controls' genes ×1.04 also arrive with the place weights, not dissected. With every efficiency at 1 the
+place-weight arm's mechanism (P2: the sum and the background, the weights then 1) cost genes at g05–g50 off capture
+against the previous tree at 1 (×1.39 unstranded, ×1.02–1.24 stranded) and won at g98 (×0.67 ss.50, ×0.96 ss.99), so
+this fix re-prices the multimappers too (`$RIGEL_RUNS/prototypes/2026-10-27_mm_intergenic/ab/qa_c1.py`).
 MEASURED 2026-10-19 on the STAR panel at the recommended parameters, pinned and fractional, against truth: on aligned
 input the capture efficiencies are most of the error of every capture-OFF condition. With every efficiency held at 1
 (the landscape kept; `capture_efficiency.capture_efficiencies` answering nothing):
@@ -577,19 +547,6 @@ own-count law, gDNA-long ss0.99 ON reads −17.5 / −43.8 / −50.2 % at g05 / 
 has no strand frame and keeps its +2–3 %. Instruments: `$RIGEL_RUNS/prototypes/2026-10-26_length_prior/`
 (`law_arm2.py --gdna-sf12a`).
 
-### the-capture-likelihood-leans-toward-rna
-`priority: now — 0.8.0, the third of the three (owner, 2026-10-26) · stage: EM · kind: defect · 2026-10-26`
-Under capture the EM leans toward RNA even with a right calibration: with no prior it leaves −35.5k gDNA at
-`g98 ss.99 ON` under an exact calibration (`ISSUES: the-pseudocount-strength-is-not-derived`, 2026-09-24), and on the
-test chromosome's gDNA-long g50 ss.99 ON, with the oracle's gDNA count and gDNA's table in the census's own capture
-frame (both from the simulator's truth), RNA is over-called by 5.7k fragments, 0.5–1.7 % in every captured gene
-(genes −9.9 % against the previous scorer, where the shipped table under the same count reads −32.9 %). The shipped
-table, under-tilted in that direction, has been cancelling it, so the strand frame's A/B will show it. Not yet
-dissected: which object class and which lengths carry it — RNA's normaliser under capture prices each object at one
-length-independent efficiency, exact only at one law or a flat capture response (the exact form, which a measured
-response would price, moved this row by under a point), and RNA's smoothed law keeps a tail far past its support. Instruments:
-`$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`exact_frame_arm.py --oracle-prior`), `quant_accuracy.py --arm oracle`.
-
 ### the-pooled-q-in-the-gdna-count
 `priority: now — 0.8.0, the first of the three (owner, 2026-10-26); re-scoped by the day's split below: the share is the small half · stage: pre-EM · kind: defect · 2026-09-24`
 Calibration's per-locus gDNA count (`priors.assemble_priors`) converts each boundary's gDNA mass to fragments by
@@ -619,41 +576,6 @@ what the oracle count removes: with calibration's count replaced by the oracle's
 shared law with the coupling) the gap rows gained 12–40 points of genes against the previous scorer (gDNA-long g98
 ss.99 ON −4.6 → −44.4 %, where 1 % of the gDNA is half the RNA). So the share fix alone deepens a net under-call —
 why the own-share arm read worse off capture — and lands only with calibration's own count repaired, its other half.
-
-### merge-keeps-least-overhang
-`priority: now — the combination rule, the paired-end repair's second wave (the code-health review, 2026-10-16), on the fix order's release path after calibration (owner, 2026-10-18) · stage: pre-EM · kind: defect · 2026-10-16`
-A multimapper's hit for each transcript is chosen by the least overhang, then the likelihood (`scoring.cpp:569-582`).
-But each hit's likelihood already contains `oh × ln overhang_alpha`, so overhang counts twice.
-- At the default alphas, a hit with overhang 0 and NM 3 beats one with overhang 1 and NM 0, which is 4.6 nats more
-  likely.
-- At `--mismatch-alpha 0`, the transcript is lost: its −inf entry is never replaced.
-
-No test puts two hits on one transcript. The candidate rule is the hit with the highest likelihood. For alternatives at
-one place with equal NM, both rules choose the same hit.
-Instrument: that fixture, at the default alpha and at the gate; then the A/B on the STAR-aligned ladder.
-
-### the-gdna-term-is-a-mean-over-places
-`priority: now — the combination rule (owner, 2026-10-16: a sum, not the mean), on the fix order's release path after calibration (owner, 2026-10-18) · stage: pre-EM · kind: defect · 2026-10-16`
-A multimapper's gDNA term is the MEAN of its eligible hits' gDNA likelihoods (`scoring.cpp`'s running log-sum-exp
-less the log of the count, pinned by `tests/test_pipeline_routing.py`), so adding a poor second place halves gDNA's
-term while RNA's is untouched, which biases every multimapper toward RNA. With the recommended STAR parameters every
-near-tied template is a multimapper, so the rule decides how all of them score. The owner's rule: gDNA sums over
-distinct places, each with its own genomic prior, capture efficiency and observable opportunity, and alternatives at
-one place count once. MEASURED 2026-10-15, before the scan's repair, on the local minimap2 panel at g50 capture ON with
-intergenic hits let into the EM: the mean owned that arm's loss (mixed multimappers whose true origin is the probed
-genic copy lost 6,416 fragments, 64 % of them with a worse intergenic place), and a sum arm turned that class to
-+41.4 k while RNA multimappers lost 33.6 k to gDNA, since no place carried its own capture efficiency. So the sum lands
-with each place's efficiency, and with `ISSUES: multimapper-intergenic-alignments`, never alone; and with it
-`ISSUES: mismatch-gate-nan-in-multimapper-gdna`. Instrument: `quant_accuracy.py` on the STAR panel per stratum,
-pinned and fractional, with every capture efficiency at 1 beside the shipped run; the arms in
-`$RIGEL_RUNS/prototypes/2026-10-15_mm_sum/`.
-
-### mismatch-gate-nan-in-multimapper-gdna
-`priority: now — with the sum over places, the paired-end repair's second wave, on the fix order's release path after calibration (owner, 2026-10-18) · stage: pre-EM · kind: defect · 2026-10-16`
-At `--mismatch-alpha 0`, a mismatched hit's gDNA term is −inf. Two such hits make the multimapper's log-sum-exp NaN
-(`scoring.cpp:57-73, 519-527, 646-653`). The NaN then fails `> 0`, so whether a later NM = 0 hit keeps its gDNA reading
-depends on the order of the hits. This is the live remainder of `scoring-penalties-are-underived-constants`' "a zero
-alpha gives NaN". Instrument: a test over the three hit orders; a pure-Python transcription reproduces it.
 
 ### the-em-prior-share-excludes-drawn-multimappers
 `priority: now — the prior's denominator, on the fix order's release path after calibration (owner, 2026-10-18); the 0.8.0 cut had kept the shipped denominator on its A/B (2026-10-14), and the repair is the share's frame · stage: pre-EM · kind: defect · 2026-10-14`
@@ -697,6 +619,22 @@ candidate does" holds for neither pool.
 
 The candidate rule is one reference: the unit's best candidate of any kind. Instrument: a per-stratum A/B. The routing
 tests set `is_synthetic` False everywhere, so pool separation is untested.
+The prune also reads no rate: it compares scores without the components' `θ` or lengths. For the intergenic background,
+whose rate is fixed, that was a defect, so it is never pruned (`DESIGN.md` §3.1g); the locus's own gDNA prune keeps
+this form (2026-10-28).
+
+### the-capture-likelihood-leans-toward-rna
+`priority: now — 0.8.0, the third of the three (owner, 2026-10-26) · stage: EM · kind: defect · 2026-10-26`
+Under capture the EM leans toward RNA even with a right calibration: with no prior it leaves −35.5k gDNA at
+`g98 ss.99 ON` under an exact calibration (`ISSUES: the-pseudocount-strength-is-not-derived`, 2026-09-24), and on the
+test chromosome's gDNA-long g50 ss.99 ON, with the oracle's gDNA count and gDNA's table in the census's own capture
+frame (both from the simulator's truth), RNA is over-called by 5.7k fragments, 0.5–1.7 % in every captured gene
+(genes −9.9 % against the previous scorer, where the shipped table under the same count reads −32.9 %). The shipped
+table, under-tilted in that direction, has been cancelling it, so the strand frame's A/B will show it. Not yet
+dissected: which object class and which lengths carry it — RNA's normaliser under capture prices each object at one
+length-independent efficiency, exact only at one law or a flat capture response (the exact form, which a measured
+response would price, moved this row by under a point), and RNA's smoothed law keeps a tail far past its support. Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-25_shared_law/` (`exact_frame_arm.py --oracle-prior`), `quant_accuracy.py --arm oracle`.
 
 ### the-release-builds
 `priority: now — release-gating: the owner's actions before tagging; the build fixes landed 2026-10-14 · stage: release · kind: release · 2026-10-14`
@@ -2011,6 +1949,117 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### multimapper-intergenic-alignments
+CLOSED 2026-10-28 by the landing (owner: "land P5"; `DESIGN.md` §3.1g, `EQUATIONS.md` §15). A multimapper's intergenic
+hits reach the EM as one background at calibration's bulk rate (`κ = 1`), every candidate at a multimapper's place
+carries that place's capture weight, and every component sums over its distinct places, hits that overlap on one
+reference being one place read at its best. MEASURED on the STAR rung (16 conditions, pinned and fractional, against
+`db656a81`, scored against the read names; Σ|error| over g05–g98, transcripts / genes): stranded capture-OFF ×0.850 /
+×0.791, stranded capture-ON ×0.651 / ×0.492, unstranded capture-OFF ×0.899 / ×0.926, the deferred stratum ×0.742 /
+×0.654; at g98 the gDNA called RNA 57,751 → 18,428 off capture and 161,446 → 8,261 under it. THE RECORDED REGRESSION:
+genes on three zero-gDNA controls, g00 ss.50 capture-OFF ×1.365 and the two capture-ON ×1.04, arriving with the place
+weights (`ISSUES: the-reader-reads-false-gdna-as-capture`). Built as five arms, each A/B'd alone: P1 the scan, the sum
+and the background, without place weights (a third of the off-capture gain; annotated RNA lost under capture); P2 the
+place weights; P3 an independent review's two defects fixed (an intergenic explanation dropped with the RNA
+candidates, and the background pruned by a score difference that cannot bound it), numerically neutral on the ladder;
+P4 RNA's place merge, 5–7 points of transcripts in every stratum; P5 gDNA's places, which landed. The review's
+normalisation finding is the measure (`EQUATIONS.md` §15.2). Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-27_mm_intergenic/` (`ab/strata.py`, `ab/qa_rate0.py`, `measure/repeat_places.py`,
+`mm_census.py`, `assign_by_class.py`).
+The record as it stood:
+THE OWNER'S CASES (2026-10-19). Rigel models RNA only as the reference annotation holds it, so an intergenic spliced
+alignment is a splice artifact or an unannotated transcript, and no "intergenic RNA" exists for it to be:
+1. intergenic only, unique, unspliced: certified gDNA;
+2. intergenic only, unique, spliced: withheld, neither gDNA nor RNA;
+3. a multimapper whose alignments are all intergenic and unspliced: certified gDNA, wherever it lies;
+4. a multimapper with intergenic spliced and unspliced alignments: the spliced ones rejected, the fragment certified
+   gDNA by its unspliced ones;
+5. a multimapper with genic and intergenic alignments, spliced or not: the valid transcript alignments and the
+   intergenic unspliced ones kept, competing in the EM.
+Cases 1–4 hold since the annotated-path rule (`tests/test_hit_verdict.py`), which rejects the spliced alignments no
+annotated transcript holds. Case 5 is this entry.
+A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA — correct. One with an
+alignment in a gene is solved by the EM, and the owner's rule is that it is compatible with gDNA if ANY alignment
+is unspliced. The scanner never buffers a multimapper's alignment that overlaps no transcript
+(the scan's intergenic path appends a unique mapper's hit alone, `bam_scanner.cpp`), so a gDNA read from an unannotated processed
+pseudogene whose other alignment splices across the parent gene reaches the EM with its spliced alignment alone
+and is certified RNA on the parent. The owner expects multimappers to matter most. The repair buffers those
+alignments, lets the scorer take a gDNA term from an alignment with no transcript candidate
+(`scoring.cpp`'s `n_cand > 0`) while an all-intergenic group still drops silently, keeps the fragment ledger
+exact, and decides which locus's gDNA component owns a gDNA reading at an intergenic position, outside that
+locus's gDNA length. Unmeasurable on the ladder (`NH` 1); the STAR panel at the recommended parameters, which report near-tied
+alternatives as multimappers, and `tests/scenarios_aligned/test_multimap_counting.py` are where it is seen. Taken
+with `ISSUES: multimapper-blind-support`. How the group's gDNA term combines its places is
+`ISSUES: the-gdna-term-is-a-mean-over-places`, which lands with it.
+MEASURED (2026-10-27, places by mate pairing, genic where a place overlaps an annotated transcript's span). On the STAR
+rung at g50 ss.99 case 5 is 88,274 gDNA fragments off capture (1.8 % of gDNA; 1,654 with a spliced genic place only,
+certified RNA today) and 80,360 on, against 26,251 and 23,243 mature RNA; on the VCaP mix it is 5,631 DNA against 31,364
+RNA, so on a real library its risk is RNA read as gDNA. Today, pinned and fractional, gDNA multimappers read 65–68 %
+gDNA off capture, case 5 or all places genic alike, against 94.9 % for unique gDNA, the rest mostly nascent RNA: about
+57 k fragments, 1.2 % of the condition's gDNA. Mature RNA multimappers read 97.9–98.6 % annotated. At g98 the bleed is
+the multimappers': a third of the RNA calls are gDNA (57,751 of 172,250), and gDNA multimappers carry 72 % of them (case 5
+alone 47 %), while unique gDNA reads 99.8 % gDNA. The derivation (`P(fragment | o) = Σ_p κ_p P_o(p, ℓ_p)`, `κ_p` the
+place's capture weight) gives one rule: every candidate at a place, RNA's and gDNA's, carries that place's capture
+weight, and gDNA sums over its places; for a unique fragment it is one constant on every candidate and changes nothing.
+THE OWNER'S GOAL AND FRAMING (2026-10-27): mitigate gDNA called RNA, worst at extremely high gDNA and where gDNA aligns
+as spliced, RNA pulled into gDNA the accepted risk. Intergenic regions are not captured, and an intergenic fragment
+belongs to no locus. Two models to explore in a session of their own: one intergenic meta-component at a global rate
+(the intergenic fragments over the observable intergenic effective length), or every intergenic region modelled, the
+accumulator depositing a multimapper's intergenic alignment as it deposits a genic one. Instruments:
+`$RIGEL_RUNS/prototypes/2026-10-27_mm_intergenic/` (`mm_census.py`, `assign_by_class.py`).
+
+### merge-keeps-least-overhang
+CLOSED 2026-10-28 with `ISSUES: multimapper-intergenic-alignments` (`DESIGN.md` §3.1g): a transcript's hits are chained
+into places by overlapping extents, each place read at its most likely hit and distinct places summed, so overhang
+counts once and a gated hit gives way to its surviving alternative
+(`test_a_transcripts_overlapping_hits_are_one_place_read_at_the_more_likely`,
+`test_at_mismatch_alpha_0_a_transcript_keeps_its_surviving_alternative`). MEASURED as its own arm (P4 against P3, the
+STAR rung, pinned and fractional): transcripts 5–7 points of the previous tree's error lower in every stratum, genes
+flat.
+The record as it stood:
+A multimapper's hit for each transcript is chosen by the least overhang, then the likelihood (`scoring.cpp:569-582`).
+But each hit's likelihood already contains `oh × ln overhang_alpha`, so overhang counts twice.
+- At the default alphas, a hit with overhang 0 and NM 3 beats one with overhang 1 and NM 0, which is 4.6 nats more
+  likely.
+- At `--mismatch-alpha 0`, the transcript is lost: its −inf entry is never replaced.
+
+No test puts two hits on one transcript. The candidate rule is the hit with the highest likelihood. For alternatives at
+one place with equal NM, both rules choose the same hit.
+Instrument: that fixture, at the default alpha and at the gate; then the A/B on the STAR-aligned ladder.
+
+### the-gdna-term-is-a-mean-over-places
+CLOSED 2026-10-28 with `ISSUES: multimapper-intergenic-alignments` (`DESIGN.md` §3.1g): gDNA's term is the sum over its
+distinct places, each at its place's capture efficiency, its intergenic places the background at the bulk rate, as this
+entry required (`test_gdna_sums_over_two_places_never_their_mean`,
+`test_two_identical_places_give_gdna_twice_one_places_term`,
+`test_gdnas_overlapping_hits_are_one_place_and_the_same_coordinates_on_two_references_two`). MEASURED without the
+background (its rate at 0), the sum and the place weights alone at g98: transcripts / genes ×0.920 / ×0.910 off capture
+and ×0.651 / ×0.583 under it.
+The record as it stood:
+A multimapper's gDNA term is the MEAN of its eligible hits' gDNA likelihoods (`scoring.cpp`'s running log-sum-exp
+less the log of the count, pinned by `tests/test_pipeline_routing.py`), so adding a poor second place halves gDNA's
+term while RNA's is untouched, which biases every multimapper toward RNA. With the recommended STAR parameters every
+near-tied template is a multimapper, so the rule decides how all of them score. The owner's rule: gDNA sums over
+distinct places, each with its own genomic prior, capture efficiency and observable opportunity, and alternatives at
+one place count once. MEASURED 2026-10-15, before the scan's repair, on the local minimap2 panel at g50 capture ON with
+intergenic hits let into the EM: the mean owned that arm's loss (mixed multimappers whose true origin is the probed
+genic copy lost 6,416 fragments, 64 % of them with a worse intergenic place), and a sum arm turned that class to
++41.4 k while RNA multimappers lost 33.6 k to gDNA, since no place carried its own capture efficiency. So the sum lands
+with each place's efficiency, and with `ISSUES: multimapper-intergenic-alignments`, never alone; and with it
+`ISSUES: mismatch-gate-nan-in-multimapper-gdna`. Instrument: `quant_accuracy.py` on the STAR panel per stratum,
+pinned and fractional, with every capture efficiency at 1 beside the shipped run; the arms in
+`$RIGEL_RUNS/prototypes/2026-10-15_mm_sum/`.
+
+### mismatch-gate-nan-in-multimapper-gdna
+CLOSED 2026-10-28 with `ISSUES: multimapper-intergenic-alignments`: a term at `−∞` is skipped before the log-sum-exp, at
+a genic and at an intergenic place, so no NaN arises and the hits' order cannot matter
+(`test_at_mismatch_alpha_0_the_gdna_term_is_the_same_in_every_hit_order`, every order of three hits).
+The record as it stood:
+At `--mismatch-alpha 0`, a mismatched hit's gDNA term is −inf. Two such hits make the multimapper's log-sum-exp NaN
+(`scoring.cpp:57-73, 519-527, 646-653`). The NaN then fails `> 0`, so whether a later NM = 0 hit keeps its gDNA reading
+depends on the order of the hits. This is the live remainder of `scoring-penalties-are-underived-constants`' "a zero
+alpha gives NaN". Instrument: a test over the three hit orders; a pure-Python transcription reproduces it.
 
 ### the-coupled-gdna-law
 CLOSED 2026-10-26: the realized (library-census) estimator and the coupling are deleted (owner: land it and record the

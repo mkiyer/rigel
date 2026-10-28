@@ -47,14 +47,18 @@ class ScoredFragments:
     coverage_weights : np.ndarray
         float32[n_candidates] — coverage weight per candidate.
     is_spliced : np.ndarray
-        bool[n_units] — True when the unit has no gDNA candidate: gDNA can explain none of its
-        alignments (each carries a sequenced junction the blacklist kept; the scorer's
-        ``gdna_can_explain``), or its gDNA term fell outside the pruning bound of the unit's best RNA
-        candidate (``gdna_competes``). An unspliced, artifact or implicit unit is True only in the
-        second case.
+        bool[n_units] — True when the unit has no gDNA reading, at its locus or intergenic: gDNA can explain
+        none of its alignments (each carries a sequenced junction the blacklist kept; the scorer's
+        ``gdna_can_explain``), or its locus gDNA term fell outside the pruning bound of the unit's best RNA
+        candidate (``gdna_competes``) and it has no intergenic place. An unspliced, artifact or implicit unit
+        is True only in the second case.
     gdna_log_liks : np.ndarray
-        float32[n_units] — pre-computed gDNA log-likelihood per unit.
-        -inf where ``is_spliced``.
+        float32[n_units] — pre-computed gDNA log-likelihood per unit at its places in the locus, the sum over
+        them. -inf where the locus's gDNA is no candidate.
+    intergenic_log_liks : np.ndarray
+        float32[n_units] — the sum of the gDNA terms at a multimapper's places with no transcript candidate,
+        which no locus carries: the EM reads it at the intergenic rate, and it is never pruned. -inf where no
+        intergenic place survived its gates.
     frag_ids : np.ndarray
         int64[n_units] — buffer frag_id for each EM unit.
     frag_class : np.ndarray
@@ -79,6 +83,7 @@ class ScoredFragments:
     splice_type: np.ndarray
     n_units: int = 0
     n_candidates: int = 0
+    intergenic_log_liks: np.ndarray | None = None
 
 
 # ======================================================================
@@ -121,3 +126,5 @@ class LocusPartition:
     frag_ids: np.ndarray  # int64[n_units] — buffer frag_id per unit
     frag_class: np.ndarray  # uint8[n_units] — fragment class code
     splice_type: np.ndarray  # uint8[n_units] — SpliceType enum value
+
+    intergenic_log_liks: np.ndarray | None = None  # float32[n_units]

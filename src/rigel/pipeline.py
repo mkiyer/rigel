@@ -38,6 +38,7 @@ import numpy as np
 
 from .annotate import (
     AF_GDNA_EM,
+    AF_GDNA_INTERGENIC,
     AF_UNRESOLVED,
     winner_flags,
 )
@@ -53,6 +54,7 @@ from .config import (
 from .estimator import AbundanceEstimator
 from .frag_length_model import FragmentLengthModel
 from .index import TranscriptIndex
+from .native import EM_WINNER_INTERGENIC
 from .native import BamScanner as _NativeBamScanner
 from .routing import FragmentRouter
 from .scoring import FragmentScorer
@@ -723,6 +725,7 @@ def _score_fragments(
     scoring: "FragmentScoringConfig",
     log_every: int,
     annotations,
+    place_efficiencies=None,
 ) -> "ScoredFragments":
     """Build FragmentScorer, route the buffer, and return ScoredFragments."""
     ctx = FragmentScorer.from_models(
@@ -740,6 +743,7 @@ def _score_fragments(
         stats,
         index,
         annotations=annotations,
+        place_efficiencies=place_efficiencies,
     )
     em_data = builder.route(buffer, log_every)
 
@@ -793,13 +797,14 @@ def _populate_em_annotations(
     # ZF assignment flags bitfield
     tx_flags = np.full(n, AF_UNRESOLVED, dtype=np.uint8)
     tx_flags[best_tid == -2] = AF_GDNA_EM
+    tx_flags[best_tid == EM_WINNER_INTERGENIC] = AF_GDNA_INTERGENIC
     if valid_t.any():
         winner_tids = best_tid[valid_t]
         tx_flags[valid_t] = winner_flags(is_synth_arr[winner_tids])
 
-    # Clean sentinel: -2 (gDNA) -> -1
+    # Clean sentinels: -2 (the locus's gDNA) and the intergenic term -> -1
     best_tid_clean = best_tid.copy()
-    best_tid_clean[best_tid == -2] = -1
+    best_tid_clean[(best_tid == -2) | (best_tid == EM_WINNER_INTERGENIC)] = -1
 
     annotations.add_batch(
         frag_ids=frag_ids,
@@ -855,6 +860,7 @@ def _run_locus_em_partitioned(
     gdna_eff_len: np.ndarray,
     *,
     em_config: EMConfig,
+    intergenic_rate: float = 0.0,
     rna_prior_weight: np.ndarray | None = None,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
@@ -890,6 +896,7 @@ def _run_locus_em_partitioned(
             p.count_cols,
             p.is_spliced,
             p.gdna_log_liks,
+            p.intergenic_log_liks,
         )
         for p in parts
     ]
@@ -933,6 +940,7 @@ def _run_locus_em_partitioned(
         # that the result MOVED can.
         rna_prior_weight=rna_prior_weight,
         gdna_eff_len=g_eff,
+        intergenic_rate=intergenic_rate,
         em_iterations=em_config.iterations,
         em_convergence_delta=em_config.convergence_delta,
         emit_locus_stats=emit_locus_stats,
@@ -1003,7 +1011,8 @@ def quant_from_buffer(
     against the locus's own fragments (``em_pseudocounts``). Returns the populated
     ``AbundanceEstimator``.
     """
-    from .calibration.priors import assemble_priors
+    from .calibration.capture_eff_length import place_efficiencies
+    from .calibration.priors import assemble_priors, intergenic_gdna_rate
     from .locus import build_multi_loci
     from .locus_partition import partition_and_free
 
@@ -1031,6 +1040,8 @@ def quant_from_buffer(
         scoring_cfg,
         log_every,
         annotations,
+        # each multimapper's place weighs its candidates by its capture
+        place_efficiencies(calibration, region_arrays, index),
     )
 
     multi_loci = build_multi_loci(em_data, index)
@@ -1049,6 +1060,7 @@ def quant_from_buffer(
         priors.gdna_count,
         priors.gdna_eff_len,
         em_config=em_config,
+        intergenic_rate=intergenic_gdna_rate(calibration, region_arrays),
         annotations=annotations,
         emit_locus_stats=emit_locus_stats,
     )

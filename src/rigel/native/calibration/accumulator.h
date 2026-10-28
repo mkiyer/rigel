@@ -236,6 +236,18 @@ struct GapHypothesis {
 ///
 /// ⚠ `hypotheses` must never be empty -- a fragment with no unsequenced gap still has ONE hypothesis,
 /// the unspliced one. The degenerate case is the general case, not a branch.
+/// One object a placement deposits on, and the part of the fragment's unit the deposit rule gives it
+/// (`Accumulator::placement_masses`): a region the placement is contained in takes the whole unit; the boundaries
+/// and junctions a crossing placement crosses share it by its slices.
+inline constexpr std::int8_t kPlaceRegion   = 0;
+inline constexpr std::int8_t kPlaceBoundary = 1;
+inline constexpr std::int8_t kPlaceSj       = 2;
+struct PlaceMass {
+    std::int8_t  kind;    // kPlaceRegion, kPlaceBoundary or kPlaceSj
+    std::int64_t index;   // ref-local from an `Accumulator`, flat from an `AccumulatorSet`
+    double       mass;
+};
+
 struct OfferedFragment {
     std::int64_t         start;
     std::int64_t         end;
@@ -534,6 +546,13 @@ public:
                               std::size_t hypothesis_index,
                               DepositScratch& scratch) const;
 
+    /// The deposit rule's mass at every object the placement's OBSERVED path -- its observed introns cut, no
+    /// implied one -- deposits on, without depositing: what `deposit_survivor` would credit on that path, one entry
+    /// per object, the masses summing to 1. Empty where the deposit would credit no object.
+    void placement_masses(const OfferedFragment& fragment,
+                          DepositScratch& scratch,
+                          std::vector<PlaceMass>& out) const;
+
     /// The annotated sj id for each of `n` introns, or -1 — `sj_edge_id` over arrays, written out here
     /// for the same reason `length_under` is: the second pass asks it once per hypothesis intron, and a
     /// Python reimplementation would be a second definition of the lookup the deposit already owns.
@@ -672,6 +691,13 @@ public:
     Accumulator&       at(std::int32_t ref_id);
     const Accumulator& at(std::int32_t ref_id) const;
 
+    /// `Accumulator::placement_masses` on reference `ref_id`, its objects on the flat axes: regions, boundaries and
+    /// sj in reference order, as the payload holds them.
+    void placement_masses(std::int32_t ref_id,
+                          const OfferedFragment& fragment,
+                          DepositScratch& scratch,
+                          std::vector<PlaceMass>& out) const;
+
     /// ⭐ Offer ONE fragment with every placement it aligned to; deposit it, hold it, or reject it. The
     /// specification is `_accumulator_reference.Accumulator.offer`:
     ///
@@ -701,6 +727,8 @@ private:
     std::vector<Accumulator> accs_;
     DeferredFragments        deferred_;
     DepositCounters          counters_;
+    // Each reference's first region, boundary and sj on the flat axes.
+    std::vector<std::int64_t> region_base_, boundary_base_, sj_base_;
 };
 
 }  // namespace rigel::accumulator

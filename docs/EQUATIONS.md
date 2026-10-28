@@ -1783,3 +1783,87 @@ efficiency enters as `ĉ_o = c_o · S_o(g) / S_o(T_G)` (`c_o` where `S_o(T_G) = 
 `fl_t = Σ_o S_o(T_R)` (§11), so at one table (`T_G = T_R`) `eff_t = Σ_o c_o S_o(g)`, RNA's capture-weighted length on the
 uncaptured law: under the null the per-fragment weight cancels (§14.1) and this is the normaliser exactly. At `T_G = g` the
 factor is 1 and §11's rule stands as read.
+
+## 15. A multimapper's places (`scoring.cpp`'s `merge_places` and `sum_over_places`, `capture_eff_length.place_efficiencies` and `place_log_weights`, `em_solver.cpp`'s `IntergenicTerm` and `intergenic_log_weight`)
+
+### 15.1 One fragment, several places
+
+A fragment `u` is observed as its usable hits `S_u`. The molecule came from one component `c`, at one place, with one
+length, and the aligner reported the whole set, so
+
+    P(u | c)  =  Σ_{p ∈ S_u(c)}  w(p) · f_c(ℓ_{c,p}) · s_c(p) · e(p)  /  Z_c
+
+with the scorer's per-hit terms (the length law `f_c`, the strand `s_c`, the mismatches and the overhang `e`), `w(p)`
+the place's capture weight (§15.2), `Z_c` the component's normaliser `L̃_c` (§11), and `S_u(c)` the places `c` can be
+at: a transcript's candidate places, the locus gDNA component's gDNA-explainable places, and the background's
+intergenic places (§15.3). Two hits whose genomic extents overlap on one reference are alternative alignments of one
+molecule at one place, so the place takes the larger term, not the sum; a transcript's hits are chained by
+transcript, gDNA's by reference. Distinct places sum. A term at `−∞` (`α = 0` with `NM > 0`, or a length the law
+cannot produce) adds nothing, so it is skipped before the log-sum-exp and the order of the hits cannot matter.
+
+For a unique fragment `w(p)` multiplies every candidate, RNA's and gDNA's, and cancels: the prunes compare
+log-likelihoods by difference, and the responsibilities are ratios. It is not applied, so a unique fragment scores as
+it did, as `A_p` is not applied to a one-placement record (§10).
+
+### 15.2 The place weight is the deposit rule's mass at the reader's efficiencies
+
+With `m_o(x)` placement `x`'s mass at object `o` under the deposit rule (§1; `Σ_o m_o = 1`) and `c_o` the reader's
+efficiency (§11),
+
+    w(x)  =  Σ_o m_o(x) · c_o
+
+is the weight whose sum over a component's placements is its normaliser on the law the efficiencies are read on:
+`Σ_x f(ℓ_x) w(x) = Σ_o c_o Σ_x f(ℓ_x) m_o(x) = Σ_o c_o share_o(f)`. A bottleneck, a maximum or a per-base mean would not
+sum to it. So `w` is `c_r` for a placement contained in region `r`, the mass-weighted mean of the boundaries'
+efficiencies for one that crosses them, and for a spliced placement its cuts' prices, a junction's by §11's
+conservation of bases (RNA only: gDNA cannot be at a spliced place). The efficiencies are gDNA's for every origin,
+since probes bind sequence (§14.1). An implicit place is weighed on its observed path, the gap unspliced, as `A_p` is;
+an RNA hypothesis that cuts an implied intron would deposit on the junction instead, which is an approximation.
+
+**The measure.** `c_o` is gDNA's yield against the bulk per unit of support on gDNA's uncaptured law `g`, so `f` above
+is the component's law in that frame: gDNA's normaliser is `Σ_x g(ℓ_x) w(x) = Σ_o c_o S_o(g)`, calibration's own
+supports, and a transcript's, at one table, is §14.8's `Σ_o c_o share_o(g)` exactly
+(`test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law`). On the scorer's tables `T_c = F · f_c` the
+sum is not the normaliser, and need not be. Where a unit's hypotheses imply one length, `F(ℓ_u)` multiplies every term
+of the unit, the background's included, and cancels from the responsibilities and, as a constant of the unit, from
+§15.3's likelihood. Where they imply different lengths (an implicit splice, or places with different mate gaps) the
+ratio is the shared law's per-fragment one, as on a unique fragment. Where the two tables differ (§14.6's `w > 0`), a
+transcript's normaliser carries their ratio per object (§14.8), not per length: the shared law's approximation, exact
+again at `T_G = g`.
+
+### 15.3 The intergenic background: a fixed rate in absolute units
+
+An intergenic place lies in no locus, so its gDNA arrives at a rate `λ` that no locus parameter carries. For one locus
+whose units have intergenic places, the locus's components emit a Poisson number of fragments with total `M` and
+composition `θ` (the grouped prior a Dirichlet on `θ`, silent on `M`), and the background emits at the fixed `λ`. With
+`q_uc` the per-candidate term (place weights included), `h_G` gDNA's length table and the deterministic fragments `d`,
+
+    b_u  =  Σ_{p ∈ IG(u)}  h_G(ℓ_p) · ½ · α^{NM_p}                      (w = 1 at an intergenic place)
+
+    ℓ(M, θ)  =  Σ_u log[ Σ_c M θ_c q_uc / L̃_c  +  λ b_u ]  +  Σ_d log(M θ_{t_d})  −  M  +  P_g log θ_g + P_R log(1 − θ_g)
+
+- E-step: `r_uc ∝ M θ_c q_uc / L̃_c` and `r_u,IG ∝ λ b_u`, normalised per unit.
+- M-step for `θ`: the grouped update (§9b) on the raw counts `Σ_u r_uc + n_det,c`, unchanged.
+- M-step for `M`: `∂ℓ/∂M = 0` gives `M = Σ_u Σ_{c ∈ locus} r_uc + N_det = N − Σ_u r_u,IG`, the locus's own data count,
+  never its pseudocounts. Under VBEM `M` is a point beside the Dirichlet, by the same equation.
+
+In the locus's frame, where the weights are `log θ_c − log L̃_c` (VBEM: `ψ(α_c) − ψ(Σα) − log L̃_c`), the background is
+one more column per unit, of weight `log λ − log M + log b_u`. A component whose `θ` the M-step does not update would
+fix the locus's intergenic share instead of its rate: a unit would get the same share in a locus of 10 fragments as in
+one of 10,000. `M = 0` is stable only where the background explains every unit better than any composition of the
+locus. The grouped prior is unchanged: its centre is calibration's gDNA share over the locus's unique fragments, and
+its strength counts the units with a locus gDNA candidate (§9b.3), so a unit whose only gDNA reading is intergenic adds
+nothing to it. The background competes at `λ` against rates and lengths the scores do not carry, so no difference of
+scores bounds its posterior, and it is never pruned.
+
+In the efficiencies' unit an intergenic place's rate is `ρ_b · w(p)`, with `ρ_b` calibration's `gdna_bulk_density`, the
+uncaptured gDNA density per start of the gDNA law. `w = 1` everywhere makes `λ = ρ_b`, one number; `w = c_r`, the
+reader's efficiency at the place's region, would model every intergenic region at its own count shrunk to the
+landscape. The two are one formula, and the ruling takes `w = 1` (`DESIGN.md` §3.1g).
+
+As built, `M` sits in SQUAREM's state at the column's slot (`M / N` under MAP, where the state is a share; `M` under
+VBEM, where it is a count) and is accelerated with `θ`. Under VBEM the final assignment reads `θ̄ = α / Σα` with `M` at
+its last update, so the background's reported mass is the posterior at `(θ̄, M)`. The per-locus `final_data_loglik` is
+the conditional log-likelihood, without the Poisson terms or the prior, so it is not this objective. The solver is held
+to plain iteration of these equations under both modes, with and without the prior
+(`test_the_em_reaches_the_reference_fixed_point`).

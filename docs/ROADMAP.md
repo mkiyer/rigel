@@ -38,12 +38,14 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   `rename_identity.py`, `calibration_vs_oracle.py`, `quant_accuracy.py`; `ISSUES: the-gdna-prior-enters-psi-twice`.
 - **The capture reader**: mode-free (owner, 2026-10-13, after two external reviews) — every object's own gDNA density
   against the bulk, no detector (`DESIGN.md` §7.2); on gDNA-poor uncaptured libraries it reads calibration's false gDNA
-  as capture — `ruler_vs_truth.py`, `quant_accuracy.py`, `ISSUES: the-reader-reads-false-gdna-as-capture`.
+  as capture, which a multimapper's place weights carry into the EM — `ruler_vs_truth.py`, `quant_accuracy.py`,
+  `ISSUES: the-reader-reads-false-gdna-as-capture`.
 - **The scan**: every usable hit is one molecule of both mates with a fragment length, paired by the search for every
   aligner (HI not read; `DESIGN.md` §1.1); each read pair has one outcome and each record one status, counted in
   `summary.json`'s `read_pairs` and checked against the annotation pass (`DESIGN.md` §1.2) — `tests/test_hit_verdict.py`,
-  `tests/test_accounting.py`; a multimapper's intergenic hits never reach the EM
-  (`ISSUES: multimapper-intergenic-alignments`).
+  `tests/test_accounting.py`; a multimapper's intergenic hits reach the EM as one background at the bulk rate, and
+  every component sums over a multimapper's places (`DESIGN.md` §3.1g) — `tests/test_multimapper_places.py`,
+  `quant_accuracy.py --bam`.
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `tests/test_scan_order_independence.py`; one
   open deposit defect, the leading intron (`ISSUES: latent-defects`); the second pass's four corrections are open
   (`ISSUES: the-second-pass-corrections`).
@@ -166,44 +168,39 @@ starts at the index.
 
 **The scan and its buffer.** The scan's repair landed between 2026-10-18 and 2026-10-21
 (`ISSUES: the-scanner-builds-fragments-from-one-mate`, closed); what it leaves:
-3. `ISSUES: multimapper-intergenic-alignments`: a multimapper's intergenic hits buffered and given a gDNA term, so its
-   valid intergenic and genic alignments compete in the EM; release-blocking, and the next session's (owner,
-   2026-10-27): at g98 gDNA multimappers carry most of the gDNA called RNA.
-4. `ISSUES: splicing-artifacts`: the derivation, then the scan's infrastructure (junction ids on buffered fragments, the
+3. `ISSUES: splicing-artifacts`: the derivation, then the scan's infrastructure (junction ids on buffered fragments, the
    contiguous reading of a spliced fragment), the fixtures, a prototype and the VCaP A/B; the release waits for its
    validation on the cluster.
-5. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
+4. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
    caches calibration is measured on date from 2026-10-16/17.
 
 **The accumulator.**
-6. `ISSUES: the-second-pass-corrections`: the length law, the weights, the mismatches and the motif rule, one arm each.
+5. `ISSUES: the-second-pass-corrections`: the length law, the weights, the mismatches and the motif rule, one arm each;
+   and the draw's region form, which still parts calibration and the EM on a multimapper's intergenic places.
 
 **Calibration**, its opportunity before its capture reader.
-7. `ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`.
-8. `ISSUES: the-reader-reads-false-gdna-as-capture`: a chronic problem, approached only once the stages before it are
+6. `ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`.
+7. `ISSUES: the-reader-reads-false-gdna-as-capture`: a chronic problem, approached only once the stages before it are
    resolved (owner, 2026-10-21); the planned fix reads each object's gDNA through calibration's own posterior for it.
-9. `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`, read again on the repaired reader.
+8. `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`, read again on the repaired reader.
 
 **After calibration, before the EM**: the scores, the priors and the lengths the EM is handed.
-10. In this order (owner, 2026-10-26): `ISSUES: the-pooled-q-in-the-gdna-count` — re-scoped the same day: the share
-    is the small half (≤ 0.3 % of gDNA), calibration's own count error the large one and of the other sign, so the
-    share lands with step 1's calibration geometry; then
-    `ISSUES: the-strand-frame-under-the-shared-law`, the frame correction for stranded capture libraries, which must
-    recover the coupling deletion's recorded gDNA-long regression; then
-    `ISSUES: the-capture-likelihood-leans-toward-rna`, read beside it. The shared length law landed 2026-10-26
-    (`DESIGN.md` §3.6b), closing `ISSUES: the-scorer-reads-a-census-length-law`, and the coupled gDNA law was deleted
-    the same day (`ISSUES: the-coupled-gdna-law`). RNA's own-count length law landed after them (`DESIGN.md` §3.6;
-    `ISSUES: eb-shrinkage-magic-ess` keeps gDNA's half), and the strand frame recovers its gDNA-long regression under
-    capture; the frame's native build waits for an unbiased decomposition at weak strandedness (the four-arm A/B,
-    2026-10-27), paused for a session of its own.
-11. `ISSUES: merge-keeps-least-overhang`.
-12. `ISSUES: the-gdna-term-is-a-mean-over-places`, with `ISSUES: mismatch-gate-nan-in-multimapper-gdna` and the scorer
-    half of `ISSUES: multimapper-intergenic-alignments`.
-13. `ISSUES: the-em-prior-share-excludes-drawn-multimappers`.
-14. `ISSUES: pruning-uses-three-references`.
+9. In this order (owner, 2026-10-26): `ISSUES: the-pooled-q-in-the-gdna-count` — re-scoped the same day: the share
+   is the small half (≤ 0.3 % of gDNA), calibration's own count error the large one and of the other sign, so the
+   share lands with step 1's calibration geometry; then
+   `ISSUES: the-strand-frame-under-the-shared-law`, the frame correction for stranded capture libraries, which must
+   recover the coupling deletion's recorded gDNA-long regression; then
+   `ISSUES: the-capture-likelihood-leans-toward-rna`, read beside it. The shared length law landed 2026-10-26
+   (`DESIGN.md` §3.6b), closing `ISSUES: the-scorer-reads-a-census-length-law`, and the coupled gDNA law was deleted
+   the same day (`ISSUES: the-coupled-gdna-law`). RNA's own-count length law landed after them (`DESIGN.md` §3.6;
+   `ISSUES: eb-shrinkage-magic-ess` keeps gDNA's half), and the strand frame recovers its gDNA-long regression under
+   capture; the frame's native build waits for an unbiased decomposition at weak strandedness (the four-arm A/B,
+   2026-10-27), paused for a session of its own.
+10. `ISSUES: the-em-prior-share-excludes-drawn-multimappers`.
+11. `ISSUES: pruning-uses-three-references`.
 
 **The release.**
-15. `ISSUES: the-release-builds`, then `docs/PUBLISHING.md`'s procedure: the deliverable measured per stratum, the zero
+12. `ISSUES: the-release-builds`, then `docs/PUBLISHING.md`'s procedure: the deliverable measured per stratum, the zero
     rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a real-data smoke run,
     the standing risks re-read, and the manual and the changelog true of what ships.
 

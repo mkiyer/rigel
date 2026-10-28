@@ -156,8 +156,10 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,448 passed / 0 skipped / 0 xfail, 3,448 collected** — re-derived
-2026-10-27 on `summary.json`'s observable genome (two gates added); 3,446 on the templates' RNA lengths over the
+**The standing baseline: 0 failed / 3,521 passed / 0 skipped / 0 xfail, 3,521 collected** — re-derived
+2026-10-28 on a multimapper's places and the intergenic background (74 gates added, one deleted: 72 in
+`tests/test_multimapper_places.py` and two for the place weights' sum, the deleted one a duplicate of two identical
+places); 3,448 on `summary.json`'s observable genome (two gates added); 3,446 on the templates' RNA lengths over the
 observable genome (four gates added); 3,442 on the RNA law's normalised variance and the decision's reading of an RNA law no count measured (ten gates
 added, one deleted: four for the variance in place of a one-curve coverage gate, six for the decision, five of them on built laws);
 3,433 on RNA's own-count length law (nine gates added: eight for the law, one for its refusal of a pool count the

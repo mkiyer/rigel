@@ -788,6 +788,78 @@ std::int64_t Accumulator::length_under(const OfferedFragment& fragment,
     return hypothesis_length(fragment, fragment.hypotheses[hypothesis_index], start, end, scratch);
 }
 
+void Accumulator::placement_masses(const OfferedFragment& fragment,
+                                   DepositScratch& scratch,
+                                   std::vector<PlaceMass>& out) const
+{
+    // ⭐ `deposit_survivor`'s crossing and containment rules on the observed path, writing nothing: the SAME
+    // clip, the same one `path_length`, the same sj resolution and the same slices.
+    out.clear();
+    if (region_bounds_.size() < 2) return;
+    const std::int64_t start = std::max(fragment.start, region_bounds_.front());
+    const std::int64_t end   = std::min(fragment.end,   region_bounds_.back());
+    if (end <= start) return;
+    static const GapHypothesis kObservedOnly{nullptr, 0, STRAND_NONE};
+    const std::int64_t length = hypothesis_length(fragment, kObservedOnly, start, end, scratch);
+    if (length <= 0) return;
+
+    auto& sj_id_at_gap = scratch.sj_id_at_gap;
+    sj_id_at_gap.assign(scratch.introns.size(), -1);
+    bool spliced = false;
+    if (fragment.sj_strand != STRAND_AMBIGUOUS) {
+        for (std::size_t gap = 0; gap < scratch.introns.size(); ++gap) {
+            const auto& [intron_start, intron_end] = scratch.introns[gap];
+            const std::int64_t id = sj_edge_id(intron_start, intron_end, fragment.sj_strand);
+            if (id >= 0) {
+                sj_id_at_gap[gap] = static_cast<std::int32_t>(id);
+                spliced = true;
+            }
+        }
+    }
+
+    for (std::size_t block = 0; block < scratch.segments.size(); ++block) {
+        const auto& [seg_start, seg_end] = scratch.segments[block];
+        const std::int64_t first =
+            std::upper_bound(region_bounds_.begin(), region_bounds_.end(), seg_start) - region_bounds_.begin();
+        const std::int64_t last =
+            std::lower_bound(region_bounds_.begin(), region_bounds_.end(), seg_end) - region_bounds_.begin();
+        const std::int32_t left_sj  = block > 0 ? sj_id_at_gap[block - 1] : -1;
+        const std::int32_t right_sj = block < sj_id_at_gap.size() ? sj_id_at_gap[block] : -1;
+        const std::int64_t n_slices = last - first + 1;
+        for (std::int64_t i = 0; i < n_slices; ++i) {
+            const std::int64_t lo = (i == 0) ? seg_start : region_bounds_[static_cast<std::size_t>(first + i - 1)];
+            const std::int64_t hi = (i == n_slices - 1) ? seg_end : region_bounds_[static_cast<std::size_t>(first + i)];
+            const std::int64_t left_boundary  = (i > 0) ? first + i - 1 : -1;
+            const std::int64_t right_boundary = (i < n_slices - 1) ? first + i : -1;
+            const std::int32_t left_jid  = (left_boundary  < 0) ? left_sj  : -1;
+            const std::int32_t right_jid = (right_boundary < 0) ? right_sj : -1;
+            const std::int64_t n_bounds = (left_boundary >= 0 ? 1 : 0) + (right_boundary >= 0 ? 1 : 0)
+                                        + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
+            if (n_bounds == 0) continue;
+            const double share = static_cast<double>(hi - lo)
+                               / (static_cast<double>(length) * static_cast<double>(n_bounds));
+            for (const std::int64_t boundary_idx : {left_boundary, right_boundary})
+                if (boundary_idx >= 0) out.push_back({kPlaceBoundary, boundary_idx - 1, share});
+            for (const std::int32_t jid : {left_jid, right_jid})
+                if (jid >= 0) out.push_back({kPlaceSj, jid, share});
+        }
+    }
+    const std::int64_t first_region = region_of_pos(scratch.segments.front().first);
+    const std::int64_t last_region  = region_of_pos(scratch.segments.back().second - 1);
+    if (!spliced && first_region == last_region) out.push_back({kPlaceRegion, first_region, 1.0});
+
+    // One entry per object: a boundary bounds two slices of one block.
+    std::sort(out.begin(), out.end(), [](const PlaceMass& a, const PlaceMass& b) {
+        return a.kind != b.kind ? a.kind < b.kind : a.index < b.index;
+    });
+    std::size_t w = 0;
+    for (std::size_t r = 0; r < out.size(); ++r) {
+        if (w > 0 && out[w - 1].kind == out[r].kind && out[w - 1].index == out[r].index) out[w - 1].mass += out[r].mass;
+        else out[w++] = out[r];
+    }
+    out.resize(w);
+}
+
 const DeferredFragments& Accumulator::deferred_canonical() {
     deferred_.canonicalise();
     return deferred_;
@@ -900,7 +972,7 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* region_bounds,
 
     // A reference contributing c region_bounds owns c-1 regions, so the region offset for reference f is
     // ref_region_bound_offsets[f] - (number of earlier references that own any region).
-    std::size_t region_base = 0;
+    std::size_t region_base = 0, boundary_base = 0;
     for (std::size_t f = 0; f < n_refs; ++f) {
         const std::size_t lo = static_cast<std::size_t>(ref_region_bound_offsets[f]);
         const std::size_t hi = static_cast<std::size_t>(ref_region_bound_offsets[f + 1]);
@@ -919,7 +991,23 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* region_bounds,
         }
         accs_.emplace_back(std::move(ref_region_bounds), std::move(types), max_length,
                            static_cast<std::int32_t>(f));
+        region_base_.push_back(static_cast<std::int64_t>(region_base));
+        boundary_base_.push_back(static_cast<std::int64_t>(boundary_base));
+        sj_base_.push_back(0);
         region_base += n_regions;
+        boundary_base += hi - lo >= 2 ? hi - lo - 2 : 0;
+    }
+}
+
+void AccumulatorSet::placement_masses(std::int32_t ref_id,
+                                      const OfferedFragment& fragment,
+                                      DepositScratch& scratch,
+                                      std::vector<PlaceMass>& out) const
+{
+    at(ref_id).placement_masses(fragment, scratch, out);
+    const std::size_t f = static_cast<std::size_t>(ref_id);
+    for (auto& m : out) {
+        m.index += m.kind == kPlaceRegion ? region_base_[f] : m.kind == kPlaceBoundary ? boundary_base_[f] : sj_base_[f];
     }
 }
 
@@ -954,6 +1042,7 @@ void AccumulatorSet::set_sj(const std::int64_t* offsets,
         if (c1 <= c0) continue;  // a reference with no region_bounds owns no regions and no sj
         const std::int64_t j0 = offsets[c0];
         const std::int64_t j1 = offsets[c1];
+        sj_base_[f] = j0;
 
         ref_offsets.clear();
         ref_offsets.reserve(static_cast<std::size_t>(c1 - c0) + 1);

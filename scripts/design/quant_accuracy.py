@@ -330,7 +330,7 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     mrna = float(quant["count"].sum())
     nrna = float(est.synthetic_count)
     gdna = float(est.gdna_em_count)
-    intergenic = float(result.stats.n_intergenic)
+    intergenic = float(result.stats.n_intergenic) + float(est.gdna_intergenic_em_count)
     oc = truth_summary.get("origin_counts", {})
     t_g = float(oc.get("gdna", float("nan")))
     t_m = float(oc.get("mrna", 0.0))

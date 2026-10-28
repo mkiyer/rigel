@@ -345,4 +345,25 @@ def assemble_priors(
     )
 
 
-__all__ = ["LocusPriors", "assemble_priors"]
+def intergenic_gdna_rate(calibration: "CalibrationResult", region_arrays: "RegionArrays") -> float:
+    """``λ``, the gDNA rate at an intergenic place: fragments per start of the gDNA law, in the unit every capture
+    efficiency is read in, so that it stands beside a locus's gDNA component, whose rate is its count over its
+    capture-weighted length.
+
+    An intergenic place is uncaptured (owner, 2026-10-27), so its rate is the bulk, ``gdna_bulk_density``: the
+    uncaptured gDNA density, a mode of the landscape. The pooled intergenic count over its support is not, under
+    capture: an aligner places captured genic fragments on intergenic copies, and on the STAR rung those copies hold a
+    third of the intergenic count. With no landscape every efficiency is 1 and the unit is a start, and the rate is the
+    intergenic regions' gDNA count over their contained support.
+    """
+    if calibration.gdna_bulk_density is not None:
+        return float(calibration.gdna_bulk_density)
+    from .signature import RegionType, coarse_type_array
+
+    intergenic = coarse_type_array(region_arrays.signature) == int(RegionType.INTERGENIC)
+    support = float(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)[intergenic].sum())
+    count = float(np.asarray(calibration.count_gdna_region, dtype=np.float64)[intergenic].sum())
+    return count / support if support > 0.0 else 0.0
+
+
+__all__ = ["LocusPriors", "assemble_priors", "intergenic_gdna_rate"]

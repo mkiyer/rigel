@@ -211,6 +211,8 @@ class AbundanceEstimator:
         # --- gDNA: locus-level, NOT per-gene ---
         # Total gDNA count as assigned by locus EM (sum across all loci)
         self._gdna_em_total = 0.0
+        # The intergenic term's mass: the multimappers' gDNA the EM put at a place outside every locus
+        self._gdna_intergenic_em_total = 0.0
 
         # Per-locus results, one dict per locus (``pipeline._run_locus_em_partitioned``).
         self.locus_results: list[dict] = []
@@ -234,6 +236,12 @@ class AbundanceEstimator:
     def gdna_em_count(self) -> float:
         """Total EM-assigned gDNA count across all loci."""
         return self._gdna_em_total
+
+    @property
+    def gdna_intergenic_em_count(self) -> float:
+        """The EM's gDNA at intergenic places, outside every locus: intergenic gDNA beside the templates no hit of
+        which resolves."""
+        return self._gdna_intergenic_em_total
 
     @property
     def synthetic_count(self) -> float:
@@ -264,6 +272,7 @@ class AbundanceEstimator:
         rna_prior_count: np.ndarray | None = None,
         rna_prior_weight: np.ndarray | None = None,
         gdna_eff_len: np.ndarray | None = None,
+        intergenic_rate: float = 0.0,
         em_iterations: int = EMConfig.iterations,
         em_convergence_delta: float = EMConfig.convergence_delta,
         emit_locus_stats: bool = False,
@@ -360,6 +369,10 @@ class AbundanceEstimator:
 
         rng_seed = int(self._rng.integers(0, 2**63))
 
+        if not (np.isfinite(intergenic_rate) and intergenic_rate >= 0.0):
+            raise ValueError(
+                f"intergenic_rate must be finite and non-negative; got {intergenic_rate!r}."
+            )
         (
             total_gdna_em,
             locus_rna,
@@ -368,6 +381,7 @@ class AbundanceEstimator:
             out_winner_tid,
             out_winner_post,
             out_n_candidates,
+            total_intergenic_em,
         ) = _batch_locus_em_partitioned(
             partition_tuples,
             locus_transcript_indices,
@@ -391,7 +405,9 @@ class AbundanceEstimator:
             self.em_config.n_threads,
             emit_locus_stats,
             emit_assignments,
+            float(intergenic_rate),
         )
+        self._gdna_intergenic_em_total += float(total_intergenic_em)
 
         if emit_locus_stats:
             if self.locus_stats is None:

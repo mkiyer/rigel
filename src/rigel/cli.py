@@ -414,7 +414,11 @@ def _strand_fit_summary(strand_models) -> dict:
 
 
 def _quantification_pools(
-    stats, count_annotated: float, count_nascent: float, count_gdna_em: float
+    stats,
+    count_annotated: float,
+    count_nascent: float,
+    count_gdna_em: float,
+    count_gdna_intergenic_em: float = 0.0,
 ) -> dict:
     """``summary.json``'s pools and their fractions of every fragment counted.
 
@@ -423,7 +427,9 @@ def _quantification_pools(
     intergenic fragments; leaving them out would halve the observed contamination of a library with substantial
     gDNA. The annotated-transcript (``fraction_annotated``), synthetic-span (``fraction_nascent``) and gDNA fractions
     sum to one; ``fraction_gdna_em`` is the EM's genic part alone, and ``fraction_intergenic`` the intergenic part."""
-    intergenic = stats.n_intergenic
+    # The templates that reach no locus (``PipelineStats.n_intergenic``), and the gDNA the EM put at a multimapper's
+    # intergenic place: neither is in a locus.
+    intergenic = stats.n_intergenic + count_gdna_intergenic_em
     total_all = count_annotated + count_nascent + count_gdna_em + intergenic
     count_gdna = count_gdna_em + intergenic
 
@@ -759,7 +765,13 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             ),
             # dropped by a hard scoring gate (an alpha of 0): every candidate failed it, so no pool holds them
             "n_gated_out": stats.n_gated_out,
-            **_quantification_pools(stats, count_annotated, count_nascent, count_gdna_em),
+            **_quantification_pools(
+                stats,
+                count_annotated,
+                count_nascent,
+                count_gdna_em,
+                float(estimator.gdna_intergenic_em_count),
+            ),
         },
     }
     with open(summary_path, "w") as f:

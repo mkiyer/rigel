@@ -69,8 +69,11 @@ def partition_and_free(
     em_data.offsets = None
 
     # ---- Scatter per-unit arrays ----
+    if em_data.intergenic_log_liks is None:
+        em_data.intergenic_log_liks = np.full(len(em_data.gdna_log_liks), -np.inf, dtype=np.float32)
     UNIT_ARRAYS = [
         ("gdna_log_liks", scatter_units_f32),
+        ("intergenic_log_liks", scatter_units_f32),
         ("is_spliced", scatter_units_u8),
         ("frag_ids", scatter_units_i64),
         ("frag_class", scatter_units_u8),
@@ -101,6 +104,7 @@ def partition_and_free(
             coverage_weights=cand_results["coverage_weights"][li],
             is_spliced=unit_results["is_spliced"][li],
             gdna_log_liks=unit_results["gdna_log_liks"][li],
+            intergenic_log_liks=unit_results["intergenic_log_liks"][li],
             frag_ids=unit_results["frag_ids"][li],
             frag_class=unit_results["frag_class"][li],
             splice_type=unit_results["splice_type"][li],
