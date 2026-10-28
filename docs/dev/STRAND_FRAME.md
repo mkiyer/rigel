@@ -140,6 +140,14 @@ exon-contained fragments at the deposit, under 100 MB at int32 on GRCh38.
   `flgap_rna_short`). The small-gap panels, simulated 2026-10-27, are test-chromosome prototypes and not part of the
   repo. The null and certification panels are `scenarios`, `scenarios_fl_equal200`, `scenarios_depth_d10`, `_d100`,
   `scenarios_mech_*_equal` and `seed43/scenarios`.
+- The weak-strand panel: the ladder's g05, g50 and g98 stranded capture-ON rows with their strands flipped to ss 0.55,
+  0.60 and 0.70, on the simulator's alignments (`ladder_flip/`) and the STAR rung (`ladder_star_flip/`), 18 BAMs in
+  `$RIGEL_RUNS/prototypes/2026-10-22_census_law/flip_bams/`; `2026-10-25_shared_law/`'s scripts read them. The rest of
+  that folder's arrays were deleted on 2026-10-28; its scripts and text receipts stay.
+- Archived on 2026-10-28 in `$RIGEL_RUNS/archive/docs_dev_2026-10-28/`: the frame correction's first derivation
+  (`FRAME_CORRECTION.md`), the second-round reviewer prompt (`STRAND_FRAME_REVIEW_PROMPT.md`), a separate agent's
+  proposal that was never run, a regularized log-contrast fitted to the raw strand counts (`LENGTH_EVIDENCE_PLAN.md`),
+  and the length-law campaign's notes (`SHARED_LENGTH_LAW.md`, `LENGTH_LAW_PRIOR.md`, `CENSUS_LAW_*.md`).
 - Rules for the A/B: frozen trees, one mechanism per arm, pinned (`scan.total_threads=1`), fractional, against truth by
   read name; transcripts read beside genes, outside the clusters too; per stratum, never pooled.
 

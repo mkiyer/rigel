@@ -445,6 +445,31 @@ Calibration's cost follows the index more than the depth: the geometry and the m
 chain, and ψ solves every RNA-admitting slot that holds a fragment. It is still the largest stage on a deep
 library; the current split is `ISSUES: performance-memory-bounded-solve`'s baseline.
 
+### 1.0 Rigel reads alignments; it never repairs them (owner, 2026-10-16 and 2026-10-18)
+
+> **A hit is an alignment the aligner reported, checked. Rigel never moves a base, never forms an alignment the aligner
+> did not report and never re-aligns: near-tied spliced and contiguous readings of a template are the aligner's to
+> report, and the EM decides between the hits reported. The scan reads, validates, withholds and counts; it never
+> chooses between hits.** Pairing the mates an aligner reports one by one is reading (§1.1).
+
+- **The input Rigel recommends** is STAR at the settings in `MANUAL.md`'s input requirements (`--sjdbScore 0`,
+  `--outFilterMultimapScoreRange 2`). STAR's default bonus for an annotated junction reports a template's spliced
+  reading alone where its contiguous reading scores alike; these settings report both. They are final (owner,
+  2026-10-18): they make ambiguous alignments visible instead of hiding them, and a tool under repair is no evidence
+  against them. Input aligned otherwise is read as reported and never repaired; `MANUAL.md` says what STAR's defaults
+  hide.
+- **Ruled out:** a genome stored in the index (dropped 2026-10-16: nothing reads bases), a second aligner inside Rigel,
+  and the splice-artifact machinery of 2026-10-14/15 that read bases (a local tie table and its second hit, a hold rule
+  for fragments whose bases cannot tell the readings apart, a mismatch emission from the sequence), which the aligner's
+  own alternatives and their NM replace. An index-time table of remote junction copies is built only if the VCaP mix
+  shows STAR missing them.
+- **The one declared exception** is the splice blacklist: it overrides what the aligner reported, and it stays until a
+  matched comparison retires it (`ISSUES: splicing-artifacts`).
+- **The fallback**, should STAR not serve an input, is a dual-aligner input: a spliced aligner's and a genome aligner's
+  alignments merged by read name into one BAM.
+- **Splice artifacts are measured on simulated reads aligned at these settings**, the ladder's STAR rung, where the
+  truth is exact (owner, 2026-10-17).
+
 ### 1.1 A template's hits: every R1 place with every R2 place, by geometry (owner, 2026-10-16/19)
 
 The scan pairs a template's mate alignments itself, for any aligner, and reads geometry alone: STAR's HI, its own
@@ -501,8 +526,8 @@ used records), equal the scan's.
 
 ## 2. The index
 
-`INDEX_FORMAT_VERSION 10` (the splice graph since 8), shipped as `regions.feather` + `edges.feather`, built and
-checked by `calibration/splice_graph.py`.
+`INDEX_FORMAT_VERSION 11` (the splice graph since 8, the unobservable mask since 11), shipped as `regions.feather` +
+`edges.feather`, built and checked by `calibration/splice_graph.py`.
 
 > The genome is a graph. **Regions** are intervals; **boundaries** connect them. A fragment is a **path**.
 > Regions count fragments *contained*; boundaries count fragments *crossing* (a 0-bp boundary, no width).

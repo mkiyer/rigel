@@ -168,9 +168,9 @@ starts at the index.
 
 **The scan and its buffer.** The scan's repair landed between 2026-10-18 and 2026-10-21
 (`ISSUES: the-scanner-builds-fragments-from-one-mate`, closed); what it leaves:
-3. `ISSUES: splicing-artifacts`: the derivation, then the scan's infrastructure (junction ids on buffered fragments, the
-   contiguous reading of a spliced fragment), the fixtures, a prototype and the VCaP A/B; the release waits for its
-   validation on the cluster.
+3. `ISSUES: splicing-artifacts`: the derivation, within `DESIGN.md` §1.0 (a contiguous reading is the aligner's to
+   report, and the EM weighs it as a place, §3.1g), then the scan infrastructure it needs (junction ids on buffered
+   fragments), the fixtures, a prototype and the VCaP A/B; the release waits for its validation on the cluster.
 4. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
    caches calibration is measured on date from 2026-10-16/17.
 

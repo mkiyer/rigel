@@ -39,6 +39,13 @@ names neither `--alignable-zarr` nor `--no-mappability`.
 
 ### splicing-artifacts
 `priority: now — release-blocking (owner, 2026-10-14), and the goal the scan's repair serves (owner, 2026-10-21): the recommended STAR parameters' competing alignments and the multimapper handling are to carry through to it; 0.8.0 waits for the mechanism AND its validation on independent artifact-containing evidence (the cluster); the design is externally reviewed, its derivation next · stage: scan · kind: defect · 2026-09-24`
+SINCE 2026-10-16 THE SCOPE IS `DESIGN.md` §1.0: Rigel reads alignments and never repairs them. What below reads
+bases — the largest block kept as an edit of the alignment, a contiguous reading Rigel would construct, the sequence
+emission from SEQ, h computed from the reference, and the scanner and index infrastructure they need — is superseded
+by the aligner's own alternatives and their NM: at the recommended STAR settings a template's spliced and contiguous
+readings that score alike are both reported, and since 2026-10-28 the EM weighs a template's places (`DESIGN.md`
+§3.1g). What reads no base stands: the strand prong, the blacklist's costs both ways, the builder's defects, the
+training sets and the counters.
 THE OWNER'S DESIGN (2026-10-14): spliced fragments are the most specific signal the tool has, so artifacts are
 removed by several prongs before any release, after the release candidate is clean.
 - **The strand prong.** A junction's strand split against the library's specificity is a likelihood: with a
@@ -86,9 +93,9 @@ and over-states gDNA's length when the short anchor is the outer block; calibrat
 owner's first repair to consider: edit the alignment — delete the rejected junction and keep only the largest
 aligned block — so the fragment is unspliced in both stages at its true length. Beyond that: the blacklist is a
 yes/no cut (count ≥ 2, anchor ≤ the longest seen) on a continuous quantity, the aligner's rate of writing that
-junction on genomic sequence at that anchor length. Measurable only on aligned data: the aligned ladder is drafted
-for the cluster (`$RIGEL_RUNS/aligned_ladder/`), and on the production store 23.3 % of the ladder's
-annotated junctions are blacklisted. Also here, from
+junction on genomic sequence at that anchor length. Measurable only on aligned data: the ladder's STAR rung
+(2026-10-21) holds a real aligner's artifacts with exact truth, but its index has no store and so no blacklist arm;
+on the production store 23.3 % of the ladder's annotated junctions are blacklisted. Also here, from
 `ISSUES: calibration-and-the-em-disagree-on-what-can-be-gdna` (closed): one length rule the stages apply differently:
 calibration drops an unspliced or artifact reading past the maximum fragment length, the EM keeps gDNA while its
 likelihood competes. LANDED 2026-10-19, the annotated-path rule (`tests/test_hit_verdict.py`): a spliced hit is usable
@@ -114,19 +121,51 @@ strands; mates disagreeing on an acceptor) reach neither stage. Its cost on the 
   library's rejections, 235,406 of 240,520, uniquely mapped). The hypothesis is remote origin, from retrocopies and
   paralogs: alignable records an artifact from every alignment, secondary and supplementary included, so a parent
   gene's junction is listed with long anchors on both sides and, under the OR rule, rejects every single-junction read
-  up to about 2m aligned bases. Measuring it needs an unspliced end-to-end realignment, alignable's per-record origins
-  and a junction mappability table; the EM side, a multimapper's intergenic places competing with its genic ones,
-  landed 2026-10-28 (`DESIGN.md` §3.1g).
+  up to about 2m aligned bases. Measuring it needs an unspliced end-to-end realignment and alignable's per-record
+  origins; a junction mappability table is built only if the aligner at the recommended settings misses the copies
+  (`DESIGN.md` §1.0). The EM side, a multimapper's intergenic places competing with its genic ones, landed 2026-10-28
+  (`DESIGN.md` §3.1g).
+- THE INDEX CASE (2026-08-03; rigel 0.7.1 at STAR's defaults with the production store; its evidence was deleted with
+  the cluster's on 2026-09-28). cfRNA-D, 96.4 % gDNA, reads strand specificity 0.786, last of 344 libraries against
+  0.991–0.999 for its 20 flowcell siblings: about 43 % of its RNA-called spliced fragments are artifacts (42.3 % by a
+  strand mixture, 43.4 % by forensics), and its novel-to-annotated junction mass is 21.6 times a clean library's. They
+  train the strand model and the RNA length law, so a repair shows in the models more than in the spliced counts. Of
+  its 135,186 junction rows the blacklist rejected 37.7 %; 10.8 % were listed and escaped, 59 % of those through
+  half-blind entries; 51.6 % were never listed. Across the cohort the blacklist's capture of novel junctions rises
+  with gDNA fraction (r 0.86), while two siblings at 74–82 % gDNA with 104-bp mates stay clean (strand specificity
+  0.991–0.993): the store's anchors stop at 62 bp, half its longest read, and a 138-bp mate's shorter side reaches 69.
+- THE CATALOGUE (`alignable` 0.1.0; every defect is still in it). Of its 5,833,092 entries, 60.5 % are half-blind: one
+  side's longest anchor is 0, so only the other side is ever tested. Its anchors stop at half the longest bin's read
+  length. It lists 20.7 % of the annotation's 404,168 junctions and catches 36 % of novel ones, and it records
+  artifacts from every alignment, secondary and supplementary included. It was simulated at STAR's production
+  settings, not the recommended ones, and a rebuild moves the observable mask with it. A site-pair rule (reject when
+  both splice sites are listed) raised cfRNA-D's novel capture from 36 % to 65 % for 1–6 presumed-genuine junctions
+  per library; since the annotated-path rule withholds novel junctions, it would now trade withheld templates for
+  gDNA-eligible ones.
+- REMOTE ORIGIN, MEASURED (2026-10-14; the VCaP mix at STAR's defaults;
+  `$RIGEL_RUNS/prototypes/2026-10-14_splice_design/`). Of the DNA library's 2,626 annotated artifact units, 2,124 are
+  ties and the other 502 all match the spliced reference rather than the contiguous one, the retrocopy signature; 71 %
+  of its annotated h ≥ 1 artifacts fit contiguously elsewhere, 996 of 1,056 at another locus. Its h = 0 artifacts fit
+  locally (97 %); 79 % of its unannotated h ≥ 1 ones fit nowhere. Aligning every annotated junction's joined sequence
+  unspliced finds a remote copy for 2,658 of 404,168 junctions (0.66 %), recalls 533 of 558 retrocopy artifacts and
+  exposes 3.2 % of the RNA library's units; realigning every spliced read adds 75 of 2,067. The production blacklist
+  caught 91 % of the annotated h = 0 artifacts, 62 % of the annotated h ≥ 1 ones and 8–11 % of the unannotated ones.
+- A CONTIGUOUS SECOND HIT, PRICED (2026-10-15; Rigel built the hit, which `DESIGN.md` §1.0 now rules out;
+  `$RIGEL_RUNS/prototypes/2026-10-15_splice_a/`). 2,044 of the DNA library's 2,363 tie artifacts went to gDNA, for at
+  most 441 RNA-library fragments, about 180 of them genuine by the strand-implied split. Its side effect: a tie read's
+  contiguous reading fits another isoform's longer exon (one ADAR isoform 3,545 → 134), and a contiguous hit the
+  aligner reports will do the same. STAR moves the DNA library's unannotated junctions onto canonical motifs (62 %
+  GT-AG, 31 % GC-AG), so a motif prong carries no signal.
 - THE BUILDER applies `min_count` (2, underived) per (chrom, intron, strand, read_length) BEFORE aggregating over read
   lengths, so a junction seen once at each of several read lengths never enters. Fixed with the catalogue rebuild.
   Since index format 9 (2026-10-14) the feather keeps each junction's count, summed over the rows that built it, so
   a threshold can be read off the index.
 - UNTESTED RULES, to pin with local falsification tests before any rule changes: the `<=`, the OR of the anchors, the
   inert stored 0, cumulative anchors across earlier introns, and the mixed fragment (one junction rejected, one kept,
-  deposited as spliced with the rejected N as a gap); every fixture's anchors (500–10,000 bp) are longer than any
-  read. Undecided: the reject runs per record before the mates are joined, so a junction rejected on one mate and
-  kept on the other survives, and any surviving junction beats ARTIFACT, so one kept junction shields the rejected
-  ones.
+  deposited as spliced with the rejected N as a gap); one gate reaches a listed junction
+  (`test_the_rule_reads_the_junctions_the_blacklist_keeps`, `tests/test_hit_verdict.py`) and none pins these. Undecided:
+  the reject runs per record before the mates are joined, so a junction rejected on one mate and kept on the other
+  survives, and any surviving junction beats ARTIFACT, so one kept junction shields the rejected ones.
 - THE TRAINING SETS. The spliced strand table that sets κ and supplies the od's RNA junction seeds holds artifacts
   whose sense fraction is ½ (the VCaP exome-DNA half: 3,223 spliced observations on 2,255 junctions, κ 0.5008, feeding
   the RNA od with information 5,701), and κ pools per-junction rates that vary with depth
@@ -134,17 +173,19 @@ strands; mates disagreeing on an acceptor) reach neither stage. Its cost on the 
   cfRNA-B's pooled κ is 0.064 against 0.0030 from its genuine junctions; κ now comes from the genuine junctions
   (2026-10-01, `DESIGN.md` §3.3b), and the per-junction artifact posterior it fits is this entry's input. The repair trains the strand model and
   the RNA length law weighted by each fragment's probability of being genuine.
-- THE COUNTERS ARE IN THREE UNITS: `sj_blacklisted` counts junction × record over every record, multimappers
-  included; the `splice.*` census counts uniquely mapped fragments; 0.7.1's `summary.json` splice counts are the
-  length models' observations. So the 344-library cohort's 0.7.1 summaries do not compare with today's census.
+- THE COUNTERS ARE IN THREE UNITS: `sj_blacklisted` counts junction × record over every record, multimappers included;
+  the `splice.*` census counts one observation per usable hit, a multimapper's hits one by one; 0.7.1's `summary.json`
+  splice counts are the length models' observations. So the 344-library cohort's 0.7.1 summaries do not compare with
+  today's census.
 - THE WORK runs on the cluster in phases: the substrate (per-record splice rows, a working index checksummed against
   production and built after the index format bump, `ISSUES: the-format-changes-to-batch-before-release` (b),
   `--notemp` re-runs, more truth mixes); both errors measured on today's tree; the mechanism census; the h-weighted
   reading (`ISSUES: scoring-penalties-are-underived-constants`); the training sets; aligner-settings robustness and the
   catalogue rebuild. The index case's splice evidence on the cluster's `/scratch` is gone (owner, 2026-09-28): it is
-  regenerated from scratch by a new run, a separate task. The VCaP mix (its BAM, 0.7.1 `annotated.bam` and
-  `summary.json`) and cfRNA-A / cfRNA-B / cfRNA-C (the same, with `SJ.out.tab.gz`) may exist only in
-  `$RIGEL_RUNS/cfrna/`: confirm cluster copies before the substrate phase and upload any that are missing.
+  regenerated from scratch by a new run, a separate task. The VCaP mix (its BAM, aligned at STAR's defaults, and its
+  0.7.1 `summary.json`) and cfRNA-A / cfRNA-B / cfRNA-C (the same, with `SJ.out.tab.gz`) may exist only in
+  `$RIGEL_RUNS/cfrna/`, where their 0.7.1 `annotated.bam`s are gone: confirm cluster copies before the substrate
+  phase and upload any that are missing.
 
 ### the-second-pass-corrections
 `priority: now — the fix order's second-pass items (owner, 2026-10-18), each its own arm; they complete the deposits calibration reads · stage: accumulator · kind: defect · 2026-10-18`
