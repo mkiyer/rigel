@@ -445,28 +445,28 @@ Calibration's cost follows the index more than the depth: the geometry and the m
 chain, and ψ solves every RNA-admitting slot that holds a fragment. It is still the largest stage on a deep
 library; the current split is `ISSUES: performance-memory-bounded-solve`'s baseline.
 
-### 1.0 Rigel reads alignments; it never repairs them (owner, 2026-10-16 and 2026-10-18)
+### 1.0 The input: STAR at the recommended settings, read as reported (owner, 2026-10-16, 2026-10-18 and 2026-10-28)
 
-> **A hit is an alignment the aligner reported, checked. Rigel never moves a base, never forms an alignment the aligner
-> did not report and never re-aligns: near-tied spliced and contiguous readings of a template are the aligner's to
-> report, and the EM decides between the hits reported. The scan reads, validates, withholds and counts; it never
-> chooses between hits.** Pairing the mates an aligner reports one by one is reading (§1.1).
+> **Rigel's input is STAR at the recommended settings, and the settings are final. Rigel reads what the aligner
+> reported: a hit is an alignment the aligner reported, checked; the scan reads, validates, withholds and counts, and
+> never chooses between hits; the EM decides between them.** Pairing the mates an aligner reports one by one is
+> reading (§1.1). That Rigel moves no base, forms no alignment the aligner did not report and re-aligns nothing is a
+> scope the owner set on 2026-10-16 to keep the work on the tool's main defects, not a prohibition: if a defect needs
+> more genome information inside Rigel, that is the owner's to discuss (owner, 2026-10-28).
 
-- **The input Rigel recommends** is STAR at the settings in `MANUAL.md`'s input requirements (`--sjdbScore 0`,
-  `--outFilterMultimapScoreRange 2`). STAR's default bonus for an annotated junction reports a template's spliced
-  reading alone where its contiguous reading scores alike; these settings report both. They are final (owner,
-  2026-10-18): they make ambiguous alignments visible instead of hiding them, and a tool under repair is no evidence
-  against them. Input aligned otherwise is read as reported and never repaired; `MANUAL.md` says what STAR's defaults
-  hide.
-- **Ruled out:** a genome stored in the index (dropped 2026-10-16: nothing reads bases), a second aligner inside Rigel,
-  and the splice-artifact machinery of 2026-10-14/15 that read bases (a local tie table and its second hit, a hold rule
-  for fragments whose bases cannot tell the readings apart, a mismatch emission from the sequence), which the aligner's
-  own alternatives and their NM replace. An index-time table of remote junction copies is built only if the VCaP mix
-  shows STAR missing them.
-- **The one declared exception** is the splice blacklist: it overrides what the aligner reported, and it stays until a
-  matched comparison retires it (`ISSUES: splicing-artifacts`).
-- **The fallback**, should STAR not serve an input, is a dual-aligner input: a spliced aligner's and a genome aligner's
-  alignments merged by read name into one BAM.
+- **The settings** (`MANUAL.md`'s input requirements: `--sjdbScore 0`, `--outFilterMultimapScoreRange 2`). STAR's
+  default bonus for an annotated junction reports a template's spliced reading alone where its contiguous reading
+  scores alike; these settings report both. They make ambiguous alignments visible instead of hiding them, and a tool
+  under repair is no evidence against them (owner, 2026-10-18). Input aligned otherwise is read as reported;
+  `MANUAL.md` says what STAR's defaults hide.
+- **Set aside on 2026-10-16 to keep the focus, not refused:** a genome stored in the index (nothing reads bases today),
+  a second aligner inside Rigel, and the splice-artifact machinery of 2026-10-14/15 that read bases (a local tie table
+  and its second hit, a hold rule for fragments whose bases cannot tell the readings apart, a mismatch emission from
+  the sequence, an index-time table of remote junction copies). A dual-aligner input, a spliced aligner's and a genome
+  aligner's alignments merged by read name into one BAM, was held as a fallback. Each comes back to the owner with the
+  evidence that the aligner's own alternatives fall short (`ISSUES: splicing-artifacts`).
+- **The splice blacklist** already overrides what the aligner reported; it stays until a matched comparison retires or
+  replaces it (`ISSUES: splicing-artifacts`).
 - **Splice artifacts are measured on simulated reads aligned at these settings**, the ladder's STAR rung, where the
   truth is exact (owner, 2026-10-17).
 

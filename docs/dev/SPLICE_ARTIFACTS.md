@@ -3,10 +3,11 @@
 Sandbox document for the session that takes `ISSUES: splicing-artifacts`: release-blocking, and step 3 of `ROADMAP.md`'s
 Next, the scan stage, the first step in the tool's order that runs on this machine (step 1's remainder, the STAR rung's
 own `alignable` store, and step 2 are cluster tasks). Nothing here is authoritative. The open record is that entry, with
-every measurement; the scope is `DESIGN.md` §1.0 (Rigel reads alignments, never repairs them); the rulings this work
-builds on are `DESIGN.md` §1.1 (a template's hits), §3.1d (which alignments gDNA may explain), §3.3b (κ from the
-genuine junctions) and §3.1g with `EQUATIONS.md` §15 (a multimapper's places). This document replaces the issue's
-design trail and the owner's comments of 2026-10-16, removed on 2026-10-28; section 9 says how to recover each.
+every measurement; today's scope is `DESIGN.md` §1.0 (Rigel reads what the aligner reported, a focus the owner set on
+2026-10-16 and not a prohibition); the rulings this work builds on are `DESIGN.md` §1.1 (a template's hits), §3.1d
+(which alignments gDNA may explain), §3.3b (κ from the genuine junctions) and §3.1g with `EQUATIONS.md` §15 (a
+multimapper's places). This document replaces the issue's design trail and the owner's comments of 2026-10-16, removed
+on 2026-10-28; section 9 says how to recover each.
 
 ## 1. The defect
 
@@ -24,11 +25,13 @@ mix's RNA half it rejected 598,010 records where a pure-gDNA library predicts ab
 becomes unspliced and gDNA-eligible at a footprint that spans the intron. It also misses: on the index case 51.6 % of
 the spliced fragments' junction rows had no entry, and another 10.8 % were listed but escaped.
 
-Why now (owner, 2026-10-21, `ROADMAP.md` Next): "gDNA that aligns as spliced is the main error on real data". The
-recommended STAR settings report the competing alignments and the multimapper handling weighs them; that handling
-landed on 2026-10-28 (`DESIGN.md` §3.1g), so this issue is what the scan's repair was building toward. 0.8.0 waits for
-the mechanism and for its validation on independent artifact-containing evidence (owner, 2026-10-14), which is the
-cluster's.
+Why now, in the owner's words (2026-10-28): "in high gdna samples, we have gdna fragments "bleeding" into RNA as spliced
+fragments. previously STAR gave an alignment bonus to spliced fragments. we removed that and reparameterized STAR. we
+hope that it reduces artifacts. we need to finish this effort and do everything to mitigate splicing artifacts in the
+next release". It is the goal the scan's repair was building toward (`ROADMAP.md` Next, 2026-10-21): the recommended
+STAR settings report the competing alignments, and the multimapper handling that weighs them landed on 2026-10-28
+(`DESIGN.md` §3.1g). 0.8.0 waits for the mechanism and for its validation on independent artifact-containing evidence
+(owner, 2026-10-14), which is the cluster's.
 
 ## 2. What has been said, in order
 
@@ -55,7 +58,10 @@ cluster's.
   tool's splice blacklist".
 - **2026-10-16, later, owner: the scope** (`DESIGN.md` §1.0). "The hope is that Rigel does not need to become an
   alignment repair utility or a second alignment tool. Rigel will document the optimal STAR parameters." The genome
-  store was dropped; a dual-aligner input is the fallback; the blacklist is the one declared exception.
+  store was set aside, a dual-aligner input held as the fallback, and the blacklist kept as the one exception. The
+  owner on it, 2026-10-28: "my 10-16 scope ruling is not firm. i just wanted to constrain the scope and focus on the
+  most important rigel tool issues. at that time we were digressing and expanding the scope. if it turns out we need
+  additional genome information, etc in rigel, we can discuss".
 - **2026-10-17/18, owner.** Splice-artifact behaviour is measured on simulated reads aligned at the recommended
   settings, because there the truth is exact; those settings report both readings of a template whose alignments score
   alike, and they are final.
@@ -70,7 +76,7 @@ cluster's.
 
 | change | landed | what it does to splice artifacts |
 |---|---|---|
-| Rigel reads, never repairs (`DESIGN.md` §1.0) | 2026-10-16 | Rules out the trail's machinery that reads bases: the genome in the index, a tie table with a Rigel-built second hit, the hold rule decided on the bases, the sequence emission from SEQ, h computed from the reference, and an index-time copy table unless the VCaP mix shows STAR missing the copies. A contiguous reading must come from the aligner |
+| Rigel reads what the aligner reported (`DESIGN.md` §1.0) | 2026-10-16 | Set aside, for focus and not refused, the trail's machinery that reads bases: the genome in the index, a tie table with a Rigel-built second hit, the hold rule decided on the bases, the sequence emission from SEQ, h computed from the reference, an index-time copy table. Today a contiguous reading reaches the EM only when the aligner reports it; each set-aside option comes back to the owner with the evidence that the aligner's alternatives fall short (owner, 2026-10-28) |
 | The recommended STAR settings | 2026-10-17/18 | `--sjdbScore 0` removes the annotated-junction bonus and `--outFilterMultimapScoreRange 2` widens the reported range, so a spliced reading and a contiguous one that score alike are both reported. Every VCaP number in the entry was measured on a BAM aligned at STAR's defaults (its `Log.out` sets neither option), and the index case's on 0.7.1 at the production settings |
 | The annotated-path rule (`DESIGN.md` §1.1) | 2026-10-19 | A spliced hit is usable only if one annotated transcript holds every junction it observes; a template left with none is withheld (`unannotated_splice`). The unannotated class, 72 % of VCaP's harmful artifacts, no longer reaches RNA, and its gDNA is no longer counted anywhere |
 | The place model (`DESIGN.md` §3.1g) | 2026-10-28 | A template's hits compete in the EM: overlapping hits on one reference are one place, read at each component's best hit; distinct places sum; intergenic places are a background at the bulk rate. A retrocopy origin the aligner reports is a distinct place, and a contiguous hit at the same locus merges with the spliced one (section 4.3) |
@@ -156,11 +162,12 @@ reading it:
   artifact share a and the reversed share b (finding 6).
 - **The sequence ratio** between a contiguous and a spliced reading of the same bases is [ε / (3(1 − ε))]^(m_s − m_c),
   where m_s and m_c count the discriminating positions the read matches under each reading: exactly 1 at h = 0,
-  whatever the read's errors. Rigel has no SEQ under `DESIGN.md` §1.0, but where the aligner reports both readings over
-  the same bases (no clip, no shifted indel), NM_C − NM_S should equal m_s − m_c (an inference, not checked), which
-  makes the derived per-mismatch factor ε / (3(1 − ε)) against today's α_mm = 0.1. ε, Σ(NM − I − D) / Σ(M, =, X) over
-  uniquely mapped unspliced fragments, is alignment divergence rather than pure sequencing error, and it must come from
-  the library, never from `mismatch_alpha`.
+  whatever the read's errors. Rigel reads no SEQ today, but where the aligner reports both readings over the same
+  bases (no clip, no shifted indel), NM_C − NM_S should equal m_s − m_c (an inference, not checked), which makes the
+  derived per-mismatch factor ε / (3(1 − ε)) against today's α_mm = 0.1. ε, Σ(NM − I − D) / Σ(M, =, X) over uniquely
+  mapped unspliced fragments, is alignment divergence rather than pure sequencing error, and it must come from the
+  library, never from `mismatch_alpha`. Where the aligner reports one reading only, h needs the bases: SEQ or MD from
+  the BAM, or the genome in the index, options for the owner (section 7, question 10).
 - **A tie is ambiguous, not disproved.** With B the length-and-opportunity ratio and q the prior's gDNA share, the MAP
   fixed point is z = B(z + q) / (B(z + q) + 2 − z − q): at B = 1, z = q; at q = 1 and B = 0.05 it leaves 0.947 on RNA.
   The mechanism claims nothing at a tie, and the prior does not decide a singleton.
@@ -170,10 +177,12 @@ reading it:
 - **Multi-junction fragments**: "a DNA candidate must explain the whole fragment without RNA splicing … independent
   per-junction penalties do not establish that combined path's existence". Never derived; 32,019 of the VCaP RNA
   library's 82,001 h = 0 units are multi-junction.
-- **Superseded**: the first proposal's weight r (a posterior share multiplied into the EM, review finding 1); the
-  largest block kept, the short anchor clipped (finding 2); pruning on r alone (finding 3); every Rigel-built
-  contiguous candidate (sources A and B, `DESIGN.md` §1.0); the hold rule decided on the bases; the genome in the
-  index; a sample allele at the spliced path (source C, "not established").
+- **Refused by the review**: the first proposal's weight r (a posterior share multiplied into the EM, finding 1); the
+  largest block kept, the short anchor clipped (finding 2); pruning on r alone (finding 3). The 2026-10-15 review also
+  refused a hold decided on the bases alone: a tie is not a decision.
+- **Set aside on 2026-10-16 for focus, not refused** (`DESIGN.md` §1.0): every Rigel-built contiguous candidate
+  (source A, the local tie; source B, the index-time copy table), the genome in the index and the sequence emission
+  from SEQ. Source C, a sample allele at the spliced path, was "not established".
 
 ## 7. The open questions
 
@@ -187,9 +196,10 @@ reading it:
 3. **What decides a tie** (h = 0, equal NM): strand, length and abundance. Is the fragment's own strand term enough, or
    does the junction's strand record add evidence without reusing it? `DESIGN.md` §3.3b's limit, "The per-junction
    artifact posterior is the input to pruning", contradicts the review's finding 1 and needs the owner.
-4. **A spliced fragment the aligner reported alone** stays certified RNA. How large is that class on the rung, and is it
-   the aligner's to fix (`DESIGN.md` §1.0)?
-5. **The blacklist**, the one declared exception: retire it, or replace its yes/no cut with a likelihood. Its catalogue
+4. **A spliced fragment the aligner reported alone** stays certified RNA. How large is that class on the rung, and what
+   would reach it: the aligner's settings, or genome information inside Rigel (question 10)?
+5. **The blacklist**, which already overrides what the aligner reported: retire it, or replace its yes/no cut with a
+   likelihood. Its catalogue
    was simulated at STAR's production settings, not the recommended ones, and carries its own defects (the entry's
    THE CATALOGUE); `IndexConfig` says a minimum count of 2 matches `alignable`'s own threshold, which defaults to 1
    (unchecked). The matched comparison needs both arms on one input: VCaP has the production arm, and the rung needs a
@@ -202,6 +212,9 @@ reading it:
 8. **The per-mismatch factor and soft clips**: derived ε / (3(1 − ε)) against α_mm = 0.1, and clipped bases that cost
    nothing (`ISSUES: scoring-penalties-are-underived-constants`).
 9. **Multi-junction and implicit fragments**, never derived.
+10. **If the aligner's alternatives fall short, which set-aside option buys the most?** The reads' own bases (SEQ or
+    MD) for h, a genome in the index for local ties, an index-time copy table for remote origin: each priced by its
+    share of the residual artifact mass, and brought to the owner before it is built (owner, 2026-10-28).
 
 ## 8. Data, instruments, constraints
 
@@ -249,12 +262,17 @@ since repaired, and the normalised model `DESIGN.md` §3.1g partly realizes) and
 
 ## 10. Starting the session
 
-> We are taking `ISSUES: splicing-artifacts` for Rigel 0.8.0, the next step in the tool's order. Read `CLAUDE.md`,
-> then `docs/dev/SPLICE_ARTIFACTS.md`, then the ISSUES entry and `DESIGN.md` §1.0, §1.1, §3.1d and §3.1g. The scope is
-> §1.0: Rigel reads alignments and never repairs them, so the contiguous reading of a spliced fragment must come from
-> the aligner, and the EM weighs it as a place. Nothing has been measured since that scope, the annotated-path rule and
+> We are taking `ISSUES: splicing-artifacts` for Rigel 0.8.0, the next step in the tool's order. In high-gDNA samples,
+> gDNA bleeds into RNA as spliced fragments. We removed STAR's bonus for spliced alignments and reparameterized it,
+> hoping that reduces the artifacts; the goal now is to finish this effort and do everything to mitigate splicing
+> artifacts in this release. Read `CLAUDE.md`, then `docs/dev/SPLICE_ARTIFACTS.md`, then the ISSUES entry and
+> `DESIGN.md` §1.0, §1.1, §3.1d and §3.1g. Today Rigel reads what the aligner reported, so a spliced fragment's
+> contiguous alternative reaches the EM only when STAR reports it, and the EM weighs it as a place. That scope kept the
+> work focused and is not a prohibition: if the mitigation needs genome information inside Rigel, bring me the
+> evidence and we will discuss it. Nothing has been measured since the new STAR settings, the annotated-path rule and
 > the place model landed. First, without changing code, measure on the STAR rung, against the read names, every gDNA
 > template that reaches RNA through a spliced hit and every RNA template that lands in gDNA: by class, by whether the
 > aligner reported a contiguous alternative, and by where the EM put it, per stratum, pinned and fractional (question 1
-> of the document's section 7). Then derive on one page, the multi-junction case included, what is left for a mechanism
-> to do within §1.0, and bring me the measurement and the derivation before any prototype.
+> of the document's section 7). Then derive on one page, the multi-junction case included, what is left for a
+> mechanism to do and what each option would take, and bring me the measurement and the derivation before any
+> prototype.

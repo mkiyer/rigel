@@ -31,7 +31,7 @@ the tool's order: the problem, what changed since its design trail, the code tod
 questions) and the strand frame's (`STRAND_FRAME.md`, paused 2026-10-27).
 
 Every other note was removed on 2026-10-28, its campaign landed or superseded, and its settled findings already in the
-permanent docs: the owner's scope rulings of 2026-10-16/18 moved to `DESIGN.md` §1.0 that day. A tracked note is
+permanent docs: the owner's scope decisions of 2026-10-16/18 moved to `DESIGN.md` §1.0 that day. A tracked note is
 recovered with `git show 84897128:docs/dev/<name>`: the splice-artifact trail (`GDNA_SPLICE_ARTIFACTS_*`,
 `SPLICE_ARTIFACTS_*`), the paired-end roadmap and wave-1 plan, the observable genome's design, the region-length
 handoff, and the owner's notes (`my_notes.md`, `TWO_PROBLEMS.md`). Copies of those, and the notes that were never

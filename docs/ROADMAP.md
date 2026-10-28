@@ -168,9 +168,11 @@ starts at the index.
 
 **The scan and its buffer.** The scan's repair landed between 2026-10-18 and 2026-10-21
 (`ISSUES: the-scanner-builds-fragments-from-one-mate`, closed); what it leaves:
-3. `ISSUES: splicing-artifacts`: the derivation, within `DESIGN.md` §1.0 (a contiguous reading is the aligner's to
-   report, and the EM weighs it as a place, §3.1g), then the scan infrastructure it needs (junction ids on buffered
-   fragments), the fixtures, a prototype and the VCaP A/B; the release waits for its validation on the cluster.
+3. `ISSUES: splicing-artifacts`: everything that mitigates them is in scope for the next release (owner, 2026-10-28).
+   First measured on the STAR rung: how much of the artifact mass the aligner's own alternatives return to gDNA now
+   that the EM weighs them as places (`DESIGN.md` §3.1g); then the derivation of what is left, whatever it needs
+   (genome information inside Rigel is the owner's to discuss, `DESIGN.md` §1.0), the fixtures, a prototype and the
+   VCaP A/B; the release waits for its validation on the cluster.
 4. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
    caches calibration is measured on date from 2026-10-16/17.
 
@@ -181,7 +183,9 @@ starts at the index.
 **Calibration**, its opportunity before its capture reader.
 6. `ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`.
 7. `ISSUES: the-reader-reads-false-gdna-as-capture`: a chronic problem, approached only once the stages before it are
-   resolved (owner, 2026-10-21); the planned fix reads each object's gDNA through calibration's own posterior for it.
+   resolved (owner, 2026-10-21), and a major cause of poor accuracy and misprediction under hybrid capture, so it
+   deserves a dedicated effort (owner, 2026-10-28); the planned fix reads each object's gDNA through calibration's own
+   posterior for it.
 8. `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`, read again on the repaired reader.
 
 **After calibration, before the EM**: the scores, the priors and the lengths the EM is handed.

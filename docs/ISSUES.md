@@ -39,13 +39,17 @@ names neither `--alignable-zarr` nor `--no-mappability`.
 
 ### splicing-artifacts
 `priority: now — release-blocking (owner, 2026-10-14), and the goal the scan's repair serves (owner, 2026-10-21): the recommended STAR parameters' competing alignments and the multimapper handling are to carry through to it; 0.8.0 waits for the mechanism AND its validation on independent artifact-containing evidence (the cluster); the design is externally reviewed, its derivation next · stage: scan · kind: defect · 2026-09-24`
-SINCE 2026-10-16 THE SCOPE IS `DESIGN.md` §1.0: Rigel reads alignments and never repairs them. What below reads
-bases — the largest block kept as an edit of the alignment, a contiguous reading Rigel would construct, the sequence
-emission from SEQ, h computed from the reference, and the scanner and index infrastructure they need — is superseded
-by the aligner's own alternatives and their NM: at the recommended STAR settings a template's spliced and contiguous
-readings that score alike are both reported, and since 2026-10-28 the EM weighs a template's places (`DESIGN.md`
-§3.1g). What reads no base stands: the strand prong, the blacklist's costs both ways, the builder's defects, the
-training sets and the counters.
+THE OWNER (2026-10-28): in high-gDNA samples gDNA bleeds into RNA as spliced fragments; STAR's bonus for a spliced
+alignment was removed and STAR reparameterized in the hope that this reduces them, and the next release must finish
+this effort and do everything to mitigate splicing artifacts. Since 2026-10-16 Rigel reads what the aligner reported
+(`DESIGN.md` §1.0), a scope set to keep the work focused, not a prohibition. So what below reads bases — the largest
+block kept as an edit of the alignment, a contiguous reading Rigel would construct, the sequence emission from SEQ, h
+computed from the reference, and the scanner and index infrastructure they need — waits on one measurement: how much
+of the artifact mass the aligner's own alternatives return to gDNA, now that the recommended STAR settings report a
+template's spliced and contiguous readings when they score alike and the EM weighs a template's places (since
+2026-10-28, `DESIGN.md` §3.1g). Genome information inside Rigel is the owner's to discuss with that evidence. What
+reads no base stands as it is: the strand prong, the blacklist's costs both ways, the builder's defects, the training
+sets and the counters.
 THE OWNER'S DESIGN (2026-10-14): spliced fragments are the most specific signal the tool has, so artifacts are
 removed by several prongs before any release, after the release candidate is clean.
 - **The strand prong.** A junction's strand split against the library's specificity is a likelihood: with a
@@ -119,12 +123,12 @@ strands; mates disagreeing on an acceptor) reach neither stage. Its cost on the 
   the qualities or the reference — so this needs new scanner and index infrastructure.
 - THE LONG-ANCHOR ARTIFACTS ARE NOT h = 0 (short side ≥ 21 bp: 4,840 DNA records, 60 % uniquely mapped; 98 % of the RNA
   library's rejections, 235,406 of 240,520, uniquely mapped). The hypothesis is remote origin, from retrocopies and
-  paralogs: alignable records an artifact from every alignment, secondary and supplementary included, so a parent
-  gene's junction is listed with long anchors on both sides and, under the OR rule, rejects every single-junction read
-  up to about 2m aligned bases. Measuring it needs an unspliced end-to-end realignment and alignable's per-record
-  origins; a junction mappability table is built only if the aligner at the recommended settings misses the copies
-  (`DESIGN.md` §1.0). The EM side, a multimapper's intergenic places competing with its genic ones, landed 2026-10-28
-  (`DESIGN.md` §3.1g).
+  paralogs: alignable records an artifact from every alignment, secondary and supplementary included, so a parent gene's
+  junction is listed with long anchors on both sides and, under the OR rule, rejects every single-junction read up to
+  about 2m aligned bases. Measuring it needs an unspliced end-to-end realignment and alignable's per-record origins; a
+  junction mappability table, set aside on 2026-10-16 (`DESIGN.md` §1.0), comes back if the aligner at the recommended
+  settings misses the copies. The EM side, a multimapper's intergenic places competing with its genic ones, landed
+  2026-10-28 (`DESIGN.md` §3.1g).
 - THE INDEX CASE (2026-08-03; rigel 0.7.1 at STAR's defaults with the production store; its evidence was deleted with
   the cluster's on 2026-09-28). cfRNA-D, 96.4 % gDNA, reads strand specificity 0.786, last of 344 libraries against
   0.991–0.999 for its 20 flowcell siblings: about 43 % of its RNA-called spliced fragments are artifacts (42.3 % by a
@@ -150,7 +154,7 @@ strands; mates disagreeing on an acceptor) reach neither stage. Its cost on the 
   unspliced finds a remote copy for 2,658 of 404,168 junctions (0.66 %), recalls 533 of 558 retrocopy artifacts and
   exposes 3.2 % of the RNA library's units; realigning every spliced read adds 75 of 2,067. The production blacklist
   caught 91 % of the annotated h = 0 artifacts, 62 % of the annotated h ≥ 1 ones and 8–11 % of the unannotated ones.
-- A CONTIGUOUS SECOND HIT, PRICED (2026-10-15; Rigel built the hit, which `DESIGN.md` §1.0 now rules out;
+- A CONTIGUOUS SECOND HIT, PRICED (2026-10-15; Rigel built the hit, an option `DESIGN.md` §1.0 set aside;
   `$RIGEL_RUNS/prototypes/2026-10-15_splice_a/`). 2,044 of the DNA library's 2,363 tie artifacts went to gDNA, for at
   most 441 RNA-library fragments, about 180 of them genuine by the strand-implied split. Its side effect: a tie read's
   contiguous reading fits another isoform's longer exon (one ADAR isoform 3,545 → 134), and a contiguous hit the
@@ -371,7 +375,7 @@ Instrument: the aligned panel, with the gDNA law injected from the oracle BAM; t
 (`ISSUES: region-lengths-count-unobservable-bases`).
 
 ### the-reader-reads-false-gdna-as-capture
-`priority: now — release-blocking (owner, 2026-10-19); a chronic problem, approached only once the stages before it are resolved (owner, 2026-10-21); found on aligned input as "calibration's strand bug" · stage: calibration · kind: defect · 2026-10-14`
+`priority: now — release-blocking (owner, 2026-10-19); a chronic problem, approached only once the stages before it are resolved (owner, 2026-10-21); a major cause of poor accuracy and misprediction, with hybrid capture performing poorly, so it deserves a dedicated effort (owner, 2026-10-28); found on aligned input as "calibration's strand bug" · stage: calibration · kind: defect · 2026-10-14`
 AMPLIFIES SMALL CHANGES (2026-10-26): calibration's geometry over the observable genome is a no-op on every capture-ON
 row with every efficiency at 1, yet moves stranded × capture-ON genes +1.2 % through the reader
 (`ISSUES: region-lengths-count-unobservable-bases`, step 5).
