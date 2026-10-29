@@ -24,14 +24,14 @@ from rigel.second_pass import lift_choices
 
 
 def _bank(records, n_hyp_each=2):
-    """A ``DeferredFragments`` holding ``records`` = list of (ref, start, end, astrand, sjstrand).
+    """A ``DeferredFragments`` holding ``records`` = list of (ref, start, end, astrand, sjstrand, nm, clip).
 
     Built in the bank's own canonical order — sorted on the record key — because that order is the
     contract ``lift_choices`` reads. Every record gets ``n_hyp_each`` hypotheses, which is what makes a
     LOCAL hypothesis index meaningful and transferable."""
     recs = sorted(records)
     n = len(recs)
-    cols = list(zip(*recs)) if n else [()] * 5
+    cols = list(zip(*recs)) if n else [()] * 7
     return DeferredFragments(
         placement_offsets=np.arange(0, n + 1, dtype=np.int64),  # one placement per record
         ref=np.asarray(cols[0], np.int64),
@@ -45,6 +45,8 @@ def _bank(records, n_hyp_each=2):
         hypothesis_sj_strand=np.zeros(n_hyp_each * n, np.int64),
         hypothesis_intron_offsets=np.zeros(n_hyp_each * n + 1, np.int64),
         hypothesis_introns=np.zeros(0, np.int64),
+        nm=np.asarray(cols[5], np.int64),
+        clip=np.asarray(cols[6], np.int64),
     )
 
 
@@ -55,20 +57,23 @@ class _P:
         self.deferred = bank
 
 
-#: Distinct records in canonical order. The last two pairs differ ONLY in `align_strand` and ONLY in
-#: `sj_strand`, which is what gives the key-completeness gate teeth: if every record already differed in
+#: Distinct records in canonical order. Near-duplicate pairs differ ONLY in `align_strand`, ONLY in `sj_strand`, ONLY
+#: in `nm` and ONLY in `clip`, which is what gives the key-completeness gate teeth: if every record already differed in
 #: (ref, start, end), dropping a trailing key field would change nothing and the fixture would be
 #: invariant under a weaker identity (`TRAPS: perturb-every-gate`).
 _RECS = [
-    (0, 100, 300, 0, 0),
-    (0, 400, 700, 0, 1),
-    (0, 900, 1200, 1, 0),
-    (1, 50, 260, 0, 0),
-    (1, 50, 260, 1, 0),  # <- differs from the previous ONLY in align_strand
-    (1, 800, 1000, 0, 0),
-    (1, 800, 1000, 0, 1),  # <- differs from the previous ONLY in sj_strand
+    (0, 100, 300, 0, 0, 0, 0),
+    (0, 400, 700, 0, 1, 0, 0),
+    (0, 900, 1200, 1, 0, 0, 0),
+    (1, 50, 260, 0, 0, 0, 0),
+    (1, 50, 260, 1, 0, 0, 0),  # <- differs from the previous ONLY in align_strand
+    (1, 800, 1000, 0, 0, 0, 0),
+    (1, 800, 1000, 0, 1, 0, 0),  # <- differs from the previous ONLY in sj_strand
+    (2, 10, 210, 0, 0, 0, 0),
+    (2, 10, 210, 0, 0, 1, 0),  # <- differs from the previous ONLY in nm
+    (2, 10, 210, 0, 0, 1, 3),  # <- differs from the previous ONLY in clip
 ]
-_CHOICES = np.array([1, 0, 1, 1, 0, 0, 1], np.int64)
+_CHOICES = np.array([1, 0, 1, 1, 0, 0, 1, 0, 1, 0], np.int64)
 
 
 def test_L1_a_partition_that_is_the_whole_gets_its_own_choices_back():
@@ -97,8 +102,8 @@ def test_L2_a_proper_subset_gets_exactly_the_choices_ITS_records_drew():
 def test_L3_a_complete_split_consumes_every_choice_EXACTLY_ONCE():
     """The identity. Two disjoint partitions covering the whole must, between them, use each
     whole-library choice once — which is what makes ``Sum(partitions) == whole`` after the drain."""
-    a = [_RECS[0], _RECS[3], _RECS[5]]
-    b = [_RECS[1], _RECS[2], _RECS[4], _RECS[6]]
+    a = [_RECS[0], _RECS[3], _RECS[5], _RECS[8]]
+    b = [_RECS[1], _RECS[2], _RECS[4], _RECS[6], _RECS[7], _RECS[9]]
     whole = _P(_bank(_RECS))
     lifted, ambiguous = lift_choices(whole, [_P(_bank(a)), _P(_bank(b))], _CHOICES)
     assert ambiguous == 0
@@ -134,8 +139,8 @@ def test_L6_duplicate_keys_split_across_partitions_are_COUNTED():
 
     The count is per RECORD of the partition, so a partition holding one of a duplicate pair reports 1
     — it cannot report half a fragment, and rounding up is the safe direction for a bound."""
-    dup = (0, 100, 300, 0, 0)
-    recs = [dup, dup, (0, 500, 700, 0, 0)]
+    dup = (0, 100, 300, 0, 0, 0, 0)
+    recs = [dup, dup, (0, 500, 700, 0, 0, 0, 0)]
     whole = _P(_bank(recs))
     ch = np.array([0, 1, 1], np.int64)
     # each partition takes ONE of the identical pair — neither can know which
@@ -152,9 +157,9 @@ def test_L6_duplicate_keys_split_across_partitions_are_COUNTED():
 
 
 def test_L7_the_key_uses_EVERY_field_of_the_record_identity():
-    """Key completeness. ``_RECS`` contains two pairs that differ ONLY in ``align_strand`` and ONLY in
-    ``sj_strand``, so a lift that ignored a trailing field would collapse each pair into one queue and
-    hand the same choice to both — detected here as a mismatch against the whole's own per-record
+    """Key completeness. ``_RECS`` contains pairs that differ ONLY in ``align_strand``, ONLY in ``sj_strand``,
+    ONLY in ``nm`` and ONLY in ``clip``, so a lift that ignored a trailing field would collapse each pair into one
+    queue and hand the same choice to both — detected here as a mismatch against the whole's own per-record
     choice.
 
     PERTURBATION: truncating the key to four fields passes every other gate, because a fixture whose
@@ -168,8 +173,10 @@ def test_L7_the_key_uses_EVERY_field_of_the_record_identity():
     # the two near-duplicate pairs must have drawn DIFFERENT choices, or the gate is vacuous (TRAPS: could-the-arm-have-fired)
     order = sorted(_RECS)
     for a, b in (
-        ((1, 50, 260, 0, 0), (1, 50, 260, 1, 0)),
-        ((1, 800, 1000, 0, 0), (1, 800, 1000, 0, 1)),
+        ((1, 50, 260, 0, 0, 0, 0), (1, 50, 260, 1, 0, 0, 0)),
+        ((1, 800, 1000, 0, 0, 0, 0), (1, 800, 1000, 0, 1, 0, 0)),
+        ((2, 10, 210, 0, 0, 0, 0), (2, 10, 210, 0, 0, 1, 0)),
+        ((2, 10, 210, 0, 0, 1, 0), (2, 10, 210, 0, 0, 1, 3)),
     ):
         ca, cb = _CHOICES[order.index(a)], _CHOICES[order.index(b)]
         assert ca != cb, (a, b, ca, cb)
@@ -182,8 +189,8 @@ def test_L8_partitions_holding_MORE_copies_of_a_key_than_the_whole_RAISES():
 
     PERTURBATION: deleting the guard passes every other gate, because no other fixture over-consumes
     and the guard is never reached (`TRAPS: could-the-arm-have-fired`)."""
-    only = (0, 100, 300, 0, 0)
-    whole = _P(_bank([only, (0, 500, 700, 0, 0)]))
+    only = (0, 100, 300, 0, 0, 0, 0)
+    whole = _P(_bank([only, (0, 500, 700, 0, 0, 0, 0)]))
     ch = np.array([0, 1], np.int64)
     with pytest.raises(ValueError, match="more records with key"):
         lift_choices(whole, [_P(_bank([only])), _P(_bank([only]))], ch)

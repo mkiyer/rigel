@@ -598,6 +598,7 @@ struct WorkerState {
         int64_t start, end;
         int32_t align_strand, sj_strand;
         std::size_t obs0, obs1, hyp0, hyp1;
+        int32_t nm, clip;  // the hit's sequence: the second pass's draw prices a multimapper's placements by it
     };
     struct PendingHypothesis {
         std::size_t imp0, imp1;
@@ -1255,7 +1256,8 @@ struct MarshalledFragment {
     rigel::accumulator::OfferedFragment offered{};
 
     MarshalledFragment(int64_t start, int64_t end, nb::iterable introns,
-                       int32_t align_strand, int32_t sj_strand, nb::object hypotheses) {
+                       int32_t align_strand, int32_t sj_strand, nb::object hypotheses,
+                       int32_t nm = 0, int32_t clip = 0) {
         for (nb::handle item : introns) {
             auto pair = nb::cast<nb::tuple>(item);
             observed.push_back({0, nb::cast<int32_t>(pair[0]), nb::cast<int32_t>(pair[1]), 0});
@@ -1287,6 +1289,8 @@ struct MarshalledFragment {
         offered.sj_strand = sj_strand;
         offered.hypotheses = spans.data();
         offered.n_hypotheses = spans.size();
+        offered.nm = nm;
+        offered.clip = clip;
     }
 
     MarshalledFragment(const MarshalledFragment&) = delete;
@@ -1353,6 +1357,8 @@ static nb::dict deferred_dict(const rigel::accumulator::DeferredFragments& defer
     put("hypothesis_sj_strand", deferred.hypothesis_sj_strand);
     put("hypothesis_intron_offsets", deferred.hypothesis_intron_offsets);
     put("hypothesis_introns", deferred.hypothesis_introns);
+    put("nm", deferred.nm);
+    put("clip", deferred.clip);
     return out;
 }
 
@@ -1948,7 +1954,7 @@ private:
                 // sequenced. An observed motif is evidence; an implied strand is an inference from the
                 // annotation.
                 ws.pending.push_back({ref_id, start, end, cr.align_strand, cr.sj_strand,
-                                      obs0, observed.size(), hyp0, ws.pending_hypotheses.size()});
+                                      obs0, observed.size(), hyp0, ws.pending_hypotheses.size(), f.nm, f.clip});
             };
 
         // ── the offer: every placement of this fragment, at once ──────────────────────────────────────
@@ -1973,6 +1979,8 @@ private:
                 pl.offered.sj_strand = p.sj_strand;
                 pl.offered.hypotheses = ws.arena_spans.data() + p.hyp0;
                 pl.offered.n_hypotheses = p.hyp1 - p.hyp0;
+                pl.offered.nm = p.nm;
+                pl.offered.clip = p.clip;
                 ws.placements.push_back(pl);
             }
             ws.acc_set->offer(ws.placements.data(), ws.placements.size(), ws.offer_scratch);
@@ -2520,6 +2528,9 @@ private:
             cal["n_fragment_pools"] = static_cast<int>(kNFragmentPools);
             cal["max_length"]       = max_length_;
             cal["n_refs"]           = static_cast<int>(n_refs);
+            // The library's mismatch rate travels with the tally, so a cached scan drains at its own rate.
+            cal["unique_unspliced_mismatches"] = stats_.n_unique_unspliced_mismatches;
+            cal["unique_unspliced_bases"]      = stats_.n_unique_unspliced_bases;
 
             result["calibration"] = cal;
         } else {
@@ -3172,8 +3183,10 @@ NB_MODULE(_bam_impl, m) {
                     nb::iterable introns,
                     int32_t align_strand,
                     int32_t sj_strand,
-                    nb::object hypotheses) {
-                     MarshalledFragment m(start, end, introns, align_strand, sj_strand, hypotheses);
+                    nb::object hypotheses,
+                    int32_t nm,
+                    int32_t clip) {
+                     MarshalledFragment m(start, end, introns, align_strand, sj_strand, hypotheses, nm, clip);
                      return std::string(
                          rigel::accumulator::outcome_key(a.deposit(m.offered, binding_scratch)));
                  },
@@ -3182,7 +3195,9 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("observed_introns") = nb::tuple(),
                  nb::arg("align_strand") = STRAND_POS,
                  nb::arg("sj_strand") = STRAND_NONE,
-                 nb::arg("hypotheses"))
+                 nb::arg("hypotheses"),
+                 nb::arg("nm") = 0,
+                 nb::arg("clip") = 0)
 
             // ⭐ L under ONE hypothesis, without depositing — what the second pass scores against.
             // ⛔ Exposed rather than reimplemented in Python: the pool rules left the tool with ONE definition of
@@ -3326,7 +3341,9 @@ NB_MODULE(_bam_impl, m) {
                                                  nb::cast<nb::iterable>(nb::getattr(p, "observed_introns")),
                                                  nb::cast<int32_t>(nb::getattr(p, "align_strand")),
                                                  nb::cast<int32_t>(nb::getattr(p, "sj_strand")),
-                                                 nb::getattr(p, "hypotheses"));
+                                                 nb::getattr(p, "hypotheses"),
+                                                 nb::cast<int32_t>(nb::getattr(p, "nm")),
+                                                 nb::cast<int32_t>(nb::getattr(p, "clip")));
                          refs.push_back(nb::cast<int32_t>(nb::getattr(p, "ref")));
                      }
                      std::vector<rigel::accumulator::Placement> pls;

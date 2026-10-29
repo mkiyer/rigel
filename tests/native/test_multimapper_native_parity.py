@@ -212,6 +212,57 @@ def test_a_GENERATOR_of_placements_is_the_same_fragment_as_the_tuple():
     assert reference.tally.qc["deferred_multiple_placements"] > 0
 
 
+def _seq(placement, nm, clip=0):
+    """*placement* with the hit's sequence: ``nm`` edits and ``clip`` soft-clipped bases."""
+    return dataclasses.replace(placement, nm=nm, clip=clip)
+
+
+def test_a_records_sequence_never_moves_it_past_a_record_its_content_orders():
+    """The bank's order is the order the draw's one stream reaches its records, so it must not depend on anything
+    but the deposit's content wherever the content decides: two records sharing a first placement are ordered by
+    their SECOND placement's content, though the first placement's sequence differs. Only records whose content
+    ties are ordered by their sequence, fewest mismatches first, so the order stays total.
+
+    PERTURBATION: comparing each placement's sequence right after its content puts the record with fewer mismatches
+    on the shared placement first, against its content order.
+    """
+    reference, native = _pair()
+    _offer_both(
+        reference,
+        native,
+        "shared, then the later",
+        (_seq(_pl(0, 1100, 1400), 0), _pl(1, 1500, 1800)),
+    )
+    _offer_both(
+        reference,
+        native,
+        "shared, then the earlier",
+        (_seq(_pl(0, 1100, 1400), 3), _pl(1, 1150, 1450)),
+    )
+    _offer_both(
+        reference, native, "a twin, one mismatch", (_seq(_pl(0, 1100, 1400), 1), _pl(1, 1150, 1450))
+    )
+    bank = dict(native.deferred)
+    assert bank["start"].tolist() == [1100, 1150, 1100, 1150, 1100, 1500], (
+        "the content decides first"
+    )
+    assert bank["nm"].tolist() == [1, 0, 3, 0, 0, 0], "the twins are ordered by their sequence"
+
+
+def test_identical_placements_keep_the_fewest_mismatches():
+    """Identical placements are one placement, as before; of the group the one kept carries the fewest mismatches,
+    then the fewest clipped bases, whatever order the aligner listed them in."""
+    for order in ((3, 1, 2), (1, 2, 3), (2, 3, 1)):
+        reference, native = _pair()
+        twins = tuple(_seq(_pl(0, 1100, 1400), nm, clip=5 - nm) for nm in order)
+        _offer_both(
+            reference, native, f"twins {order} beside a paralog", (*twins, _pl(1, 1150, 1450))
+        )
+        bank = dict(native.deferred)
+        assert bank["placement_offsets"].tolist() == [0, 2]
+        assert bank["nm"].tolist() == [1, 0] and bank["clip"].tolist() == [4, 0]
+
+
 def test_the_union_bank_interleaves_gap_held_and_multimapping_records_in_one_order():
     """Gap-held records on both references and multi-placement records between them: the native union
     (every reference's bank and the set's own, sorted once) is the specification's one list."""

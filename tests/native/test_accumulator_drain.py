@@ -262,6 +262,25 @@ def test_the_draw_never_leaks_into_the_NEXT_records_run():
     )
 
 
+def test_an_overshooting_draw_lands_on_a_POSITIVE_hypothesis():
+    """The clamp keeps a choice inside its own run, and it must also keep it off a hypothesis with no mass: a run that
+    ends in zero-score hypotheses would otherwise hand an overshooting uniform to a candidate the score excluded.
+
+    CONSTRUCTED, as the leak gate is: each run holds 0.5 of mass on its first two slots and none on its last, so
+    every uniform above 0.5 overshoots, half of them. PERTURBATION: clamping to the run's end instead of its last
+    positive slot puts about half the choices on the excluded slot.
+    """
+    from rigel.second_pass import choose_hypotheses
+
+    n, k = 400, 3
+    offsets = np.arange(n + 1, dtype=np.int64) * k
+    score = np.tile([0.25, 0.25, 0.0], n)
+    picked = choose_hypotheses(_FakeScores(score), _FakeDeferred(offsets, n), seed=3)
+    assert picked.min() >= 0 and picked.max() <= 1, (
+        f"a choice landed on a hypothesis with no mass: got range [{picked.min()}, {picked.max()}]"
+    )
+
+
 @dataclasses.dataclass
 class _FakeScores:
     """Just the one field :func:`choose_hypotheses` reads. Deliberately not a real `HeldScores`: the
@@ -821,6 +840,18 @@ def test_an_IMPOSSIBLE_LENGTH_cannot_be_CHOSEN_however_much_traffic_favours_it()
         np.array([0.0, 0.0]), np.array([0.0, 0.0]), np.array([1.0, 1.0])
     )
     assert undecided and np.allclose(scores, [0.5, 0.5])
+
+
+def test_factors_that_UNDERFLOW_for_every_candidate_still_decide():
+    """The factors are combined in logs. A product of probabilities and densities can underflow to zero for every
+    candidate of a record (a sequence price at many mismatches does), and the zero rule then reads the whole record
+    as uninformative, a fair coin, though the factors separate its candidates two to one.
+
+    PERTURBATION: the product form returns [0.5, 0.5] here.
+    """
+    scores, undecided = _score_one(rho=[1e-150, 2e-150], f=[1e-200, 1e-200], s=[1.0, 1.0])
+    assert not undecided
+    np.testing.assert_allclose(scores, [1.0 / 3.0, 2.0 / 3.0], rtol=1e-12)
 
 
 def test_SURVIVORS_are_weighted_by_LIKELIHOOD_not_tossed_for():

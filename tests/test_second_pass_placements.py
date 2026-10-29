@@ -39,10 +39,21 @@ def _gtf() -> str:
     return "".join(rows)
 
 
-def _scan(tmp_path_factory, label: str, unique_depth: tuple[int, int], unknown=None):
+def _scan(
+    tmp_path_factory,
+    label: str,
+    unique_depth: tuple[int, int],
+    unknown=None,
+    *,
+    background: int = 0,
+    multi_nm: tuple[int, int] = (0, 0),
+    unique_nm: int = 0,
+):
     """Scan a fixture with ``unique_depth[f]`` uniquely mapped contained pairs in contig ``f``'s first exon and
     ``N_MULTI`` multimapping pairs contained in both, the genome holding ``N`` over *unknown*'s runs; return what
-    the scorer reads."""
+    the scorer reads. ``background`` unique pairs per contig lie in its last intergenic region, the library's gDNA
+    bulk; a multimapper's read 1 carries ``multi_nm[f]`` mismatches on contig ``f``, and every unique read
+    ``unique_nm``, which sets the library's mismatch rate."""
     import pysam
 
     base = tmp_path_factory.mktemp(f"placements_{label}")
@@ -52,7 +63,7 @@ def _scan(tmp_path_factory, label: str, unique_depth: tuple[int, int], unknown=N
     TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
     index = TranscriptIndex.load(str(base / "idx"))
 
-    def read(qname, ref_id, pos, mate_pos, is_r1, nh=1, hi=None, secondary=False):
+    def read(qname, ref_id, pos, mate_pos, is_r1, nh=1, hi=None, secondary=False, nm=0):
         a = pysam.AlignedSegment()
         a.query_name = qname
         a.reference_id = ref_id
@@ -64,20 +75,39 @@ def _scan(tmp_path_factory, label: str, unique_depth: tuple[int, int], unknown=N
         a.query_qualities = pysam.qualitystring_to_array("I" * 100)
         a.next_reference_id = ref_id
         a.next_reference_start = mate_pos
-        a.set_tags([("NH", nh, "i")] + ([("HI", hi, "i")] if hi is not None else []))
+        a.set_tags(
+            [("NH", nh, "i"), ("NM", nm, "i")] + ([("HI", hi, "i")] if hi is not None else [])
+        )
         return a
 
     reads = []
     for ref_id, depth in enumerate(unique_depth):
         for k in range(depth):
             reads += [
-                read(f"u_{ref_id}_{k}", ref_id, 1100, 1300, True),
-                read(f"u_{ref_id}_{k}", ref_id, 1300, 1100, False),
+                read(f"u_{ref_id}_{k}", ref_id, 1100, 1300, True, nm=unique_nm),
+                read(f"u_{ref_id}_{k}", ref_id, 1300, 1100, False, nm=unique_nm),
+            ]
+    for ref_id in (0, 1):
+        for k in range(background):
+            pos = 3000 + 10 * k
+            reads += [
+                read(f"b_{ref_id}_{k}", ref_id, pos, pos + 200, True, nm=unique_nm),
+                read(f"b_{ref_id}_{k}", ref_id, pos + 200, pos, False, nm=unique_nm),
             ]
     for k in range(N_MULTI):
         for ref_id, hi in ((0, 1), (1, 2)):
             reads += [
-                read(f"mm_{k}", ref_id, 1120, 1320, True, nh=2, hi=hi, secondary=hi == 2),
+                read(
+                    f"mm_{k}",
+                    ref_id,
+                    1120,
+                    1320,
+                    True,
+                    nh=2,
+                    hi=hi,
+                    secondary=hi == 2,
+                    nm=multi_nm[ref_id],
+                ),
                 read(f"mm_{k}", ref_id, 1320, 1120, False, nh=2, hi=hi, secondary=hi == 2),
             ]
     bam = str(base / "p.bam")
@@ -130,6 +160,23 @@ def nothing_unique(tmp_path_factory):
 @pytest.fixture(scope="module")
 def one_side_only(tmp_path_factory):
     return _scan(tmp_path_factory, "one", (12, 0))
+
+
+@pytest.fixture(scope="module")
+def one_side_only_over_a_bulk(tmp_path_factory):
+    return _scan(tmp_path_factory, "one_bulk", (12, 0), background=100)
+
+
+#: A library whose unique reads carry one mismatch a mate in 100 bases (rate 0.01), and a multimapper whose read 1
+#: matches chr1's copy and mismatches chr2's once; the unique depth is the same on both copies.
+@pytest.fixture(scope="module")
+def one_mismatch_apart(tmp_path_factory):
+    return _scan(tmp_path_factory, "nm", (10, 10), multi_nm=(0, 1), unique_nm=1)
+
+
+@pytest.fixture(scope="module")
+def one_mismatch_in_a_clean_library(tmp_path_factory):
+    return _scan(tmp_path_factory, "nm0", (10, 10), multi_nm=(0, 1), unique_nm=0)
 
 
 #: chr2's copy of the first exon ([1000, 1600)) holds an N run beyond every read, so the index masks it: of the
@@ -218,6 +265,83 @@ def test_unique_evidence_on_one_side_only_is_a_hard_zero_on_the_other(one_side_o
     assert int(np.asarray(drained.region_contained_count)[exon2].sum()) == 0, (
         "nothing reaches the silent copy"
     )
+
+
+def _bulk_by_hand(scanned) -> float:
+    """The pass-one bulk counted directly: the unique contained fragments over the intergenic regions' observable
+    contained support, in the unit a contained placement's term reads."""
+    from rigel.calibration.effective_length import observable_contained_eff_length
+    from rigel.calibration.signature import coarse_type_array
+
+    payload, _rt, _sj, _sm, regions = scanned
+    support = observable_contained_eff_length(regions, build_fl_models(payload).global_pmf)
+    intergenic = coarse_type_array(regions.signature) == 0
+    counts = np.asarray(payload.region_contained_count, dtype=np.float64).sum(axis=1)
+    return float(counts[intergenic].sum() / support[intergenic].sum())
+
+
+def test_a_copy_with_no_unique_traffic_reads_the_bulk_beside_one_that_has_some(
+    one_side_only_over_a_bulk,
+):
+    """gDNA's floor: a copy every fragment of which multimaps reads no unique traffic, but gDNA is one template at a
+    uniform rate before capture and capture only enriches, so a place gDNA can be holds at least the bulk. The silent
+    copy reads the library's bulk, not a hard zero, and the draw weighs the copies by their terms.
+
+    PERTURBATION: without the floor the silent copy reads 0 and is never drawn; with a sum in place of the bound the
+    copy WITH traffic reads its own density plus the bulk.
+    """
+    from rigel.calibration.effective_length import observable_contained_eff_length
+
+    payload, scores, multi, runs, _rt, _sj = _scored(one_side_only_over_a_bulk)
+    bulk = _bulk_by_hand(one_side_only_over_a_bulk)
+    regions = one_side_only_over_a_bulk[4]
+    support = observable_contained_eff_length(regions, build_fl_models(payload).global_pmf)
+    exon = int(payload.ref_region_offsets[0]) + 1  # chr1's first exon, where its unique pairs sit
+    own = float(np.asarray(payload.region_contained_count[exon], dtype=np.float64).sum()) / float(
+        support[exon]
+    )
+    assert own > bulk > 0.0
+    for i in multi:
+        r0, r1 = int(runs[i]), int(runs[i + 1])
+        a = scores.terms.placement_abundance[r0:r1]
+        assert a[0] == pytest.approx(own, rel=1e-12), "chr1's copy keeps its own unique density"
+        assert a[1] == pytest.approx(bulk, rel=1e-12), "chr2's silent copy reads the bulk"
+        np.testing.assert_allclose(scores.score[r0:r1], a / a.sum(), rtol=1e-12, atol=0.0)
+
+
+def test_two_copies_one_mismatch_apart_are_drawn_at_the_mismatch_price(one_mismatch_apart):
+    """The draw reads a multimapper's sequence at the EM's own prices: at the library's mismatch rate 0.01 a copy
+    with one more mismatch is weighed by ``ε / (3(1 − ε))`` against the one it matches, everything else tied.
+
+    PERTURBATION: a draw that reads no sequence splits these records evenly.
+    """
+    from rigel.scoring import sequence_log_penalties
+
+    payload, scores, multi, runs, _rt, _sj = _scored(one_mismatch_apart)
+    mismatch, _clip = sequence_log_penalties(0.01)
+    assert payload.mismatch_rate == pytest.approx(0.01, rel=1e-12)
+    assert multi.size == N_MULTI
+    for i in multi:
+        r0, r1 = int(runs[i]), int(runs[i + 1])
+        np.testing.assert_array_equal(scores.terms.sequence[r0:r1], [0.0, mismatch])
+        np.testing.assert_allclose(
+            scores.score[r0:r1],
+            np.array([1.0, np.exp(mismatch)]) / (1.0 + np.exp(mismatch)),
+            rtol=1e-12,
+        )
+
+
+def test_in_a_library_with_no_mismatch_a_mismatched_copy_is_never_drawn(
+    one_mismatch_in_a_clean_library,
+):
+    """At a mismatch rate of zero a mismatch is impossible, so the mismatched copy takes no part, as in the EM."""
+    payload, scores, multi, runs, region_types, sj = _scored(one_mismatch_in_a_clean_library)
+    assert payload.mismatch_rate == 0.0
+    for i in multi:
+        r0, r1 = int(runs[i]), int(runs[i + 1])
+        np.testing.assert_array_equal(scores.score[r0:r1], [1.0, 0.0])
+    choices = choose_hypotheses(scores, payload, seed=5)
+    assert np.all(choices[multi] == 0)
 
 
 def test_one_density_over_observable_bases_scores_the_placements_evenly(

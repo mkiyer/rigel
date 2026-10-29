@@ -57,6 +57,8 @@ from typing import Any
 
 import numpy as np
 
+from .stats import library_mismatch_rate
+
 
 #: The two columns of every bank ARE the two genome strands. `Strand` has four values — OR semantics
 #: make POS|NEG == AMBIGUOUS, and NONE means no strand — so only two of them name a column, and a fragment
@@ -292,9 +294,10 @@ ADDITIVE_AXES: tuple[tuple[str, str], ...] = (
 )
 
 
-#: The deferred bank's arrays, in the order :meth:`Tally.deferred_arrays` emits them. Read off the
-#: dataclass below rather than written out twice; the tuple exists because the validation needs an order.
-_DEFERRED_RECORD_FIELDS = ("ref", "start", "end", "align_strand", "sj_strand")
+#: The deferred bank's per-placement arrays, in the order :meth:`Tally.deferred_arrays` emits them. Read off the
+#: dataclass below rather than written out twice; the tuple exists because the validation needs an order. The last
+#: two are the hit's sequence, which the canonical sort reads only once a whole record's content ties.
+_DEFERRED_RECORD_FIELDS = ("ref", "start", "end", "align_strand", "sj_strand", "nm", "clip")
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,6 +357,10 @@ class DeferredFragments:
     )  # int64[n_hypotheses] — INFERRED; an observed motif always wins
     hypothesis_intron_offsets: np.ndarray  # int64[n_hypotheses + 1] — in PAIRS
     hypothesis_introns: np.ndarray  # int64[2 * n_implied] — the IMPLIED introns; empty ⇒ unspliced
+    #: int64[n_placements] — the hit's sequence over both mates, its edits and its soft-clipped read bases. Never
+    #: deposited: the draw prices a multimapper's placements by it, as the EM prices its hits.
+    nm: np.ndarray
+    clip: np.ndarray
 
     @property
     def n_fragments(self) -> int:
@@ -593,6 +600,10 @@ class AccumulatorPayload:
     qc: ScanQC
     max_length: int  # the fragment-length limit applied to L, and the pool-histogram width
     n_refs: int
+    #: The library's unique unspliced hits: their edits and their aligned read bases (M, I, =, X), the scan's own
+    #: counts, so a cached scan drains at its own mismatch rate and an origin split sums to the whole.
+    mismatches: int
+    aligned_bases: int
 
     #: Provenance, and it must cover regions AND boundaries. The payload is boundary-keyed by
     #: construction — its sj axis is meaningless against a different sj CSR — whereas
@@ -614,6 +625,11 @@ class AccumulatorPayload:
     @property
     def n_strand_columns(self) -> int:
         return N_STRAND_COLUMNS
+
+    @property
+    def mismatch_rate(self) -> float | None:
+        """The library's mismatch rate, which the draw prices a multimapper's sequence at."""
+        return library_mismatch_rate(self.mismatches, self.aligned_bases)
 
     @property
     def n_regions(self) -> int:
@@ -838,6 +854,8 @@ class AccumulatorPayload:
             qc=qc,
             max_length=max_length,
             n_refs=n_refs,
+            mismatches=int(cal["unique_unspliced_mismatches"]),
+            aligned_bases=int(cal["unique_unspliced_bases"]),
             graph_hash=graph_hash,
         )
 

@@ -29,6 +29,7 @@ N_SENSE = (
 )
 N_ANTISENSE = 2  # and a few on the other strand, so the library is stranded but not perfectly
 N_MULTI = 20
+N_BACKGROUND = 40  # unique unspliced pairs 400 bases long in chr2's intergenic tail: the all-fragment law is not RNA's
 _M, _N = 0, 3
 
 
@@ -42,14 +43,14 @@ def _gtf() -> str:
     return "".join(rows)
 
 
-@pytest.fixture(scope="module")
-def scanned(tmp_path_factory):
+def _scan(tmp_path_factory, label: str, multi_xs):
     """``N_SENSE`` unique fragments spliced across chr1's annotated junction with R1 on the motif's strand, and
-    ``N_MULTI`` multimappers whose first hit is spliced across that junction with R1 on the OTHER strand and whose
-    second hit is unspliced, contained in chr2's first exon."""
+    ``N_MULTI`` multimappers whose first hit is spliced across that junction with R1 on the OTHER strand, its motif
+    tag *multi_xs* (``None``: the aligner wrote none), and whose second hit is unspliced, contained in chr2's first
+    exon."""
     import pysam
 
-    base = tmp_path_factory.mktemp("strand_placements")
+    base = tmp_path_factory.mktemp(f"strand_placements_{label}")
     fasta, gtf = base / "g.fa", base / "a.gtf"
     write_fasta(fasta, {"chr1": GENOME, "chr2": GENOME})
     gtf.write_text(_gtf())
@@ -96,12 +97,18 @@ def scanned(tmp_path_factory):
             read(f"a_{k}", 0, 2080, 1550, True, True, [(_M, 100)]),
             read(f"a_{k}", 0, 1550, 2080, False, False, spliced, xs="+"),
         ]
+    for k in range(N_BACKGROUND):
+        pos = 3000 + 10 * k
+        reads += [
+            read(f"b_{k}", 1, pos, pos + 300, True, False, [(_M, 100)]),
+            read(f"b_{k}", 1, pos + 300, pos, False, True, [(_M, 100)]),
+        ]
     for k in range(
         N_MULTI
     ):  # hit 1: R2 forward and spliced on a + motif, R1 reverse; hit 2: unspliced on chr2
         reads += [
             read(f"mm_{k}", 0, 2080, 1550, True, True, [(_M, 100)], nh=2, hi=1),
-            read(f"mm_{k}", 0, 1550, 2080, False, False, spliced, nh=2, hi=1, xs="+"),
+            read(f"mm_{k}", 0, 1550, 2080, False, False, spliced, nh=2, hi=1, xs=multi_xs),
             read(f"mm_{k}", 1, 1320, 1120, True, True, [(_M, 100)], nh=2, hi=2, secondary=True),
             read(f"mm_{k}", 1, 1120, 1320, False, False, [(_M, 100)], nh=2, hi=2, secondary=True),
         ]
@@ -118,6 +125,96 @@ def scanned(tmp_path_factory):
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
     return payload, RegionArrays.from_index(index), build_sj_arrays(index), strand_model
+
+
+@pytest.fixture(scope="module")
+def scanned(tmp_path_factory):
+    return _scan(tmp_path_factory, "tagged", "+")
+
+
+@pytest.fixture(scope="module")
+def scanned_untagged(tmp_path_factory):
+    return _scan(tmp_path_factory, "untagged", None)
+
+
+def _spliced_placements(scanned):
+    """Score the fixture; yield each multimapper's spliced placement with its hypotheses' slice."""
+    payload, regions, sj, strand_model = scanned
+    fl = build_fl_models(payload)
+    scores = score_held_fragments(
+        payload, fl_models=fl, rna_sense_frac=strand_model.p_r1_sense, regions=regions, sj=sj
+    )
+    d = payload.deferred
+    multi = np.flatnonzero(np.diff(d.placement_offsets) == 2)
+    assert multi.size == N_MULTI
+    out = []
+    for i in multi:
+        q = [p for p in d.placements_of(int(i)) if d.observed_introns_of(p).shape[0]]
+        assert len(q) == 1, "one hit is spliced across the annotated junction, the other contiguous"
+        q = q[0]
+        out.append((q, slice(int(d.hypothesis_offsets[q]), int(d.hypothesis_offsets[q + 1]))))
+    return scores, fl, d, strand_model.p_r1_sense, out
+
+
+def test_an_untagged_annotated_splice_reads_its_junctions_strand(scanned_untagged):
+    """The deposit books a placement spliced when an observed intron resolves to an annotated junction, whatever the
+    aligner tagged; so the draw reads it as RNA on the strand of the transcripts holding the junction, ``1 - p`` for
+    R1 on the other strand, never gDNA's ½ (`ISSUES: the-second-pass-corrections`, the motif rule).
+
+    PERTURBATION: reading the motif tag alone gives ½ here.
+    """
+    scores, _fl, d, p, spliced = _spliced_placements(scanned_untagged)
+    for q, hyp in spliced:
+        assert int(d.sj_strand[q]) == int(Strand.NONE), "the aligner wrote no motif on this hit"
+        np.testing.assert_allclose(scores.terms.strand[hyp], 1.0 - p, rtol=1e-12, atol=0.0)
+
+
+def test_an_observed_annotated_splice_reads_the_RNA_length_law(scanned):
+    """A placement whose observed intron resolves to an annotated junction is certified RNA under every one of its
+    paths, so each takes the RNA length law; the unconditional anchor is for a path whose component is unknown.
+
+    PERTURBATION: choosing the law from the implied introns alone reads the anchor here.
+    """
+    scores, fl, d, _p, spliced = _spliced_placements(scanned)
+    assert not np.array_equal(fl.rna_pmf, fl.global_pmf), (
+        "the two laws must differ for this gate to see"
+    )
+    for _q, hyp in spliced:
+        L = scores.terms.length[hyp]
+        np.testing.assert_allclose(
+            scores.terms.length_likelihood[hyp], fl.rna_pmf[L], rtol=1e-12, atol=0.0
+        )
+
+
+def test_a_spliced_placement_never_takes_gDNAs_bound(scanned):
+    """gDNA's floor holds a placement at least at the library's bulk only where gDNA can be. A placement the deposit
+    books spliced holds no gDNA, so it keeps its own junction traffic even where that is none: chr2's junction,
+    which no unique fragment crossed, reads 0 beside a bulk of 1, and chr1's reads its own traffic.
+
+    PERTURBATION: flooring every placement reads chr2's junction at the bulk.
+    """
+    from rigel.calibration.effective_length import observable_contained_eff_length
+    from rigel.second_pass import placement_abundance
+
+    payload, regions, sj, _strand_model = scanned
+    d = payload.deferred
+    support = observable_contained_eff_length(regions, build_fl_models(payload).global_pmf)
+    chr1_sj = int(payload.ref_sj_offsets[0])
+    chr2_sj = int(payload.ref_sj_offsets[1])
+    assert (
+        float(payload.sj_inv_length_sum[chr2_sj]) == 0.0 < float(payload.sj_inv_length_sum[chr1_sj])
+    )
+    p = 0
+    for junction, expected in (
+        (chr2_sj, 0.0),
+        (chr1_sj, float(payload.sj_inv_length_sum[chr1_sj])),
+    ):
+        got = placement_abundance(payload, p, np.array([junction], np.int64), support, bulk=1.0)
+        assert got == expected
+    assert placement_abundance(payload, p, np.zeros(0, np.int64), support, bulk=1e9) == 1e9, (
+        "a placement no annotated junction cuts reads at least the bulk"
+    )
+    assert d.n_placements > 0
 
 
 def test_a_wrong_strand_spliced_placement_carries_one_minus_p_beside_an_unspliced_one(scanned):

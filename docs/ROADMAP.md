@@ -28,8 +28,9 @@ fixed (`DESIGN.md` §3.1c), and which alignments gDNA may explain is ruled (`DES
 real libraries and on the test chromosome's planted panels. The 0.8.0 cut (owner, 2026-10-14) put what a user hits and
 what cannot change once released before in-scope accuracy work, and its release-critical items are landed or measured;
 since 2026-10-18 the release follows the owner's fix order, in the order the tool runs (below). Every change is derived
-on one page and A/B'd against what ships, one issue closed at a time; **splicing artifacts on real data** stay the cluster's track — a real-data problem the
-simulated panels cannot show, handled across the aligner, the blacklist's builder and Rigel.
+on one page and A/B'd against what ships, one issue closed at a time. **Splicing artifacts** are handled on the STAR rung,
+whose rustar aligner is adequate (owner, 2026-10-29); the cluster's real libraries test the release candidate once every
+other fix is in.
 
 ## Where the tool is — one line per claim; run the named instrument for a current number
 
@@ -47,8 +48,9 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   every component sums over a multimapper's places (`DESIGN.md` §3.1g) — `tests/test_multimapper_places.py`,
   `quant_accuracy.py --bam`.
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `tests/test_scan_order_independence.py`; one
-  open deposit defect, the leading intron (`ISSUES: latent-defects`); the second pass's four corrections are open
-  (`ISSUES: the-second-pass-corrections`).
+  open deposit defect, the leading intron (`ISSUES: latent-defects`); the second pass's draw reads the EM's emission
+  with gDNA's floor under its prior (`DESIGN.md` §4.4) — `ab_draw.py` on the STAR rung; what the floor leaves is
+  `ISSUES: the-draw-reads-unique-traffic`.
 - **Library gDNA fraction**: calibration's matches the oracle calibration's on the ladder's three in-scope strata at full
   depth and is structurally blind on the deferred one — `calibration_vs_oracle.py` (its pools); end to end, with the
   length law read over the observable genome (2026-10-22) it reads 0.96–1.00 of truth on every in-scope row of the fair
@@ -118,10 +120,11 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   for now (owner, 2026-09-26), `ruler_vs_truth.py --scale` (the class means and the within-gene spread),
   `ISSUES: the-junction-price-is-noisy-within-a-gene`; what the gDNA witness cannot see of a
   transcript-designed panel is declared — `ISSUES: ruler-witness-geometry-on-transcript-panels`.
-- **Splice-artifact detection**: the blacklist errs both ways on real data — artifacts pass as certified RNA and
-  rejected genuine reads become gDNA-eligible — and an index whose manifest records no alignable store runs with
-  detection off, which its load now says — the cluster track, `ISSUES: splicing-artifacts`,
-  `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`; `summary.json`'s `sj_blacklist_loaded`.
+- **Splice artifacts**: at the recommended STAR settings the aligner reports an artifact's contiguous reading and a
+  multimapper's hits are priced by their sequence (`DESIGN.md` §3.1h); the blacklist errs both ways on real data, and
+  an index whose manifest records no alignable store runs with detection off, which its load now says — the release
+  candidate's cluster test, `ISSUES: splicing-artifacts`, `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`;
+  `summary.json`'s `sj_blacklist_loaded` and `fragment_stats.mismatch_rate`.
 - **Performance**: the sweep is one native call, bit-identical at every thread count; the locus EM hands loci to its
   threads one at a time; the two 0.8.0 numeric no-ops landed and the rest of the thread is later —
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`; a `_debug`
@@ -146,47 +149,56 @@ every capture efficiency at 1 beside the shipped run), the oracle ladder for reg
 recommended STAR parameters report the competing alignments and the multimapper handling is to weigh them, so that
 splice artifacts are handled downstream (`ISSUES: splicing-artifacts`).
 
+**The order now** (owner, 2026-10-29): the capture reader (step 7), the biggest remaining problem, now that the
+second pass's draw is done (step 5). The cluster runs (step 2, and step 3's validation) wait for a release candidate with every
+other fix; the rustar rung is adequate and no aligner issue is anticipated.
+
 **First: the opportunity the fair panel exposed** (owner, 2026-10-22). The panels re-simulated on 2026-10-21 draw no
 read from an `N` run, and on them Rigel under-calls gDNA by 6–21 % on the in-scope strata and books the rest as nascent
 RNA. Every later step is measured on them, and the multimapper repair's gDNA term and the splice-artifact work both
 weigh gDNA against RNA, so this is taken first; which bases are observable is a property of the reference, so its fix
 starts at the index.
-1. `ISSUES: region-lengths-count-unobservable-bases`: dissected 2026-10-22 — the term is the gDNA length law, whose
+1. DONE (closed 2026-10-29): `ISSUES: region-lengths-count-unobservable-bases`: dissected 2026-10-22 — the term is the gDNA length law, whose
    one-sided rate reads unobservable bases as the cleanest gDNA. The owner's direction (2026-10-22): an observable
    genome from mappability, a mask first; the mask is approved: with an `alignable` store its zero-mappability set at
    the store's longest read length, N included; without one, the N runs; the existing GRCh38 store serves for now.
    Built 2026-10-22, one step at a time: the index records the mask, the second pass and the length law read it, and
    every in-scope row reads its gDNA at 0.96–1.00 of truth; the costs are traced in the entry. Calibration's geometry
    followed 2026-10-26 (the oracle's gdna-field gate passes; off capture a large gain, the capture-ON regression the
-   reader's, recorded), and the templates' RNA lengths and the report 2026-10-27 (near-neutral). Left: the STAR rung's own store. Calibration's own count error is the larger half
+   reader's, recorded), and the templates' RNA lengths and the report 2026-10-27 (near-neutral); the STAR rung's own
+   store is step 6's. Calibration's own count error is the larger half
    of the gDNA count's (`ISSUES: the-pooled-q-in-the-gdna-count`, the day's split): unstranded capture-OFF −4.0 %
    net on the ladder, g98 P/O 0.945.
 
 **The index.**
-2. `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`: the cluster's manifest checked before any cluster
-   quant, the owner's.
+2. `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`: the cluster's manifest checked before its quant, the
+   owner's, at the release candidate.
 
 **The scan and its buffer.** The scan's repair landed between 2026-10-18 and 2026-10-21
 (`ISSUES: the-scanner-builds-fragments-from-one-mate`, closed); what it leaves:
 3. `ISSUES: splicing-artifacts`: everything that mitigates them is in scope for the next release (owner, 2026-10-28).
    Measured on the STAR rung (the aligner's own alternatives return the artifacts, and the EM splits an exact tie at
    its calibrated posterior), and the mechanism landed 2026-10-29: a multimapper's hits priced by their sequence at the
-   library's own mismatch rate (`DESIGN.md` §3.1h). Left: the same prices in the second pass's draw
-   (`ISSUES: the-second-pass-corrections`), then the VCaP mix at the recommended settings on the cluster, which the
-   release waits for.
+   library's own mismatch rate (`DESIGN.md` §3.1h), and the second pass's draw reads the same prices (§4.4). Left: the
+   VCaP mix at the recommended settings on the cluster, at the release candidate.
 4. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
    caches calibration is measured on date from 2026-10-16/17.
 
 **The accumulator.**
-5. `ISSUES: the-second-pass-corrections`: the length law, the weights, the mismatches and the motif rule, one arm each;
-   and the draw's region form, which still parts calibration and the EM on a multimapper's intergenic places.
+5. DONE (2026-10-29): `ISSUES: the-second-pass-corrections`: the draw reads the EM's emission, with gDNA's floor
+   under its prior (`DESIGN.md` §4.4). Transcripts ×0.920–0.994 and genes ×0.908–0.967 per stratum on the STAR rung,
+   gDNA called RNA down in every stratum; the recorded regression is
+   `ISSUES: rna-under-called-at-high-gdna-off-capture`, and the weights' share was refused
+   (`ISSUES: the-draws-placement-share`).
 
 **Calibration**, its opportunity before its capture reader.
-6. `ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`.
-7. `ISSUES: the-reader-reads-false-gdna-as-capture`: a chronic problem, approached only once the stages before it are
-   resolved (owner, 2026-10-21), and a major cause of poor accuracy and misprediction under hybrid capture, so it
-   deserves a dedicated effort (owner, 2026-10-28); the planned fix reads each object's gDNA through calibration's own
-   posterior for it.
+6. `ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`: re-measured on today's tree, its
+   region-length half closed; what is left needs the STAR rung's own store (step 5's emptied copies are bounded by
+   gDNA's floor, `DESIGN.md` §4.4).
+7. NEXT: `ISSUES: the-reader-reads-false-gdna-as-capture`: the biggest remaining problem (owner,
+   2026-10-29), a chronic one approached only once the stages before it are resolved (owner, 2026-10-21), and a major
+   cause of poor accuracy and misprediction under hybrid capture, so it deserves a dedicated effort (owner, 2026-10-28);
+   the planned fix reads each object's gDNA through calibration's own posterior for it.
 8. `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`, read again on the repaired reader.
 
 **After calibration, before the EM**: the scores, the priors and the lengths the EM is handed.

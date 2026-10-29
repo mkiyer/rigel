@@ -67,6 +67,12 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   its unique unspliced alignments; `summary.json` reports it as `fragment_stats.mismatch_rate` (schema 8). A spliced
   read whose contiguous alternative fits only by clipping the bases it cannot place now stays RNA, and a gDNA read that
   aligns to several copies goes to the copy its sequence matches.
+- **Calibration places a multimapper the way the EM scores it.** The second pass's draw prices a multimapping
+  fragment's alignments by their sequence at the same rates, reads an alignment through an annotated junction as RNA,
+  and holds every copy genomic DNA could come from at no less than the library's background gDNA rate, so a repeat copy
+  whose fragments all multimap is no longer left empty. On simulated libraries aligned with STAR, genomic DNA counted
+  as RNA falls in every library type (by 14 % in unstranded libraries without capture), and transcript error falls by
+  1–8 %; at 98 % genomic DNA without capture the RNA under-count grows.
 
 ### Changed
 

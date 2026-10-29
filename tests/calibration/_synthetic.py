@@ -104,6 +104,8 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ),
         max_length=200,
         n_refs=1,
+        mismatches=0,
+        aligned_bases=0,
     )
     region_df = pd.DataFrame(
         {

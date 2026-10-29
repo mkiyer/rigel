@@ -8,6 +8,13 @@ reducing boilerplate and enabling consistent serialization.
 from dataclasses import dataclass, asdict
 
 
+def library_mismatch_rate(mismatches: int, bases: int) -> float | None:
+    """The library's mismatch rate: NM per aligned read base over its unique unspliced hits, the maximum-likelihood
+    rate of the binomial each aligned base is; ``None`` when there is no such base to read it on. One definition,
+    read by the EM's prices (:class:`PipelineStats`) and the second pass's draw (the payload)."""
+    return mismatches / bases if bases else None
+
+
 @dataclass
 class PipelineStats:
     """Structured counters for the rigel pipeline.
@@ -158,9 +165,9 @@ class PipelineStats:
     @property
     def mismatch_rate(self) -> float | None:
         """NM per aligned read base over the unique unspliced hits; ``None`` when the library has none."""
-        if not self.n_unique_unspliced_bases:
-            return None
-        return self.n_unique_unspliced_mismatches / self.n_unique_unspliced_bases
+        return library_mismatch_rate(
+            self.n_unique_unspliced_mismatches, self.n_unique_unspliced_bases
+        )
 
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dictionary."""

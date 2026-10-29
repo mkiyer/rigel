@@ -28,6 +28,10 @@ A stale dev doc is harmless. A dev doc that something else depends on is not.
 
 One session document with its starting prompt: the strand frame's (`STRAND_FRAME.md`, paused 2026-10-27).
 
+The second pass's draw's session document was removed on 2026-10-29, its design landed: the ruling and the A/B are
+`DESIGN.md` §4.4, the derivation `EQUATIONS.md` §10, the refusal `ISSUES: the-draws-placement-share`. Its last
+version is in `$RIGEL_RUNS/archive/docs_dev_2026-10-29/`.
+
 The splice artifacts' session document was removed on 2026-10-29, its mechanism landed: the measurement is in
 `ISSUES: splicing-artifacts`, the derivation in `EQUATIONS.md` §16 and the ruling in `DESIGN.md` §3.1h. Its last
 version, with the measurement, the derivation and the A/B, is in `$RIGEL_RUNS/archive/docs_dev_2026-10-29/`; the one

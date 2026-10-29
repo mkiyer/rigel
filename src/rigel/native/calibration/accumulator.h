@@ -257,6 +257,10 @@ struct OfferedFragment {
     std::int32_t         sj_strand;
     const GapHypothesis* hypotheses;
     std::size_t          n_hypotheses;
+    /// The hit's sequence over both mates: its edits (NM) and its soft-clipped read bases. Never part of a deposit;
+    /// the second pass's draw prices a multimapper's placements by them, as the EM prices its hits.
+    std::int32_t         nm = 0;
+    std::int32_t         clip = 0;
 };
 
 /// The umbrella census: every fragment whose enumeration produced at least
@@ -328,6 +332,7 @@ struct DeferredFragments {
     std::vector<std::int64_t> hypothesis_sj_strand;
     std::vector<std::int64_t> hypothesis_intron_offsets{0};
     std::vector<std::int64_t> hypothesis_introns;
+    std::vector<std::int64_t> nm, clip;                    // the hit's sequence, per placement; never deposited
 
     std::size_t n_records()    const noexcept { return placement_offsets.size() - 1; }
     std::size_t n_placements() const noexcept { return start.size(); }
@@ -364,7 +369,8 @@ struct DeferredFragments {
 
     /// ⭐ THE KEY, between two placements of this bank: the specification's
     /// `(ref, start, end, align_strand, sj_strand, observed_introns, hypotheses)` compared as Python
-    /// compares those tuples (a PREFIX sorts before the sequence it is a prefix of). -1, 0 or 1.
+    /// compares those tuples (a PREFIX sorts before the sequence it is a prefix of). -1, 0 or 1. The deposit's
+    /// content only: two placements equal here deposit identically, whatever their sequence.
     int compare_placements(std::size_t a, std::size_t b) const noexcept;
 
     /// Forget every record, keeping the capacity (the set's per-fragment scratch).

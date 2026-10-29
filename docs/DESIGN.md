@@ -555,6 +555,33 @@ tool — re-derive them from the index. And `reach` is covered by neither index 
 calibration-facing cache needs a third key, as the scan cache's `scan_cache.reach_digest` is
 (`TRAPS: a-hash-that-misses-its-artifact`).
 
+### 2.1 The observable genome (owner, 2026-10-22; built 2026-10-22 to 10-27)
+
+> **A base on which no fragment can be observed is no opportunity. The index records them as a mask
+> (`unobservable.feather`, `rigel.observable`): with an `alignable` store its zero set at the store's longest
+> read-length bin, N included by its own measure; without one, the FASTA's N runs. Every opportunity is read over the
+> observable genome.**
+
+- `region_arrays` cuts every region at the mask into observable pieces, and each opportunity form has an observable
+  twin equal to it to the bit on an empty mask, so the test chromosome and every synthetic index are fixed points.
+- Calibration's geometry: a region's contained support over its observable pieces, a boundary's crossing support within
+  its reaches to the nearest masked base, and gDNA's conserved share at each boundary its observable one; the landscape,
+  the capture reader's supports, the published lengths and the priors' gDNA lengths read them.
+- The length law reads every contained support over observable pieces, and the pools' `A(w)` and `T(w)` over the
+  observable genome; the second pass reads a placement's density over its region's observable support.
+- A fragment touching a masked base is never observed, so a template's fl-marginal length is the sum of its runs, the
+  stretches no masked base interrupts (`capture_eff_length.observable_fl_eff_lengths`).
+- `summary.json`'s `observable_genome` block records the mask (its rule, the store, its read-length bin) and the
+  observable and unobservable bases, over the genome and per reference.
+
+**Why.** Region lengths counted bases on which no fragment can be observed (on the suite genome 36 % of the intergenic
+sequence is N; on GRCh38 11.4 %, and 13.4 Mb more that the GRCh38 store's aligner cannot place at 125 bp), so the gDNA
+length law's one-sided rate read the unobservable bases as the cleanest gDNA, and Rigel under-called gDNA by 6–21 % on
+the in-scope strata and booked the rest as nascent RNA. Built, gDNA reads 0.96–1.00 of truth on every in-scope row that
+holds gDNA (0.73–1.03 before) and the oracle's gDNA-field gate passes on every capture-OFF gDNA row; the capture-ON
+regression is the capture reader's, recorded in its entry. The record is `ISSUES: region-lengths-count-unobservable-bases`
+(closed).
+
 ---
 
 ## 3. The accumulator
@@ -782,8 +809,8 @@ intergenic hits after its genic ones. The rulings that fixed the form (owner, 20
   place; two overlapping unspliced alternatives occur in 0.38 % of the STAR rung's mates with two or more.
 - **The rate is fixed from calibration**, never re-estimated across loci, which would couple every locus's EM to every
   other's. Each locus re-estimates its own total.
-- **The second pass's draw is unchanged**: changing it is its own arm, after this one
-  (`ISSUES: the-second-pass-corrections`).
+- **The second pass's draw reads the same background before calibration**: gDNA's floor holds a place gDNA can be at
+  at least the pass-one bulk (§4.4).
 - **A case-5 fragment whose only genic place is spliced** competes as RNA there against its intergenic places. It has no
   locus gDNA candidate, so it adds nothing to the prior's strength (§3.1c).
 - **The background's mass is intergenic gDNA** in `summary.json` (`count_gdna − count_gdna_em`), never in the loci
@@ -852,7 +879,7 @@ It replaced `mismatch_alpha`, an underived 0.1 on every hit (2.3 nats a mismatch
 - **`ε` is the library's**, reported in `summary.json`'s `fragment_stats.mismatch_rate`. No unique unspliced base gives
   no price; `ε = 0` makes a mismatch impossible, so a mismatched place takes no part; a rate of `¾` or more is refused.
   `--mismatch-alpha` and its gate are gone.
-- **The second pass's draw does not read it yet**: its own arm (`ISSUES: the-second-pass-corrections`).
+- **The second pass's draw reads it too**, on a multimapper's placements, so the two stages read one emission (§4.4).
 
 **Why.** The splice artifacts (`ISSUES: splicing-artifacts`). At the recommended STAR settings a spliced gDNA template
 comes with its contiguous reading (all but 2 of 23,739 on the STAR rung), and the EM's split of an exact tie is
@@ -1040,8 +1067,9 @@ law at 1,000 pseudo-fragments: the all-fragment law is mostly the majority origi
 (`TRAPS: opposite-tilts-must-not-pool`), and every divisor is a probability, not a count
 (`TRAPS: divide-by-a-probability`). The contained pair dominates off capture; the crossing pair dominates
 under it, because the surviving off-target gDNA sits beside a probe and reaches the exon boundary. The
-second pass scores a spliced hypothesis with the RNA law and a genomic one with the unconditional
-anchor (`global_pmf`, every deposited fragment), both from pass one's payload (§4).
+second pass scores a path the deposit books spliced (an implied junction, or an observed annotated one) with the RNA
+law and any other with the unconditional anchor (`global_pmf`, every deposited fragment), both from pass one's payload
+(§4.4).
 
 ### 3.6b The EM's two length tables are one shared law unless the data show a difference capture cannot make (owner, 2026-10-26)
 
@@ -1179,8 +1207,8 @@ probabilistically best placement by the abundance of uniquely aligned fragments 
   unique evidence (a perfect paralog pair) makes the term uninformative and the draw even; a placement
   without unique evidence beside one with some is a hard zero and never chosen — the literal rule, with its
   named consequence that a silent processed pseudogene's gDNA goes to its expressed parent (owner, 2026-10-10:
-  accepted for now, the mixed class to be measured on real libraries before any uniform component is
-  considered, as its own mechanism).
+  accepted for now, the uniform component to be considered as its own mechanism). That component landed on
+  2026-10-29 as gDNA's floor, wherever gDNA can be (§4.4).
 * **The drain re-enters `deposit` at the chosen placement's reference**, so there is still one tally path;
   `DrainQC.offered_multimapper` says how many records were held on their placements.
 * **The EM is untouched.** It still receives every genic hit of a multimapper (and, since 2026-10-28, its
@@ -1220,6 +1248,70 @@ per bank (`OracleTruth.gdna_spliced_leak`) instead of refusing to describe the f
 an open defect: `ISSUES: drain-contaminates-certified-rna`.
 
 ---
+
+### 4.4 The draw reads the EM's emission, and gDNA's floor bounds its prior (owner, 2026-10-29)
+
+> **A held record's placements are scored by the EM's own emission and by pass one's traffic as the prior. On a
+> multimapper the hit's sequence is priced at the library's mismatch rate (§3.1h); a placement the deposit books
+> spliced is RNA under every one of its paths, with the RNA length law and RNA's strand; and a placement gDNA can be
+> at reads at least gDNA's pass-one bulk. The score is formed in logs, and the draw lands on a candidate with mass.**
+> (`second_pass.score_held_fragments`, `combine_factors`, `placement_abundance`, `pass_one_bulk`,
+> `choose_hypotheses`; the bank's `nm` and `clip` columns; the derivation is `EQUATIONS.md` §10.)
+
+The owner asked the draw to read the EM's scoring wherever it can (2026-10-29). It reads the EM's terms at a place:
+the sequence prices, the strand term and the length law. Its prior stays pass one's traffic, because the draw is
+calibration's input and the EM's prior (`θ`, the reader's efficiencies) is calibration's output. The rulings:
+- **One emission.** The bank carries each placement's NM and soft-clipped bases, and the draw prices them as the
+  EM does; a one-placement record's sequence is common to its paths and is not read. The payload carries the scan's
+  two mismatch counts, so a cached scan drains at its own rate. A hit's sequence breaks a tie in the bank's order only
+  once a whole record's content ties, so no record moves past another its content orders.
+- **gDNA's floor.** Pass one counts only the fragments it deposited, so a copy every fragment of which multimaps read
+  zero, the zero was hard, and its gDNA went to the copies with unique traffic, the expressed ones first. gDNA is one
+  template at a uniform rate before capture and capture only enriches, so a placement gDNA can be at reads
+  `max(A_p, bulk)`, the bulk the unique contained fragments per observable start over the intergenic regions; a
+  placement the deposit books spliced keeps its own traffic. The bound and not a sum, which counts gDNA twice wherever
+  pass one saw it.
+- **Certified RNA reads as RNA.** One predicate, the deposit's: an observed intron resolving to an annotated junction.
+  The rung holds no untagged annotated splice, so the strand half is gated on a hand-built record.
+- **Refused:** a dimensionless share within each placement (`ISSUES: the-draws-placement-share`).
+
+**Measured** on the STAR rung (all 16 conditions, pinned and fractional, against the shipped draw in the same build,
+scored against the read names; Σ|error| over g05–g98 per stratum). The prototype's shipped arm reproduced the tree
+before it bit for bit, and the score in logs left every condition's draw, drained tally and transcript counts unchanged:
+
+| stratum | transcripts | genes | gDNA called RNA | RNA called gDNA |
+|---|---:|---:|---:|---:|
+| stranded capture-OFF | ×0.920 | ×0.925 | 503,693 → 485,118 | 613,422 → 617,437 |
+| stranded capture-ON | ×0.984 | ×0.908 | 663,122 → 636,882 | 778,384 → 794,143 |
+| unstranded capture-OFF | ×0.952 | ×0.967 | 907,561 → 776,106 | 854,583 → 869,119 |
+| unstranded capture-ON (deferred) | ×0.994 | ×0.950 | 3,388,210 → 3,297,360 | 837,067 → 874,945 |
+
+- Step by step, transcripts per stratum in the order above: the sequence ×0.967, ×0.989, ×1.000, ×0.982 (genes
+  ×0.997, ×0.990, ×0.993, ×0.965); the floor on top ×0.951, ×0.994, ×0.952, ×1.012 (genes ×0.928, ×0.917, ×0.974,
+  ×0.985); certified RNA within ×1.001.
+- The draw itself, scored as its expected count per region against the true count over every held multimapper
+  (joined to its read name): ×0.385, ×0.798, ×0.384, ×0.795; gDNA's ×0.071, ×0.770, ×0.076, ×0.771. gDNA drawn onto a
+  spliced path does not rise (215 → 202 stranded capture-OFF, 1,533 → 1,507 stranded capture-ON).
+- The g00 controls improve or hold: transcripts ×0.745, ×0.978, ×0.979, ×1.001, genes ×0.985, ×0.990, ×0.992,
+  ×1.000. With every capture efficiency at 1 the capture-ON strata read ×1.000 on both axes: the gain under capture
+  comes through the reader's efficiencies.
+- THE RECORDED REGRESSION: g98 stranded capture-OFF, transcripts ×1.261 and genes ×1.342. gDNA called RNA falls
+  34,765 → 19,910 there, but mature RNA called gDNA rises 47,203 → 53,203 and the nascent span's count falls 13,005 →
+  2,372 against a truth of 40,610. The losses sit on ordinary unique genes the tool already under-called (RNA ×0.843
+  of truth → ×0.777; PEX26 2,019 true, 1,453 → 1,079): the draw puts gDNA where it truly is, calibration's gDNA count at those loci rises, and
+  the EM's existing RNA under-call there deepens, the direction the owner accepted (2026-10-28). Also g05 unstranded
+  capture-ON (deferred) transcripts ×1.059, g50 stranded capture-ON transcripts ×1.038 (genes ×0.844), and g05
+  unstranded capture-OFF genes ×1.054.
+- On the simulator's alignments, which hold no multimapper (two ladder rows and one row of each fl-gap panel), the
+  sequence and the floor change nothing, bit for bit, and certified RNA moves transcripts ×0.9985–1.0006 and genes
+  ×0.9960–1.0004.
+
+What the floor leaves (gDNA's per-region error ×0.77 under capture) is `ISSUES: the-draw-reads-unique-traffic`.
+Gates: `tests/test_second_pass_placements.py` (the sequence at the prices' odds, a clean library, the floor),
+`tests/test_second_pass_strand.py` (certified RNA's law and strand, a spliced placement never floored),
+`tests/native/test_accumulator_drain.py` (the log form, the clamp), `tests/native/test_multimapper_native_parity.py`
+(the bank's order and the collapse against the specification). Instruments: `$RIGEL_RUNS/prototypes/2026-10-29_draw/`
+(`ab_draw.py`, `report.md`) and `2026-10-29_draw_census/` (`truth_regions.py`).
 
 ## 5. nRNA components
 

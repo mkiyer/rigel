@@ -57,6 +57,8 @@ void DeferredFragments::append_placement(const OfferedFragment& fragment,
         hypothesis_intron_offsets.push_back(static_cast<std::int64_t>(hypothesis_introns.size() / 2));
     }
     hypothesis_offsets.push_back(static_cast<std::int64_t>(hypothesis_sj_strand.size()));
+    nm.push_back(fragment.nm);
+    clip.push_back(fragment.clip);
 }
 
 void DeferredFragments::merge_from(const DeferredFragments& other) {
@@ -82,6 +84,8 @@ void DeferredFragments::merge_from(const DeferredFragments& other) {
     shift_append(hypothesis_intron_offsets, other.hypothesis_intron_offsets);
     hypothesis_introns.insert(hypothesis_introns.end(),
                               other.hypothesis_introns.begin(), other.hypothesis_introns.end());
+    nm.insert(nm.end(), other.nm.begin(), other.nm.end());
+    clip.insert(clip.end(), other.clip.begin(), other.clip.end());
 }
 
 namespace {
@@ -170,6 +174,8 @@ void DeferredFragments::copy_placement(const DeferredFragments& from, std::size_
         hypothesis_intron_offsets.push_back(static_cast<std::int64_t>(hypothesis_introns.size() / 2));
     }
     hypothesis_offsets.push_back(static_cast<std::int64_t>(hypothesis_sj_strand.size()));
+    nm.push_back(from.nm[i]);
+    clip.push_back(from.clip[i]);
 }
 
 const OfferedFragment& DeferredFragments::offered_of(std::size_t p, std::size_t h0, std::size_t h1,
@@ -206,12 +212,14 @@ const OfferedFragment& DeferredFragments::offered_of(std::size_t p, std::size_t 
     st.offered.sj_strand = static_cast<std::int32_t>(sj_strand[p]);
     st.offered.hypotheses = st.spans.data();
     st.offered.n_hypotheses = st.spans.size();
+    st.offered.nm = static_cast<std::int32_t>(nm[p]);
+    st.offered.clip = static_cast<std::int32_t>(clip[p]);
     return st.offered;
 }
 
 void DeferredFragments::clear() {
     for (std::vector<std::int64_t>* v : {&ref, &start, &end, &align_strand, &sj_strand, &observed_introns,
-                                         &hypothesis_sj_strand, &hypothesis_introns}) {
+                                         &hypothesis_sj_strand, &hypothesis_introns, &nm, &clip}) {
         v->clear();
     }
     for (std::vector<std::int64_t>* v : {&placement_offsets, &observed_intron_offsets, &hypothesis_offsets,
@@ -238,7 +246,16 @@ void DeferredFragments::canonicalise() {
             const int c = compare_placements(a0 + k, b0 + k);
             if (c != 0) return c < 0;
         }
-        return (a1 - a0) < (b1 - b0);
+        if (a1 - a0 != b1 - b0) return (a1 - a0) < (b1 - b0);
+        // ⚠ The sequence only once the whole record's content ties: a record's sequence must never move it past a
+        // record its content orders, or the draw's stream would reach every later record in another order. Records
+        // tying here deposit identically and are ordered by their placements' (nm, clip), so the order stays total
+        // and a set's offer, which keeps the first of identical placements, keeps the fewest mismatches.
+        for (std::size_t k = 0; k < common; ++k) {
+            if (nm[a0 + k] != nm[b0 + k]) return nm[a0 + k] < nm[b0 + k];
+            if (clip[a0 + k] != clip[b0 + k]) return clip[a0 + k] < clip[b0 + k];
+        }
+        return false;
     };
 
     std::vector<std::size_t> order(n);

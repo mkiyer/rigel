@@ -1255,43 +1255,69 @@ as such (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`).
 
 ## 10. The second pass's score
 
-`src/rigel/second_pass.py` (`combine_factors`, `choose_hypotheses`). `f(L)` here is the second pass's
-per-fragment length term (its `length_likelihood` array); it is not a length composition channel — this one ranks one fragment's already-enumerated candidates against each other and
-never claims a composition.
+`src/rigel/second_pass.py` (`combine_factors`, `placement_abundance`, `choose_hypotheses`). `f(L)` here is the second
+pass's per-fragment length term (its `length_likelihood` array); it is not a length composition channel — this one ranks
+one fragment's already-enumerated candidates against each other and never claims a composition.
 
     score  =  ρ × f(L) × s
 
-normalised within one fragment's candidate set, factors applied in order of the evidence behind them and
-skipped when flat-zero among the survivors (`TRAPS: an-all-zero-factor-is-inert`). One multinomial draw
-per fragment, in the side buffer's canonical order, from a single RNG stream. ⛔ Never key the draw on the
-fragment's content: a content hash ties on exactly the duplicates it would harm, so 100 identical
-fragments would draw identically and a 60/40 posterior would collapse to 100/0.
+normalised within one fragment's candidate set, factors applied in order of the evidence behind them and skipped when
+flat-zero among the survivors (`TRAPS: an-all-zero-factor-is-inert`). The product is formed in logs, the record's
+maximum subtracted before it is exponentiated: a product of probabilities, densities and sequence prices can underflow
+for every candidate of a record, and the rule would then read the record as uninformative. One multinomial draw per
+fragment, in the side buffer's canonical order, from a single RNG stream, clamped onto the record's last candidate
+with mass. ⛔ Never key the draw on the fragment's content: a content hash ties on exactly the duplicates it would harm,
+so 100 identical fragments would draw identically and a 60/40 posterior would collapse to 100/0. The order is the
+records' content, and a hit's sequence breaks a tie only once a whole record's content ties: a record's sequence must
+never move it past a record its content orders, or every later record would meet another part of the stream.
 
-Known approximation: `ρ` enters as a hard multiplicative zero, but zero observations is
-`P(0 | λ, E) = e^(−λE)`, not zero. The hard zero is the large-exposure limit of the correct likelihood, so
-it is right where the library is deep and wrong where it is shallow.
+**Certified RNA.** A placement whose observed intron resolves to an annotated junction (the deposit's own rule,
+`Accumulator::sj_edge_id`, the motif not AMBIGUOUS) is booked spliced by the deposit, so it is RNA under every one of
+its paths: each takes the RNA law, and its strand term is RNA's — by the motif when the aligner wrote one, else by the
+strand of the transcripts holding its junctions (`½` when they hold both strands). A path no annotated junction cuts
+takes the unconditional anchor, its component unknown.
 
-**The placement term, for a fragment held on its placements (§1.8).** Over the record's whole run,
+Known approximation: `ρ` enters as a hard multiplicative zero, but zero observations is `P(0 | λ, E) = e^(−λE)`, not
+zero. The hard zero is the large-exposure limit of the correct likelihood, so it is right where the library is deep and
+wrong where it is shallow.
 
-    score(p, h)  =  A_p × ρ(h) × f(L_{p,h}) × s(p, h)
+**The placement terms, for a fragment held on its placements (§1.8).** Over the record's whole run,
 
-with `A_p` the pass-one UNIQUE traffic at the objects the placement's own path — its extent with its
-observed introns cut out, the hypothesis that implies nothing — deposits on, read through the deposit rule's
-geometry (`second_pass.placement_abundance`): the bottleneck of `sj_inv_length_sum` over the annotated sj
-the observed introns resolve to (an AMBIGUOUS motif trusts no splice); else the bottleneck of
-`boundary_unspliced_inv_length_sum` over the contiguous boundaries the path crosses; else, contained in one
-region, `region_contained_count / contained_eff_length(ℓ, global_pmf)` — fragments per start opportunity in
-the frame calibration's density uses, under the unconditional anchor because the component is unknown, as
-for the genomic hypothesis's `f`; a path contained in no object (an unannotated intron swallowed every
-boundary between two regions) deposits on nothing and reads 0, as an empty bottleneck does. The bottleneck
-for the reason `ρ` uses it: a molecule that took this placement was present at every object on it. `A` is
-applied as its own factor between `s` and `ρ` — it rests on one placement's objects' traffic, the same kind
-of evidence as `ρ`, and is judged first so the within-placement question is asked among the placements
-unique evidence kept — and NOT on a one-placement record, where it is a common factor, so the gap-held
-population's scores are unchanged bit for bit. The zero rules above are the whole degenerate policy: every
-placement at `A = 0` makes the factor uninformative (a perfect paralog pair draws evenly and the record
-counts as undecided); a zero beside a positive stays hard (owner, 2026-10-10). The known approximation
-applies to `A` as to `ρ`.
+    score(p, h)  =  e(p) × A_p × ρ(h) × f(L_{p,h}) × s(p, h)
+
+with `e(p)` the placement's hit sequence at the EM's own prices (§16), `log e(p) = NM · log[ε/(3(1 − ε))] + clip ·
+log[1/(4(1 − ε))]`, `ε` the library's own (the payload carries the scan's counts, so a cached scan drains at its own
+rate and an origin split sums to the whole), applied after the strand term; and `A_p` the pass-one UNIQUE traffic at
+the objects the placement's own path — its extent with its observed introns cut out, the hypothesis that implies
+nothing — deposits on, read through the deposit rule's geometry (`second_pass.placement_abundance`): the bottleneck of
+`sj_inv_length_sum` over the annotated sj the observed introns resolve to; else the bottleneck of
+`boundary_unspliced_inv_length_sum` over the contiguous boundaries the path crosses; else, contained in one region,
+`region_contained_count / contained_eff_length(ℓ, global_pmf)` — fragments per start opportunity in the frame
+calibration's density uses, under the unconditional anchor because the component is unknown, as for the genomic
+hypothesis's `f`; a path contained in no object (an unannotated intron swallowed every boundary between two regions)
+deposits on nothing and reads 0, as an empty bottleneck does. Every form is a start density per base. The bottleneck
+for the reason `ρ` uses it: a molecule that took this placement was present at every object on it. Neither `e` nor `A`
+is applied on a one-placement record, where each is a common factor, so the gap-held population's scores are
+unchanged by them. The zero rules above are the whole degenerate policy: every placement at `A = 0` makes the factor
+uninformative (a perfect paralog pair draws evenly and the record counts as undecided); a zero beside a positive stays
+hard (owner, 2026-10-10). The known approximation applies to `A` as to `ρ`.
+
+**gDNA's floor (owner, 2026-10-29).** Let a place hold fragment starts at rate `λ_p` per base, gDNA's part `ρ_G c_p`
+with `c_p ≥ 1`: gDNA is one template at a uniform rate before capture, and capture only enriches. Pass one deposits a
+start only when its fragment is not held, a fraction `u_p` of the place's starts (its own mappability, 0 at a copy every
+fragment of which multimaps), so its count is Poisson with mean `λ_p u_p S_p` and `A_p = k_p / S_p` estimates
+`λ_p u_p`, not `λ_p`. Over the intergenic regions the same estimator reads the pass-one bulk
+`ρ̂_b = Σ k / Σ S ≈ ρ_G ū`, `ū` their mean mappability (`second_pass.pass_one_bulk`). Every placement gDNA can be at —
+none the deposit books spliced, which holds no gDNA — reads
+
+    A_p  ←  max(A_p, ρ̂_b)  =  max(λ_p u_p, ρ_G ū),
+
+so every gDNA-only copy at or below the intergenic mappability takes the same weight, the even split its gDNA truly
+has; a fully unique gDNA copy beside an unmappable one reads `ρ_G` against `ρ_G ū`, a bias of `1/ū`; an expressed copy
+keeps its own traffic. The bound and not a sum, because `A_p` already holds gDNA's share wherever `u_p > 0`. It is the
+EM's intergenic background (§15.3: an intergenic place at the bulk rate) before calibration. What it cannot see is
+`u_p` itself: the exact rate is `k_p / (u_p S_p)`, which needs the reference's mappability, or rates that count the
+held fragments (pass-one deposits plus the held records' expected deposits, iterated to a fixed point).
 ## 11. The conserved frame — every component's shares of its objects at their capture efficiencies (`effective_length.conserved_cut_shares`, `capture_eff_length`, `capture_efficiency`, `priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`; the reader, `capture_efficiency.capture_efficiencies`)
 
 Under hybrid capture the EM divides every component by its capture-contracted length, and one rule gives it

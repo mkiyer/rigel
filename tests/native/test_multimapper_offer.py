@@ -300,6 +300,8 @@ def test_the_bank_flattens_with_a_placement_level_and_round_trips():
         "hypothesis_sj_strand",
         "hypothesis_intron_offsets",
         "hypothesis_introns",
+        "nm",
+        "clip",
     }
 
 

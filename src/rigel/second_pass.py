@@ -25,9 +25,10 @@ abundance, no calibration output, and no second pass over the BAM::
 
     score(h)  =  rho(h)  x  f(L_h)  x  s(h)
 
-and on a multi-placement record a fourth factor, ``A_p``: the pass-1 unique traffic at the objects the
-hypothesis's placement deposits on (:func:`placement_abundance`). On a one-placement record it would be
-a common factor, so it is not applied.
+and on a multi-placement record two more: ``A_p``, the pass-1 unique traffic at the objects the hypothesis's
+placement deposits on, held at least at gDNA's bulk wherever gDNA can be (:func:`placement_abundance`); and
+``e(p)``, the hit's sequence at the EM's own prices (``scoring.sequence_log_penalties``), so the draw and the EM
+read one emission. On a one-placement record both would be common factors, so neither is applied.
 
 Every input comes from pass 1, which is what lets this run BEFORE calibration and lets calibration then
 run exactly once, on the complete tally.
@@ -47,6 +48,7 @@ import numpy as np
 from .calibration.effective_length import observable_contained_eff_length
 from .calibration.signature import coarse_type_array
 from .native import Accumulator as NativeAccumulator
+from .scoring import sequence_log_penalties
 from .scan_payload import (
     _DEFERRED_RECORD_FIELDS,
     ADDITIVE_AXES,
@@ -88,10 +90,13 @@ class HypothesisTerms:
     density: np.ndarray  # float64 — rho, in fragments per base
     length_likelihood: np.ndarray  # float64 — f(L_h) under the pmf appropriate to the hypothesis
     strand: np.ndarray  # float64 — P(align_strand | hypothesis)
-    #: float64 — A_p, the unique traffic at the objects the hypothesis's PLACEMENT deposits on
-    #: (:func:`placement_abundance`); carried per hypothesis, and 1 on a one-placement record, where it
-    #: is a common factor and is not applied.
+    #: float64 — A_p, the unique traffic at the objects the hypothesis's PLACEMENT deposits on, at least gDNA's
+    #: bulk where gDNA can be (:func:`placement_abundance`); carried per hypothesis, and 1 on a one-placement
+    #: record, where it is a common factor and is not applied.
     placement_abundance: np.ndarray
+    #: float64 — log e(p): the PLACEMENT's hit sequence at the EM's prices, ``nm · m + clip · c``; 0 on a
+    #: one-placement record, where it is a common factor and is not applied.
+    sequence: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +182,7 @@ def combine_factors(
     length_likelihood: np.ndarray,
     strand: np.ndarray,
     placement_abundance: np.ndarray | None = None,
+    sequence: np.ndarray | None = None,
 ) -> tuple[np.ndarray, bool]:
     """Combine one fragment's factors into a normalised posterior over its candidates.
 
@@ -185,21 +191,22 @@ def combine_factors(
 
         score(h)  =  rho(h)  x  f(L_h)  x  s(h),   normalised over the candidate set
 
-    and for a fragment held on its PLACEMENTS the fourth factor ``A_p`` — the unique traffic at the
-    objects the candidate's placement deposits on (:func:`placement_abundance`) — enters the same way,
-    between the strand term and ``rho``: it rests on one placement's objects' traffic, the same kind of
-    evidence as ``rho``, and it is judged before ``rho`` so that the within-placement question is asked
-    among the placements that unique evidence kept. ``None`` on a one-placement record, where it would be
-    a common factor: the record's scores are then exactly the three-factor ones.
+    and for a fragment held on its PLACEMENTS two more factors: ``e(p)``, the placement's hit sequence at the
+    EM's prices, given in logs as *sequence*; and ``A_p``, the unique traffic at the objects the candidate's
+    placement deposits on (:func:`placement_abundance`). Both are ``None`` on a one-placement record, where
+    they would be common factors: the record's scores are then exactly the three-factor ones.
 
     The factors are only ever compared WITHIN one fragment. The product is not a rate and not a
     calibrated likelihood — ``rho`` carries units of fragments per base while ``f`` and ``s`` are
     probabilities — and it does not need to be, because the normalisation makes any common scale cancel.
+    It is formed in logs, the record's maximum subtracted before it is exponentiated: a product of
+    probabilities, densities and sequence prices can underflow for every candidate of a record, and the
+    rule below would then read the whole record as uninformative.
 
     An all-zero factor is UNINFORMATIVE, not decisive, and that normalisation is why: a factor taking the
     same value for every candidate cancels and cannot affect the answer. Zero is the one value where the
     arithmetic loses that property — instead of cancelling it destroys the product, the normalisation
-    cannot run, and the record collapses to a coin toss that discards the other two factors. So a factor
+    cannot run, and the record collapses to a coin toss that discards the other factors. So a factor
     that is zero for every candidate is dropped for that fragment.
 
     The PARTIAL-zero case is untouched, and that is the point. A factor that is zero for some
@@ -209,33 +216,33 @@ def combine_factors(
 
     "Uninformative" is judged among the SURVIVORS, not globally. Factors are applied in order of how much
     evidence stands behind them — the length pmf is fitted from the whole library, the strand fraction
-    from its whole spliced population, a single object's traffic from however many fragments happened to
-    touch it — and each is skipped when it is flat-zero across the candidates still standing. Judging it
-    globally is not enough: a record where the length term separates two candidates by orders of
-    magnitude but traffic is zero for both would otherwise fall through to a fair coin, discarding that
-    difference. Weighting by the surviving factor is the same statement as dropping an uninformative one,
-    applied one level down.
+    from its whole spliced population, the sequence price from its whole unique unspliced population, a
+    single object's traffic from however many fragments happened to touch it — and each is skipped when it
+    is flat-zero across the candidates still standing. Judging it globally is not enough: a record where the
+    length term separates two candidates by orders of magnitude but traffic is zero for both would otherwise
+    fall through to a fair coin, discarding that difference. Weighting by the surviving factor is the same
+    statement as dropping an uninformative one, applied one level down.
     """
     n = density.shape[0]
     if n == 0:
         return np.zeros(0), False
-    # Ordered by weight of evidence, strongest first: an ``f`` of 0 rests on the whole library's length
-    # distribution, an ``s`` of 0 on its whole spliced population, a ``rho`` of 0 on one object's traffic.
+    with np.errstate(divide="ignore"):
+        logs = [np.log(length_likelihood), np.log(strand)]
+        if sequence is not None:
+            logs.append(np.asarray(sequence, dtype=np.float64))
+        if placement_abundance is not None:
+            logs.append(np.log(placement_abundance))
+        logs.append(np.log(density))
     alive = np.ones(n, dtype=bool)
-    scores = np.ones(n, dtype=np.float64)
-    factors = (
-        (length_likelihood, strand, density)
-        if placement_abundance is None
-        else (length_likelihood, strand, placement_abundance, density)
-    )
-    for factor in factors:
-        if not (factor[alive] > 0.0).any():
+    total = np.zeros(n, dtype=np.float64)
+    for factor in logs:
+        live = np.isfinite(factor)
+        if not live[alive].any():
             continue  # flat zero among the survivors: uninformative here, so it says nothing
-        alive &= factor > 0.0
-        scores = scores * factor
-    scores = np.where(alive, scores, 0.0)
-    total = float(scores.sum())
-    scores = scores / total if total > 0.0 else np.full(n, 1.0 / n)
+        alive &= live
+        total += np.where(live, factor, 0.0)
+    weight = np.where(alive, np.exp(total - total[alive].max()), 0.0)
+    scores = weight / weight.sum()
     # `undecided` says what it means: more than one candidate is tied for the lead, so the draw between
     # them is a coin toss. Stated as a property of the ANSWER rather than of which factors contributed,
     # because that is what the diagnostics want and it cannot drift from the arithmetic above. Exact
@@ -403,18 +410,60 @@ def _covered_segments(start: int, end: int, observed: np.ndarray) -> list[tuple[
     return segments
 
 
+def _annotated_junctions(
+    payload: AccumulatorPayload, p: int, accumulator: NativeAccumulator
+) -> np.ndarray:
+    """The payload's sj ids of the annotated junctions placement ``p``'s OBSERVED introns resolve to — the
+    deposit's own rule (``Accumulator::sj_edge_id``); empty when none resolves, and when the motif is AMBIGUOUS,
+    which trusts no splice. Non-empty means the deposit books the placement spliced: certified RNA under every
+    one of its paths."""
+    d = payload.deferred
+    observed = d.observed_introns_of(p)
+    motif = int(d.sj_strand[p])
+    if not observed.shape[0] or motif == int(Strand.AMBIGUOUS):
+        return np.zeros(0, dtype=np.int64)
+    local = np.asarray(
+        accumulator.sj_edge_ids(
+            starts=np.ascontiguousarray(observed[:, 0], dtype=np.int64),
+            ends=np.ascontiguousarray(observed[:, 1], dtype=np.int64),
+            sj_strand=np.full(observed.shape[0], motif, dtype=np.int32),
+        ),
+        dtype=np.int64,
+    )
+    return int(payload.ref_sj_offsets[int(d.ref[p])]) + local[local >= 0]
+
+
+def pass_one_bulk(
+    payload: AccumulatorPayload, region_types: np.ndarray, region_support: np.ndarray
+) -> float:
+    """gDNA's bulk on pass one: the unique contained fragments per observable start over the intergenic regions —
+    the unit :func:`placement_abundance` reads a contained placement in, the pooled rate of one uniform template.
+    0 when the library holds no intergenic support."""
+    intergenic = region_types == 0
+    support = float(region_support[intergenic].sum())
+    if support <= 0.0:
+        return 0.0
+    counts = np.asarray(payload.region_contained_count, dtype=np.float64)[intergenic]
+    return float(counts.sum()) / support
+
+
 def placement_abundance(
-    payload: AccumulatorPayload, p: int, accumulator: NativeAccumulator, region_support: np.ndarray
+    payload: AccumulatorPayload,
+    p: int,
+    junctions: np.ndarray,
+    region_support: np.ndarray,
+    bulk: float,
 ) -> float:
     """``A_p``: the pass-one UNIQUE traffic at the objects the placement's own path deposits on — the
     owner's "abundance of uniquely aligned fragments" at a placement, read through the deposit rule's own
-    geometry and nothing else.
+    geometry — held at least at gDNA's *bulk* wherever gDNA can be.
 
     The path is the placement's extent with its OBSERVED introns cut out (the hypothesis that implies no
     intron: what the placement is before the gap question). By the deposit rule that path deposits on
 
-    * the annotated sj it uses, when its observed introns resolve to one — then the bottleneck of their
-      ``sj_inv_length_sum`` (the spliced hypothesis's own rule); an AMBIGUOUS motif trusts no splice;
+    * the annotated sj it uses, when its observed introns resolve to one (*junctions*,
+      :func:`_annotated_junctions`) — then the bottleneck of their ``sj_inv_length_sum`` (the spliced
+      hypothesis's own rule);
     * else the contiguous boundaries it crosses — the bottleneck of their ``boundary_unspliced_inv_length_sum``;
     * else, contained in one region, that region — its ``region_contained_count`` per OBSERVABLE start:
       *region_support*, each region's contained support over its observable pieces under the
@@ -426,12 +475,25 @@ def placement_abundance(
       two regions) deposits on nothing and reads 0, as an empty bottleneck does.
 
     The bottleneck, not a mean, for the reason the existing rule gives: a molecule that took this
-    placement was present at every object on it.
+    placement was present at every object on it. Every form is a start density per base, which is what
+    lets one bound serve all three.
+
+    gDNA's floor. Pass one counts only the fragments it deposited, so a copy every fragment of which
+    multimaps reads no traffic, however much gDNA it holds. gDNA is one template at a uniform rate before
+    capture, and capture only enriches, so a place gDNA can be holds at least the bulk: a placement the deposit
+    books spliced holds none and keeps its own term; every other reads ``max(A_p, bulk)`` — the bound, not a
+    sum, because ``A_p`` already holds gDNA's share wherever pass one saw it.
     """
+    if junctions.size:
+        return _bottleneck([float(payload.sj_inv_length_sum[int(j)]) for j in junctions])
+    return max(_unspliced_abundance(payload, p, region_support), bulk)
+
+
+def _unspliced_abundance(payload: AccumulatorPayload, p: int, region_support: np.ndarray) -> float:
+    """:func:`placement_abundance`'s contiguous and contained forms, for a path no annotated junction cuts."""
     d = payload.deferred
     ref = int(d.ref[p])
     start, end = int(d.start[p]), int(d.end[p])
-    observed = d.observed_introns_of(p)
     lo, hi = (
         int(payload.ref_region_bound_offsets[ref]),
         int(payload.ref_region_bound_offsets[ref + 1]),
@@ -439,21 +501,7 @@ def placement_abundance(
     bounds = np.asarray(payload.region_bounds[lo:hi], dtype=np.int64)
     if bounds.shape[0] < 2:
         return 0.0
-    motif = int(d.sj_strand[p])
-    if observed.shape[0] and motif != int(Strand.AMBIGUOUS):
-        local = np.asarray(
-            accumulator.sj_edge_ids(
-                starts=np.ascontiguousarray(observed[:, 0], dtype=np.int64),
-                ends=np.ascontiguousarray(observed[:, 1], dtype=np.int64),
-                sj_strand=np.full(observed.shape[0], motif, dtype=np.int32),
-            ),
-            dtype=np.int64,
-        )
-        used = local[local >= 0]
-        if used.size:
-            base = int(payload.ref_sj_offsets[ref])
-            return _bottleneck([float(payload.sj_inv_length_sum[base + int(j)]) for j in used])
-    segments = _covered_segments(start, end, observed)
+    segments = _covered_segments(start, end, d.observed_introns_of(p))
     if not segments:
         return 0.0
     boundary_base = int(payload.ref_boundary_offsets[ref])
@@ -515,6 +563,7 @@ def score_held_fragments(
     length_likelihood = np.zeros(n_hyp, np.float64)
     strand = np.ones(n_hyp, np.float64)
     abundance = np.ones(n_hyp, np.float64)
+    sequence = np.zeros(n_hyp, np.float64)
     score = np.zeros(n_hyp, np.float64)
 
     rna_pmf, global_pmf = fl_models.rna_pmf, fl_models.global_pmf
@@ -529,6 +578,10 @@ def score_held_fragments(
     region_types = coarse_type_array(regions.signature)
     # the placement term's divisor, once per region: the unconditional anchor over each region's observable pieces
     region_support = observable_contained_eff_length(regions, global_pmf)
+    bulk = pass_one_bulk(payload, region_types, region_support)
+    # the EM's own prices, at the library's own rate (`scoring.sequence_log_penalties`)
+    mismatch_price, clip_price = sequence_log_penalties(payload.mismatch_rate)
+    junction_strands = np.asarray(sj.strand, dtype=np.int64)
     accumulators = _Accumulators(payload, region_types, sj)
     sj_of, first_of, last_of = _resolve_intron_lookups(payload, accumulators)
     intron_offsets = np.asarray(deferred.hypothesis_intron_offsets, dtype=np.int64)
@@ -554,10 +607,16 @@ def score_held_fragments(
             ]
             acc = accumulators[ref]
             boundary_base = int(payload.ref_boundary_offsets[ref])
+            # A placement the deposit books spliced is certified RNA under every one of its paths.
+            junctions = _annotated_junctions(payload, p, acc)
             if multi:
-                # ⭐ The placement's own term, once per placement, carried per hypothesis; a one-placement
-                # record never has it applied (it would be a common factor), so its scores are today's.
-                abundance[h0:h1] = placement_abundance(payload, p, acc, region_support)
+                # ⭐ The placement's own terms, once per placement, carried per hypothesis; a one-placement
+                # record never has them applied (they would be common factors).
+                abundance[h0:h1] = placement_abundance(payload, p, junctions, region_support, bulk)
+                nm, clip = int(deferred.nm[p]), int(deferred.clip[p])
+                sequence[h0:h1] = (nm * mismatch_price if nm else 0.0) + (
+                    clip * clip_price if clip else 0.0
+                )
             # The region the GENOMIC hypothesis claims is contiguous and every spliced one jumps: the union
             # of the competing implied introns. Scoring `∅` over exactly this — rather than over its whole
             # path — is what keeps the comparison symmetric, since otherwise `∅` is penalised simply for
@@ -611,7 +670,7 @@ def score_held_fragments(
                     density[slot] = _bottleneck(boundary_densities)
 
                 # -- f(L) -----------------------------------------------------------------------------
-                pmf = rna_pmf if introns else global_pmf
+                pmf = rna_pmf if (introns or junctions.size) else global_pmf
                 length_likelihood[slot] = float(pmf[L]) if 0 <= L <= max_size else 0.0
 
                 # -- strand ---------------------------------------------------------------------------
@@ -623,6 +682,14 @@ def score_held_fragments(
                     strand[slot], _ = strand_terms(
                         align=align,
                         implied_strand=observed_motif,
+                        rna_sense_frac=rna_sense_frac,
+                    )
+                elif junctions.size:
+                    # An annotated splice the aligner wrote no motif for is RNA on the strand of the
+                    # transcripts holding its junctions, as the deposit books it; both strands say nothing.
+                    strand[slot], _ = strand_terms(
+                        align=align,
+                        implied_strand=int(np.bitwise_or.reduce(junction_strands[junctions])),
                         rna_sense_frac=rna_sense_frac,
                     )
                 else:
@@ -642,6 +709,7 @@ def score_held_fragments(
             length_likelihood[r0:r1],
             strand[r0:r1],
             abundance[r0:r1] if multi else None,
+            sequence[r0:r1] if multi else None,
         )
         n_undecided += undecided
 
@@ -653,6 +721,7 @@ def score_held_fragments(
             length_likelihood=length_likelihood,
             strand=strand,
             placement_abundance=abundance,
+            sequence=sequence,
         ),
         n_undecided=n_undecided,
     )
@@ -789,10 +858,15 @@ def choose_hypotheses(scores: HeldScores, payload: AccumulatorPayload, *, seed: 
     base = cumulative[starts] - scores.score[starts]
     draws = np.random.default_rng(seed).random(n)
     picked = np.searchsorted(cumulative, base + draws, side="right")
-    # Clamped into the run. A uniform arbitrarily close to 1 can exceed a run's final cumulative value
-    # by one float rounding and land on the next run's first slot — which would be another fragment's
-    # hypothesis, silently.
-    return np.clip(picked, starts, ends - 1) - starts
+    # Clamped onto the run's last POSITIVE slot. A uniform arbitrarily close to 1 can exceed a run's final
+    # cumulative value by one float rounding and land past it: on the next run's first slot, which would be
+    # another fragment's hypothesis, silently, or on a trailing hypothesis the score excluded.
+    record = np.repeat(np.arange(n, dtype=np.int64), ends - starts)
+    slot = np.arange(scores.score.shape[0], dtype=np.int64)
+    positive = scores.score > 0.0
+    last = np.full(n, -1, dtype=np.int64)
+    np.maximum.at(last, record[positive], slot[positive])
+    return np.clip(picked, starts, last) - starts
 
 
 def drain(

@@ -231,11 +231,15 @@ class Placement:
     sj_strand: int
     observed_introns: tuple[tuple[int, int], ...] = ()
     hypotheses: tuple[GapHypothesis, ...] = UNSPLICED_ONLY
+    #: The hit's sequence over both mates: its edits and its soft-clipped read bases. Never deposited; the second
+    #: pass's draw prices a multimapper's placements by it.
+    nm: int = 0
+    clip: int = 0
 
     @property
     def key(self):
         """The placement's own content, in the canonical order's comparison form (Python tuple order,
-        prefix rule included)."""
+        prefix rule included). Two placements equal here deposit identically, whatever their sequence."""
         return (
             self.ref,
             self.start,
@@ -270,7 +274,10 @@ class DeferredFragment:
 
     @property
     def key(self):
-        return tuple(p.key for p in self.placements)
+        """The record's content first, then its placements' sequences: a record's sequence must never move it
+        past a record its content orders, and records whose content ties are ordered by it, so the order is
+        total."""
+        return tuple(p.key for p in self.placements), tuple((p.nm, p.clip) for p in self.placements)
 
 
 class FragmentPool(enum.IntEnum):
@@ -668,7 +675,7 @@ class Tally:
         Sorting on the record's own content is the canonical form: two records that tie on this key
         are identical records, so their relative order cannot be observed.
         """
-        placement_fields = ("ref", "start", "end", "align_strand", "sj_strand")
+        placement_fields = ("ref", "start", "end", "align_strand", "sj_strand", "nm", "clip")
         out: dict[str, list[int]] = {name: [] for name in placement_fields}
         ordered = self.deferred_canonical()
         out |= {
@@ -732,6 +739,8 @@ class Accumulator:
         align_strand: int = Strand.POS,
         sj_strand: int = Strand.NONE,
         hypotheses: tuple[GapHypothesis, ...] = UNSPLICED_ONLY,
+        nm: int = 0,
+        clip: int = 0,
     ) -> DepositOutcome:
         """Deposit one fragment, or hold it for the second pass; return which, and why.
 
@@ -807,7 +816,15 @@ class Accumulator:
                 DeferredFragment(
                     placements=(
                         self._placement(
-                            ref, start, end, align_strand, sj_strand, observed_introns, hypotheses
+                            ref,
+                            start,
+                            end,
+                            align_strand,
+                            sj_strand,
+                            observed_introns,
+                            hypotheses,
+                            nm,
+                            clip,
                         ),
                     )
                 )
@@ -847,7 +864,6 @@ class Accumulator:
         """
         admitted = []
         strand_rejected = empty_rejected = 0
-        seen = set()
         for placement in placements:
             result = self._admit(
                 placement.ref, placement.start, placement.end, placement.align_strand
@@ -867,11 +883,14 @@ class Accumulator:
                 placement.sj_strand,
                 placement.observed_introns,
                 placement.hypotheses,
+                placement.nm,
+                placement.clip,
             )
-            if clipped.key in seen:
-                continue
-            seen.add(clipped.key)
             admitted.append(clipped)
+        # Identical placements are ONE: of a group the first in content-then-sequence order stays, the fewest
+        # mismatches and then the fewest clipped bases. The deposit is the group's either way.
+        admitted.sort(key=lambda pl: (pl.key, (pl.nm, pl.clip)))
+        admitted = [pl for i, pl in enumerate(admitted) if i == 0 or pl.key != admitted[i - 1].key]
         if not admitted:
             return self._reject(
                 DepositOutcome.STRAND_UNDEFINED
@@ -888,10 +907,11 @@ class Accumulator:
                 align_strand=one.align_strand,
                 sj_strand=one.sj_strand,
                 hypotheses=one.hypotheses,
+                nm=one.nm,
+                clip=one.clip,
             )
-        # Within the record the placements sit in THEIR canonical order, so the record's content does not
-        # depend on the order the aligner listed the hits in.
-        admitted.sort(key=lambda pl: pl.key)
+        # Within the record the placements sit in THEIR canonical order (the sort above), so the record's
+        # content does not depend on the order the aligner listed the hits in.
         union = [
             (pl, row)
             for pl in admitted
@@ -915,6 +935,8 @@ class Accumulator:
                 align_strand=pl.align_strand,
                 sj_strand=pl.sj_strand,
                 hypotheses=(hypothesis,),
+                nm=pl.nm,
+                clip=pl.clip,
             )
             self.tally.gap_resolution.update(census_before)
             return outcome
@@ -953,7 +975,7 @@ class Accumulator:
 
     @staticmethod
     def _placement(
-        ref, start, end, align_strand, sj_strand, observed_introns, hypotheses
+        ref, start, end, align_strand, sj_strand, observed_introns, hypotheses, nm=0, clip=0
     ) -> Placement:
         return Placement(
             ref=int(ref),
@@ -963,6 +985,8 @@ class Accumulator:
             sj_strand=int(sj_strand),
             observed_introns=tuple((int(s), int(e)) for s, e in observed_introns),
             hypotheses=tuple(hypotheses),
+            nm=int(nm),
+            clip=int(clip),
         )
 
     def _deposit_survivor(self, ref, column, region_bounds, start, end, sj_strand, survivor):

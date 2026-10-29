@@ -148,6 +148,8 @@ def _calibration_dict(**overrides) -> dict:
         "n_fragment_pools": 5,
         "max_length": MAX_LENGTH,
         "n_refs": len(REGION_BOUNDS_PER_REF),
+        "unique_unspliced_mismatches": 7,
+        "unique_unspliced_bases": 3_500,
     }
     cal.update(overrides)
     return {"calibration": cal}
