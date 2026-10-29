@@ -157,7 +157,7 @@ Create a YAML file in `scripts/benchmark/configs/`. The sweep framework (`script
 - **Simulation params**: `strand_specificity`, `gdna_fraction`, per-entity `n_rna_fragments`
 - **EM params** (`em_config`): `prior_pseudocount`, `mode` (map/vbem), `convergence_delta`, `max_iterations`
 - **BAM scan params** (`scan_config`): (none currently sweepable)
-- **Scoring params** (`scoring_config`): `overhang_log_penalty`, `mismatch_log_penalty`
+- **Scoring params** (`scoring_config`): `overhang_log_penalty` (the mismatch and clip prices are the library's own)
 
 Each dimension in `sweep_dims` creates a Cartesian product grid. Use `n_rna_fragments` + `gdna_fraction` mode (not `n_fragments`) to keep RNA counts fixed while varying gDNA contamination.
 
@@ -176,7 +176,7 @@ When asked to run benchmarks, compare to gold standard, and analyze results:
 
 - **nRNA siphon** is the dominant failure mode: when NTA1 >> TA1 (ratio ≥ 5), the nRNA component absorbs mRNA fragments causing up to ~37% mRNA error. This is a fundamental identifiability issue, not a hyperparameter problem.
 - **gDNA overestimation** at low contamination (gdna_fraction=0.3): relative error ~1.5–2.0×, improving at higher contamination.
-- **Scoring penalties** (overhang, mismatch) show zero sensitivity in synthetic data (no mismatches in simulated reads).
+- **The overhang penalty** shows zero sensitivity in synthetic data.
 - **EM hyperparameters** (prior_pseudocount 0.1–5.0, MAP vs VBEM) have negligible effect.
 
 ## Architecture Summary

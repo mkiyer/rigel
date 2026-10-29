@@ -196,16 +196,22 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     def schema_warnings(run_dir):
         return [w for w in load_substrate(run_dir).warnings if "schema_version" in w]
 
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 7
+    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 8
     assert schema_warnings(out) == []
     bumped = tmp_path / "bumped"
     bumped.mkdir()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
         cli._write_quant_outputs(pr, result.index, bumped, args)
-        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 8
+        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 9
         assert schema_warnings(bumped) == [] and schema_warnings(out) != []
-    assert summary["quantification"]["n_gated_out"] == 0  # the default alphas gate nothing
+    assert summary["quantification"]["n_gated_out"] == 0  # the default alpha gates nothing
+
+    # the library's mismatch rate, read on its unique unspliced hits: the counts the scan kept, and their ratio
+    rate = summary["fragment_stats"]["mismatch_rate"]
+    assert rate["mismatches"] == pr.stats.n_unique_unspliced_mismatches
+    assert rate["bases"] == pr.stats.n_unique_unspliced_bases > 0
+    assert rate["rate"] == round(rate["mismatches"] / rate["bases"], cli.SUMMARY_DECIMALS)
 
     # one outcome per read pair and one status per record, each summing to its total, as the scan counted them
     pairs, records = summary["read_pairs"], summary["alignment_stats"]["records"]

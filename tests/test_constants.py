@@ -135,6 +135,7 @@ FORMAT_MODULES = {
 DEFINITIONS = {
     ("second_pass.py", "P_ORIENTATION_GIVEN_GDNA"),  # gDNA has no strand: ½
     ("calibration/landscape.py", "_LN10"),  # ln 10, decades to nats
+    ("scoring.py", "_N_BASES"),  # a base is one of four
     (
         "calibration/effective_length.py",
         "UNBOUNDED_REACH",

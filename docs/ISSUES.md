@@ -38,18 +38,27 @@ detection off — while an index built with no store loads quietly. Left: the cl
 names neither `--alignable-zarr` nor `--no-mappability`.
 
 ### splicing-artifacts
-`priority: now — release-blocking (owner, 2026-10-14), and the goal the scan's repair serves (owner, 2026-10-21): the recommended STAR parameters' competing alignments and the multimapper handling are to carry through to it; 0.8.0 waits for the mechanism AND its validation on independent artifact-containing evidence (the cluster); the design is externally reviewed, its derivation next · stage: scan · kind: defect · 2026-09-24`
+`priority: now — release-blocking (owner, 2026-10-14), and the goal the scan's repair serves (owner, 2026-10-21); the mechanism landed 2026-10-29 (DESIGN.md §3.1h), and 0.8.0 waits for its validation on independent artifact-containing evidence: the VCaP mix aligned at the recommended settings, on the cluster · stage: scan · kind: defect · 2026-09-24`
 THE OWNER (2026-10-28): in high-gDNA samples gDNA bleeds into RNA as spliced fragments; STAR's bonus for a spliced
 alignment was removed and STAR reparameterized in the hope that this reduces them, and the next release must finish
 this effort and do everything to mitigate splicing artifacts. Since 2026-10-16 Rigel reads what the aligner reported
-(`DESIGN.md` §1.0), a scope set to keep the work focused, not a prohibition. So what below reads bases — the largest
-block kept as an edit of the alignment, a contiguous reading Rigel would construct, the sequence emission from SEQ, h
-computed from the reference, and the scanner and index infrastructure they need — waits on one measurement: how much
-of the artifact mass the aligner's own alternatives return to gDNA, now that the recommended STAR settings report a
-template's spliced and contiguous readings when they score alike and the EM weighs a template's places (since
-2026-10-28, `DESIGN.md` §3.1g). Genome information inside Rigel is the owner's to discuss with that evidence. What
-reads no base stands as it is: the strand prong, the blacklist's costs both ways, the builder's defects, the training
-sets and the counters.
+(`DESIGN.md` §1.0), a scope set to keep the work focused, not a prohibition.
+MEASURED (2026-10-28; the STAR rung's 16 conditions against the read names,
+`$RIGEL_RUNS/prototypes/2026-10-28_splice_measure/`): the aligner's own alternatives return the artifacts. gDNA
+reaches a usable spliced hit for 25–7,096 templates a condition, all single-junction, and all but 2 of 23,739 come with
+their contiguous reading, 98.9 % of the local ones an exact tie. The EM's split of the exact ties puts 0.98–1.21 times
+the gDNA truly among them in gDNA in scope, and gDNA called RNA through a spliced hit is under 0.11 % of all gDNA
+called RNA. What was left was the clipped alternative: a genuine short anchor's contiguous reading clips the bases it
+cannot place, and with the clip free 99.96 % of the 228,148 clipped alternatives were genuine RNA, 68–77 % of the RNA
+put in gDNA through a spliced hit. LANDED 2026-10-29 (`DESIGN.md` §3.1h, `EQUATIONS.md` §16): a multimapper's hits
+priced by their sequence at the library's own mismatch rate, a clipped base at the composition. On the rung's evidence
+no genome information inside Rigel is needed. Left: the same prices in the second pass's draw
+(`ISSUES: the-second-pass-corrections`); the VCaP mix at the recommended settings, for what the rung cannot hold
+(STAR itself, a genome rich in retrocopies, the sample's alleles, real errors, qualities and adapter clips); and what
+reads bases (the reference's h at a junction, a contiguous reading Rigel would build, a copy table) only if that
+evidence asks for it. What reads no base stands as it is: the strand prong, the blacklist's costs both ways (its work,
+the local ties, is now the aligner's and the EM's), the builder's defects, the training sets (κ saw at most 8 artifacts
+a condition on the rung: an artifact that comes with its alternative is a multimapper) and the counters.
 THE OWNER'S DESIGN (2026-10-14): spliced fragments are the most specific signal the tool has, so artifacts are
 removed by several prongs before any release, after the release candidate is clean.
 - **The strand prong.** A junction's strand split against the library's specificity is a likelihood: with a
@@ -120,7 +129,9 @@ strands; mates disagreeing on an acceptor) reach neither stage. Its cost on the 
   one page, the multi-junction case included: an ambiguous junction ADDS an unspliced reading weighted about
   (ε/3)^h, ε from the library, h from the reference (at index time for annotated junctions, at scan time for novel
   ones); the owner's "edit the alignment" is its gDNA limit at h = 0. Rigel reads NM only — never MD, the sequence,
-  the qualities or the reference — so this needs new scanner and index infrastructure.
+  the qualities or the reference — so this needs new scanner and index infrastructure. ANSWERED 2026-10-29: at the
+  recommended settings the aligner reports the unspliced reading itself, and NM carries h where the alternative aligns
+  every base (`EQUATIONS.md` §16.4).
 - THE LONG-ANCHOR ARTIFACTS ARE NOT h = 0 (short side ≥ 21 bp: 4,840 DNA records, 60 % uniquely mapped; 98 % of the RNA
   library's rejections, 235,406 of 240,520, uniquely mapped). The hypothesis is remote origin, from retrocopies and
   paralogs: alignable records an artifact from every alignment, secondary and supplementary included, so a parent gene's
@@ -159,7 +170,8 @@ strands; mates disagreeing on an acceptor) reach neither stage. Its cost on the 
   most 441 RNA-library fragments, about 180 of them genuine by the strand-implied split. Its side effect: a tie read's
   contiguous reading fits another isoform's longer exon (one ADAR isoform 3,545 → 134), and a contiguous hit the
   aligner reports will do the same. STAR moves the DNA library's unannotated junctions onto canonical motifs (62 %
-  GT-AG, 31 % GC-AG), so a motif prong carries no signal.
+  GT-AG, 31 % GC-AG), so a motif prong carries no signal. At the recommended settings the aligner writes this hit (2 of
+  the STAR rung's 23,739 artifacts come without it).
 - THE BUILDER applies `min_count` (2, underived) per (chrom, intron, strand, read_length) BEFORE aggregating over read
   lengths, so a junction seen once at each of several read lengths never enters. Fixed with the catalogue rebuild.
   Since index format 9 (2026-10-14) the feather keeps each junction's count, summed over the rows that built it, so
@@ -202,8 +214,9 @@ Four corrections, each its own arm, and each also moves today's multimapper draw
 2. **The weights.** Each candidate carries one placement factor and one dimensionless share within its placement,
    `w(p, h) = A_p × ρ(h) / Σ ρ(h′ of p) × f(L) × s`, the share taken over unique hypotheses and formed in logs. Today
    the draw depends on ρ's units, and a placement with no contested region reads ρ = 0 beside one that has.
-3. **The mismatches.** The deferred bank carries no NM, so a placement with 37 more mismatches is drawn as often as a
-   perfect one. The fix carries NM and weighs by the EM's own `α_mm^NM`, with α_mm = 0 a hard gate.
+3. **The sequence.** The deferred bank carries no NM and no clip, so a placement with 37 more mismatches is drawn as
+   often as a perfect one. The fix carries both and weighs by the EM's own prices (`scoring.sequence_log_penalties`,
+   `DESIGN.md` §3.1h), so the two stages read one emission.
 4. **The motif rule.** Pass 2 decides that a placement is RNA from the motif tag, where the deposit decides it from an
    observed intron that resolves to an annotated junction, so an annotated splice without a tag gets gDNA's ½ in pass
    2 while the deposit books it spliced. Since the annotated-path rule (2026-10-19) a hit whose tag contradicts the
@@ -422,8 +435,10 @@ which quantifies 0.8–1.4 k fewer templates per 10 M: transcript / gene error +
 (g50 κ0.50 +5.77 / +9.60 %), +2.37 / +3.12 % stranded capture-OFF, −0.38 / +1.03 % stranded capture-ON shipped, and
 +0.22 / +0.73, +0.18 / +0.93, +0.14 / +0.15 % at 1; then the resolver's chimera call deleted (2026-10-20), which
 returns 12 multimapping hits of g50 κ0.99 capture-ON's 10 M templates to calibration and the EM: its transcript / gene
-error +0.68 / +1.91 % shipped, its true gDNA counted as RNA +80.8 k, and +0.26 / +0.28 % at 1. So a scan change is
-judged with the efficiencies at 1 beside the shipped run until this is fixed.
+error +0.68 / +1.91 % shipped, its true gDNA counted as RNA +80.8 k, and +0.26 / +0.28 % at 1; then a multimapper's
+hits priced by their sequence (2026-10-29, `DESIGN.md` §3.1h), which moves gDNA called RNA at g98 stranded capture-ON
+51,682 → 53,346 (+3.2 %) shipped and by −779 at 1 (the weak-strand flips' g98 rows +52 to +1,354 shipped, −698 to −860
+at 1). So a scan or scoring change is judged with the efficiencies at 1 beside the shipped run until this is fixed.
 The reader reads each object's deconvolved gDNA mass as a point Poisson count, whatever the deconvolution's own
 uncertainty; on the simulator's alignments the efficiencies stay at 1 in every condition here.
 THE PLANNED FIX (2026-10-19), for after the splice-artifact waves (owner: stay on the wave plan; the reader took many
@@ -1589,12 +1604,14 @@ The multimapper half of the EM's prior moved to
 unmeasured on today's tree.
 
 ### scoring-penalties-are-underived-constants
-`priority: later — the derivations; the zero-alpha NaN lands in 0.8.0 with ISSUES: latent-defects · stage: pre-EM · kind: question · 2026-09-28`
-Two fragment-score penalties are 0.1 and underived (`scoring.py`): log(`mismatch_alpha`) per NM mismatch, and
-log(`overhang_alpha`), RNA only. Both also set where the pruning lattice cuts. The splice-artifact work adds more to
-derive or put to the owner: the minimum count of 2, the anchor floors 4 / 6 / 11, `alignSJDBoverhangMin` 8, the 5-bp
-mismatch window. The ε of the proposed h-weighted reading (`ISSUES: splicing-artifacts`) must come from the library,
-never from `mismatch_alpha`. A zero alpha gives NaN today (`ISSUES: latent-defects`).
+`priority: later — the overhang price's derivation · stage: pre-EM · kind: question · 2026-09-28`
+One fragment-score penalty is 0.1 and underived (`config.py`): log(`overhang_alpha`) per base of overhang, RNA only.
+The mismatch's is derived since 2026-10-29, at the library's own rate (`DESIGN.md` §3.1h). The overhang price also sets
+where the pruning lattice cuts, and it ties with the pruning bound exactly: four overhang bases cost 4 log 10 =
+−log 10⁻⁴, so a candidate four bases behind its pool's best sits on the bound and the scorer's `-ffast-math` rounding
+decides its side (one STAR-rung library, 2026-10-29: refactoring the scorer moved 9,705 such candidates in and 8,906
+out of 92 M, every one on the bound). The splice-artifact work adds more to derive or put to the owner: the minimum
+count of 2, the anchor floors 4 / 6 / 11, `alignSJDBoverhangMin` 8, the 5-bp mismatch window.
 Instrument: none yet; the splice truth mixes.
 
 ### coverage-weight-plateau-for-short-transcripts
@@ -2059,7 +2076,7 @@ CLOSED 2026-10-28 with `ISSUES: multimapper-intergenic-alignments` (`DESIGN.md` 
 into places by overlapping extents, each place read at its most likely hit and distinct places summed, so overhang
 counts once and a gated hit gives way to its surviving alternative
 (`test_a_transcripts_overlapping_hits_are_one_place_read_at_the_more_likely`,
-`test_at_mismatch_alpha_0_a_transcript_keeps_its_surviving_alternative`). MEASURED as its own arm (P4 against P3, the
+`test_in_a_library_with_no_mismatch_a_transcript_keeps_its_surviving_alternative`). MEASURED as its own arm (P4 against P3, the
 STAR rung, pinned and fractional): transcripts 5–7 points of the previous tree's error lower in every stratum, genes
 flat.
 The record as it stood:
@@ -2099,7 +2116,7 @@ pinned and fractional, with every capture efficiency at 1 beside the shipped run
 ### mismatch-gate-nan-in-multimapper-gdna
 CLOSED 2026-10-28 with `ISSUES: multimapper-intergenic-alignments`: a term at `−∞` is skipped before the log-sum-exp, at
 a genic and at an intergenic place, so no NaN arises and the hits' order cannot matter
-(`test_at_mismatch_alpha_0_the_gdna_term_is_the_same_in_every_hit_order`, every order of three hits).
+(`test_in_a_library_with_no_mismatch_the_gdna_term_is_the_same_in_every_hit_order`, every order of three hits).
 The record as it stood:
 At `--mismatch-alpha 0`, a mismatched hit's gDNA term is −inf. Two such hits make the multimapper's log-sum-exp NaN
 (`scoring.cpp:57-73, 519-527, 646-653`). The NaN then fails `> 0`, so whether a later NM = 0 hit keeps its gDNA reading

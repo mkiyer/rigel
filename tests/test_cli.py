@@ -143,11 +143,11 @@ def test_quant_refuses_an_unknown_config_key_with_an_error_not_a_traceback(tmp_p
 
 @pytest.mark.parametrize(
     "flag, value",
-    [("--overhang-alpha", "nan"), ("--mismatch-alpha", "-0.5"), ("--overhang-alpha", "1.5")],
+    [("--overhang-alpha", "nan"), ("--overhang-alpha", "-0.5"), ("--overhang-alpha", "1.5")],
 )
 def test_quant_refuses_an_alpha_outside_zero_to_one_before_loading_the_index(tmp_path, flag, value):
-    """An alpha is the probability kept per base of overhang or per mismatch: NaN gated almost every fragment and wrote
-    NaN into summary.json, and one above 1 rewarded mismatches. It is refused as an error, before the index loads."""
+    """An alpha is the probability kept per base of overhang: NaN gated almost every fragment and wrote NaN into
+    summary.json, and one above 1 rewarded overhang. It is refused as an error, before the index loads."""
     bam = tmp_path / "in.bam"
     bam.write_bytes(b"")
     index = tmp_path / "index"
@@ -282,14 +282,14 @@ def test_config_yaml_records_every_path_absolute(tmp_path, monkeypatch):
 
 def test_a_hard_scoring_gate_dumps_as_strict_json():
     """An alpha of 0 is the hard gate, whose log-penalty is −inf. The configuration summary.json records holds the
-    alphas, which are finite, so the file stays JSON (``-Infinity`` is not)."""
+    alpha, which is finite, so the file stays JSON (``-Infinity`` is not)."""
     import math
 
     from rigel.config import FragmentScoringConfig, PipelineConfig
 
-    cfg = PipelineConfig(scoring=FragmentScoringConfig(overhang_alpha=0.0, mismatch_alpha=0.0))
+    cfg = PipelineConfig(scoring=FragmentScoringConfig(overhang_alpha=0.0))
     json.dumps(cfg.to_dict(), allow_nan=False)
-    assert cfg.scoring.overhang_log_penalty == cfg.scoring.mismatch_log_penalty == -math.inf
+    assert cfg.scoring.overhang_log_penalty == -math.inf
 
 
 def test_sim_accepts_every_documented_scenario_key(tmp_path):
@@ -623,9 +623,8 @@ class TestConfigRoundTrip:
         for f in dataclasses.fields(ref.scan):
             assert getattr(result.scan, f.name) == getattr(ref.scan, f.name), f.name
 
-        # Scoring: log penalties match exactly
+        # Scoring: the log penalty matches exactly
         assert result.scoring.overhang_log_penalty == ref.scoring.overhang_log_penalty
-        assert result.scoring.mismatch_log_penalty == ref.scoring.mismatch_log_penalty
 
     def test_param_specs_cover_all_defaults(self):
         """Every key in _build_quant_defaults matches a _ParamSpec or is CLI-only."""

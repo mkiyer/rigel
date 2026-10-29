@@ -16,7 +16,6 @@ from .calibration.capture_eff_length import place_log_weights
 from .estimator import AbundanceEstimator
 from .scored_fragments import ScoredFragments
 from .index import TranscriptIndex
-from .scoring import FragmentScorer
 from .stats import PipelineStats
 from .annotate import AF_GDNA_INTERGENIC, AF_UNRESOLVED, winner_flag
 
@@ -34,8 +33,8 @@ class FragmentRouter:
 
     Parameters
     ----------
-    ctx : FragmentScorer
-        Pre-computed scoring parameters.
+    scorer : NativeFragmentScorer
+        The run's scorer (``rigel.scoring.build_scorer``).
     estimator : AbundanceEstimator
         Accumulates unambig counts during routing.
     stats : PipelineStats
@@ -52,14 +51,14 @@ class FragmentRouter:
 
     def __init__(
         self,
-        ctx: FragmentScorer,
+        scorer,
         estimator: AbundanceEstimator,
         stats: PipelineStats,
         index: TranscriptIndex,
         annotations=None,
         place_efficiencies=None,
     ):
-        self.ctx = ctx
+        self.scorer = scorer
         self.estimator = estimator
         self.stats = stats
         self.index = index
@@ -80,11 +79,11 @@ class FragmentRouter:
         Chunks are consumed from the buffer in order and scored by the
         native ``StreamingScorer``.
         """
-        native_scorer = self.ctx._native_ctx
+        native_scorer = self.scorer
         estimator = self.estimator
         stats = self.stats
         index = self.index
-        t_to_g = self.ctx.t_to_g
+        t_to_g = index.t_to_g_arr
         annotations = self.annotations
 
         from .native import StreamingScorer
@@ -104,18 +103,15 @@ class FragmentRouter:
             arrays = chunk.to_scoring_arrays()
             if self.place_efficiencies is not None and chunk.place_offsets is not None:
                 c_region, c_boundary, c_sj = self.place_efficiencies
-                arrays = (
-                    *arrays,
-                    place_log_weights(
-                        chunk.place_offsets,
-                        chunk.place_kind,
-                        chunk.place_index,
-                        chunk.place_mass,
-                        intergenic=np.diff(chunk.t_offsets) == 0,
-                        c_region=c_region,
-                        c_boundary=c_boundary,
-                        c_sj=c_sj,
-                    ),
+                arrays["log_weight"] = place_log_weights(
+                    chunk.place_offsets,
+                    chunk.place_kind,
+                    chunk.place_index,
+                    chunk.place_mass,
+                    intergenic=np.diff(chunk.t_offsets) == 0,
+                    c_region=c_region,
+                    c_boundary=c_boundary,
+                    c_sj=c_sj,
                 )
             scorer.score_chunk(arrays)
             n_processed += chunk.size

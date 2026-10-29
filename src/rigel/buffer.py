@@ -86,6 +86,7 @@ class _FinalizedChunk:
     genomic_footprint: np.ndarray  # int32[N]
     genomic_start: np.ndarray  # int32[N]
     nm: np.ndarray  # uint16[N]
+    clip: np.ndarray  # uint16[N]  the hit's soft-clipped read bases
     size: int
     _fragment_classes: np.ndarray | None = None  # cached uint8[N]
     # Each row's place masses, CSR over rows: the deposit rule's mass at each object (region, boundary or sj, by
@@ -115,6 +116,7 @@ class _FinalizedChunk:
             genomic_footprint=raw["genomic_footprint"],
             genomic_start=raw["genomic_start"],
             nm=raw["nm"],
+            clip=raw["clip"],
             size=int(raw["size"]),
             place_offsets=raw.get("place_offsets"),
             place_kind=raw.get("place_kind"),
@@ -141,6 +143,7 @@ class _FinalizedChunk:
                 self.genomic_footprint,
                 self.genomic_start,
                 self.nm,
+                self.clip,
                 *(
                     a
                     for a in (
@@ -181,29 +184,28 @@ class _FinalizedChunk:
         object.__setattr__(self, "_fragment_classes", classes)
         return classes
 
-    def to_scoring_arrays(self) -> tuple:
-        """Return the contiguous array tuple expected by ``StreamingScorer.score_chunk``.
+    def to_scoring_arrays(self) -> dict:
+        """The arrays ``StreamingScorer.score_chunk`` reads, by name.
 
-        ``from_raw`` and ``_load_chunk`` both guarantee that every
-        stored array is C-contiguous with the exact dtype the C++
-        scoring kernel expects, so this method is a zero-copy view
-        constructor (apart from the lazy ``fragment_classes`` compute
-        on first access).
+        ``from_raw`` and ``_load_chunk`` both guarantee that every stored array is C-contiguous in the exact dtype the
+        C++ kernel expects, so these are the chunk's own arrays (the fragment classes are computed once, on first
+        access).
         """
-        return (
-            self.t_offsets,
-            self.t_indices,
-            self.frag_lengths,
-            self.exon_bp,
-            self.splice_type,
-            self.align_strand,
-            self.fragment_classes,
-            self.frag_id,
-            self.read_length,
-            self.genomic_footprint,
-            self.genomic_start,
-            self.nm,
-        )
+        return {
+            "t_offsets": self.t_offsets,
+            "t_indices": self.t_indices,
+            "frag_lengths": self.frag_lengths,
+            "exon_bp": self.exon_bp,
+            "splice_type": self.splice_type,
+            "align_strand": self.align_strand,
+            "fragment_classes": self.fragment_classes,
+            "frag_id": self.frag_id,
+            "read_length": self.read_length,
+            "genomic_footprint": self.genomic_footprint,
+            "genomic_start": self.genomic_start,
+            "nm": self.nm,
+            "clip": self.clip,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +244,7 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
             "genomic_footprint": chunk.genomic_footprint,
             "genomic_start": chunk.genomic_start,
             "nm": chunk.nm,
+            "clip": chunk.clip,
             **(
                 {}
                 if chunk.place_offsets is None
@@ -294,6 +297,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
         genomic_start=table.column("genomic_start").to_numpy().copy(),
         nm=table.column("nm").to_numpy().copy().astype(np.uint16),
+        clip=table.column("clip").to_numpy().copy().astype(np.uint16),
         size=len(table),
         **_load_place_masses(table),
     )

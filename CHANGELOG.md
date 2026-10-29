@@ -62,6 +62,12 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
 - For development, a scan cache (`scripts/design/build_scan_cache.py`) keyed by the index, the graph, the
   boundary reaches and the scan settings (never a thread count), so a stale cache is refused rather than reused.
 
+- **A multimapper's alignments are told apart by their sequence.** Each mismatch and each soft-clipped base of an
+  alignment is priced against a base aligned and matching, at the library's own mismatch rate, which the scan reads on
+  its unique unspliced alignments; `summary.json` reports it as `fragment_stats.mismatch_rate` (schema 8). A spliced
+  read whose contiguous alternative fits only by clipping the bases it cannot place now stays RNA, and a gDNA read that
+  aligns to several copies goes to the copy its sequence matches.
+
 ### Changed
 
 - **Output names (breaking).** RNA is reported as *annotated* (every reference transcript, single-exon included) or
@@ -153,6 +159,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   `fragment_stats.chimeric`, `chimeric_trans`, `chimeric_cis_same` or `chimeric_cis_diff`, the annotated BAM no
   longer sets `ZF` bit 0x40 (retired, never set), and the report drops its chimeric breakdown. The scan runs 3 %
   faster.
+
+- `--mismatch-alpha` and its hard gate: the mismatch price is the library's own (see Added).
 
 ### Fixed
 

@@ -31,6 +31,7 @@ NB_MODULE(_resolve_impl, m) {
     nb::class_<ResolvedFragment>(m, "ResolvedFragment")
         .def_rw("num_hits", &ResolvedFragment::num_hits)
         .def_rw("nm", &ResolvedFragment::nm)
+        .def_rw("clip", &ResolvedFragment::clip)
         .def_ro("splice_type", &ResolvedFragment::splice_type)
         .def_ro("align_strand", &ResolvedFragment::align_strand)
         .def_ro("sj_strand", &ResolvedFragment::sj_strand)

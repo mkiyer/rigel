@@ -9,7 +9,7 @@ places ``c`` can be at and ``Z_c`` the EM's capture-contracted length of ``c``. 
 
 * Every component's term is the SUM over its places, never the mean: a place is the hits whose extents overlap on one
   reference, alternatives read at the most likely of them, and distinct places add, for a transcript and for gDNA
-  alike. A term at ``−∞`` adds nothing, so the hits' order cannot matter, at ``--mismatch-alpha 0`` too.
+  alike. A term at ``−∞`` adds nothing, so the hits' order cannot matter, in a library with no mismatch too.
 * ``w(x) = Σ_o m_o(x) · c_o``, the deposit rule's mass of the placement at each object it deposits on times the
   object's capture efficiency, is the weight whose sum over a component's placements, on the law the efficiencies are
   read on, is that component's normaliser. Every candidate at a place carries it; on a unique fragment it is common
@@ -46,7 +46,7 @@ from rigel.frag_length_model import FragmentLengthModel
 from rigel.index import TranscriptIndex
 from rigel.pipeline import scan_and_buffer
 from rigel.routing import FragmentRouter
-from rigel.scoring import FragmentScorer
+from rigel.scoring import build_scorer, sequence_log_penalties
 from rigel.splice import SpliceStrandCol, SpliceType
 from rigel.stats import PipelineStats
 from rigel.strand_model import StrandModel, StrandModels
@@ -274,6 +274,7 @@ class Hit:
     splice_type: SpliceType = SpliceType.UNSPLICED
     footprint: int = 250
     nm: int = 0
+    clip: int = 0
     log_weight: float = 0.0
     start: int | None = (
         None  # its genomic start; none given: a place of its own, apart from the group's others
@@ -282,8 +283,8 @@ class Hit:
 
 
 class _Chunk:
-    """The ``size`` and ``to_scoring_arrays`` the router reads, from rows ``(frag_id, class, Hit)``, the place weight
-    last."""
+    """The ``size`` and ``to_scoring_arrays`` the router reads, from rows ``(frag_id, class, Hit)``, each row's place
+    weight among them."""
 
     def __init__(self, rows):
         hits = [h for _f, _c, h in rows]
@@ -292,21 +293,22 @@ class _Chunk:
         n_cand = int(offsets[-1])
         frag_ids = [f for f, _c, _h in rows]
         fclass = [c for _f, c, _h in rows]
-        self._arrays = (
-            np.asarray(offsets, dtype=np.int32),
-            np.asarray([t for h in hits for t in h.t], dtype=np.int32),
-            np.full(n_cand, 200, dtype=np.int32),
-            np.asarray([h.exon_bp for h in hits for _ in h.t], dtype=np.uint16),
-            np.asarray([int(h.splice_type) for h in hits], dtype=np.uint8),
-            np.full(len(hits), int(Strand.POS), dtype=np.uint8),
-            np.asarray(fclass, dtype=np.uint8),
-            np.asarray(frag_ids, dtype=np.int64),
-            np.full(len(hits), 100, dtype=np.uint16),
-            np.asarray([h.footprint for h in hits], dtype=np.int32),
-            np.asarray([h.start for h in hits], dtype=np.int32),
-            np.asarray([h.nm for h in hits], dtype=np.uint16),
-            np.asarray([h.log_weight for h in hits], dtype=np.float32),
-        )
+        self._arrays = {
+            "t_offsets": np.asarray(offsets, dtype=np.int32),
+            "t_indices": np.asarray([t for h in hits for t in h.t], dtype=np.int32),
+            "frag_lengths": np.full(n_cand, 200, dtype=np.int32),
+            "exon_bp": np.asarray([h.exon_bp for h in hits for _ in h.t], dtype=np.uint16),
+            "splice_type": np.asarray([int(h.splice_type) for h in hits], dtype=np.uint8),
+            "align_strand": np.full(len(hits), int(Strand.POS), dtype=np.uint8),
+            "fragment_classes": np.asarray(fclass, dtype=np.uint8),
+            "frag_id": np.asarray(frag_ids, dtype=np.int64),
+            "read_length": np.full(len(hits), 100, dtype=np.uint16),
+            "genomic_footprint": np.asarray([h.footprint for h in hits], dtype=np.int32),
+            "genomic_start": np.asarray([h.start for h in hits], dtype=np.int32),
+            "nm": np.asarray([h.nm for h in hits], dtype=np.uint16),
+            "clip": np.asarray([h.clip for h in hits], dtype=np.uint16),
+            "log_weight": np.asarray([h.log_weight for h in hits], dtype=np.float32),
+        }
 
     def to_scoring_arrays(self):
         return self._arrays
@@ -361,6 +363,9 @@ class _Index:
 
 N_T = 4
 
+#: A multimapper's hit's sequence prices at a typical library's mismatch rate, per mismatch and per clipped base.
+MISMATCH_LP, CLIP_LP = sequence_log_penalties(0.002)
+
 
 def _route_all(groups, classes=None, *, fl=None, mismatch_log_penalty=None, split=None):
     """Score fragments, each a group of hits, through the shipped scorer and router; ``split`` cuts the rows into two
@@ -368,17 +373,14 @@ def _route_all(groups, classes=None, *, fl=None, mismatch_log_penalty=None, spli
     classes = classes or [FRAG_MULTIMAPPER] * len(groups)
     index = _Index(N_T)
     fl = fl if fl is not None else _live_fl()
-    scorer = FragmentScorer.from_models(
+    scorer = build_scorer(
         StrandModels(exonic_spliced=StrandModel(pos_pos=20)),
         fl,
         fl,
         index,
         overhang_log_penalty=FragmentScoringConfig().overhang_log_penalty,
-        mismatch_log_penalty=(
-            FragmentScoringConfig().mismatch_log_penalty
-            if mismatch_log_penalty is None
-            else mismatch_log_penalty
-        ),
+        mismatch_log_penalty=MISMATCH_LP if mismatch_log_penalty is None else mismatch_log_penalty,
+        clip_log_penalty=CLIP_LP,
     )
     estimator = AbundanceEstimator(N_T, em_config=EMConfig(seed=1))
     stats, stamps = PipelineStats(), _Stamps()
@@ -406,14 +408,11 @@ def _live_fl():
 
 
 def _term(footprint, nm=0, *, fl=None, mismatch_log_penalty=None):
-    """One place's gDNA term, read off a unique unspliced fragment: the law at the footprint, ½, the mismatches."""
-    em = _route(
-        [[Hit((0,), footprint=footprint, nm=nm)]],
-        [FRAG_UNAMBIG],
-        fl=fl,
-        mismatch_log_penalty=mismatch_log_penalty,
-    )
-    return float(em.gdna_log_liks[0])
+    """One place's gDNA term: the law at the footprint and ½, read off a unique unspliced fragment (one hit, whose
+    sequence is common to its candidates and not read), and the hit's mismatches at a multimapper's price."""
+    em = _route([[Hit((0,), footprint=footprint)]], [FRAG_UNAMBIG], fl=fl)
+    price = MISMATCH_LP if mismatch_log_penalty is None else mismatch_log_penalty
+    return float(em.gdna_log_liks[0]) + (nm * price if nm else 0.0)
 
 
 def _intergenic(em):
@@ -448,10 +447,11 @@ def test_two_identical_places_give_gdna_twice_one_places_term():
 
 
 @pytest.mark.parametrize("order", list(itertools.permutations(range(3))))
-def test_at_mismatch_alpha_0_the_gdna_term_is_the_same_in_every_hit_order(order):
-    """At the hard gate a mismatched place's term is ``−∞`` and adds nothing to the sum, so the fragment's gDNA term
-    is its one perfect place's, whichever order the hits arrive in. Today two ``−∞`` terms ahead of a finite one
-    make the running log-sum-exp NaN and gDNA is dropped, and in the other orders the mean divides by three."""
+def test_in_a_library_with_no_mismatch_the_gdna_term_is_the_same_in_every_hit_order(order):
+    """In a library with no mismatch a mismatched place's term is ``−∞`` and adds nothing to the sum, so the
+    fragment's gDNA term is its one perfect place's, whichever order the hits arrive in. Two ``−∞`` terms ahead of a
+    finite one once made the running log-sum-exp NaN and gDNA was dropped, and in the other orders the mean divided by
+    three."""
     hits = [Hit((0,), nm=2), Hit((1,), nm=3), Hit((2,), nm=0)]
     gate = -math.inf
     em = _route([[hits[i] for i in order]], mismatch_log_penalty=gate)
@@ -514,7 +514,7 @@ def test_the_intergenic_term_is_kept_wherever_its_place_survives():
 #: A genic place that fails a gate beside an intergenic one that does not, with the gate's penalty.
 GATED_GENIC_PLACE = {
     "zero capture weight": ([Hit((0,), log_weight=-math.inf), Hit(())], None),
-    "a mismatch at alpha 0": ([Hit((0,), nm=1), Hit((), nm=0)], -math.inf),
+    "a mismatch in a library with none": ([Hit((0,), nm=1), Hit((), nm=0)], -math.inf),
 }
 
 
@@ -592,9 +592,9 @@ def test_a_transcripts_overlapping_hits_are_one_place_read_at_the_more_likely():
     assert _rna(em) == pytest.approx(_rna(alone), abs=1e-5)
 
 
-def test_at_mismatch_alpha_0_a_transcript_keeps_its_surviving_alternative():
-    """The gate takes the hit with a mismatch, and the transcript is still read at its other alternative; the
-    least-overhang rule kept the gated one and lost the transcript."""
+def test_in_a_library_with_no_mismatch_a_transcript_keeps_its_surviving_alternative():
+    """A library with no mismatch takes the hit with one, and the transcript is still read at its other alternative;
+    the least-overhang rule kept the excluded one and lost the transcript."""
     em = _route(
         [[Hit((0,), start=1000, nm=1), Hit((0,), start=1020, exon_bp=99)]],
         mismatch_log_penalty=-math.inf,
@@ -1171,9 +1171,10 @@ def test_a_unit_the_intergenic_term_wins_is_stamped_intergenic_gdna():
 def test_the_annotated_bam_writes_a_multimapper_called_intergenic_at_no_one_place(
     toy_index, tmp_path
 ):
-    """Through the whole pipeline: a multimapper whose genic place fails ``--mismatch-alpha 0`` and whose intergenic one
-    does not is counted intergenic, never gated, and written ``ZF 0x25`` on every record with no hit marked the winning
-    placement (``ZH 1``): the call is the fragment's, at no one place, as a locus's gDNA winner's is."""
+    """Through the whole pipeline: in a library whose unique unspliced hits show no mismatch, a multimapper whose genic
+    place has one and whose intergenic one has none is counted intergenic, never gated, and written ``ZF 0x25`` on
+    every record with no hit marked the winning placement (``ZH 1``): the call is the fragment's, at no one place, as a
+    locus's gDNA winner's is."""
     from rigel.annotate import AF_GDNA_INTERGENIC
     from rigel.config import PipelineConfig
     from rigel.pipeline import run_pipeline
@@ -1188,12 +1189,9 @@ def test_the_annotated_bam_writes_a_multimapper_called_intergenic_at_no_one_plac
     result = run_pipeline(
         _write_bam(tmp_path, toy_index, records),
         toy_index,
-        PipelineConfig(
-            scan=BamScanConfig(total_threads=1),
-            scoring=FragmentScoringConfig(mismatch_alpha=0.0),
-            annotated_bam_path=annotated,
-        ),
+        PipelineConfig(scan=BamScanConfig(total_threads=1), annotated_bam_path=annotated),
     )
+    assert result.stats.mismatch_rate == 0.0
     assert result.stats.n_intergenic == 1 and result.stats.n_gated_out == 0
     with pysam.AlignmentFile(str(annotated), "rb", check_sq=False) as f:
         out = [r for r in f.fetch(until_eof=True) if r.query_name == "zz_case5"]

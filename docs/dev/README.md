@@ -24,11 +24,14 @@ Everything in this directory is provisional and nothing in it is settled.
 
 A stale dev doc is harmless. A dev doc that something else depends on is not.
 
-## What is here (2026-10-28)
+## What is here (2026-10-29)
 
-Two session documents, each with its starting prompt: the splice artifacts' (`SPLICE_ARTIFACTS.md`, the next issue in
-the tool's order: the problem, what changed since its design trail, the code today, what is measured, the open
-questions) and the strand frame's (`STRAND_FRAME.md`, paused 2026-10-27).
+One session document with its starting prompt: the strand frame's (`STRAND_FRAME.md`, paused 2026-10-27).
+
+The splice artifacts' session document was removed on 2026-10-29, its mechanism landed: the measurement is in
+`ISSUES: splicing-artifacts`, the derivation in `EQUATIONS.md` §16 and the ruling in `DESIGN.md` §3.1h. Its last
+version, with the measurement, the derivation and the A/B, is in `$RIGEL_RUNS/archive/docs_dev_2026-10-29/`; the one
+before them is `git show dd80711a:docs/dev/SPLICE_ARTIFACTS.md`.
 
 Every other note was removed on 2026-10-28, its campaign landed or superseded, and its settled findings already in the
 permanent docs: the owner's scope decisions of 2026-10-16/18 moved to `DESIGN.md` §1.0 that day. A tracked note is

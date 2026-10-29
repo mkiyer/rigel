@@ -91,6 +91,10 @@ class PipelineStats:
     n_nh_tag_missing: int = 0
     n_nh_tag_invalid: int = 0
 
+    # --- The library's mismatch rate, read on its unique unspliced hits: their NM, and the read bases they align ---
+    n_unique_unspliced_mismatches: int = 0
+    n_unique_unspliced_bases: int = 0
+
     # --- Hits that are not usable, by reason, and the templates left with none (no fragment, not intergenic) ---
     n_hits_rejected_missing_mate: int = 0  # one mate only: no fragment length at all
     n_hits_rejected_reference: int = 0  # the mates on two references
@@ -150,6 +154,13 @@ class PipelineStats:
     #: placements is censused once per placement and counted once. Those returns were a silent loss
     #: before this counter.
     n_deposit_not_offered: int = 0
+
+    @property
+    def mismatch_rate(self) -> float | None:
+        """NM per aligned read base over the unique unspliced hits; ``None`` when the library has none."""
+        if not self.n_unique_unspliced_bases:
+            return None
+        return self.n_unique_unspliced_mismatches / self.n_unique_unspliced_bases
 
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dictionary."""

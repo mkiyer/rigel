@@ -57,7 +57,7 @@ from .index import TranscriptIndex
 from .native import EM_WINNER_INTERGENIC
 from .native import BamScanner as _NativeBamScanner
 from .routing import FragmentRouter
-from .scoring import FragmentScorer
+from .scoring import build_scorer, sequence_log_penalties
 from .splice import SpliceType
 from .stats import PipelineStats
 from .strand_model import StrandModels
@@ -727,29 +727,29 @@ def _score_fragments(
     annotations,
     place_efficiencies=None,
 ) -> "ScoredFragments":
-    """Build FragmentScorer, route the buffer, and return ScoredFragments."""
-    ctx = FragmentScorer.from_models(
+    """Build the scorer, route the buffer, and return ScoredFragments. A hit's sequence is priced at the mismatch
+    rate the scan read on the library's unique unspliced hits."""
+    mismatch_log_penalty, clip_log_penalty = sequence_log_penalties(stats.mismatch_rate)
+    scorer = build_scorer(
         strand_models,
         rna_fl,
         gdna_fl,
         index,
         overhang_log_penalty=scoring.overhang_log_penalty,
-        mismatch_log_penalty=scoring.mismatch_log_penalty,
+        mismatch_log_penalty=mismatch_log_penalty,
+        clip_log_penalty=clip_log_penalty,
         pruning_min_posterior=scoring.pruning_min_posterior,
     )
-    builder = FragmentRouter(
-        ctx,
+    router = FragmentRouter(
+        scorer,
         estimator,
         stats,
         index,
         annotations=annotations,
         place_efficiencies=place_efficiencies,
     )
-    em_data = builder.route(buffer, log_every)
-
-    # The router and the scorer's parameters are no longer needed; routing consumed the buffer
-    del builder, ctx
-    return em_data
+    # routing consumes the buffer; the router and the scorer go with this frame
+    return router.route(buffer, log_every)
 
 
 def _assign_locus_ids(estimator: AbundanceEstimator, multi_loci: list) -> None:

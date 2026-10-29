@@ -1798,8 +1798,9 @@ the place's capture weight (§15.2), `Z_c` the component's normaliser `L̃_c` (�
 at: a transcript's candidate places, the locus gDNA component's gDNA-explainable places, and the background's
 intergenic places (§15.3). Two hits whose genomic extents overlap on one reference are alternative alignments of one
 molecule at one place, so the place takes the larger term, not the sum; a transcript's hits are chained by
-transcript, gDNA's by reference. Distinct places sum. A term at `−∞` (`α = 0` with `NM > 0`, or a length the law
-cannot produce) adds nothing, so it is skipped before the log-sum-exp and the order of the hits cannot matter.
+transcript, gDNA's by reference. Distinct places sum. A term at `−∞` (a mismatch in a library with none, §16.3, or a
+length the law cannot produce) adds nothing, so it is skipped before the log-sum-exp and the order of the hits cannot
+matter.
 
 For a unique fragment `w(p)` multiplies every candidate, RNA's and gDNA's, and cancels: the prunes compare
 log-likelihoods by difference, and the responsibilities are ratios. It is not applied, so a unique fragment scores as
@@ -1867,3 +1868,55 @@ its last update, so the background's reported mass is the posterior at `(θ̄, M
 the conditional log-likelihood, without the Poisson terms or the prior, so it is not this objective. The solver is held
 to plain iteration of these equations under both modes, with and without the prior
 (`test_the_em_reaches_the_reference_fixed_point`).
+
+## 16. A hit's sequence (`scoring.sequence_log_penalties`, `scoring.cpp`'s `score_mm_alignment`, the scan's `n_unique_unspliced_*`)
+
+### 16.1 Each base, aligned or clipped
+
+A hit's read bases are aligned (`M`, `=`, `X`, `I`) or soft-clipped. At the library's mismatch rate `ε` an aligned
+base reads its reference base with probability `1 − ε` and each of the three others with `ε/3`. A clipped base is
+placed nowhere: with no reference to read it against, it reads at the composition of the four bases, `¼`. Against a
+hit whose every base is aligned and matches, a hit's emission is
+
+    log e(p)  =  NM · log[ε / (3(1 − ε))]  +  clip · log[1 / (4(1 − ε))]
+
+with `NM` its edits and `clip` its soft-clipped bases, both mates'. A fragment's hits read the same bases, so the
+reference hit is common to them all. At the STAR rung's `ε = 0.0019` a mismatch costs 7.3 nats and a clipped base 1.4
+(`tests/test_hit_sequence.py` enumerates the emissions).
+
+### 16.2 One hit reads no sequence
+
+A fragment with one hit gives every candidate the same `e(p)`. It cancels from the responsibilities, which are ratios,
+and from every prune, which compares log-likelihoods by difference, so it is read only on a multimapper's hits, where
+it tells the places apart (§15.1).
+
+### 16.3 ε, read on the library
+
+`ε = Σ NM / Σ aligned bases` over the unique unspliced hits is the maximum-likelihood rate of the binomial each
+aligned base is. A spliced hit stays out, where the aligner cut being its own choice, and so does a multimapper, whose
+hits are the question the rate prices. A library with no mismatch makes one impossible (`−∞`): a mismatched place takes
+no part. A library with no unique unspliced base gives no price. A rate of `¾` or more would make a mismatch at least
+as likely as a match, and is refused.
+
+### 16.4 A spliced reading beside its contiguous one
+
+`S` is the spliced reading, its junctions annotated and held by transcript `T`; `C` is a contiguous reading the
+aligner reported beside it. `T` reads `S` (`C` would pay the overhang price at every intronic base); gDNA, the nascent
+span and an isoform retaining the intron read `C`. With a component's term its best hit at a place (§15.1),
+
+    P(gDNA | u) / P(T | u)  =  [θ_G / L̃_G · f(L_C) · ½ · e(C)]  /  [θ_T / L̃_T · f(L_S) · s_T(o) · e(S)]
+
+- **Where `C` aligns every base `S` aligns**, the readings differ only at the moved bases whose two references differ,
+  so `e(C)/e(S) = [ε/(3(1 − ε))]^(m_s − m_c)` and `NM_C − NM_S = m_s − m_c` (99.8 % of the STAR rung's full
+  alternatives). At an exact tie the emission ratio is 1 and the odds are density × strand × length: nothing in the
+  template says which origin it has, and the posterior split is the calibrated one.
+- **Where `C` clips `Δc` bases `S` aligns**, `e(C)/e(S)` gains `[1/(4(1 − ε))]^Δc`. Read against the reference, the
+  clipped bases' emission ratio is `[ε/(3(1 − ε))]^m`, `m` of them mismatching the contiguous reference. An aligner
+  scoring a match +1 and a mismatch −1 clips a tail only where its mismatches are at least its matches, `m ≥ Δc/2`, so
+  per base that is at most
+  `√(ε/(3(1 − ε)))`, below `¼` for every `ε` under 3/19: `¼` a base is a bound that can only favour `C`, the reading
+  gDNA can explain.
+- **More than one junction.** gDNA reads only a fully contiguous reading: anchored at one aligned segment, every other
+  segment moves across every intron between it and the anchor, so a tie at each junction alone says nothing about the
+  whole path. A partial reading, one junction kept and one undone, is RNA's alone: an isoform retaining that intron. The
+  aligner reports whole-fragment readings and the places weigh them as they come, so no per-junction rule is needed.

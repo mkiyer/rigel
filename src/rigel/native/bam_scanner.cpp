@@ -442,6 +442,10 @@ struct BamScanStats {
     SJTagCounts sj_tags;
     IntTagCounts nm_tag, nh_tag;
     int64_t n_nm_conflicting = 0;
+    // The library's mismatch rate, read on its unique unspliced hits: their NM, and the read bases they align. A
+    // junction's alignment is the aligner's choice of where to cut, and a multimapper's hits are the EM's question.
+    int64_t n_unique_unspliced_mismatches = 0;
+    int64_t n_unique_unspliced_bases = 0;
 
     // Hits that are not usable, by `HIT_*` reason; the templates left with none, by `WITHHELD_*` outcome; and the unpaired
     // ones by the furthest check any of their hits reached (`unpaired_reason`)
@@ -516,6 +520,8 @@ struct BamScanStats {
         nm_tag.merge(o.nm_tag);
         nh_tag.merge(o.nh_tag);
         n_nm_conflicting += o.n_nm_conflicting;
+        n_unique_unspliced_mismatches += o.n_unique_unspliced_mismatches;
+        n_unique_unspliced_bases += o.n_unique_unspliced_bases;
         for (int32_t v = 0; v < N_HIT_VERDICTS; v++) hits_rejected[v] += o.hits_rejected[v];
         for (int32_t w = 0; w < N_WITHHELD; w++) withheld[w] += o.withheld[w];
         for (int32_t v = 0; v < N_HIT_VERDICTS; v++) unpaired_reason[v] += o.unpaired_reason[v];
@@ -533,7 +539,10 @@ struct BamScanStats {
 struct AssembledFragment {
     std::vector<ExonBlock> exons;
     std::vector<IntronBlock> introns;
+    // Over the hit's records: their NM, the read bases they soft-clip, and the read bases they align (M, =, X and I)
     int32_t nm = 0;
+    int32_t clip = 0;
+    int32_t aligned = 0;
 
     int32_t genomic_footprint() const {
         if (exons.empty()) return -1;
@@ -904,8 +913,20 @@ static void observed_junctions(
               out.end());
 }
 
+/// The read bases a record aligns: its M operations (`canonical_cigar` merges = and X into them) and its insertions.
+static int32_t aligned_bases(const std::vector<uint32_t>& cigar)
+{
+    int32_t n = 0;
+    for (const uint32_t c : cigar) {
+        const int op = bam_cigar_op(c);
+        if (op == BAM_CMATCH || op == BAM_CINS) n += static_cast<int32_t>(bam_cigar_oplen(c));
+    }
+    return n;
+}
+
 /// A hit's records as one fragment: their aligned blocks merged per reference and strand, R2's strand flipped, so a
-/// block carries the fragment's strand; the hit's junctions (`observed_junctions`); and NM summed.
+/// block carries the fragment's strand; the hit's junctions (`observed_junctions`); and its sequence summed: NM, the
+/// soft-clipped bases and the aligned ones.
 static AssembledFragment build_fragment(
     const std::vector<ParsedAlignment*>& r1_reads,
     const std::vector<ParsedAlignment*>& r2_reads)
@@ -919,6 +940,8 @@ static AssembledFragment build_fragment(
             auto& blocks = exon_dict[(static_cast<int64_t>(rec->ref_id) << 32) | static_cast<uint32_t>(strand)];
             blocks.insert(blocks.end(), rec->exons.begin(), rec->exons.end());
             frag.nm += rec->nm;
+            frag.clip += rec->clip_lead + rec->clip_trail;
+            frag.aligned += aligned_bases(rec->cigar);
         }
     }
 
@@ -2067,6 +2090,10 @@ private:
             AssembledFragment frag;
             RawResolveResult cr;
             resolve_hit(hit, ctx, scratch, frag, cr);
+            if (is_unique_mapper && frag.introns.empty()) {
+                stats.n_unique_unspliced_mismatches += frag.nm;
+                stats.n_unique_unspliced_bases += frag.aligned;
+            }
 
             // Empty t_inds: an intergenic fragment. It is unspliced: a spliced hit the scan keeps has a transcript
             // holding its junctions (`hit_verdict`). Counted once all hits are seen, to count the template once.
@@ -2087,6 +2114,7 @@ private:
                 ResolvedFragment ig_result = ResolvedFragment::from_core(cr);
                 ig_result.num_hits = num_hits;
                 ig_result.nm = frag.nm;
+                ig_result.clip = frag.clip;
                 if (is_unique_mapper) {
                     accumulator.append(ig_result, frag_id);
                 } else {
@@ -2105,6 +2133,7 @@ private:
             ResolvedFragment result = ResolvedFragment::from_core(cr);
             result.num_hits = num_hits;
             result.nm = frag.nm;
+            result.clip = frag.clip;
 
             // For multimappers, count exon/splice/strand stats only
             // on the first resolved hit to avoid inflation.
@@ -2249,6 +2278,8 @@ private:
         stats_dict["n_nm_tag_missing"] = stats_.nm_tag.missing;
         stats_dict["n_nm_tag_invalid"] = stats_.nm_tag.invalid;
         stats_dict["n_nm_conflicting"] = stats_.n_nm_conflicting;
+        stats_dict["n_unique_unspliced_mismatches"] = stats_.n_unique_unspliced_mismatches;
+        stats_dict["n_unique_unspliced_bases"] = stats_.n_unique_unspliced_bases;
         stats_dict["n_nh_tag_missing"] = stats_.nh_tag.missing;
         stats_dict["n_nh_tag_invalid"] = stats_.nh_tag.invalid;
         for (int32_t v = HIT_USABLE + 1; v < N_HIT_VERDICTS; v++)

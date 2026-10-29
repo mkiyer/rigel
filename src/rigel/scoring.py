@@ -1,166 +1,105 @@
-"""rigel.scoring — scoring parameter assembly for the native scorer.
+"""rigel.scoring — the native fragment scorer, built from one run's models.
 
-The fragment-scoring math itself lives in the C++ extension
-(``src/rigel/native/scoring.cpp``).  This module only holds the
-``FragmentScorer`` builder, which gathers the trained strand /
-fragment-length models and index geometry into a single parameter
-bundle and hands them to a ``NativeFragmentScorer``. The alphas a user
-sets become log-penalties in ``FragmentScoringConfig``.
+The fragment-scoring math lives in the C++ extension (``src/rigel/native/scoring.cpp``). :func:`build_scorer` gathers
+what it reads — the trained strand and fragment-length models, the penalties and the index's transcript geometry —
+into one ``NativeFragmentScorer``, which ``rigel.routing.FragmentRouter`` drives over the buffer. A hit's sequence is
+priced at the library's own mismatch rate (:func:`sequence_log_penalties`).
 """
 
 import math
-from dataclasses import dataclass
 
 import numpy as np
 
 from .config import CONSTANTS, FragmentScoringConfig
 
 
-# ---------------------------------------------------------------------------
-# FragmentScorer — parameter bundle for the native scorer
-# ---------------------------------------------------------------------------
+#: A base is one of four.
+_N_BASES = 4
 
 
-@dataclass(frozen=True)
-class FragmentScorer:
-    """Pre-computed scoring parameters, built once per pipeline run.
+def sequence_log_penalties(mismatch_rate: float | None) -> tuple[float, float]:
+    """A hit's two sequence prices per base, each against an aligned base that matches: ``(mismatch, clip)``.
 
-    Bundles the trained strand / fragment-length models, penalty
-    parameters, and index geometry.  ``from_models`` assembles these into
-    a ``NativeFragmentScorer`` (the C++ scorer in ``scoring.cpp``) that
-    does the actual per-fragment scoring.
+    At the library's mismatch rate ε an aligned base reads its reference base with probability 1 − ε and each of the
+    three others with ε/3, while a soft-clipped base is placed nowhere and reads at the composition of the four bases,
+    ¼. So a mismatch costs log[ε / (3(1 − ε))] and a clipped base log[1 / (4(1 − ε))]
+    (``tests/test_hit_sequence.py`` enumerates the emissions). A library with no mismatch makes one impossible (−inf);
+    with no unique unspliced base to read ε on, a hit's sequence is not priced.
     """
-
-    # Strand model: RNA
-    log_p_sense: float
-    log_p_antisense: float
-    r1_antisense: bool  # True when R1-antisense protocol (p_sense < 0.5)
-
-    # Penalty parameters
-    overhang_log_penalty: float
-    mismatch_log_penalty: float
-
-    # Fragment-length LUT — RNA model (pre-finalized)
-    fl_log_prob: np.ndarray | None  # numpy array or None
-    fl_max_size: int
-    fl_tail_base: float
-
-    # Fragment-length LUT — gDNA model (pre-finalized)
-    gdna_fl_log_prob: np.ndarray | None
-    gdna_fl_max_size: int
-    gdna_fl_tail_base: float
-
-    # Index arrays (borrowed references, never copied)
-    t_strand_arr: np.ndarray  # int8[n_transcripts]
-    t_to_g: np.ndarray  # int32[n_transcripts]
-
-    # Transcript geometry used by RNA scoring.
-    t_length_arr: np.ndarray  # int32[n_transcripts] — spliced exonic length
-
-    @staticmethod
-    def from_models(
-        strand_models,
-        rna_fl,
-        gdna_fl,
-        index,
-        *,
-        overhang_log_penalty: float = FragmentScoringConfig().overhang_log_penalty,
-        mismatch_log_penalty: float = FragmentScoringConfig().mismatch_log_penalty,
-        pruning_min_posterior: float = FragmentScoringConfig.pruning_min_posterior,
-    ) -> "FragmentScorer":
-        """Build a FragmentScorer from trained models and index.
-
-        Parameters
-        ----------
-        strand_models : StrandModels
-        rna_fl : FragmentLengthModel
-            Finalised RNA fragment-length scoring model.
-        gdna_fl : FragmentLengthModel
-            Finalised gDNA fragment-length scoring model.
-        index : TranscriptIndex
-        overhang_log_penalty, mismatch_log_penalty : float
-            Log-penalty per base of overhang and per NM mismatch (``FragmentScoringConfig``'s defaults).
-        pruning_min_posterior : float
-            Minimum posterior threshold for candidate pruning.
-            Lower values are more conservative (keep more candidates).
-        """
-        rna_sm = strand_models.exonic_spliced
-        p_sense = rna_sm.p_r1_sense
-        p_antisense = rna_sm.p_r1_antisense
-
-        fl_log_prob = rna_fl._log_prob  # numpy array or None
-        fl_max_size = rna_fl.max_size
-        fl_tail_base: float = getattr(rna_fl, "_tail_base", 0.0)
-
-        gdna_fl_log_prob = gdna_fl._log_prob
-        gdna_fl_max_size = gdna_fl.max_size
-        gdna_fl_tail_base: float = getattr(gdna_fl, "_tail_base", 0.0)
-        # Per-transcript geometry arrays for RNA scoring.
-        t_length_arr = index.t_df["length"].values.astype(np.int32)
-
-        # Per-transcript exon CSR arrays for the coverage weight and the
-        # genomic→transcript coordinate mapping, built once by the index
-        # and cached there.
-        exon_offsets, exon_starts, exon_ends, exon_cumsum = index.build_exon_csr()
-
-        ctx = FragmentScorer(
-            log_p_sense=math.log(max(p_sense, CONSTANTS.scoring.strand_probability_floor)),
-            log_p_antisense=math.log(max(p_antisense, CONSTANTS.scoring.strand_probability_floor)),
-            r1_antisense=p_sense < 0.5,
-            overhang_log_penalty=overhang_log_penalty,
-            mismatch_log_penalty=mismatch_log_penalty,
-            fl_log_prob=fl_log_prob,
-            fl_max_size=fl_max_size,
-            fl_tail_base=fl_tail_base,
-            gdna_fl_log_prob=gdna_fl_log_prob,
-            gdna_fl_max_size=gdna_fl_max_size,
-            gdna_fl_tail_base=gdna_fl_tail_base,
-            t_strand_arr=index.t_to_strand_arr,
-            t_to_g=index.t_to_g_arr,
-            t_length_arr=t_length_arr,
+    if mismatch_rate is None:
+        return 0.0, 0.0
+    eps = float(mismatch_rate)
+    if not 0.0 <= eps < (_N_BASES - 1) / _N_BASES:
+        raise ValueError(
+            f"a mismatch rate of {eps:g} is no library's: at or past {(_N_BASES - 1) / _N_BASES:g} a mismatch is "
+            "at least as likely as a match"
         )
+    mismatch = math.log(eps / ((_N_BASES - 1) * (1.0 - eps))) if eps > 0.0 else -math.inf
+    return mismatch, -math.log(_N_BASES * (1.0 - eps))
 
-        # Build native C++ scoring context for hot-path acceleration.
-        # Cast arrays to exact dtypes expected by the C++ nanobind binding
-        # to tolerate callers (including test mocks) that provide int64 etc.
-        from .native import NativeFragmentScorer
 
-        # Pool-separated likelihood pruning: compute Δ = -log(ε)
-        _eps = max(pruning_min_posterior, CONSTANTS.scoring.pruning_floor)
-        max_ll_delta = -math.log(_eps) if _eps < 1.0 else 0.0
+def build_scorer(
+    strand_models,
+    rna_fl,
+    gdna_fl,
+    index,
+    *,
+    overhang_log_penalty: float = FragmentScoringConfig().overhang_log_penalty,
+    mismatch_log_penalty: float = 0.0,
+    clip_log_penalty: float = 0.0,
+    pruning_min_posterior: float = FragmentScoringConfig.pruning_min_posterior,
+):
+    """The run's ``NativeFragmentScorer``.
 
-        # The synthetic flag drives the scorer's pool separation: only rigel's
-        # synthetic spans form the span pool. An annotated single-exon transcript
-        # (``is_single_exon``), even one that covers a multi-exon transcript's span,
-        # is an annotated transcript and is pruned with them.
-        t_is_synthetic_arr = index.t_df["is_synthetic"].values.astype(np.uint8)
+    Parameters
+    ----------
+    strand_models : StrandModels
+    rna_fl, gdna_fl : FragmentLengthModel
+        The finalised RNA and gDNA fragment-length scoring models.
+    index : TranscriptIndex
+    overhang_log_penalty : float
+        Log-penalty per base of overhang (``FragmentScoringConfig``'s).
+    mismatch_log_penalty, clip_log_penalty : float
+        A multimapper's hit's sequence prices, per NM mismatch and per soft-clipped base
+        (:func:`sequence_log_penalties`); 0, the default, prices no sequence.
+    pruning_min_posterior : float
+        A candidate whose likelihood falls below this fraction of its pool's best is pruned.
+    """
+    from .native import NativeFragmentScorer
+
+    p_sense = strand_models.exonic_spliced.p_r1_sense
+    p_antisense = strand_models.exonic_spliced.p_r1_antisense
+    floor = CONSTANTS.scoring.strand_probability_floor
+    # Pool-separated likelihood pruning: Δ = -log(threshold)
+    threshold = max(pruning_min_posterior, CONSTANTS.scoring.pruning_floor)
+    # The coverage weight's exon CSR, built once by the index and cached there
+    exon_offsets, exon_starts, exon_ends, exon_cumsum = index.build_exon_csr()
+    t_df = index.t_df
+    return NativeFragmentScorer(
+        log_p_sense=math.log(max(p_sense, floor)),
+        log_p_antisense=math.log(max(p_antisense, floor)),
+        r1_antisense=bool(p_sense < 0.5),
+        overhang_log_penalty=float(overhang_log_penalty),
+        mismatch_log_penalty=float(mismatch_log_penalty),
+        clip_log_penalty=float(clip_log_penalty),
+        fl_log_prob=rna_fl._log_prob,
+        fl_max_size=int(rna_fl.max_size),
+        fl_tail_base=float(getattr(rna_fl, "_tail_base", 0.0)),
+        gdna_fl_log_prob=gdna_fl._log_prob,
+        gdna_fl_max_size=int(gdna_fl.max_size),
+        gdna_fl_tail_base=float(getattr(gdna_fl, "_tail_base", 0.0)),
+        t_strand_arr=np.ascontiguousarray(index.t_to_strand_arr, dtype=np.int8),
+        t_length_arr=np.ascontiguousarray(t_df["length"].values, dtype=np.int32),
+        exon_offsets=np.ascontiguousarray(exon_offsets, dtype=np.int32),
+        exon_starts=np.ascontiguousarray(exon_starts, dtype=np.int32),
+        exon_ends=np.ascontiguousarray(exon_ends, dtype=np.int32),
+        exon_cumsum=np.ascontiguousarray(exon_cumsum, dtype=np.int32),
+        # Only rigel's synthetic spans form the span pool; an annotated single-exon transcript is pruned with the
+        # annotated ones, even one covering a multi-exon transcript's span
+        t_is_synthetic_arr=np.ascontiguousarray(t_df["is_synthetic"].values, dtype=np.uint8),
         # Each transcript's reference, as a code: a multimapper's genic places are told apart on it
-        t_ref_arr = np.unique(index.t_df["ref"].astype(str).to_numpy(), return_inverse=True)[
-            1
-        ].astype(np.int32)
-
-        native_ctx = NativeFragmentScorer(
-            log_p_sense=float(ctx.log_p_sense),
-            log_p_antisense=float(ctx.log_p_antisense),
-            r1_antisense=bool(ctx.r1_antisense),
-            overhang_log_penalty=float(ctx.overhang_log_penalty),
-            mismatch_log_penalty=float(ctx.mismatch_log_penalty),
-            fl_log_prob=ctx.fl_log_prob,
-            fl_max_size=int(ctx.fl_max_size),
-            fl_tail_base=float(ctx.fl_tail_base),
-            gdna_fl_log_prob=ctx.gdna_fl_log_prob,
-            gdna_fl_max_size=int(ctx.gdna_fl_max_size),
-            gdna_fl_tail_base=float(ctx.gdna_fl_tail_base),
-            t_strand_arr=np.ascontiguousarray(ctx.t_strand_arr, dtype=np.int8),
-            t_length_arr=np.ascontiguousarray(ctx.t_length_arr, dtype=np.int32),
-            exon_offsets=np.ascontiguousarray(exon_offsets, dtype=np.int32),
-            exon_starts=np.ascontiguousarray(exon_starts, dtype=np.int32),
-            exon_ends=np.ascontiguousarray(exon_ends, dtype=np.int32),
-            exon_cumsum=np.ascontiguousarray(exon_cumsum, dtype=np.int32),
-            t_is_synthetic_arr=np.ascontiguousarray(t_is_synthetic_arr),
-            t_ref_arr=np.ascontiguousarray(t_ref_arr),
-            pruning_max_ll_delta=max_ll_delta,
-        )
-        object.__setattr__(ctx, "_native_ctx", native_ctx)
-
-        return ctx
+        t_ref_arr=np.ascontiguousarray(
+            np.unique(t_df["ref"].astype(str).to_numpy(), return_inverse=True)[1], dtype=np.int32
+        ),
+        pruning_max_ll_delta=-math.log(threshold) if threshold < 1.0 else 0.0,
+    )

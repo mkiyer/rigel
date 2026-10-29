@@ -209,7 +209,7 @@ def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noq
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
 #: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name;
 #: ``length_tables`` is the EM's two length tables and the decision behind them.
-SUMMARY_SCHEMA_VERSION = 7
+SUMMARY_SCHEMA_VERSION = 8
 
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
@@ -575,6 +575,14 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "sj_blacklist_size": bl_size,
         "sj_blacklist_loaded": bool(bl_size),
     }
+    # The library's mismatch rate, read on its unique unspliced hits (their NM over the read bases they align): the
+    # price of a multimapper's hit's mismatches and soft-clipped bases; null with no such hit
+    rate = stats.mismatch_rate
+    mismatch_rate = {
+        "rate": None if rate is None else round(rate, SUMMARY_DECIMALS),
+        "mismatches": stats.n_unique_unspliced_mismatches,
+        "bases": stats.n_unique_unspliced_bases,
+    }
 
     # Calibration section — library scalars only, never a per-region dict.
     cal = getattr(result, "calibration", None)
@@ -717,6 +725,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 "chimeric": stats.n_hits_rejected_chimeric,
             },
             "splice": splice_counts,
+            "mismatch_rate": mismatch_rate,
         },
         "strand_model": {
             "protocol": "R1-sense" if sm.read1_sense else "R1-antisense",
@@ -1050,7 +1059,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("tmpdir", "scan.spill_dir", "path_or_none"),
     # -- FragmentScoringConfig: transformed --
     _ParamSpec("overhang_alpha", "scoring.overhang_alpha"),
-    _ParamSpec("mismatch_alpha", "scoring.mismatch_alpha"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig: advanced --
     _ParamSpec("calib_refit_iters", "calibration.calib_refit_iters"),
@@ -1577,14 +1585,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help=f"Per-base overhang penalty alpha in [0,1] (default: {qd['overhang_alpha']:g}). "
-        "0 = hard gate, 1 = no penalty.",
-    )
-    adv.add_argument(
-        "--mismatch-alpha",
-        dest="mismatch_alpha",
-        type=float,
-        default=None,
-        help=f"Per-mismatch (NM tag) penalty alpha in [0,1] (default: {qd['mismatch_alpha']:g}). "
         "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(

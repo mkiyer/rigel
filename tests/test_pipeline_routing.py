@@ -25,7 +25,7 @@ from rigel.splice import SpliceType
 from rigel.config import EMConfig, FragmentScoringConfig, alpha_log_penalty
 from rigel.estimator import AbundanceEstimator
 from rigel.frag_length_model import FragmentLengthModel
-from rigel.scoring import FragmentScorer
+from rigel.scoring import build_scorer, sequence_log_penalties
 from rigel.routing import FragmentRouter
 from rigel.stats import PipelineStats
 from rigel.strand_model import StrandModel, StrandModels
@@ -42,8 +42,13 @@ class _BF:
     intron_bp: np.ndarray
     read_length: int
     nm: int = 0
+    clip: int = 0
     genomic_footprint: int = 200
     genomic_start: int = -1
+
+
+#: A multimapper's hit's sequence prices at a typical library's mismatch rate, per mismatch and per clipped base.
+MISMATCH_LP, CLIP_LP = sequence_log_penalties(0.002)
 
 
 class _Chunk:
@@ -62,6 +67,7 @@ class _Chunk:
         self.genomic_footprint = np.array([bf.genomic_footprint for bf in bfs], dtype=np.int32)
         self.genomic_start = np.array([bf.genomic_start for bf in bfs], dtype=np.int32)
         self.nm = np.array([bf.nm for bf in bfs], dtype=np.uint16)
+        self.clip = np.array([bf.clip for bf in bfs], dtype=np.uint16)
         self.size = n
 
         # CSR transcript indices (variable-length per fragment)
@@ -85,20 +91,22 @@ class _Chunk:
         self.exon_bp = np.array(flat_exon, dtype=np.uint16)
 
     def to_scoring_arrays(self):
-        return (
-            np.ascontiguousarray(self.t_offsets, dtype=np.int32),
-            np.ascontiguousarray(self.t_indices, dtype=np.int32),
-            np.ascontiguousarray(self.frag_lengths, dtype=np.int32),
-            np.ascontiguousarray(self.exon_bp, dtype=np.uint16),
-            np.ascontiguousarray(self.splice_type, dtype=np.uint8),
-            np.ascontiguousarray(self.align_strand, dtype=np.uint8),
-            np.ascontiguousarray(self.fragment_classes, dtype=np.uint8),
-            np.ascontiguousarray(self.frag_id, dtype=np.int64),
-            np.ascontiguousarray(self.read_length, dtype=np.uint16),
-            np.ascontiguousarray(self.genomic_footprint, dtype=np.int32),
-            np.ascontiguousarray(self.genomic_start, dtype=np.int32),
-            np.ascontiguousarray(self.nm, dtype=np.uint16),
+        dtypes = dict(
+            t_offsets=np.int32,
+            t_indices=np.int32,
+            frag_lengths=np.int32,
+            exon_bp=np.uint16,
+            splice_type=np.uint8,
+            align_strand=np.uint8,
+            fragment_classes=np.uint8,
+            frag_id=np.int64,
+            read_length=np.uint16,
+            genomic_footprint=np.int32,
+            genomic_start=np.int32,
+            nm=np.uint16,
+            clip=np.uint16,
         )
+        return {k: np.ascontiguousarray(getattr(self, k), dtype=t) for k, t in dtypes.items()}
 
 
 class _Buffer:
@@ -158,25 +166,27 @@ def _route_buffer(
     log_every=1_000_000,
     *,
     overhang_log_penalty=FragmentScoringConfig().overhang_log_penalty,
-    mismatch_log_penalty=FragmentScoringConfig().mismatch_log_penalty,
+    mismatch_log_penalty=MISMATCH_LP,
+    clip_log_penalty=CLIP_LP,
     annotations=None,
     fl=None,
 ):
-    """Build EM data from a buffer using FragmentScorer + FragmentRouter."""
+    """Build EM data from a buffer using the shipped scorer and FragmentRouter."""
     # Routing tests don't exercise FL scoring: pass unfinalized (empty) FL models
     # so the scorer's FL LUT is inert (_log_prob is None), matching the prior use
     # of the container's empty rna/gdna models. A test that must see the length term passes ``fl``.
     empty_fl = fl if fl is not None else FragmentLengthModel(max_size=max_frag_size)
-    ctx = FragmentScorer.from_models(
+    scorer = build_scorer(
         strand_models,
         empty_fl,
         empty_fl,
         index,
         overhang_log_penalty=overhang_log_penalty,
         mismatch_log_penalty=mismatch_log_penalty,
+        clip_log_penalty=clip_log_penalty,
     )
     builder = FragmentRouter(
-        ctx,
+        scorer,
         estimator,
         stats,
         index,
@@ -408,15 +418,13 @@ def test_route_counters_are_exclusive_per_unit():
 
 
 def test_nm_penalty_discriminates_multimapper_hits():
-    """Multimapper with different NM values → NM penalty produces different log-liks.
+    """A multimapper's hits with different NM → each mismatch costs its price, log[ε / (3(1 − ε))].
 
     Hit A: maps to t0 with NM=0 (perfect match)
-    Hit B: maps to t1 with NM=4 (4 mismatches)
+    Hit B: maps to t1 with NM=1, one mismatch, within the pruning bound (two would be past it)
     Both have identical geometry (oh=0), strand, fragment length.
     The NM penalty should make t0 score significantly higher than t1.
     """
-    import math
-
     index = _Index(
         t_to_g=[0, 1],
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
@@ -435,7 +443,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
         read_length=100,
         nm=0,
     )
-    # Hit B: maps to t1 with NM=4
+    # Hit B: maps to t1 with NM=1
     bf_b = _BF(
         t_inds=np.array([1], dtype=np.int32),
         splice_type=int(SpliceType.UNSPLICED),
@@ -444,7 +452,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
         exon_bp=np.array([100], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
         read_length=100,
-        nm=4,
+        nm=1,
     )
 
     chunk = _Chunk(
@@ -469,83 +477,45 @@ def test_nm_penalty_discriminates_multimapper_hits():
     mRNA_t = em.t_indices
     mRNA_ll = em.log_liks
     assert len(mRNA_t) == 2
-    # t0 (NM=0) should have higher log-lik than t1 (NM=4)
+    # t0 (NM=0) should have higher log-lik than t1 (NM=1)
     t0_idx = np.where(mRNA_t == 0)[0][0]
     t1_idx = np.where(mRNA_t == 1)[0][0]
-    # Default mismatch_alpha = 0.1 → log(0.1) ≈ -2.3 per mismatch
-    # 4 mismatches → Δ ≈ -9.2
+    # one mismatch at the price for ε = 0.002, −7.3 nats
     assert mRNA_ll[t0_idx] > mRNA_ll[t1_idx]
-    assert mRNA_ll[t0_idx] - mRNA_ll[t1_idx] == pytest.approx(
-        -4 * math.log(0.1),
-        abs=0.01,
-    )
+    assert mRNA_ll[t0_idx] - mRNA_ll[t1_idx] == pytest.approx(-MISMATCH_LP, abs=0.01)
 
 
-def test_nm_penalty_zero_when_disabled():
-    """With mismatch_alpha=1.0 (no penalty), NM has no effect on log-liks.
-
-    Two identical fragments differing only in NM should score identically.
-    """
+def test_a_one_hit_fragment_reads_no_sequence():
+    """One hit's mismatches and clipped bases are common to all its candidates and cancel: two fragments that differ
+    only in their hit's NM and soft clips score identically, the gDNA term included, at the shipped prices."""
     index = _Index(
         t_to_g=[0],
         t_to_strand=[int(Strand.POS)],
         g_to_strand=[int(Strand.POS)],
     )
-    strand_models, max_frag_size, estimator_a, stats_a = _make_env(index)
-    _, _, estimator_b, stats_b = _make_env(index)
+    strand_models, max_frag_size, _, _ = _make_env(index)
 
-    bf_nm0 = _BF(
-        t_inds=np.array([0], dtype=np.int32),
-        splice_type=int(SpliceType.UNSPLICED),
-        align_strand=int(Strand.POS),
-        frag_lengths=np.array([200], dtype=np.int32),
-        exon_bp=np.array([100], dtype=np.int16),
-        intron_bp=np.array([0], dtype=np.int16),
-        read_length=100,
-        nm=0,
-    )
-    bf_nm5 = _BF(
-        t_inds=np.array([0], dtype=np.int32),
-        splice_type=int(SpliceType.UNSPLICED),
-        align_strand=int(Strand.POS),
-        frag_lengths=np.array([200], dtype=np.int32),
-        exon_bp=np.array([100], dtype=np.int16),
-        intron_bp=np.array([0], dtype=np.int16),
-        read_length=100,
-        nm=5,
-    )
+    def routed(nm, clip):
+        bf = _BF(
+            t_inds=np.array([0], dtype=np.int32),
+            splice_type=int(SpliceType.UNSPLICED),
+            align_strand=int(Strand.POS),
+            frag_lengths=np.array([200], dtype=np.int32),
+            exon_bp=np.array([100], dtype=np.int16),
+            intron_bp=np.array([0], dtype=np.int16),
+            read_length=100,
+            nm=nm,
+            clip=clip,
+        )
+        _, _, estimator, stats = _make_env(index)
+        chunk = _Chunk(bfs=[bf], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
+        return _route_buffer(
+            _Buffer([chunk]), index, strand_models, max_frag_size, estimator, stats
+        )
 
-    # Run with mismatch_alpha=1.0 (disabled)
-    import math
-
-    mismatch_lp = math.log(1.0)  # = 0.0
-
-    chunk_a = _Chunk(bfs=[bf_nm0], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
-    chunk_b = _Chunk(bfs=[bf_nm5], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
-
-    em_a = _route_buffer(
-        _Buffer([chunk_a]),
-        index,
-        strand_models,
-        max_frag_size,
-        estimator_a,
-        stats_a,
-        log_every=1_000_000,
-        mismatch_log_penalty=mismatch_lp,
-    )
-    em_b = _route_buffer(
-        _Buffer([chunk_b]),
-        index,
-        strand_models,
-        max_frag_size,
-        estimator_b,
-        stats_b,
-        log_every=1_000_000,
-        mismatch_log_penalty=mismatch_lp,
-    )
-
-    # Log-liks should be identical since penalty is 0
-    assert em_a.log_liks[0] == pytest.approx(em_b.log_liks[0])
+    clean, dirty = routed(0, 0), routed(5, 7)
+    assert clean.log_liks.tolist() == dirty.log_liks.tolist()
+    assert clean.gdna_log_liks.tolist() == dirty.gdna_log_liks.tolist()
 
 
 # ── `--overhang-alpha 0` is a hard gate, not a NaN ─────────────────────────────────────────────────
@@ -623,12 +593,11 @@ def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_c
     assert em.log_liks[0] == default.log_liks[t0]
 
 
-@pytest.mark.parametrize("gate", ["mismatch", "overhang"])
-def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_routed_one(gate):
-    """At alpha 0 a mismatch or an overhang excludes a candidate outright. A fragment whose only candidate fails the
-    gate is dropped and counted as gated whatever its routing: the deterministic path, which assigns an unambiguous
-    annotated-spliced fragment without scoring it, read neither NM nor overhang, so the same mismatched fragment was
-    kept when deterministic and dropped when EM-routed."""
+def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_routed_one():
+    """At alpha 0 an overhang excludes a candidate outright. A fragment whose only candidate fails the gate is dropped
+    and counted as gated whatever its routing: the deterministic path, which assigns an unambiguous annotated-spliced
+    fragment without scoring it, once read no overhang, so the same fragment was kept when deterministic and dropped
+    when EM-routed."""
     index = _Index(
         t_to_g=[0],
         t_to_strand=[int(Strand.POS)],
@@ -640,15 +609,19 @@ def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_r
         splice_type=int(SpliceType.SPLICED_ANNOT),
         align_strand=int(Strand.POS),
         frag_lengths=np.array([200], dtype=np.int32),
-        exon_bp=np.array([90 if gate == "overhang" else 100], dtype=np.int16),
+        exon_bp=np.array([90], dtype=np.int16),
         intron_bp=np.array([0], dtype=np.int16),
         read_length=100,
-        nm=5 if gate == "mismatch" else 0,
     )
     chunk = _Chunk(bfs=[bf], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
-    penalty = {f"{gate}_log_penalty": alpha_log_penalty(0.0)}
     _route_buffer(
-        _Buffer([chunk]), index, strand_models, max_frag_size, estimator, stats, **penalty
+        _Buffer([chunk]),
+        index,
+        strand_models,
+        max_frag_size,
+        estimator,
+        stats,
+        overhang_log_penalty=alpha_log_penalty(0.0),
     )
     assert stats.deterministic_unambig_units == 0
     assert stats.n_gated_out == 1
@@ -785,8 +758,10 @@ def _hit(splice_type, footprint, t=0, nm=0):
 
 
 def _unspliced_term(footprint, nm=0, fl=None):
-    em, _ = _one_unit([_hit(SpliceType.UNSPLICED, footprint, nm=nm)], [FRAG_UNAMBIG], [1], fl=fl)
-    return float(em.gdna_log_liks[0])
+    """One place's gDNA term: the law at the footprint and ½, read off a unique unspliced fragment (one hit, whose
+    sequence is common to its candidates and not read), and the hit's mismatches at a multimapper's price."""
+    em, _ = _one_unit([_hit(SpliceType.UNSPLICED, footprint)], [FRAG_UNAMBIG], [1], fl=fl)
+    return float(em.gdna_log_liks[0]) + nm * MISMATCH_LP
 
 
 def _live_fl():
@@ -845,23 +820,23 @@ def test_the_gdna_term_is_the_unspliced_term_AT_THE_FOOTPRINT_whatever_the_label
 def test_a_multimapper_s_gdna_term_excludes_its_spliced_hit_and_keeps_its_reported_type():
     fl = _live_fl()
     em, _ = _one_unit(
-        [_hit(SpliceType.SPLICED_ANNOT, 400, t=0), _hit(SpliceType.UNSPLICED, 250, t=1, nm=2)],
+        [_hit(SpliceType.SPLICED_ANNOT, 400, t=0), _hit(SpliceType.UNSPLICED, 250, t=1, nm=1)],
         [FRAG_MULTIMAPPER] * 2,
         [7, 7],
         fl=fl,
     )
-    assert float(em.gdna_log_liks[0]) == pytest.approx(_unspliced_term(250, nm=2, fl=fl), abs=1e-5)
+    assert float(em.gdna_log_liks[0]) == pytest.approx(_unspliced_term(250, nm=1, fl=fl), abs=1e-5)
     assert em.splice_type[0] == SpliceType.SPLICED_ANNOT
 
 
 def test_a_multimapper_s_gdna_term_is_the_SUM_of_its_eligible_hits_terms():
     fl = _live_fl()
     a = _unspliced_term(300, nm=0, fl=fl)
-    b = _unspliced_term(300, nm=2, fl=fl)
+    b = _unspliced_term(300, nm=1, fl=fl)
     em, _ = _one_unit(
         [
             _hit(SpliceType.SPLICED_IMPLICIT, 300, t=0),
-            _hit(SpliceType.SPLICE_ARTIFACT, 300, t=1, nm=2),
+            _hit(SpliceType.SPLICE_ARTIFACT, 300, t=1, nm=1),
         ],
         [FRAG_MULTIMAPPER] * 2,
         [8, 8],
@@ -914,9 +889,9 @@ def test_an_ARTIFACT_whose_footprint_the_law_cannot_produce_is_pruned():
 def test_a_multimapper_s_gdna_sum_takes_every_eligible_hit_even_one_the_law_cannot_produce():
     fl = _live_fl()
     a = fl._log_prob[1000] + math.log(0.5)  # an IMPLICIT hit at 1,000 bp: the floor
-    b = _unspliced_term(250, nm=2, fl=fl)
+    b = _unspliced_term(250, nm=1, fl=fl)
     em, _ = _one_unit(
-        [_hit(SpliceType.SPLICED_IMPLICIT, 1000, t=0), _hit(SpliceType.UNSPLICED, 250, t=1, nm=2)],
+        [_hit(SpliceType.SPLICED_IMPLICIT, 1000, t=0), _hit(SpliceType.UNSPLICED, 250, t=1, nm=1)],
         [FRAG_MULTIMAPPER] * 2,
         [7, 7],
         fl=fl,

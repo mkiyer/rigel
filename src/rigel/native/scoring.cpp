@@ -167,12 +167,12 @@ class NativeFragmentScorer {
     // the penalty as 0; a candidate with any overhang is skipped, which is what the -inf would have done
     bool oh_gate_;
     double oh_log_pen_;
-    // `--mismatch-alpha 0` is a hard gate too, carried by the penalty on the EM path: nm * -inf is -inf
-    // (nm > 0), which prunes an RNA candidate and keeps a gDNA term from competing; a multimapper's sum over its
-    // places skips a -inf term, so the order of its hits cannot matter. The deterministic path, which scores
-    // nothing, reads the flag
-    bool mm_gate_;
-    double mm_log_pen_;
+    // A hit's sequence, each base against an aligned one that matches (`rigel.scoring.sequence_log_penalties`): per
+    // NM mismatch, and per soft-clipped read base. Read only on a multimapper's hits, which it tells apart; one hit's
+    // sequence is common to all its candidates and cancels. In a library with no mismatch a mismatch is -inf: the hit
+    // takes no part, and a multimapper's sum over its places skips the term, so the order of its hits cannot matter.
+    double mismatch_log_pen_;
+    double clip_log_pen_;
     int32_t fl_max_size_;
     double  fl_tail_base_;
     bool    has_fl_lut_;
@@ -291,7 +291,8 @@ public:
         double log_p_antisense,
         bool   r1_antisense,
         double oh_log_pen,
-        double mm_log_pen,
+        double mismatch_log_pen,
+        double clip_log_pen,
         nb::object fl_log_prob_obj,
         int32_t fl_max_size,
         double  fl_tail_base,
@@ -312,8 +313,8 @@ public:
         r1_antisense_(r1_antisense),
         oh_gate_(std::isinf(oh_log_pen) && oh_log_pen < 0.0),
         oh_log_pen_(std::isinf(oh_log_pen) && oh_log_pen < 0.0 ? 0.0 : oh_log_pen),
-        mm_gate_(std::isinf(mm_log_pen) && mm_log_pen < 0.0),
-        mm_log_pen_(mm_log_pen),
+        mismatch_log_pen_(mismatch_log_pen),
+        clip_log_pen_(clip_log_pen),
         fl_max_size_(fl_max_size),
         fl_tail_base_(fl_tail_base),
         has_fl_lut_(false),
@@ -400,6 +401,7 @@ private:
         const int32_t*  g_fp;
         const int32_t*  g_sta;
         const uint16_t* nm;
+        const uint16_t* clip;
         // The log capture weight of each row's place, applied to a multimapper's every candidate at that place;
         // nullptr reads 0 (a unique fragment's is common to its candidates and never applied).
         const float*    lw;
@@ -417,8 +419,9 @@ private:
         double  coverage_wt;
     };
 
-    // One key's term over all of a multimapper's hits, and what the unit records of its best hit.
-    struct MergedCandidate {
+    // A candidate's term — a transcript's (annotated or a synthetic span), or for gDNA a reference's — and what the
+    // unit records of it: one hit's, or a multimapper's over its hits, read at its best hit.
+    struct Candidate {
         int32_t key;
         double  log_lik;
         int32_t count_col;
@@ -428,7 +431,7 @@ private:
     // Each key's term is the SUM over its places, RNA's and gDNA's alike: hits whose extents overlap are alternatives
     // at one place and count once, at the best of them; distinct places add. A transcript's unit records the count
     // column and coverage weight of its best hit, the first in input order among equals. `terms` is sorted in place.
-    static void merge_places(std::vector<PlaceTerm>& terms, std::vector<MergedCandidate>& out) {
+    static void merge_places(std::vector<PlaceTerm>& terms, std::vector<Candidate>& out) {
         static constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
         out.clear();
         std::stable_sort(terms.begin(), terms.end(), [](const PlaceTerm& a, const PlaceTerm& b) {
@@ -457,7 +460,7 @@ private:
 
     // The log of the sum over every place of every key: gDNA's term, its keys the references its places are on.
     // `per_key` receives each key's own sum.
-    static double sum_over_places(std::vector<PlaceTerm>& terms, std::vector<MergedCandidate>& per_key) {
+    static double sum_over_places(std::vector<PlaceTerm>& terms, std::vector<Candidate>& per_key) {
         merge_places(terms, per_key);
         double lse_max = 0.0, lse_sum = 0.0;
         bool lse_has = false;
@@ -503,14 +506,14 @@ private:
         int64_t mm_fid;
         int     mm_n_members;
         std::vector<PlaceTerm> mm_terms;
-        std::vector<MergedCandidate> mm_merged;
+        std::vector<Candidate> mm_merged;
         int     mm_best_stype;
 
         // gDNA's terms at the places it can explain: at a place with a transcript candidate the locus's, merged over
         // places at the flush; at a place with none the intergenic term's, an online log-sum-exp (no reference is
         // known there, so each is its own place).
         std::vector<PlaceTerm> mm_gdna_terms;
-        std::vector<MergedCandidate> mm_gdna_merged;
+        std::vector<Candidate> mm_gdna_merged;
         double  mm_ig_lse_max;
         double  mm_ig_lse_sum;
         bool    mm_ig_lse_has;
@@ -545,6 +548,40 @@ private:
         }
     };
 
+    // Row `row`'s candidate entry `k`, annotated transcript or synthetic span alike: what it carries on its own, the
+    // strand, the fragment length the transcript implies and the overhang past its exons. A term the whole hit shares
+    // is the caller's. False when the entry is no candidate: no exonic base, or overhang at the overhang gate.
+    inline bool candidate_term(const ChunkPtrs& cp, int row, int64_t k, Candidate& c) const {
+        const int32_t t_idx = cp.t_ind[k];
+        const int32_t ebp = cp.e_bp[k];
+        if (ebp <= 0) return false;
+        const int rl = cp.r_len[row] > 0 ? static_cast<int>(cp.r_len[row]) : 1;
+        const int32_t oh = std::max(rl - ebp, 0);
+        if (oh_gate_ && oh > 0) return false;
+
+        const int exon_str = cp.e_str[row];
+        double log_strand = LOG_HALF;
+        bool is_anti = false;
+        if (exon_str == 1 || exon_str == 2) {
+            const bool same = exon_str == static_cast<int>(t_strand_[t_idx]);
+            log_strand = same ? log_p_sense_ : log_p_antisense_;
+            is_anti = same ? r1_antisense_ : !r1_antisense_;
+        }
+        const int32_t flen = cp.f_len[k];
+        const int32_t genomic_start = cp.g_sta[row];
+        c.key = t_idx;
+        c.log_lik = log_strand + frag_len_log_lik(flen) + oh * oh_log_pen_;
+        c.count_col = cp.s_type[row] * 2 + (is_anti ? 1 : 0);
+        c.coverage_wt = (genomic_start >= 0 && flen > 0) ? coverage_weight(genomic_start, flen, t_idx) : 1.0;
+        return true;
+    }
+
+    // gDNA's term at a hit, before any term the hit shares: the gDNA length law at its genomic footprint, and the ½
+    // of a strand it does not prefer.
+    inline double gdna_term(int32_t footprint) const {
+        return gdna_frag_len_log_lik(footprint) + LOG_HALF;
+    }
+
     // ---------------------------------------------------------------
     // score_mm_alignment — eagerly score one MM alignment
     // ---------------------------------------------------------------
@@ -563,20 +600,14 @@ private:
         int n_cand    = static_cast<int>(end - start);
 
         int stype    = cp.s_type[row];
-        int exon_str = cp.e_str[row];
-        int rl = cp.r_len[row] > 0
-               ? static_cast<int>(cp.r_len[row]) : 1;
-        int nm = cp.nm[row];
-        double log_nm = nm > 0 ? nm * mm_log_pen_ : 0.0;
-        bool has_strand  = (exon_str == 1 || exon_str == 2);
-        int genomic_start_val = cp.g_sta[row];
-        bool has_genomic = (genomic_start_val >= 0);
-        // The place's capture weight, on every candidate at it, RNA's and gDNA's alike.
+        // The hit's sequence and its place's capture weight, on every candidate at it, RNA's and gDNA's alike.
+        const int nm = cp.nm[row], clip = cp.clip[row];
+        const double log_seq = (nm > 0 ? nm * mismatch_log_pen_ : 0.0) + (clip > 0 ? clip * clip_log_pen_ : 0.0);
         const double log_w = cp.lw ? static_cast<double>(cp.lw[row]) : 0.0;
         // The hit's genomic extent, which tells a component's places apart.
         int32_t gfp_val = cp.g_fp[row];
-        const int32_t hit_start = genomic_start_val;
-        const int32_t hit_end = genomic_start_val + std::max(gfp_val, 1);
+        const int32_t hit_start = cp.g_sta[row];
+        const int32_t hit_end = hit_start + std::max(gfp_val, 1);
 
         // Update per-group metadata accumulators (the reported splice type only)
         if (stype == SPLICE_SPLICED_ANNOT) st.mm_best_stype = SPLICE_SPLICED_ANNOT;
@@ -584,11 +615,11 @@ private:
         // gDNA's term at this place, from every hit gDNA can explain (`gdna_can_explain`), SUMMED over the
         // places: the molecule came from one of them. A place with a transcript candidate is the locus's, on its
         // candidates' reference; a place with none is intergenic, in no locus, and its sum is the intergenic term.
-        // A term at -inf (the mismatch gate, or a length the law cannot produce) adds nothing, so it is skipped and
-        // the hits' order cannot matter. The EM applies each component's rate and length.
+        // A term at -inf (a mismatch in a library with none, or a length the law cannot produce) adds nothing, so it
+        // is skipped and the hits' order cannot matter. The EM applies each component's rate and length.
         if (gdna_can_explain(stype))
         {
-            double hit_log_ll = gdna_frag_len_log_lik(gfp_val) + LOG_HALF + log_nm + log_w;
+            double hit_log_ll = gdna_term(gfp_val) + log_seq + log_w;
             if (hit_log_ll > -std::numeric_limits<double>::infinity()) {
                 if (n_cand > 0)
                     st.mm_gdna_terms.push_back({t_ref_[cp.t_ind[start]], hit_start, hit_end, hit_log_ll, 0, 0.0});
@@ -601,43 +632,36 @@ private:
         ++st.mm_n_members;
 
         // Score every transcript candidate, annotated or the synthetic span
-        if (n_cand <= 0) return;
+        Candidate c;
+        for (int64_t k = start; k < end; ++k)
+            if (candidate_term(cp, row, k, c))
+                st.mm_terms.push_back({c.key, hit_start, hit_end, c.log_lik + log_seq + log_w, c.count_col,
+                                       c.coverage_wt});
+    }
 
-        for (int64_t k = start; k < end; ++k) {
-            int32_t t_idx = cp.t_ind[k];
-            int32_t ebp   = cp.e_bp[k];
-            if (ebp <= 0) continue;
-
-            int32_t oh = rl - ebp;
-            if (oh < 0) oh = 0;
-            if (oh_gate_ && oh > 0) continue;
-
-            int32_t flen = cp.f_len[k];
-            double log_fl = frag_len_log_lik(flen);
-
-            double log_strand;
-            bool is_anti;
-            if (has_strand) {
-                bool same = (exon_str ==
-                    static_cast<int>(t_strand_[t_idx]));
-                log_strand = same ? log_p_sense_
-                                 : log_p_antisense_;
-                is_anti = same ? r1_antisense_
-                              : !r1_antisense_;
-            } else {
-                log_strand = LOG_HALF;
-                is_anti = false;
-            }
-
-            double log_lik = log_strand + log_fl
-                           + oh * oh_log_pen_ + log_nm + log_w;
-            int32_t ct = stype * 2 + (is_anti ? 1 : 0);
-
-            double cov_wt = (has_genomic && flen > 0)
-                ? coverage_weight(genomic_start_val, flen, t_idx) : 1.0;
-
-            st.mm_terms.push_back({t_idx, hit_start, hit_end, log_lik, ct, cov_wt});
+    // A unit's candidates into its CSR, pruned by pool: annotated transcripts and synthetic spans are each kept within
+    // `max_ll_delta_` of their own pool's best. Returns the best kept term, -inf when none is kept.
+    double emit_pruned(const Candidate* c, int n, FillState& st) const {
+        static constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
+        double annotated_best = NEG_INF;
+        double synthetic_best = NEG_INF;
+        for (int j = 0; j < n; ++j) {
+            double& pool_best = t_is_synthetic_[c[j].key] ? synthetic_best : annotated_best;
+            pool_best = std::max(pool_best, c[j].log_lik);
         }
+        double best_ll = NEG_INF;
+        for (int j = 0; j < n; ++j) {
+            const double pool_best = t_is_synthetic_[c[j].key] ? synthetic_best : annotated_best;
+            if (pool_best - c[j].log_lik <= max_ll_delta_) {
+                st.v_ti->push_back(c[j].key);
+                st.v_ll->push_back(static_cast<float>(c[j].log_lik));
+                st.v_ct->push_back(static_cast<uint8_t>(c[j].count_col));
+                st.v_cw->push_back(static_cast<float>(c[j].coverage_wt));
+                ++st.cand_cur;
+                best_ll = std::max(best_ll, c[j].log_lik);
+            }
+        }
+        return best_ll;
     }
 
     // ---------------------------------------------------------------
@@ -663,35 +687,8 @@ private:
         if (st.mm_n_members == 0) return;
 
         merge_places(st.mm_terms, st.mm_merged);
-
-        // Pool-separated likelihood pruning: annotated transcripts (`annotated_best`) and synthetic spans
-        // (`synthetic_best`, by `t_is_synthetic_`) are each pruned against their own pool's best
-        double annotated_best = NEG_INF;
-        double synthetic_best = NEG_INF;
-        for (const auto& mc : st.mm_merged) {
-            if (t_is_synthetic_[mc.key])
-                synthetic_best = std::max(synthetic_best, mc.log_lik);
-            else
-                annotated_best = std::max(annotated_best, mc.log_lik);
-        }
-
-        int64_t emit_start = st.cand_cur;
-        double best_ll = NEG_INF;
-
-        for (const auto& mc : st.mm_merged) {
-            const int32_t t_idx = mc.key;
-            double pool_best = t_is_synthetic_[t_idx]
-                             ? synthetic_best : annotated_best;
-            if (pool_best - mc.log_lik <= max_ll_delta_) {
-                st.v_ti->push_back(t_idx);
-                st.v_ll->push_back(static_cast<float>(mc.log_lik));
-                st.v_ct->push_back(
-                    static_cast<uint8_t>(mc.count_col));
-                st.v_cw->push_back(static_cast<float>(mc.coverage_wt));
-                ++st.cand_cur;
-                if (mc.log_lik > best_ll) best_ll = mc.log_lik;
-            }
-        }
+        const int64_t emit_start = st.cand_cur;
+        const double best_ll = emit_pruned(st.mm_merged.data(), static_cast<int>(st.mm_merged.size()), st);
 
         // The group's two gDNA readings, each the sum over its places: the locus's, and the intergenic term no locus
         // carries. -inf where no place of the kind survived its gates.
@@ -747,7 +744,6 @@ private:
         const int N            = cp.N;
         const int32_t*  t_off  = cp.t_off;
         const int32_t*  t_ind  = cp.t_ind;
-        const int32_t*  f_len  = cp.f_len;
         const uint16_t* e_bp   = cp.e_bp;
         const uint8_t*  s_type = cp.s_type;
         const uint8_t*  e_str  = cp.e_str;
@@ -755,8 +751,6 @@ private:
         const int64_t*  f_id   = cp.f_id;
         const uint16_t* r_len  = cp.r_len;
         const int32_t*  g_fp   = cp.g_fp;
-        const int32_t*  g_sta  = cp.g_sta;
-        const uint16_t* nm_arr = cp.nm;
 
         for (int i = 0; i < N; ++i) {
             int fclass = fc[i];
@@ -797,10 +791,10 @@ private:
                 stype == SPLICE_SPLICED_ANNOT) {
                 int32_t t_idx = t_ind[start];
 
-                // The hard gates hold on this path too: at alpha 0 a mismatch, or an overhang past the one
-                // candidate's exons, excludes it, so the fragment is gated exactly as an EM-routed one would be
+                // The overhang gate holds on this path too: an overhang past the one candidate's exons excludes it,
+                // so the fragment is gated exactly as an EM-routed one would be
                 const int rl_det = r_len[i] > 0 ? static_cast<int>(r_len[i]) : 1;
-                if ((mm_gate_ && nm_arr[i] > 0) || (oh_gate_ && rl_det - e_bp[start] > 0)) {
+                if (oh_gate_ && rl_det - e_bp[start] > 0) {
                     ++stat_gated;
                     st.v_gated_fid->push_back(f_id[i]);
                     st.v_gated_fclass->push_back(static_cast<int8_t>(fclass));
@@ -835,93 +829,21 @@ private:
                 continue;
             }
 
-            // ---- EM-routed scoring ----
-            int rl = r_len[i] > 0 ? static_cast<int>(r_len[i]) : 1;
-            int nm = nm_arr[i];
-            double log_nm = nm > 0 ? nm * mm_log_pen_ : 0.0;
-            bool has_strand  = (exon_str == 1 || exon_str == 2);
-            int genomic_start = g_sta[i];
-            int genomic_footprint = g_fp[i];
-            bool has_genomic = (genomic_start >= 0);
-
-            int64_t emit_start = st.cand_cur;
-            double best_ll = NEG_INF;
-
-            // ===== candidate scoring: annotated transcripts and synthetic spans alike =====
-            struct ScoredCandidate {
-                int32_t t_idx, oh, ct;
-                double  log_lik, cov_wt;
-            };
-            ScoredCandidate scored_stack[SCORED_STACK_CAPACITY];
-            std::vector<ScoredCandidate> scored_heap;
-            ScoredCandidate* scored = scored_stack;
+            // ---- EM-routed scoring: one hit, so no sequence term (it would be common to every candidate) ----
+            // Every candidate, annotated transcript and synthetic span alike, then the pruned survivors into the unit
+            Candidate scored_stack[SCORED_STACK_CAPACITY];
+            std::vector<Candidate> scored_heap;
+            Candidate* scored = scored_stack;
             if (n_cand > SCORED_STACK_CAPACITY) {
                 scored_heap.resize(n_cand);
                 scored = scored_heap.data();
             }
             int n_scored = 0;
-
-            for (int64_t k = start; k < end; ++k) {
-                int32_t t_idx = t_ind[k];
-                int32_t ebp   = e_bp[k];
-                if (ebp <= 0) continue;
-
-                int32_t oh = rl - ebp;
-                if (oh < 0) oh = 0;
-                if (oh_gate_ && oh > 0) continue;
-
-                int32_t flen = f_len[k];
-                double log_fl = frag_len_log_lik(flen);
-
-                double log_strand;
-                bool is_anti;
-                if (has_strand) {
-                    bool same = (exon_str ==
-                        static_cast<int>(t_strand_[t_idx]));
-                    log_strand = same ? log_p_sense_
-                                     : log_p_antisense_;
-                    is_anti = same ? r1_antisense_
-                                  : !r1_antisense_;
-                } else {
-                    log_strand = LOG_HALF;
-                    is_anti = false;
-                }
-
-                double log_lik = log_strand + log_fl
-                               + oh * oh_log_pen_ + log_nm;
-                int32_t ct = stype * 2 + (is_anti ? 1 : 0);
-
-                double cov_wt = (has_genomic && flen > 0)
-                    ? coverage_weight(genomic_start, flen, t_idx) : 1.0;
-
-                scored[n_scored++] = {t_idx, oh, ct, log_lik, cov_wt};
-            }
-
-            // Pool-separated likelihood pruning: annotated transcripts (`annotated_best`) and synthetic spans
-            // (`synthetic_best`, by `t_is_synthetic_`) are each pruned against their own pool's best
-            double annotated_best = NEG_INF;
-            double synthetic_best = NEG_INF;
-            for (int j = 0; j < n_scored; ++j) {
-                if (t_is_synthetic_[scored[j].t_idx])
-                    synthetic_best = std::max(synthetic_best, scored[j].log_lik);
-                else
-                    annotated_best = std::max(annotated_best, scored[j].log_lik);
-            }
-
-            for (int j = 0; j < n_scored; ++j) {
-                auto& s = scored[j];
-                double pool_best = t_is_synthetic_[s.t_idx]
-                                 ? synthetic_best : annotated_best;
-                if (pool_best - s.log_lik <= max_ll_delta_) {
-                    st.v_ti->push_back(s.t_idx);
-                    st.v_ll->push_back(static_cast<float>(s.log_lik));
-                    st.v_ct->push_back(
-                        static_cast<uint8_t>(s.ct));
-                    st.v_cw->push_back(static_cast<float>(s.cov_wt));
-                    ++st.cand_cur;
-                    if (s.log_lik > best_ll) best_ll = s.log_lik;
-                }
-            }
+            Candidate c;
+            for (int64_t k = start; k < end; ++k)
+                if (candidate_term(cp, i, k, c)) scored[n_scored++] = c;
+            const int64_t emit_start = st.cand_cur;
+            const double best_ll = emit_pruned(scored, n_scored, st);
 
             // ---- Finalize this EM unit ----
             int64_t new_cands = st.cand_cur - emit_start;
@@ -939,7 +861,7 @@ private:
                 double gdna_ll = 0.0;
                 bool has_gdna = false;
                 if (gdna_can_explain(stype)) {
-                    gdna_ll = gdna_frag_len_log_lik(genomic_footprint) + LOG_HALF + log_nm;
+                    gdna_ll = gdna_term(g_fp[i]);
                     has_gdna = gdna_competes(gdna_ll, best_ll);
                 }
                 // "spliced" = gDNA is no candidate: certified RNA.
@@ -1087,27 +1009,30 @@ public:
     StreamingScorer(const StreamingScorer&) = delete;
     StreamingScorer& operator=(const StreamingScorer&) = delete;
 
-    void score_chunk(nb::tuple chunk_arrays) {
+    // One chunk's arrays, by name (`_FinalizedChunk.to_scoring_arrays`); `log_weight`, each row's place weight, is
+    // optional and reads 0.
+    void score_chunk(nb::dict arrays) {
         if (finished_)
             throw std::runtime_error(
                 "StreamingScorer: score_chunk called after finish");
 
         NativeFragmentScorer::ChunkPtrs cp{};
-        cp.t_off  = nb::cast<i32_1d>(chunk_arrays[0]).data();
-        cp.t_ind  = nb::cast<i32_1d>(chunk_arrays[1]).data();
-        cp.f_len  = nb::cast<i32_1d>(chunk_arrays[2]).data();
-        cp.e_bp   = nb::cast<u16_1d>(chunk_arrays[3]).data();
-        cp.s_type = nb::cast<u8_1d>(chunk_arrays[4]).data();
-        cp.e_str  = nb::cast<u8_1d>(chunk_arrays[5]).data();
-        cp.fc     = nb::cast<u8_1d>(chunk_arrays[6]).data();
-        cp.f_id   = nb::cast<i64_1d>(chunk_arrays[7]).data();
-        cp.r_len  = nb::cast<u16_1d>(chunk_arrays[8]).data();
-        cp.g_fp   = nb::cast<i32_1d>(chunk_arrays[9]).data();
-        cp.g_sta  = nb::cast<i32_1d>(chunk_arrays[10]).data();
-        cp.nm     = nb::cast<u16_1d>(chunk_arrays[11]).data();
-        cp.lw     = nb::len(chunk_arrays) > 12 ? nb::cast<f32_1d>(chunk_arrays[12]).data() : nullptr;
+        cp.t_off  = nb::cast<i32_1d>(arrays["t_offsets"]).data();
+        cp.t_ind  = nb::cast<i32_1d>(arrays["t_indices"]).data();
+        cp.f_len  = nb::cast<i32_1d>(arrays["frag_lengths"]).data();
+        cp.e_bp   = nb::cast<u16_1d>(arrays["exon_bp"]).data();
+        cp.s_type = nb::cast<u8_1d>(arrays["splice_type"]).data();
+        cp.e_str  = nb::cast<u8_1d>(arrays["align_strand"]).data();
+        cp.fc     = nb::cast<u8_1d>(arrays["fragment_classes"]).data();
+        cp.f_id   = nb::cast<i64_1d>(arrays["frag_id"]).data();
+        cp.r_len  = nb::cast<u16_1d>(arrays["read_length"]).data();
+        cp.g_fp   = nb::cast<i32_1d>(arrays["genomic_footprint"]).data();
+        cp.g_sta  = nb::cast<i32_1d>(arrays["genomic_start"]).data();
+        cp.nm     = nb::cast<u16_1d>(arrays["nm"]).data();
+        cp.clip   = nb::cast<u16_1d>(arrays["clip"]).data();
+        cp.lw     = arrays.contains("log_weight") ? nb::cast<f32_1d>(arrays["log_weight"]).data() : nullptr;
         cp.N      = static_cast<int>(
-            nb::cast<u8_1d>(chunk_arrays[4]).shape(0));
+            nb::cast<u8_1d>(arrays["splice_type"]).shape(0));
 
         scorer_.score_chunk_impl(
             cp, st_,
@@ -1180,7 +1105,7 @@ NB_MODULE(_scoring_impl, m) {
 
     nb::class_<NativeFragmentScorer>(m, "NativeFragmentScorer")
         .def(nb::init<
-                 double, double, bool, double, double,
+                 double, double, bool, double, double, double,
                  nb::object, int32_t, double,
                  nb::object, int32_t, double,
                  i8_1d, i32_1d,
@@ -1191,6 +1116,7 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("r1_antisense"),
              nb::arg("overhang_log_penalty"),
              nb::arg("mismatch_log_penalty"),
+             nb::arg("clip_log_penalty"),
              nb::arg("fl_log_prob").none(),
              nb::arg("fl_max_size"),
              nb::arg("fl_tail_base"),
@@ -1218,7 +1144,7 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("unambig_counts"))
         .def("score_chunk",
              &StreamingScorer::score_chunk,
-             nb::arg("chunk_arrays"))
+             nb::arg("arrays"))
         .def("finish",
              &StreamingScorer::finish);
 

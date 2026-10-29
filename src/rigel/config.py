@@ -111,36 +111,33 @@ class EMConfig:
 class FragmentScoringConfig:
     """Configuration for fragment scoring penalties.
 
+    A hit's sequence is priced by the library itself, never by a setting: its mismatches and the read bases it clips,
+    each against an aligned base that matches, at the mismatch rate the scan reads on the unique unspliced hits
+    (``rigel.scoring.sequence_log_penalties``).
+
     Parameters
     ----------
     overhang_alpha : float
         The probability kept per base of overhang, in [0, 1]: the default 0.1 cuts each base's likelihood 10×, 1 is
         no penalty, and 0 is a hard gate that excludes any candidate with overhang. Its log is the scorer's
         per-base log-penalty (:attr:`overhang_log_penalty`, −inf at the gate).
-    mismatch_alpha : float
-        The same, per NM mismatch (:attr:`mismatch_log_penalty`).
     pruning_min_posterior : float
         A candidate whose likelihood falls below this fraction of its fragment's best is pruned, in [0, 1): at 1 a
         fragment would keep only its tied-best candidates.
     """
 
     overhang_alpha: float = 0.1
-    mismatch_alpha: float = 0.1
     pruning_min_posterior: float = 1e-4
 
     def __post_init__(self):
-        for name in ("overhang_alpha", "mismatch_alpha"):
-            value = getattr(self, name)
-            # NaN fails both comparisons; a bool is an int to Python but never an alpha
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not 0.0 <= value <= 1.0
-            ):
-                raise ValueError(
-                    f"--{name.replace('_', '-')} must be a number in [0, 1], got {value!r}"
-                )
-        # NaN fails both comparisons; a bool is an int to Python but never a threshold
+        # NaN fails both comparisons; a bool is an int to Python but never an alpha or a threshold
+        value = self.overhang_alpha
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0.0 <= value <= 1.0
+        ):
+            raise ValueError(f"--overhang-alpha must be a number in [0, 1], got {value!r}")
         value = self.pruning_min_posterior
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.0 <= value < 1.0:
             raise ValueError(f"--pruning-min-posterior must be a number in [0, 1), got {value!r}")
@@ -149,11 +146,6 @@ class FragmentScoringConfig:
     def overhang_log_penalty(self) -> float:
         """``log(overhang_alpha)``: the per-base log-penalty, −inf at the hard gate."""
         return alpha_log_penalty(self.overhang_alpha)
-
-    @property
-    def mismatch_log_penalty(self) -> float:
-        """``log(mismatch_alpha)``: the per-mismatch log-penalty, −inf at the hard gate."""
-        return alpha_log_penalty(self.mismatch_alpha)
 
 
 def alpha_log_penalty(alpha: float) -> float:

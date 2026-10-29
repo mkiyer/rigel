@@ -69,6 +69,7 @@ public:
     int32_t read_length = 0;
     int32_t num_hits = 1;
     int32_t nm = 0;
+    int32_t clip = 0;  // the hit's soft-clipped read bases, over its records
 
     // Leftmost ANNOTATED sj (ref, start, end); -1 when the fragment
     // crosses none.  With `sj_strand` this is the per-sj strand
@@ -209,6 +210,7 @@ public:
     std::vector<int32_t>  genomic_footprint_;
     std::vector<int32_t>  genomic_start_;
     std::vector<uint16_t> nm_;
+    std::vector<uint16_t> clip_;
     // Each row's place masses, CSR: the deposit rule's mass at every object (region, boundary or sj, flat ids) a
     // multimapper's genic place deposits on, which its capture weight reads. Empty on every other row.
     std::vector<int64_t>  place_offsets_;
@@ -243,6 +245,7 @@ public:
         genomic_footprint_.reserve(n_fragments);
         genomic_start_.reserve(n_fragments);
         nm_.reserve(n_fragments);
+        clip_.reserve(n_fragments);
         t_indices_.reserve(n_candidates);
         t_offsets_.reserve(n_fragments + 1);
         frag_lengths_.reserve(n_candidates);
@@ -272,6 +275,7 @@ public:
         genomic_footprint_.push_back(r.genomic_footprint);
         genomic_start_.push_back(r.genomic_start);
         nm_.push_back(checked_u16_buffer_value(r.nm, "nm"));
+        clip_.push_back(checked_u16_buffer_value(r.clip, "clip"));
         place_offsets_.push_back(static_cast<int64_t>(place_kind_.size()));
         size_++;
     }
@@ -298,6 +302,7 @@ public:
         result["genomic_footprint"] = vec_to_ndarray(std::move(genomic_footprint_));
         result["genomic_start"]     = vec_to_ndarray(std::move(genomic_start_));
         result["nm"]                = vec_to_ndarray(std::move(nm_));
+        result["clip"]              = vec_to_ndarray(std::move(clip_));
         result["place_offsets"]     = vec_to_ndarray(std::move(place_offsets_));
         result["place_kind"]        = vec_to_ndarray(std::move(place_kind_));
         result["place_index"]       = vec_to_ndarray(std::move(place_index_));

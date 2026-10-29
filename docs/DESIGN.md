@@ -789,7 +789,7 @@ intergenic hits after its genic ones. The rulings that fixed the form (owner, 20
 - **The background's mass is intergenic gDNA** in `summary.json` (`count_gdna − count_gdna_em`), never in the loci
   table. A unit it wins is stamped `ZF 0x25` on every record and none `ZH 1`, since a sum over places names no place.
 
-A multimapper whose genic places all fail their gates (a zero place weight, `--mismatch-alpha 0`) beside a surviving
+A multimapper whose genic places all fail (a zero place weight, or a mismatch in a library with none, §3.1h) beside a surviving
 intergenic one is intergenic gDNA, counted with the templates no hit of which resolves (`fragment_stats.intergenic`);
 one with no surviving place is gated.
 
@@ -828,12 +828,68 @@ multimapper, the result is the previous tree's bit for bit on the four condition
 each fl-gap panel). On the VCaP mix (pinned and fractional) gDNA reads 0.2576 against its read-name truth 0.2518
 (0.2569 before) and genes sit 2.252 % from its RNA-only half (2.277 %): stable, not improved. The EM's default budget
 suffices: converged, the background's mass at g98 capture-ON moves 0.14 of 132,589 fragments. Gates: `tests/test_multimapper_places.py` (the owner's five cases on hand-built records; the sum
-against the per-place terms in every hit order at `α = 0`; overlapping and distinct places for a transcript and for
+against the per-place terms in every hit order in a library with no mismatch; overlapping and distinct places for a transcript and for
 gDNA; the background never pruned and unmoved by a common scaling; an independent plain-iteration reference of
 `(θ, M)` matched under MAP and VBEM, with and without the prior; the accounting across a chunk boundary, a spill to
 disk and the annotated BAM) and the place weights' sum over the native deposit
 (`tests/calibration/test_capture_eff_length.py`). Instruments: `$RIGEL_RUNS/prototypes/2026-10-27_mm_intergenic/`
 (`ab/strata.py`, `ab/qa_rate0.py`, `measure/repeat_places.py`).
+
+### 3.1h A multimapper's hits are told apart by their sequence, at the library's own mismatch rate (owner, 2026-10-29)
+
+> **A hit's read bases are aligned or soft-clipped. At the library's mismatch rate `ε` — NM over the read bases its
+> unique unspliced hits align, read by the scan — every candidate at a multimapper's hit carries that hit's sequence,
+> against a base aligned and matching: `NM · log[ε / (3(1 − ε))] + clip · log[1 / (4(1 − ε))]`, each mismatch at its
+> probability and each clipped base at the composition of the four bases. A one-hit fragment reads neither: its
+> sequence is common to every candidate and cancels.** (`scoring.sequence_log_penalties`, `scoring.cpp`'s
+> `score_mm_alignment`, the scan's `n_unique_unspliced_mismatches` and `n_unique_unspliced_bases`; the derivation is
+> `EQUATIONS.md` §16.)
+
+It replaced `mismatch_alpha`, an underived 0.1 on every hit (2.3 nats a mismatch against 7.3 at the STAR rung's
+`ε = 0.0019`), and a soft clip the scorer priced at nothing. The rulings:
+- **A multimapper's hits only.** One hit's sequence cancels, so reading it there would change nothing but the rounding
+  of every unique fragment's likelihood.
+- **`ε` is the library's**, reported in `summary.json`'s `fragment_stats.mismatch_rate`. No unique unspliced base gives
+  no price; `ε = 0` makes a mismatch impossible, so a mismatched place takes no part; a rate of `¾` or more is refused.
+  `--mismatch-alpha` and its gate are gone.
+- **The second pass's draw does not read it yet**: its own arm (`ISSUES: the-second-pass-corrections`).
+
+**Why.** The splice artifacts (`ISSUES: splicing-artifacts`). At the recommended STAR settings a spliced gDNA template
+comes with its contiguous reading (all but 2 of 23,739 on the STAR rung), and the EM's split of an exact tie is
+calibrated (0.98–1.21 times the gDNA truly among them, in scope). A genuine short anchor's contiguous reading clips the
+bases it cannot place, and with the clip free it read as a false tie: 99.96 % of the 228,148 clipped alternatives were
+genuine RNA, carrying 68–77 % of the RNA put in gDNA through a spliced hit wherever the library held gDNA. `¼` a base is
+a bound that can only favour the contiguous reading, the one gDNA can explain (`EQUATIONS.md` §16.4).
+
+**Measured** on the STAR rung (16 conditions, pinned and fractional, scored against the read names; Σ|error| over
+g05–g98 per stratum), the prototype against the tree before it (`dd80711a`):
+
+| stratum | transcripts | genes | gDNA called RNA | RNA called gDNA |
+|---|---:|---:|---:|---:|
+| unstranded × OFF | ×0.986 | ×0.975 | 908,865 → 907,564 | 856,344 → 854,582 |
+| stranded × OFF | ×0.983 | ×0.964 | 504,440 → 503,692 | 614,301 → 613,422 |
+| stranded × ON | ×0.991 | ×0.991 | 662,269 → 663,115 | 780,606 → 778,387 |
+| unstranded × ON (deferred) | ×0.994 | ×0.999 | 3,391,382 → 3,388,206 | 839,428 → 837,068 |
+
+- The clip leaves 16–20 % of the clipped alternatives' RNA in gDNA at g05–g50 and 24–49 % at g98, as a one-step
+  estimate from the measured posteriors predicted.
+- The mismatch price sends unspliced gDNA multimappers to the copy their sequence matches (219–738 fewer gDNA fragments
+  called RNA a condition at g05–g50) and carries the gene gain, to ×0.949 at g00 unstranded × OFF.
+- THE RECORDED REGRESSION: gDNA called RNA rises at g98 stranded × ON, 51,682 → 53,346 (+3.2 %), while the transcripts
+  and genes there improve (×0.996, ×0.995). With every capture efficiency at 1 the same change cuts it by 779, so it is
+  the reader's amplification (`ISSUES: the-reader-reads-false-gdna-as-capture`); the weak-strand flips repeat it at g98
+  only, and gain ×0.992–0.996 on transcripts.
+- The landed tree reproduces the prototype within 0.0005 of every stratum's ratios and 8 fragments of every
+  condition's gDNA called RNA. On the simulator's alignments, which hold no multimapper, the prototype was the previous
+  tree's bit for bit (two ladder rows, one row of each fl-gap panel); the landed tree moves there only through
+  rounding, the one-hit mismatch term it no longer carries and the pruning-bound ties
+  (`ISSUES: scoring-penalties-are-underived-constants`): transcripts ×0.9986–1.0037 and genes ×0.9993–1.0047, isoforms
+  of equal evidence trading up to 529 fragments.
+
+Gates: `tests/test_hit_sequence.py` (the prices against an enumeration of the emissions; the clips at both ends of both
+mates; the rate on the unique unspliced hits alone, `M` and `I` counted; a multimapper's hits apart by their prices; the
+pipeline's prices from the scan's rate) and `tests/test_pipeline_routing.py` (a one-hit fragment reads no sequence).
+Instruments: `$RIGEL_RUNS/prototypes/2026-10-28_splice_bc/` (`ab.py`, `report.md`) and `2026-10-29_splice_land/`.
 
 ### 3.2 One strand convention
 
