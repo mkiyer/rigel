@@ -181,8 +181,8 @@ starts at the index.
    its calibrated posterior), and the mechanism landed 2026-10-29: a multimapper's hits priced by their sequence at the
    library's own mismatch rate (`DESIGN.md` §3.1h), and the second pass's draw reads the same prices (§4.4). Left: the
    VCaP mix at the recommended settings on the cluster, at the release candidate.
-4. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
-   caches calibration is measured on date from 2026-10-16/17.
+4. DONE (2026-10-29): every panel re-cached with `--force` on the second pass's draw (the ladder, both fl-gap panels,
+   the test chromosome; `preflight.py --full` clean), and the identity references re-frozen (`TESTING.md` §6).
 
 **The accumulator.**
 5. DONE (2026-10-29): `ISSUES: the-second-pass-corrections`: the draw reads the EM's emission, with gDNA's floor
@@ -233,8 +233,8 @@ starts at the index.
 
 **Later**, each with its entry, in the tool's order. The index: `ISSUES: overlapping-synthetic-shadows`. The scan:
 `ISSUES: fragments-that-fit-one-gene-but-no-transcript` · `ISSUES: the-tail-rule-waits-for-truth`. The accumulator:
-`ISSUES: drain-contaminates-certified-rna` · `ISSUES: draw-clamp-can-pick-a-zero` ·
-`ISSUES: second-pass-geometry-in-python`. Calibration: `ISSUES: strand-overdispersion-one-shared-value` ·
+`ISSUES: drain-contaminates-certified-rna` · `ISSUES: second-pass-geometry-in-python` ·
+`ISSUES: the-draw-reads-unique-traffic`. Calibration: `ISSUES: strand-overdispersion-one-shared-value` ·
 `ISSUES: the-fl-boundary-inversion-reads-missing-evidence-as-a-value` ·
 `ISSUES: the-fl-boundary-inversion-has-underived-pieces` · `ISSUES: capture-blind-gdna-divisor` ·
 `ISSUES: eb-shrinkage-magic-ess` · `ISSUES: intron-seeds-near-probes-are-capture-enriched` ·
@@ -249,7 +249,7 @@ starts at the index.
 `ISSUES: nascent-stress-sensitivity` · `ISSUES: expand-the-gdna-spectrum` ·
 `ISSUES: capture-probes-on-dropped-duplicates` · `ISSUES: simulated-errors-redraw-the-base`. The instruments:
 `ISSUES: debug-capture-memory-is-unbounded`. Across the stages: `ISSUES: performance-memory-bounded-solve` ·
-`ISSUES: hygiene-ledger`.
+`ISSUES: hygiene-ledger` · `ISSUES: rna-under-called-at-high-gdna-off-capture`.
 
 **Parked — Tier 5**, each with its entry: `ISSUES: a-pure-gdna-library-reads-as-nascent-rna` ·
 `ISSUES: capture-premise-untested-on-cdna` · `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` ·
