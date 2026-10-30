@@ -26,7 +26,8 @@ A stale dev doc is harmless. A dev doc that something else depends on is not.
 
 ## What is here (2026-10-29)
 
-One session document with its starting prompt: the strand frame's (`STRAND_FRAME.md`, paused 2026-10-27).
+Two session documents, each with its starting prompt: the capture reader's (`CAPTURE_READER.md`, written 2026-10-29
+for the next session) and the strand frame's (`STRAND_FRAME.md`, paused 2026-10-27).
 
 The second pass's draw's session document was removed on 2026-10-29, its design landed: the ruling and the A/B are
 `DESIGN.md` §4.4, the derivation `EQUATIONS.md` §10, the refusal `ISSUES: the-draws-placement-share`. Its last

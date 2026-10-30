@@ -288,19 +288,30 @@ hits priced by their sequence (2026-10-29, `DESIGN.md` §3.1h), which moves gDNA
 at 1). So a scan or scoring change is judged with the efficiencies at 1 beside the shipped run until this is fixed.
 The reader reads each object's deconvolved gDNA mass as a point Poisson count, whatever the deconvolution's own
 uncertainty; on the simulator's alignments the efficiencies stay at 1 in every condition here.
-THE PLANNED FIX (2026-10-19), for after the splice-artifact waves (owner: stay on the wave plan; the reader took many
-iterations to reach): the reader reads each object's gDNA through calibration's own posterior for it, ψ's
-`Var(log f_g)` (`var_gdna`), instead of as a point count, so an object whose gDNA the solve cannot locate reads the
-prior, the bulk, while located enrichment still reads. Per object and continuous, with no detector, so DESIGN §7.2's
-ruling stands. A probe on the STAR panel: true capture is located (g50 κ0.99 capture-ON, 6,679 objects above 10×:
-median 0.013 nat², 5 % above 1 nat²); the false enrichment mostly is not (g00, 486 objects above 10×: median 9.7 nat²,
-80 % above 1), nor the false depletion (g05, 414 objects below 0.5×: unbounded, 92 % above 1). Not reached by it:
-located false gDNA (g05's 14 objects above 10×, median 0.14 nat²). The order: the derivation in EQUATIONS §11, a
-prototype outside src, then the A/B; its bar is every capture-OFF STAR condition near the efficiencies-at-1 row above,
-capture-ON near shipped, and the ladder's capture rows no worse.
-Instruments: `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/` — `calib_dump.py` (the landscape, bulk, saturation and
-per-region efficiencies; `CAL_UNSTRANDED=1`, `ORACLE=1`), `run_cond.py` (`NO_CAPTURE=1`, `CAL_UNSTRANDED=1`,
-`EM_UNSTRANDED=1`, `ORACLE=1`).
+THE 2026-10-19 PLAN, WITHDRAWN (2026-10-29): widening each object's count by ψ's `Var(log f_g)` is 2026-10-13's
+refused `tglhb` (`ISSUES: the-located-mode-capture-reader`, the log readout widened by the solve's Var(log f_g)). It
+erased sparse true capture then: lowg g001 κ0.99 ON transcripts went 21.00 → 37.99 % and d10 g01 ON 30.32 → 39.30 %,
+with genes flat. On today's STAR rung it closes a quarter of g00's gap, because the convolution is centred on ψ's
+posterior median, a decision 11–15 nat from a bulk that at zero gDNA is the deepest zero-count wall (1/max S).
+MEASURED 2026-10-29 on 81fc67b6: shipped against every efficiency at 1, pinned and fractional, by read name, 16
+conditions on both inputs.
+- Off capture on the STAR rung, transcripts / genes: g00 κ0.99 ×9.44 / ×14.95, g00 κ0.50 ×1.53 / ×3.21, the unstranded
+  stratum ×1.12 / ×1.08, the stranded ×1.02 / ×1.06. g50 κ0.99 reads ×1.00, where it read −34 % at 1 on 2026-10-19.
+- Under capture the reader is most of the accuracy: at 1, stranded ON is ×6.7 on transcripts and ×14 on genes.
+- At g00 the whole error is the 229 regions and 581 boundaries read above 10×. Setting only them to 1 closes 99 % /
+  100 % of the gap; setting the 57 k small lifts to 1 closes nothing. Most of the 810 are not located by ψ: AMBIG
+  slots, where strand cannot separate gDNA from balanced RNA, and unlocated single-strand ones. Half the transcript
+  damage enters through the boundaries. The widened reader closes 24 % / 26 %.
+- At g05 κ0.50 the enrichment side carries the cost (76 % / 98 %), on objects ψ calls located while strand is dead.
+- The simulator's alignments now read below 1 at g05 κ0.50: 519 empty short regions and 3,341 boundaries against the
+  landscape's floor basin, transcripts ×1.14.
+The bar stands — every capture-OFF STAR condition near its efficiencies-at-1 row, capture-ON near shipped, the ladder's
+capture rows no worse — with the refusal's own rows added: lowg and d10 capture-ON no worse than shipped.
+Instruments: `$RIGEL_RUNS/prototypes/2026-10-29_reader_census/` (`reader_census.py`, shipped against every efficiency at
+1 per condition; `reader_dump.py` and `reader_dissect.py`; `reader_ablate.py`, one population at 1 per arm). The
+2026-10-19 `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/` tools — `calib_dump.py` (`CAL_UNSTRANDED=1`,
+`ORACLE=1`) and `run_cond.py` (`NO_CAPTURE=1`, `CAL_UNSTRANDED=1`, `EM_UNSTRANDED=1`, `ORACLE=1`) — read the old
+`star_panel/` BAMs.
 EARLIER, ON REAL DATA (2026-10-13/14), when this was deferred to 0.8.1 as a known limitation:
 On a library with almost no gDNA the bulk sits at the landscape's floor, and calibration's false gDNA on a few objects reads
 as enormous capture (`capture_efficiency._read` reads the deconvolved mass as a point Poisson count). The real VCaP

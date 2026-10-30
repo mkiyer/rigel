@@ -197,8 +197,9 @@ starts at the index.
    gDNA's floor, `DESIGN.md` §4.4).
 7. NEXT: `ISSUES: the-reader-reads-false-gdna-as-capture`: the biggest remaining problem (owner,
    2026-10-29), a chronic one approached only once the stages before it are resolved (owner, 2026-10-21), and a major
-   cause of poor accuracy and misprediction under hybrid capture, so it deserves a dedicated effort (owner, 2026-10-28);
-   the planned fix reads each object's gDNA through calibration's own posterior for it.
+   cause of poor accuracy and misprediction under hybrid capture, so it deserves a dedicated effort (owner, 2026-10-28).
+   The 2026-10-19 plan — ψ's Var(log f_g) widening the count — was withdrawn on 2026-10-29: it is the refused `tglhb`.
+   At g00 the whole error is the 810 objects read above 10× (`reader_ablate.py`).
 8. `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`, read again on the repaired reader.
 
 **After calibration, before the EM**: the scores, the priors and the lengths the EM is handed.
