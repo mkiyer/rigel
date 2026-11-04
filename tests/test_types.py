@@ -1,6 +1,6 @@
 """`rigel.types` — the value types every other module is written in terms of.
 
-`Strand`, `Interval`, `GenomicInterval`, `IntervalType` and `AnnotatedInterval`: their construction,
+`Strand`, `Interval`, `IntervalType` and `AnnotatedInterval`: their construction,
 comparison, arithmetic and edge cases. The last block checks that the scoring
 constants C++ carries as hand-typed decimals (``LOG_HALF``, ``TAIL_DECAY_LP`` in
 ``native/constants.h``) equal Python's ``math.log(0.5)`` and ``math.log(0.99)`` exactly.
@@ -9,7 +9,6 @@ constants C++ carries as hand-typed decimals (``LOG_HALF``, ``TAIL_DECAY_LP`` in
 import pytest
 
 from rigel.types import (
-    GenomicInterval,
     Interval,
     IntervalType,
     AnnotatedInterval,
@@ -93,31 +92,6 @@ class TestInterval:
 
 
 # =====================================================================
-# GenomicInterval
-# =====================================================================
-
-
-class TestGenomicInterval:
-    def test_default_strand_is_none(self):
-        gi = GenomicInterval("chr1", 100, 200)
-        assert gi.strand == Strand.NONE
-
-    def test_with_strand(self):
-        gi = GenomicInterval("chr1", 100, 200, Strand.POS)
-        assert gi.ref == "chr1"
-        assert gi.start == 100
-        assert gi.end == 200
-        assert gi.strand == Strand.POS
-
-    def test_tuple_unpacking(self):
-        ref, start, end, strand = GenomicInterval("chr1", 0, 50, Strand.NEG)
-        assert ref == "chr1"
-        assert start == 0
-        assert end == 50
-        assert strand == Strand.NEG
-
-
-# =====================================================================
 # IntervalType
 # =====================================================================
 
@@ -163,12 +137,12 @@ class TestCppConstantParity:
 
     def test_log_half(self):
         import math
-        from rigel._scoring_impl import LOG_HALF
+        from rigel._scoring_impl.testing import LOG_HALF
 
         assert LOG_HALF == math.log(0.5)
 
     def test_tail_decay_lp(self):
         import math
-        from rigel._scoring_impl import TAIL_DECAY_LP
+        from rigel._scoring_impl.testing import TAIL_DECAY_LP
 
         assert TAIL_DECAY_LP == math.log(0.99)

@@ -9,7 +9,8 @@
 //
 // Every table is a view of raw pointers with its sizes, so the same kernels run on the block pipeline's arena
 // (`solve_kernel.cpp`: one native call per sweep, a thread pool over the blocks) and on numpy arrays passed through
-// the bindings. The row constructors are in `transfer_rows.h`, shared with ψ's kernel. This is the only
+// the gates' bindings (`testing/solve.cpp`); `transfer_store.h` owns the tables' storage. The row constructors are in
+// `transfer_rows.h`, shared with ψ's kernel. This is the only
 // implementation of the policy's arithmetic; there is no Python twin.
 // Gate: tests/calibration/test_transfer_*.py, against independent recomputes.
 #pragma once
@@ -23,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "constants.h"
 #include "transfer_rows.h"
 
 namespace transfer_kernel {
@@ -87,6 +89,19 @@ inline void junction_flanks(int f, int64_t left, int64_t right, int64_t& c, int6
 // read_column: the genome-strand column strand `col`'s RNA reads on — its own when the library reads sense
 // (kappa >= 1/2), the other under an antisense protocol
 inline int read_column(int col, double kappa) { return kappa >= 0.5 ? col : 1 - col; }
+
+// One slot's reference-free strand composition evidence at the message-free fg_loc, `disc` the protocol's
+// discriminability (0: the channel is dead):
+//   I_strand = N·disc·[f_g(1−f_g)]² / (4 p(1−p)),   p = κ + f_g(½ − κ)
+// A single-strand node holds its own composition claim where it is positive.
+inline double strand_evidence(double u_pos, double u_neg, double fg_loc, double kappa, double disc) {
+    using rigel::OWN_EVIDENCE_EPS;
+    const double n_str = u_pos + u_neg;
+    const double fgl = std::clamp(fg_loc, OWN_EVIDENCE_EPS, 1.0 - OWN_EVIDENCE_EPS);
+    const double pmix = std::clamp(kappa + fgl * (0.5 - kappa), OWN_EVIDENCE_EPS, 1.0 - OWN_EVIDENCE_EPS);
+    const double sq = fgl * (1.0 - fgl);
+    return n_str * disc * (sq * sq) / (4.0 * pmix * (1.0 - pmix));
+}
 
 // ---- the chain as the builders read it ------------------------------------------------------------
 
@@ -204,6 +219,17 @@ struct LaneOut {  // a level lane's tables: faces, two-sided faces, own levels, 
 };
 
 // ---- the builders, one per message ------------------------------------------------------------------
+
+// The pointwise minimum of bounds on one density, max-normalised: bounds intersect, they do not multiply. The first
+// part is copied, the rest folded.
+struct Intersection {
+    double* acc; int K; int n = 0;
+    void add(const double* p) {
+        if (n++ == 0) std::copy(p, p + K, acc); else fold_min(p, K, acc);
+    }
+    bool any() const { return n > 0; }
+    void finish() { norm_inplace(acc, K); }
+};
 
 inline void claims(const Chain& c, RowsOut& own, Scratch& S) {
     for (int x = 0; x < c.n; ++x) {
@@ -362,13 +388,12 @@ inline void gdna_lane(const Chain& c, const RowsOut& own, const FacesOut& F, dou
     }
 }
 
-// one strand's RNA lane — its faces from the flag bits, its sources, its flux levels
-inline void rna_lane(const Chain& c, const RowsOut& own, int strand, double rho_ref, LaneOut& L, Scratch& S) {
+// One strand's RNA lane faces, from the flag bits: a face crosses a boundary carrying none of the strand's bits, or
+// enters the strand's own intron through a boundary with no terminus of it; it is two-sided where the region beyond is
+// that intron.
+inline void rna_faces(const Chain& c, int strand, LaneOut& L) {
     const bool* free = strand == 0 ? c.fp : c.fn;
     const bool* exon_s = strand == 0 ? c.exon_pos : c.exon_neg;
-    const int col = strand;
-    const int col_read = read_column(col, c.kappa);
-    const double kappa_read = std::max(c.kappa, 1.0 - c.kappa);
     const int all_bits = ALL_BITS[strand], term_bits = TERM_BITS[strand];
     auto intron_s = [&](int64_t r) { return !c.is_bnd[r] && free[r] && !exon_s[r]; };
     for (int64_t i = 0; i < c.n; ++i) {
@@ -387,16 +412,24 @@ inline void rna_lane(const Chain& c, const RowsOut& own, int strand, double rho_
             L.two_sided[i * 2 + side] = two;
         }
     }
-    if (!(rho_ref > 0.0)) return;
+}
+
+// One strand's RNA sources: at every node the strand admits, its own level (a single-strand profile read as an RNA
+// level) intersected with the certified flux level of each junction at its exon edges; an empty node's flux is its
+// witness.
+inline void rna_sources(const Chain& c, const RowsOut& own, int strand, double rho_ref, LaneOut& L, Scratch& S) {
+    const bool* free = strand == 0 ? c.fp : c.fn;
+    const int col = strand;
+    const int col_read = read_column(col, c.kappa);
+    const double kappa_read = std::max(c.kappa, 1.0 - c.kappa);
     for (int64_t x = 0; x < c.n; ++x) {
         if (!free[x]) continue;
         const bool empty = !(c.n_u[x] > 0.0) || !(c.a_r[x] > 0.0);
         const bool single = !(c.fp[x] && c.fn[x]);
-        int n_parts = 0;
-        double* acc = S.d.data();  // the intersection of the parts, folded as they come
+        Intersection inter{S.d.data(), c.K};
         if (const double* o = own.get(x); !empty && single && o != nullptr && ptp(o, c.K) > EPS) {
-            rna_level_of_profile(o, c.lam, c.lam, c.K, c.n_u[x], c.a_r[x], rho_ref, S, acc);
-            n_parts = 1;
+            rna_level_of_profile(o, c.lam, c.lam, c.K, c.n_u[x], c.a_r[x], rho_ref, S, S.c.data());
+            inter.add(S.c.data());
         }
         double c_sum = 0.0, a_sum = 0.0;
         if (c.is_exon[x]) {
@@ -412,24 +445,28 @@ inline void rna_lane(const Chain& c, const RowsOut& own, int strand, double rho_
                 if (!std::isfinite(v)) continue;
                 double* fl = S.e.data();
                 flux_level(c.lam, c.K, c_j, r_j, rho_ref, v, S, fl);
-                if (n_parts == 0) std::copy(fl, fl + c.K, acc); else fold_min(fl, c.K, acc);
-                ++n_parts;
+                inter.add(fl);
                 const int side = b < x ? 0 : 1;
                 L.flux_index[x * 2 + side] = L.flux.keep(fl);
                 c_sum += c_j;
                 a_sum += c_j / r_j;
             }
         }
-        if (n_parts) {
-            norm_inplace(acc, c.K);
-            L.own_level.set(x, acc);
-            if (empty) {
-                L.witness[2 * x] = c_sum;
-                L.witness[2 * x + 1] = a_sum;
-                L.witness_mask[x] = true;
-            }
+        if (!inter.any()) continue;
+        inter.finish();
+        L.own_level.set(x, inter.acc);
+        if (empty) {
+            L.witness[2 * x] = c_sum;
+            L.witness[2 * x + 1] = a_sum;
+            L.witness_mask[x] = true;
         }
     }
+}
+
+// One strand's RNA lane: its faces, and where the library has an RNA coordinate its sources and flux levels.
+inline void rna_lane(const Chain& c, const RowsOut& own, int strand, double rho_ref, LaneOut& L, Scratch& S) {
+    rna_faces(c, strand, L);
+    if (rho_ref > 0.0) rna_sources(c, own, strand, rho_ref, L, S);
 }
 
 // The builders in one call: every node's own claim, the face rules and the lanes. The gDNA lane is built only where
@@ -495,6 +532,18 @@ inline void levels_write(LevelsView& L, int i, const double* profile, double cou
     L.rna_count_var[i] = witness ? rna_var : nan;
 }
 
+// Row x of a lane's received table, read at node `at`'s own count and opportunity; with the other strand column, where
+// the protocol permits, the split witness (the columns' difference, and their sum as its variance).
+inline void levels_write_at(const LaneView& ln, LevelsView& L, int x, const double* profile, int at) {
+    const double count = ln.count[at];
+    if (ln.other == nullptr) {
+        levels_write(L, x, profile, count, ln.a[at], false, 0.0, 0.0);
+        return;
+    }
+    const double c_o = ln.other[at];
+    levels_write(L, x, profile, count, ln.a[at], true, count - c_o, count + c_o);
+}
+
 inline void levels_forward(LevelsView& L, int s, int i) {
     L.present[i] = L.present[s];
     std::copy(L.row(s), L.row(s) + L.K, L.row(i));
@@ -503,19 +552,6 @@ inline void levels_forward(LevelsView& L, int s, int i) {
     L.has_witness[i] = L.has_witness[s];
     L.rna_count[i] = L.rna_count[s];
     L.rna_count_var[i] = L.rna_count_var[s];
-}
-
-// intersect the present parts (pointwise minimum), max-normalised, into out; whether any part
-inline bool intersect2(const double* p, const double* q, int K, double* out) {
-    if (p == nullptr && q == nullptr) return false;
-    if (p != nullptr && q != nullptr) {
-        for (int j = 0; j < K; ++j) out[j] = std::min(p[j], q[j]);
-    } else {
-        const double* r = p != nullptr ? p : q;
-        std::copy(r, r + K, out);
-    }
-    norm_inplace(out, K);
-    return true;
 }
 
 // what s sends toward x on a lane, written into row x; whether anything was sent
@@ -531,20 +567,18 @@ inline bool lane_emit(const LaneView& ln, LevelsView& L, int K, int s, int x, in
         lower_side(own, K, S.a.data());
         own_used = S.a.data();
     }
-    const double* held = far ? L.row(s) : nullptr;
-    if (!intersect2(own_used, held, K, S.b.data())) return false;
+    Intersection sent{S.b.data(), K};
+    if (own_used != nullptr) sent.add(own_used);
+    if (far) sent.add(L.row(s));
+    if (!sent.any()) return false;
+    sent.finish();
     if (ln.empty[s]) {
         if (!ln.witness_mask[s]) throw std::runtime_error("an empty node with an own level has no flux witness");
         const double* w = ln.witness + static_cast<size_t>(s) * 2;
         levels_write(L, x, S.b.data(), w[0], w[1], false, 0.0, 0.0);
         return true;
     }
-    if (ln.other != nullptr) {
-        const double c_r = ln.count[s], c_o = ln.other[s];
-        levels_write(L, x, S.b.data(), c_r, ln.a[s], true, c_r - c_o, c_r + c_o);
-    } else {
-        levels_write(L, x, S.b.data(), ln.count[s], ln.a[s], false, 0.0, 0.0);
-    }
+    levels_write_at(ln, L, x, S.b.data(), s);
     return true;
 }
 
@@ -574,12 +608,7 @@ inline void lane_receive(const LaneView& ln, LevelsView& L, int K, const double*
         blur_row(p, K, lam, v, S.b.data(), S.blur);
         p = S.b.data();
     }
-    if (ln.other != nullptr) {
-        const double c_o = ln.other[x];
-        levels_write(L, x, p, cnt, a_x, true, cnt - c_o, cnt + c_o);
-    } else {
-        levels_write(L, x, p, cnt, a_x, false, 0.0, 0.0);
-    }
+    levels_write_at(ln, L, x, p, x);
 }
 
 // the composition rule at the face into i from side, on what the sender sends (its own claim, what it holds):
@@ -696,31 +725,15 @@ struct CubeOut {  // the cube delivery, one row per delivered AMBIG node, writte
     double* rho; int capacity;
 };
 
-// the pointwise-minimum accumulator of bounds on one density: the first part is copied, the rest folded
-struct Intersection {
-    double* acc; int K; int n = 0;
-    void add(const double* p) {
-        if (n++ == 0) std::copy(p, p + K, acc); else fold_min(p, K, acc);
-    }
-    bool any() const { return n > 0; }
-    void finish() { norm_inplace(acc, K); }
-};
+// One block's solve: the two received tables and the lanes, read node by node into ψ's two channels.
+struct BlockSolve {
+    const double* lam; int K;  // a level's coordinate is the solve grid
+    const ReceivedView* sides; const SolveLane& G; const SolveLane* rna;
+    Scratch& S; double* bound; double* row;  // (K,) each
 
-// the two received tables into ψ's channels: the fused λ rows (written in place, zero where nothing fused) and the
-// cube delivery. Returns (live, the number of cube rows delivered).
-inline std::pair<bool, int> solve_block(const double* lam, int K, int n, const ReceivedView sides[2], const SolveLane& G,
-                                        const SolveLane rna[2], const bool* free_pos, const bool* free_neg,
-                                        double* out_rows, CubeOut& cube, Scratch& S, std::vector<double>& bound,
-                                        std::vector<double>& row) {
-    const double* u = lam;  // a level's coordinate is the solve grid
-    const bool* free_of[2] = {free_pos, free_neg};
-    bound.resize(K); row.resize(K);
-    bool live = false;
-    int d = 0;
-    for (int i = 0; i < n; ++i) {
-        double* r = out_rows + static_cast<size_t>(i) * K;
-        const bool ambig = free_pos[i] && free_neg[i];
-        // the two held compositions add
+    // The held compositions at node i add, and a held gDNA level on either side, read through the node's own total,
+    // joins as one more witness; written into r, unnormalised. Whether anything fused.
+    bool fuse(int i, double* r) const {
         bool fused = false;
         for (int side = 0; side < 2; ++side) {
             const ReceivedView& h = sides[side];
@@ -729,72 +742,93 @@ inline std::pair<bool, int> solve_block(const double* lam, int K, int n, const R
             if (!fused) std::copy(c, c + K, r); else for (int j = 0; j < K; ++j) r[j] += c[j];
             fused = true;
         }
-        // a held gDNA level on either side, read through the node's own total, joins as one more witness
-        if (G.built && !G.empty[i]) {
-            Intersection inter{bound.data(), K};
+        if (!G.built || G.empty[i]) return fused;
+        Intersection inter{bound, K};
+        for (int side = 0; side < 2; ++side) {
+            const LevelsView& L = sides[side].lanes[G.field];
+            if (!L.present[i]) continue;
+            profile_of_level(L.row(i), lam, lam, K, G.total[i], G.a[i], G.rho_ref, S, row);
+            inter.add(row);
+        }
+        if (!inter.any()) return fused;
+        inter.finish();
+        if (fused) for (int j = 0; j < K; ++j) r[j] += bound[j]; else std::copy(bound, bound + K, r);
+        return true;
+    }
+
+    // The ceiling a single-strand node's live strand s puts on its row: the RNA levels of the faces that sent no
+    // composition, intersected with the node's own junction flux at them, read as "at most this much gDNA". Whether it
+    // joined the row.
+    bool ceiling(int i, int s, double* r) const {
+        const SolveLane& L = rna[s];
+        Intersection inter{bound, K};
+        for (int side = 0; side < 2; ++side) {
+            const ReceivedView& h = sides[side];
+            if (!h.has_neighbour[i] || h.has_composition[i]) continue;
+            const LevelsView& lv = h.lanes[L.field];
+            if (lv.present[i]) inter.add(lv.row(i));
+            const int32_t fr = L.flux_index[static_cast<size_t>(i) * 2 + side];
+            if (fr >= 0) inter.add(L.flux_store + static_cast<size_t>(fr) * K);
+        }
+        if (!inter.any()) return false;
+        inter.finish();
+        rna_row_of_level(bound, lam, lam, K, L.total[i], L.a[i], L.rho_ref, S, row);
+        if (ptp(row, K) <= EPS) return false;
+        if (ptp(r, K) > EPS) { for (int j = 0; j < K; ++j) r[j] += row[j]; norm_inplace(r, K); }
+        else std::copy(row, row + K, r);
+        return true;
+    }
+
+    // The cube row of an AMBIG node, at row d: per strand, the held levels and the own level's lower side intersected.
+    // Whether either strand holds a profile, and so the row is delivered.
+    bool cube_row(int i, int d, CubeOut& cube) const {
+        if (d >= cube.capacity) throw std::runtime_error("transfer_solve: the cube table is full");
+        bool any_profile = false;
+        for (int s = 0; s < 2; ++s) {
+            const SolveLane& L = rna[s];
+            Intersection inter{(s == 0 ? cube.pos : cube.neg) + static_cast<size_t>(d) * K, K};
             for (int side = 0; side < 2; ++side) {
-                const LevelsView& L = sides[side].lanes[G.field];
-                if (!L.present[i]) continue;
-                profile_of_level(L.row(i), u, u, K, G.total[i], G.a[i], G.rho_ref, S, row.data());
-                inter.add(row.data());
+                const LevelsView& lv = sides[side].lanes[L.field];
+                if (lv.present[i]) inter.add(lv.row(i));
             }
-            if (inter.any()) {
-                inter.finish();
-                if (fused) for (int j = 0; j < K; ++j) r[j] += bound[j]; else std::copy(bound.begin(), bound.end(), r);
-                fused = true;
+            if (L.own_mask[i]) {
+                lower_side(L.own_rows + static_cast<size_t>(i) * K, K, row);
+                inter.add(row);
             }
+            if (inter.any()) inter.finish();
+            (s == 0 ? cube.has_pos : cube.has_neg)[d] = inter.any();
+            any_profile |= inter.any();
         }
-        if (fused) { norm_inplace(r, K); live = true; }
-        // the ceilings at a single-strand node, from the faces that sent no composition
-        if (!ambig) {
+        if (!any_profile) return false;
+        cube.slot[d] = i;
+        cube.total[d] = rna[0].total[i];
+        cube.opportunity[d] = rna[0].a[i];
+        cube.rho[d] = rna[0].rho_ref;
+        return true;
+    }
+};
+
+// the two received tables into ψ's channels: the fused λ rows (written in place, zero where nothing fused) and the
+// cube delivery. Returns (live, the number of cube rows delivered).
+inline std::pair<bool, int> solve_block(const double* lam, int K, int n, const ReceivedView sides[2], const SolveLane& G,
+                                        const SolveLane rna[2], const bool* free_pos, const bool* free_neg,
+                                        double* out_rows, CubeOut& cube, Scratch& S, std::vector<double>& bound,
+                                        std::vector<double>& row) {
+    const bool* free_of[2] = {free_pos, free_neg};
+    bound.resize(K); row.resize(K);
+    const BlockSolve solve{lam, K, sides, G, rna, S, bound.data(), row.data()};
+    bool live = false;
+    int d = 0;
+    for (int i = 0; i < n; ++i) {
+        double* r = out_rows + static_cast<size_t>(i) * K;
+        if (solve.fuse(i, r)) { norm_inplace(r, K); live = true; }
+        if (!(free_pos[i] && free_neg[i])) {
             for (int s = 0; s < 2; ++s) {
-                const SolveLane& L = rna[s];
-                if (!L.built || !free_of[s][i] || L.empty[i]) continue;
-                Intersection inter{bound.data(), K};
-                for (int side = 0; side < 2; ++side) {
-                    const ReceivedView& h = sides[side];
-                    if (!h.has_neighbour[i] || h.has_composition[i]) continue;
-                    const LevelsView& lv = h.lanes[L.field];
-                    if (lv.present[i]) inter.add(lv.row(i));
-                    const int32_t fr = L.flux_index[static_cast<size_t>(i) * 2 + side];
-                    if (fr >= 0) inter.add(L.flux_store + static_cast<size_t>(fr) * K);
-                }
-                if (!inter.any()) continue;
-                inter.finish();
-                rna_row_of_level(bound.data(), u, u, K, L.total[i], L.a[i], L.rho_ref, S, row.data());
-                if (ptp(row.data(), K) <= EPS) continue;
-                if (ptp(r, K) > EPS) { for (int j = 0; j < K; ++j) r[j] += row[j]; norm_inplace(r, K); }
-                else std::copy(row.begin(), row.end(), r);
-                live = true;
+                if (!rna[s].built || !free_of[s][i] || rna[s].empty[i]) continue;
+                if (solve.ceiling(i, s, r)) live = true;
             }
-        }
-        // the cube at an AMBIG node: per strand, the held levels and the own level's lower side intersected
-        if (ambig && rna[0].built && rna[1].built && !rna[0].empty[i]) {
-            if (d >= cube.capacity) throw std::runtime_error("transfer_solve: the cube table is full");
-            bool any_profile = false;
-            for (int s = 0; s < 2; ++s) {
-                const SolveLane& L = rna[s];
-                double* dest = (s == 0 ? cube.pos : cube.neg) + static_cast<size_t>(d) * K;
-                Intersection inter{dest, K};
-                for (int side = 0; side < 2; ++side) {
-                    const LevelsView& lv = sides[side].lanes[L.field];
-                    if (lv.present[i]) inter.add(lv.row(i));
-                }
-                if (L.own_mask[i]) {
-                    lower_side(L.own_rows + static_cast<size_t>(i) * K, K, row.data());
-                    inter.add(row.data());
-                }
-                if (inter.any()) inter.finish();
-                (s == 0 ? cube.has_pos : cube.has_neg)[d] = inter.any();
-                any_profile |= inter.any();
-            }
-            if (any_profile) {
-                cube.slot[d] = i;
-                cube.total[d] = rna[0].total[i];
-                cube.opportunity[d] = rna[0].a[i];
-                cube.rho[d] = rna[0].rho_ref;
-                ++d;
-            }
+        } else if (rna[0].built && rna[1].built && !rna[0].empty[i] && solve.cube_row(i, d, cube)) {
+            ++d;
         }
     }
     return {live, d};

@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from _synthetic import (
-    make_gdna_fl_pmf,
+    spike_pmf,
     make_strand_models,
     make_synthetic_sj,
     make_synthetic_payload,
@@ -30,19 +30,17 @@ BOUNDARY_SPLICED = np.array([0.0, 6.0])
 SJ_FLUX = np.array([13.0])  # sj_count [9, 4]
 
 
-_UNSET = object()
-
-
-def _run(config=None, sj=_UNSET, strand=None):
+def _run(config=None, sj=None, strand=None):
     payload, ra = make_synthetic_payload()
     return calibrate(
         payload=payload,
         region_arrays=ra,
         strand_model=make_strand_models(0.95, 40) if strand is None else strand,
-        gdna_fl_pmf=make_gdna_fl_pmf(),
-        rna_fl_pmf=make_gdna_fl_pmf(),  # a valid pmf; these tests pin mechanics, not the splice fraction
+        gdna_fl_pmf=spike_pmf(),
+        rna_fl_pmf=spike_pmf(),  # a valid pmf; these tests pin mechanics, not the splice fraction
         config=config or CalibrationConfig(),
-        sj=make_synthetic_sj() if sj is _UNSET else sj,
+        sj=make_synthetic_sj() if sj is None else sj,
+        boundary_flags=np.zeros(int(payload.n_boundaries), np.uint16),
     )
 
 
@@ -59,7 +57,7 @@ def test_mass_conserved_per_region():
     np.testing.assert_allclose(result.count_gdna_region + result.count_rna_region, REGION_TOTAL)
 
 
-def test_mass_conserved_per_boundary_INCLUDING_the_spliced_crossings():
+def test_mass_conserved_per_boundary_including_the_spliced_crossings():
     """A boundary's gDNA + RNA equals unspliced + spliced. ``count_rna_boundary`` is spliced-inclusive (a certified-RNA
     crossing is RNA whatever the unspliced mixture resolves to, since gDNA cannot splice), so dropping it would lose 6
     of boundary 1's 11 fragments."""
@@ -71,7 +69,7 @@ def test_mass_conserved_per_boundary_INCLUDING_the_spliced_crossings():
     assert np.all(result.count_rna_boundary >= result.count_rna_spliced_boundary - 1e-9)
 
 
-def test_sj_flux_is_exported_VERBATIM_and_never_deconvolved():
+def test_sj_flux_is_exported_verbatim_and_never_deconvolved():
     """A sj boundary is pure mature RNA by construction, so there is nothing to split: the result carries ``sj_count``
     summed over the genome-strand columns, exactly. It is a different population from ``count_rna_spliced_boundary`` (a
     molecule that jumped rather than crossed contiguously), and the two differ widely even in this toy.
@@ -80,7 +78,7 @@ def test_sj_flux_is_exported_VERBATIM_and_never_deconvolved():
     np.testing.assert_array_equal(result.count_rna_sj, SJ_FLUX)
 
 
-def test_the_conserved_sj_mass_recovers_the_ACCUMULATORS_OWN_sj_mass_BANK():
+def test_the_conserved_sj_mass_recovers_the_accumulators_own_sj_mass_bank():
     """``sj_conserved_mass`` is ``sj_count × (sj_mass / sj_count)``, so it must come back as ``sj_mass`` itself, the
     bank the scanner wrote. The fixture's sj carries 13 incidences against an ``sj_mass`` of 1.3, so the two cannot
     coincide.
@@ -110,7 +108,7 @@ def test_masses_bounded_by_their_own_totals():
         assert np.all(g <= tot + 1e-9)
 
 
-def test_an_intergenic_region_is_ALL_gDNA():
+def test_an_intergenic_region_is_all_gdna():
     """Region 2 carries no exon or intron bit, so no RNA can be contained in it: a structural lock, not an inference.
     ``count_rna_region[2] == 0`` exactly; a floored or smoothed answer would manufacture RNA where the annotation says
     none exists.
@@ -123,7 +121,7 @@ def test_an_intergenic_region_is_ALL_gDNA():
 # --- the two geometric supports ---------------------------------------------------------------
 
 
-def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
+def test_the_supports_are_the_two_frames_of_one_formula_family():
     """Arithmetic, not a recorded number. Every region is 100 bp and the gDNA pmf is a delta at 50::
 
         contained  E_f[(100 − 50 + 1)+]                    = 51   starts that fit inside
@@ -137,7 +135,7 @@ def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
     np.testing.assert_allclose(result.gdna_boundary_eff_len, [49.0, 49.0])
 
 
-def test_gdna_density_global_is_a_ratio_of_SUMS_over_both_axes():
+def test_gdna_density_global_is_a_ratio_of_sums_over_both_axes():
     """Σ gDNA mass / Σ gDNA support, pooled across regions and boundaries, never a mean of per-object ratios, which
     differs whenever the supports differ."""
     result = _run()
@@ -169,7 +167,7 @@ def _strand_models_from(n_sense, n_antisense):
 
 def test_an_empty_spliced_census_calibrates_as_unstranded():
     """No spliced read gives κ = ½ and a dead strand channel, never an exception: calibration must work with no RNA."""
-    from rigel.calibration.region_init import strand_discriminability
+    from rigel.calibration.strand_balance import strand_discriminability
 
     result = _run(strand=_strand_models_from([], []))
     assert result.rna_sense_frac == 0.5
@@ -195,11 +193,20 @@ def test_density_and_supports_sane():
 # --- the sj axis is checked, not assumed ------------------------------------------------
 
 
-def test_a_mismatched_sj_axis_is_REFUSED():
+def test_a_mismatched_sj_axis_is_refused():
     """A sj axis built against a different graph would place every splice on the wrong boundary with a plausible shape
     and nothing downstream faulting, so it is refused at the door."""
+    from rigel.calibration.splice_graph import SpliceJunctionGeometry
+
+    empty = SpliceJunctionGeometry(
+        src_region=np.zeros(0, dtype=np.int64),
+        dst_region=np.zeros(0, dtype=np.int64),
+        strand=np.zeros(0, dtype=np.int8),
+        reach_lo=np.zeros(0),
+        reach_hi=np.zeros(0),
+    )
     with pytest.raises(ValueError, match="sj axis"):
-        _run(sj=None)  # the payload declares one sj; an empty axis is not it
+        _run(sj=empty)  # the payload declares one sj; an empty axis is not it
 
 
 def test_the_sj_axis_length_is_what_is_checked_not_its_content():
@@ -215,3 +222,48 @@ def test_the_sj_axis_length_is_what_is_checked_not_its_content():
     )
     with pytest.raises(ValueError, match="2 boundaries but the payload has 1"):
         _run(sj=two)
+
+
+def test_the_logodds_window_has_one_source_the_config(monkeypatch):
+    """``CalibrationConfig.sweep_logodds_window`` is the window's one source. No consumer carries a default of its own,
+    and ``calibrate`` hands the configured value to every initial belief and to the prior-free sweep, at the lattice
+    size the step gives it; a fitted prior can only widen a later sweep's bracket. The window here is not the shipped
+    one, so a consumer that reads a literal instead of the config fails. Perturbation: a default restored on any
+    consumer fails the first assertion, and a call that drops the configured window fails the second."""
+    import importlib
+    import inspect
+
+    from rigel.calibration.region_geometry import init_beliefs
+    from rigel.calibration.simplex_logodds import logodds_grid
+    from rigel.calibration.sweep import solve_chain
+
+    for consumer, argument in (
+        (init_beliefs, "logodds_window"),
+        (solve_chain, "logodds_window"),
+        (logodds_grid, "L"),
+    ):
+        default = inspect.signature(consumer).parameters[argument].default
+        assert default is inspect.Parameter.empty, f"{consumer.__name__}({argument}={default})"
+
+    module = importlib.import_module("rigel.calibration.calibrate")
+    calls = []
+
+    def recording(consumer):
+        def call(*args, **kwargs):
+            calls.append((consumer.__name__, kwargs["logodds_window"], kwargs["n_grid"]))
+            return consumer(*args, **kwargs)
+
+        return call
+
+    monkeypatch.setattr(module, "init_beliefs", recording(init_beliefs))
+    monkeypatch.setattr(module, "solve_chain", recording(solve_chain))
+    window = 7.0
+    assert window != CalibrationConfig.sweep_logodds_window
+    _run(CalibrationConfig(sweep_logodds_window=window))
+
+    points = module.lattice_points(window, CalibrationConfig.sweep_logodds_step)
+    inits = [c for c in calls if c[0] == "init_beliefs"]
+    sweeps = [c for c in calls if c[0] == "solve_chain"]
+    assert inits and all(c[1:] == (window, points) for c in inits), calls
+    assert sweeps[0][1:] == (window, points), calls
+    assert all(c[1] >= window for c in sweeps), calls

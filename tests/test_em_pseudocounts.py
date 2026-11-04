@@ -25,7 +25,7 @@ from rigel.config import EMConfig
 from rigel.estimator import AbundanceEstimator
 from rigel.locus import Locus, MultiLocus
 from rigel.locus_partition import partition_and_free
-from rigel.pipeline import _run_locus_em_partitioned, em_pseudocounts
+from rigel.pipeline import run_locus_em_partitioned, em_pseudocounts
 from rigel.scored_fragments import ScoredFragments
 from rigel.splice import SpliceStrandCol
 
@@ -54,7 +54,7 @@ def test_the_strength_is_one_pseudocount_per_gdna_eligible_unit():
     np.testing.assert_allclose(pg + pr, [600.0, 40.0])
 
 
-def test_a_gdna_count_above_the_locus_total_is_a_share_of_one_never_a_negative_rna_pseudocount():
+def test_a_gdna_count_above_the_locus_total_is_a_share_of_one_not_negative_rna():
     pg, pr = em_pseudocounts(np.array([1200.0]), np.array([1000.0]), np.array([600.0]))
     assert (pg[0], pr[0]) == (600.0, 0.0)
 
@@ -177,7 +177,7 @@ def _run(ss: float, junction_len: int, mode: str):
     index = SimpleNamespace(
         t_to_g_arr=np.zeros(n_t, np.int64), g_df=pd.DataFrame({"is_synthetic": [False]})
     )
-    _run_locus_em_partitioned(
+    run_locus_em_partitioned(
         est,
         partition_and_free(em, [locus]),
         [locus],

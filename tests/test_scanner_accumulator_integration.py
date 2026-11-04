@@ -141,6 +141,15 @@ def _scan(result) -> AccumulatorPayload:
 
 
 class TestScannerAccumulatorIntegration:
+    def test_the_scan_refuses_to_run_without_the_region_partition(self, oracle, monkeypatch):
+        """The calibration tally is not optional: a scan whose regions were never installed is refused, not run with
+        an empty tally."""
+        import rigel.pipeline
+
+        monkeypatch.setattr(rigel.pipeline, "_wire_calibration_regions", lambda *a, **k: None)
+        with pytest.raises(RuntimeError, match="set_regions was not called"):
+            _scan(oracle)
+
     def test_payload_is_populated(self, oracle):
         payload = _scan(oracle)
         assert payload is not None
@@ -219,12 +228,12 @@ class TestFragmentLengthAnchor:
         mismatch somewhere new, so the anchor's total must equal ``qc.deposited`` and not the count of
         everything the scanner classified.
         """
-        from rigel.calibration.fl import build_fl_models
+        from rigel.pipeline import library_fl_models
 
         result, index = blacklisted_oracle
         _, _, _, payload = self._scan_raw(result.bam_path, index)
 
-        fl = build_fl_models(payload)
+        fl = library_fl_models(payload, index)
         np.testing.assert_array_equal(fl.global_counts, np.asarray(payload.deposited_lengths))
         assert float(fl.global_counts.sum()) == float(payload.qc.deposited)
         np.testing.assert_allclose(
@@ -233,7 +242,7 @@ class TestFragmentLengthAnchor:
 
     # No gate compares the anchor against a scanner histogram, because the scanner builds none.
 
-    def test_a_FOREIGN_ANCHOR_CANNOT_BE_PASSED_AT_ALL(self):
+    def test_a_foreign_anchor_cannot_be_passed_at_all(self):
         """The gate here is structural, not a value.
 
         The two tests above pin what ``build_fl_models`` returns; neither can catch a call site that
@@ -363,7 +372,7 @@ class TestSpliceCensus:
         )
         assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted
 
-    def test_the_artifact_census_is_confirmed_by_the_deposit_TOTAL(
+    def test_the_artifact_census_is_confirmed_by_the_deposit_total(
         self, oracle, blacklisted_oracle
     ):
         """The artifact count, derived a second way, from a subsystem that has never heard of an

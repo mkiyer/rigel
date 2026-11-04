@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "constants.h"
+#include "fragment_blocks.h"
 
 namespace rigel {
 

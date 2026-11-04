@@ -382,7 +382,7 @@ class TestGenuineKappa:
         from scipy.special import logsumexp
 
         from rigel.config import CONSTANTS
-        from rigel.junction_fit import _genuine_mixture
+        from rigel.junction_fit import genuine_mixture
 
         kn, cnt = np.unique(
             np.stack([table.n_sense, table.depth], axis=1).astype(float), axis=0, return_counts=True
@@ -390,7 +390,7 @@ class TestGenuineKappa:
         k, n, c = kn[:, 0], kn[:, 1], cnt.astype(float)
         if c @ k > 0.5 * (c @ n):
             k = n - k
-        fit_loglik = _genuine_mixture(k, n, c)[4]
+        fit_loglik = genuine_mixture(k, n, c)[4]
 
         def classes(kappa):
             return np.stack(

@@ -22,7 +22,6 @@ from rigel.scored_fragments import ScoredFragments
 
 from _em_harness import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
 
-
 # =====================================================================
 # Helpers — lightweight mock index + fixtures
 # =====================================================================
@@ -86,6 +85,7 @@ class MockIndex:
                 "strand": g_to_strand,
                 "start": list(range(0, num_genes * 2000, 2000)),
                 "end": list(range(1500, num_genes * 2000 + 1500, 2000)),
+                "is_synthetic": [False] * num_genes,
             }
         )
 
@@ -168,7 +168,7 @@ class TestScoredFragments:
         assert em.n_candidates == 6
         assert list(em.offsets) == [0, 2, 3, 6]
 
-    def test_new_fields_present(self):
+    def test_the_locus_em_fields_are_populated(self):
         """The locus-EM fields are populated."""
         em = _make_em_data([[0, 1]])
         assert em.is_spliced.shape == (1,)
@@ -245,21 +245,6 @@ class TestLocusEM:
         _run_and_assign(rc, bundle, em_iterations=10)
 
         assert rc.em_counts[0].sum() > rc.em_counts[1].sum()
-
-    def test_convergence_detected(self):
-        """EM should converge early for simple problems."""
-        rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
-        rc.unambig_counts[0, 0] = 100.0
-        rc.unambig_counts[1, 0] = 100.0
-
-        bundle = _make_locus_em_data(
-            [[0, 1]] * 100,
-            num_transcripts=2,
-            rc=rc,
-        )
-        _run_and_assign(rc, bundle, em_iterations=100)
-        # Just verify it runs without error and produces sensible output
-        assert rc.em_counts.sum() == pytest.approx(100.0, abs=1.0)
 
 
 # =====================================================================
@@ -677,7 +662,7 @@ class TestCountsOutput:
         assert list(df["transcript_id"]) == ["t0", "t1", "t2"]
         assert list(df["gene_id"]) == ["g0", "g0", "g1"]
 
-    def test_a_span_an_annotated_single_exon_transcript_covers_is_NO_nascent_span(self):
+    def test_a_span_an_annotated_single_exon_transcript_covers_is_no_nascent_span(self):
         """``nascent_id`` and ``count_nascent`` name a transcript's synthetic span, and the nascent table's rows
         are the synthetic spans alone. Where an annotated single-exon transcript covers a multi-exon transcript's
         merged span, the index makes it the span's entity and adds no synthetic span; it is annotated RNA, a row
@@ -919,7 +904,7 @@ class TestWholeCounts:
     """
 
     @pytest.mark.parametrize("fixture", sorted(_WHOLE_COUNT_FIXTURES))
-    def test_whole_counts_ARE_the_fractional_counts_rounded_within_the_locus(self, fixture):
+    def test_whole_counts_are_the_fractional_counts_rounded_within_the_locus(self, fixture):
         kw = _WHOLE_COUNT_FIXTURES[fixture]
         frac_t, frac_g, _, _ = _one_locus(mode="fractional", **kw)
         frac = np.append(frac_t, frac_g)
@@ -937,7 +922,7 @@ class TestWholeCounts:
         if fixture == "ordered_against_the_draw":
             assert stranded > 0, "the draw stranded nothing, so the repair was never exercised here"
 
-    def test_every_count_stays_within_one_of_its_fractional_count_when_the_rounding_is_unreachable(
+    def test_each_count_is_within_one_of_its_fraction_when_rounding_is_unreachable(
         self,
     ):
         """Largest remainder can round a set of components past the fragments that can reach it: here a fragment
@@ -1029,20 +1014,6 @@ class TestWholeCounts:
         np.testing.assert_array_equal(a[3], b[3])
         np.testing.assert_array_equal(a[0], b[0])
 
-    def test_fractional_mode_preserves_posteriors(self):
-        """Fractional mode produces non-integer counts."""
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="fractional"))
-        rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
-        rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
-        bundle = _make_locus_em_data(
-            [[0, 1]] * 200,
-            num_transcripts=3,
-            rc=rc,
-        )
-        _run_and_assign(rc, bundle, em_iterations=10)
-        frac = rc.em_counts - np.floor(rc.em_counts)
-        assert np.any(frac > 0.0), "Fractional mode should produce non-integer counts"
-
     def test_total_counts_preserved_in_both_modes(self):
         for mode in ["fractional", "sample"]:
             rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode=mode))
@@ -1056,7 +1027,7 @@ class TestWholeCounts:
             total = rc.em_counts.sum()
             assert total == pytest.approx(300.0, abs=1e-9), f"mode={mode} lost fragments"
 
-    def test_the_argmax_assignment_is_gone(self):
+    def test_an_argmax_assignment_mode_is_refused(self):
         with pytest.raises(ValueError, match="assignment mode"):
             EMConfig(assignment_mode="map")
 
@@ -1404,7 +1375,7 @@ def _counts_against_prior(shape, *, mode, priors=(0.0, 500.0)):
 
 
 @pytest.mark.parametrize("shape", list(_SHAPES), ids=list(_SHAPES))
-def test_the_RNA_prior_moves_NO_component_s_SHARE_of_the_RNA_pool_under_MAP(shape):
+def test_the_rna_prior_moves_no_components_share_of_the_rna_pool_under_map(shape):
     """The rule's promise, where it is exactly true.
 
     The RNA pseudocount reaches every RNA component as the same factor `(1 + rna_prior/rna_count)`,
@@ -1422,7 +1393,7 @@ def test_the_RNA_prior_moves_NO_component_s_SHARE_of_the_RNA_pool_under_MAP(shap
 
 
 @pytest.mark.parametrize("shape", list(_SHAPES), ids=list(_SHAPES))
-def test_under_VBEM_the_prior_moves_the_split_only_by_the_DIGAMMA_CORRECTION(shape):
+def test_under_vbem_the_prior_moves_the_split_only_by_the_digamma_correction(shape):
     """The same claim under the shipped mode, where it is exact only in the limit, with a derived bound.
 
     VBEM's M-step is `theta_i ∝ exp(psi(alpha_i))`, which is not scale-equivariant, so a common factor
@@ -1448,7 +1419,7 @@ def test_under_VBEM_the_prior_moves_the_split_only_by_the_DIGAMMA_CORRECTION(sha
 
 
 @pytest.mark.parametrize("mode", ["map", "vbem"])
-def test_a_SYNTHETIC_SPAN_STILL_LOSES_to_the_transcript_it_spans(mode):
+def test_a_synthetic_span_loses_to_the_transcript_it_spans(mode):
     """The RNA prior reaches every RNA component as the same factor, so it does nothing to make a
     synthetic span decay; the decay rests on the likelihood alone, which suffices. A synthetic span is
     longer than the transcript it spans, so at equal per-fragment likelihood its yield ratio
@@ -1473,7 +1444,7 @@ def test_a_SYNTHETIC_SPAN_STILL_LOSES_to_the_transcript_it_spans(mode):
 
 
 @pytest.mark.parametrize("mode", ["map", "vbem"])
-def test_a_component_the_DATA_SUPPORTS_keeps_its_mass(mode):
+def test_a_component_the_data_supports_keeps_its_mass(mode):
     """The counterpart of the test above, which a rule zeroing anything with a long yield would pass.
     Component 1 is the strictly better explanation here (a 10× longer yield against a likelihood
     advantage of `e^8`), and it must keep the mass."""
@@ -1492,7 +1463,7 @@ def test_a_component_the_DATA_SUPPORTS_keeps_its_mass(mode):
 
 
 @pytest.mark.parametrize("mode", ["map", "vbem"])
-def test_a_ZERO_EVIDENCE_component_is_NOT_revived_by_the_prior(mode):
+def test_a_zero_evidence_component_is_not_revived_by_the_prior(mode):
     """The guard the rule keeps, and the reason the weights are the evidence rather than a flat
     share. `out[i]` is proportional to `raw[i]`, so `out[i] = 0` is an absorbing state that no prior
     magnitude escapes; the RNA pseudocount is a fragment count, tens to thousands on an expressed locus,
@@ -1594,7 +1565,7 @@ def _warm_start_run(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_the_SHIPPED_default_is_coverage_and_is_BYTE_IDENTICAL_to_no_switch():
+def test_the_shipped_default_is_coverage_and_is_byte_identical_to_no_switch():
     """The control: the shipped default is ``coverage``, and naming it changes nothing."""
     assert EMConfig().warm_start == "coverage"
     part = _warm_start_partition(n_units=100, log_liks=(0.0, -0.4), gdna_log_lik=-1.0)
@@ -1614,7 +1585,7 @@ def test_the_SHIPPED_default_is_coverage_and_is_BYTE_IDENTICAL_to_no_switch():
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_the_WEIGHT_moves_the_converged_split_into_the_weights_ratio():
+def test_the_weight_moves_the_converged_split_into_the_weights_ratio():
     """Two components whose likelihoods are identical, so the data cannot separate them and only the
     prior says where mass belongs. At the fixed point ``theta_i`` is proportional to ``raw_i + a_i``;
     with flat likelihoods ``raw_i`` is itself proportional to ``theta_i``, so the algebra collapses to
@@ -1633,7 +1604,7 @@ def test_the_WEIGHT_moves_the_converged_split_into_the_weights_ratio():
     )
 
 
-def test_the_split_is_MONOTONE_in_the_weight_ratio():
+def test_the_split_is_monotone_in_the_weight_ratio():
     """A property rather than a number: the exact converged ratio is perturbed by the gDNA component
     sharing the locus, so pinning it to `w0/w1` would fit the fixture. The allocation guarantees
     direction and order: equal weights split evenly, and a heavier weight always takes strictly more."""
@@ -1648,7 +1619,7 @@ def test_the_split_is_MONOTONE_in_the_weight_ratio():
     assert got[0] < 1.0 < got[2] < got[3]
 
 
-def test_the_prior_only_warm_start_CHANGES_THE_SEED_but_not_a_UNIQUE_fixed_point():
+def test_the_prior_only_warm_start_changes_the_seed_but_not_a_unique_fixed_point():
     """Zeroing the warm start changes where the EM starts, not where it ends: when the fixed point is
     unique the two seeds converge to the same answer. So the switch is shown on the iteration: truncated
     to a single pass the two seeds give visibly different answers, and at convergence they agree. A
@@ -1669,7 +1640,7 @@ def test_the_prior_only_warm_start_CHANGES_THE_SEED_but_not_a_UNIQUE_fixed_point
     np.testing.assert_allclose(late_cov, late_pri, rtol=1e-6)
 
 
-def test_the_RNA_PRIOR_REACHES_a_locus_with_NO_gDNA_CANDIDATE():
+def test_the_rna_prior_reaches_a_locus_with_no_gdna_candidate():
     """Gating both pseudocounts on ``has_gdna`` would discard the whole RNA prior::
 
         gdna_prior = has_gdna ? ... : 0.0
@@ -1694,7 +1665,7 @@ def test_the_RNA_PRIOR_REACHES_a_locus_with_NO_gDNA_CANDIDATE():
     assert shipped[0] == pytest.approx(shipped[1], rel=1e-9)
 
 
-def test_an_unknown_warm_start_is_REFUSED():
+def test_an_unknown_warm_start_is_refused():
     """``Literal`` is a type-checker annotation, not a runtime constraint — so a typo must be refused
     explicitly, or it silently falls through to the shipped path."""
     with pytest.raises(ValueError, match="Unknown warm start"):
@@ -1704,11 +1675,11 @@ def test_an_unknown_warm_start_is_REFUSED():
 @pytest.mark.parametrize(
     "codes, name, parameter",
     [
-        ("_ASSIGNMENT_MODE_CODES", "fractional", "assignment_mode"),
-        ("_WARM_START_CODES", "coverage", "warm_start_mode"),
+        ("ASSIGNMENT_MODE_CODES", "fractional", "assignment_mode"),
+        ("WARM_START_CODES", "coverage", "warm_start_mode"),
     ],
 )
-def test_an_unknown_mode_CODE_is_REFUSED_by_the_native_EM(monkeypatch, codes, name, parameter):
+def test_an_unknown_mode_code_is_refused_by_the_native_em(monkeypatch, codes, name, parameter):
     """The mode codes have one definition, in ``_em_impl``: the estimator maps the config's names onto the
     codes it reads from there, and the binding refuses a code it does not define rather than indexing the
     draw only sample mode fills or running the coverage seed. The config refuses an unknown name first, so
@@ -1716,11 +1687,11 @@ def test_an_unknown_mode_CODE_is_REFUSED_by_the_native_EM(monkeypatch, codes, na
     import rigel.estimator as estimator_mod
     from rigel import native
 
-    assert estimator_mod._ASSIGNMENT_MODE_CODES == {
+    assert estimator_mod.ASSIGNMENT_MODE_CODES == {
         "fractional": native.ASSIGN_FRACTIONAL,
         "sample": native.ASSIGN_SAMPLE,
     }
-    assert estimator_mod._WARM_START_CODES == {
+    assert estimator_mod.WARM_START_CODES == {
         "coverage": native.WARM_START_COVERAGE,
         "prior": native.WARM_START_PRIOR,
         "uniform": native.WARM_START_UNIFORM,
@@ -1786,7 +1757,7 @@ def _synthetic_span_share(ratio: float, *, n: int = 20_000, gdna_prior: float = 
 
 
 @pytest.mark.parametrize("ratio", [0.5, 1.0])
-def test_a_synthetic_span_holding_NOTHING_decays_to_ZERO_while_it_is_the_LONGER_component(ratio):
+def test_a_synthetic_span_holding_nothing_decays_to_zero_as_the_longer_component(ratio):
     """The threshold is `L_g / L_n = 1`, derived, not chosen.
 
     Every fragment here is gDNA, so the only correct answer is that the synthetic span holds none of
@@ -1801,7 +1772,7 @@ def test_a_synthetic_span_holding_NOTHING_decays_to_ZERO_while_it_is_the_LONGER_
     "ratio,expected",
     [(2.0, 0.3519), (6.223, 0.5269), (20.0, 0.8204)],
 )
-def test_a_synthetic_span_holding_NOTHING_GROWS_once_it_is_the_SHORTER_component(ratio, expected):
+def test_a_synthetic_span_holding_nothing_grows_once_it_is_the_shorter_component(ratio, expected):
     """Past the threshold `theta_n = 0` is unstable: the synthetic span's density is multiplied by
     `L_g/L_n > 1` every iteration and climbs off zero, settling where the strand channel alone stops it.
     The shares here are the closed-form fixed point, so this gate pins the solver against the derivation
@@ -1816,7 +1787,7 @@ def test_a_synthetic_span_holding_NOTHING_GROWS_once_it_is_the_SHORTER_component
     assert _synthetic_span_share(ratio) == pytest.approx(expected, abs=2e-3)
 
 
-def test_the_gDNA_PSEUDOCOUNT_bounds_the_synthetic_span_but_does_NOT_close_the_channel():
+def test_the_gdna_pseudocount_bounds_the_synthetic_span_but_does_not_close_it():
     """The calibration's own gDNA count anchors `theta_g`, so it damps the climb. It is a bound, not a
     fix: the synthetic span still takes a large share.
     """

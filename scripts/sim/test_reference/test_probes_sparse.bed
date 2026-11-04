@@ -1,5 +1,5 @@
-# THE SPARSE ADVERSARIAL PANEL (owner directive 2026-09-01) — one 125 bp probe CENTRED on
-# every annotated exon of a probed gene: faces depleted, mid-exon enriched. BED12.
+# THE SPARSE ADVERSARIAL PANEL — one 125 bp probe CENTRED on every annotated exon of a probed
+# gene: faces depleted, mid-exon enriched. BED12.
 # DERIVED from test_chr.yaml by build_test_reference.py — do not edit; edit the YAML and re-run it.
 test_chr	94438	94563	sparse_B1_cap_e0	0	.	94438	94563	0	1	125	0
 test_chr	102438	102563	sparse_B1_cap_e1	0	.	102438	102563	0	1	125	0

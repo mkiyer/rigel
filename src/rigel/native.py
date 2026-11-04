@@ -5,11 +5,11 @@ Every C++ symbol the package uses is imported through this module:
 _bam_impl     : BAM scanning, annotation writing, junction-tag detection (htslib)
 _resolve_impl : fragment overlap resolution against the reference index
 _scoring_impl : per-fragment likelihood scoring (strand, coverage, splice)
-_em_impl      : the locus-level EM, connected components, effective-length normalization
+_em_impl      : the locus-level EM, the partition scatter that builds its loci's arrays, connected components
 _solve_impl   : the calibration solve: the sweep's block pipeline in one call (``solve_blocks``), ψ (``psi_solve``),
-                and ``rows``, the row constructors and predicates the tests read, with ``read_column`` and the shared
-                constants production reads
-_cgranges_impl: interval overlap queries (vendored cgranges)
+                and ``rows``: ``read_column`` and ``ARM_EPS``, the kernel's values its Python readers share
+
+Every extension carries a ``testing`` submodule, its seams bound for the tests; production never imports it.
 """
 
 # -- BAM scanning ----------------------------------------------------------
@@ -24,8 +24,6 @@ from ._bam_impl import PLACE_REGION, PLACE_BOUNDARY, PLACE_SJ
 
 # -- Fragment resolution ----------------------------------------------------
 from ._resolve_impl import FragmentResolver
-from ._resolve_impl import FragmentAccumulator
-from ._resolve_impl import ResolvedFragment
 
 # -- Scoring ----------------------------------------------------------------
 from ._scoring_impl import NativeFragmentScorer
@@ -66,11 +64,8 @@ from ._solve_impl import psi_solve
 from ._solve_impl import POLICY_SILENT
 from ._solve_impl import POLICY_TRANSFER
 
-# the row constructors and predicates, for the tests; `read_column` and the shared constants, for production
+# `read_column` and `ARM_EPS`, which the transfer policy and the landscape read
 from ._solve_impl import rows as transfer_rows
-
-# -- Interval overlap -------------------------------------------------------
-from ._cgranges_impl import cgranges
 
 __all__ = [
     # BAM
@@ -83,8 +78,6 @@ __all__ = [
     "PLACE_SJ",
     # Resolution
     "FragmentResolver",
-    "FragmentAccumulator",
-    "ResolvedFragment",
     # Scoring
     "NativeFragmentScorer",
     "StreamingScorer",
@@ -115,6 +108,4 @@ __all__ = [
     "transfer_rows",
     # ψ
     "psi_solve",
-    # Intervals
-    "cgranges",
 ]

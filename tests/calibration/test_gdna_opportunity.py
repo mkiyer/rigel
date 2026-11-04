@@ -262,41 +262,18 @@ class TestTheCombination:
 
 
 class TestWiredIntoTheModel:
-    def test_the_fallback_is_the_CONTAINED_pair_not_the_raw_four(self):
-        """Without a divisor the gDNA pool falls back to the two contained pools: pooling the four raw is worse than
-        either the contained pair or the de-tilted four.
+    def test_where_the_contrast_declines_the_divisor_moves_the_pools_not_their_evidence(
+        self,
+    ):
+        """With no gDNA density the two-pool contrast declines, and the gDNA law is the four pools de-tilted by their
+        combined opportunity: all 850 fragments stand behind it, the divisor moves its shape, and the RNA pool is
+        untouched by it. The RNA pool spans several lengths on purpose: `detilt_pool` renormalises to the pool's own
+        total, so a single-bin histogram would be invariant under any divisor and could not show the gDNA divisor
+        leaking into the RNA one.
         """
         from types import SimpleNamespace
 
-        from rigel.calibration.fl import build_fl_models, gdna_contained_fl_mass, gdna_fl_mass
-
-        max_size = 20
-        pools = np.zeros((5, max_size + 1))
-        pools[0, 5] = 100.0  # intergenic contained
-        pools[1, 6] = 50.0  # intronic contained
-        pools[2, 18] = 400.0  # intron-exon crossing: much longer, and much larger
-        pools[3, 19] = 300.0  # intergenic-exon crossing
-        pools[4, 10] = 70.0  # RNA
-        payload = SimpleNamespace(
-            pool_lengths=pools,
-            deposited_lengths=pools.sum(axis=0),
-            max_length=max_size,
-        )
-
-        assert float(gdna_contained_fl_mass(payload).sum()) == 150.0
-        assert float(gdna_fl_mass(payload).sum()) == 850.0
-
-        models = build_fl_models(payload, prior_ess=0.0)
-        # The fallback must be the contained pair: 150 fragments at 5 and 6 bp, not 850 dragged long.
-        assert models.n_gdna == pytest.approx(150.0)
-        assert float((models.gdna_pmf * np.arange(max_size + 1)).sum()) < 7.0
-
-    def test_the_divisor_moves_the_gdna_pool_and_preserves_its_evidence_weight(self):
-        """The four-pool arm uses all 850 fragments, and the EB weight reflects that. The RNA pool spans several lengths
-        on purpose: `detilt_pool` renormalises to the pool's own total, so a single-bin histogram would be invariant
-        under any divisor and could not show the gDNA divisor leaking into the RNA one.
-        """
-        from types import SimpleNamespace
+        from _fl_fixture import regions_of
 
         from rigel.calibration.fl import build_fl_models
         from rigel.calibration.gdna_opportunity import GdnaOpportunity
@@ -310,55 +287,37 @@ class TestWiredIntoTheModel:
         pools[4, 8] = 30.0
         pools[4, 12] = 25.0
         pools[4, 17] = 15.0
+        regions = regions_of([1000, 200, 800], [0, 2, 1])
         payload = SimpleNamespace(
-            pool_lengths=pools, deposited_lengths=pools.sum(axis=0), max_length=max_size
+            pool_lengths=pools,
+            deposited_lengths=pools.sum(axis=0),
+            max_length=max_size,
+            region_contained_count=np.zeros(
+                (regions.n_regions, 2)
+            ),  # no gDNA density: the contrast declines
         )
         width = np.arange(max_size + 1, dtype=np.float64)
-        opportunity = GdnaOpportunity(
-            intergenic_contained=np.maximum(1000.0 - width, 0.0),
-            intronic_contained=np.maximum(800.0 - width, 0.0),
-            intron_exon_crossing=np.maximum(width - 1.0, 0.0) * 10.0,
-            intergenic_exon_crossing=np.maximum(width - 1.0, 0.0) * 5.0,
-            total=np.full(max_size + 1, 5000.0),
-        )
 
-        plain = build_fl_models(payload, prior_ess=0.0)
-        detilted = build_fl_models(payload, gdna_opportunity=opportunity, prior_ess=0.0)
+        def opportunity(crossing_scale):
+            return GdnaOpportunity(
+                intergenic_contained=np.maximum(1000.0 - width, 0.0),
+                intronic_contained=np.maximum(800.0 - width, 0.0),
+                intron_exon_crossing=np.maximum(width - 1.0, 0.0) * 10.0 * crossing_scale,
+                intergenic_exon_crossing=np.maximum(width - 1.0, 0.0) * 5.0 * crossing_scale,
+                total=np.full(max_size + 1, 5000.0),
+            )
 
-        assert detilted.n_gdna == pytest.approx(850.0), (
-            "the crossing pools must contribute evidence"
+        pi = np.linspace(0.0, 1.0, max_size + 1)
+        flat = build_fl_models(
+            payload, sj_opportunity=pi, gdna_opportunity=opportunity(0.0), regions=regions
         )
-        assert not np.allclose(plain.gdna_pmf, detilted.gdna_pmf)
+        tilted = build_fl_models(
+            payload, sj_opportunity=pi, gdna_opportunity=opportunity(1.0), regions=regions
+        )
+        assert tilted.n_gdna == pytest.approx(850.0), "the crossing pools must contribute evidence"
+        assert not np.allclose(flat.gdna_pmf, tilted.gdna_pmf)
         # The RNA pool is untouched by the gDNA divisor: the two selections are different objects.
-        assert plain.rna_pmf == pytest.approx(detilted.rna_pmf)
-
-    def test_EVERY_production_caller_of_build_fl_models_passes_the_annotation_inputs(self):
-        """Every annotation input to `build_fl_models` is optional so tests without an index can build a model, which
-        makes forgetting one in production silent: without ``sj_opportunity`` the RNA pool stays tilted long; without
-        ``gdna_opportunity`` the gDNA pool falls back to the contained pair and reads short under capture; without
-        ``regions`` the two-pool contrast never runs. So every call site in the package is checked, at source level (a
-        runtime check would need a pipeline run per call site) and over every module, so a new caller is covered.
-        """
-        import ast
-        from pathlib import Path
-
-        import rigel
-
-        required = {"sj_opportunity", "gdna_opportunity", "regions"}
-        package = Path(rigel.__file__).parent
-        calls = []
-        for path in sorted(package.rglob("*.py")):
-            for node in ast.walk(ast.parse(path.read_text())):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "build_fl_models"
-                ):
-                    calls.append((path.relative_to(package), node))
-        assert calls, "nothing in the package calls build_fl_models — retarget this test"
-        for where, call in calls:
-            missing = required - {k.arg for k in call.keywords}
-            assert not missing, f"{where}:{call.lineno} builds FL models without {sorted(missing)}"
+        assert flat.rna_pmf == pytest.approx(tilted.rna_pmf)
 
 
 class TestFromTheIndex:

@@ -20,6 +20,7 @@ import pytest
 from rigel.index import IndexLoadError, TranscriptIndex
 
 from rigel.calibration.splice_graph import (
+    BOUNDARY_COLUMNS,
     EDGE_KIND_CONTIGUOUS,
     EDGE_KIND_SJ,
     FLAG_ACCEPTOR_NEG,
@@ -36,12 +37,14 @@ from rigel.calibration.splice_graph import (
     validate_graph,
 )
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_POS
-from rigel.scan_cache import REACH_COLUMNS
 from rigel.transcript import Interval, Transcript
 from rigel.types import Strand
 
 from _index_builder import build_test_index
 from native._accumulator_reference import Partition
+
+#: The boundary table's four reach columns.
+REACH_COLUMNS = tuple(c for c in BOUNDARY_COLUMNS if c.startswith("reach_"))
 
 
 REF = {"chr1": 2000}
@@ -62,7 +65,7 @@ def _graph(transcripts, reflen=None):
     regions, boundaries = build_splice_graph(transcripts, reflen)
     with warnings.catch_warnings():
         # Several cases here build strand-coincident sj (G18, the per-strand reach case). validate_graph warns on those
-        # because they are biologically impossible; test_strand_coincident_sj_warn_but_still_work asserts the warning,
+        # because they are biologically impossible; test_strand_coincident_sj_warn_and_build asserts the warning,
         # so it is muted here to keep the suite warning-clean.
         warnings.simplefilter("ignore", RuntimeWarning)
         validate_graph(regions, boundaries, reflen, transcripts=transcripts)  # I1-I12 on every case
@@ -92,7 +95,7 @@ def _flags_at(regions, boundaries, pos):
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_G1_single_exon_transcript():
+def test_g1_single_exon_transcript():
     """3 regions (upstream / exon / downstream), 2 contiguous boundaries, 0 sj, TSS+TES on the two."""
     n, e = _graph([_tx([(500, 800)])])
     assert _regions(n) == [(0, 500), (500, 800), (800, 2000)]
@@ -102,7 +105,7 @@ def test_G1_single_exon_transcript():
     assert _flags_at(n, e, 800) & FLAG_TES_POS
 
 
-def test_G2_two_exon_transcript():
+def test_g2_two_exon_transcript():
     """One sj boundary donor→acceptor; the intron region exists and is not on the transcript's path."""
     n, e = _graph([_tx([(500, 700), (1200, 1500)])])
     assert _regions(n) == [(0, 500), (500, 700), (700, 1200), (1200, 1500), (1500, 2000)]
@@ -110,12 +113,12 @@ def test_G2_two_exon_transcript():
     assert n["signature"][2] & BIT_INTRON_POS  # the skipped intron region is annotated as intron
 
 
-def test_G3_three_exon_transcript():
+def test_g3_three_exon_transcript():
     n, e = _graph([_tx([(200, 400), (700, 900), (1200, 1400)])])
     assert len(_sj(e)) == 2
 
 
-def test_G4_alternative_TSS_inside_another_exon():
+def test_g4_alternative_tss_inside_another_exon():
     """An interior bound whose two sides share a signature, the case a merging partition would delete."""
     n, e = _graph([_tx([(400, 1000)], t_id="long"), _tx([(600, 1000)], t_id="short")])
     assert (600, 1000) in _regions(n), "the alternative-TSS region_bound at 600 was merged away"
@@ -124,20 +127,20 @@ def test_G4_alternative_TSS_inside_another_exon():
     assert _flags_at(n, e, 600) & FLAG_TSS_POS
 
 
-def test_G5_alternative_TES_inside_another_exon():
+def test_g5_alternative_tes_inside_another_exon():
     n, e = _graph([_tx([(400, 1000)], t_id="long"), _tx([(400, 700)], t_id="short")])
     assert (400, 700) in _regions(n)
     assert _flags_at(n, e, 700) & FLAG_TES_POS
 
 
-def test_G6_position_is_both_terminus_and_sj():
+def test_g6_position_is_both_terminus_and_sj():
     """TES_s and DONOR_s on one boundary, the case the 4-bit signature cannot represent."""
     n, e = _graph([_tx([(400, 800)], t_id="ends"), _tx([(200, 800), (1200, 1500)], t_id="splices")])
     f = _flags_at(n, e, 800)
     assert f & FLAG_TES_POS and f & FLAG_DONOR_POS
 
 
-def test_G7_exon_skipping():
+def test_g7_exon_skipping():
     """Two sj boundaries out of A's last region; the undirected graph now has a cycle."""
     n, e = _graph(
         [
@@ -149,7 +152,7 @@ def test_G7_exon_skipping():
     assert sum(1 for s, _d, _st in _sj(e) if s == a_last) == 2
 
 
-def test_G8_mutually_exclusive_exons():
+def test_g8_mutually_exclusive_exons():
     n, e = _graph(
         [
             _tx([(100, 300), (500, 700), (1500, 1700)], t_id="m1"),
@@ -162,7 +165,7 @@ def test_G8_mutually_exclusive_exons():
     assert (ns.index((500, 700)), ns.index((900, 1100)), Strand.POS) not in _sj(e)
 
 
-def test_G9_retained_intron():
+def test_g9_retained_intron():
     """The intron region carries exon_s and intron_s; the sj boundary spans it."""
     n, e = _graph(
         [
@@ -175,7 +178,7 @@ def test_G9_retained_intron():
     assert len(_sj(e)) == 1
 
 
-def test_G10_overlapping_transcripts_opposite_strands():
+def test_g10_overlapping_transcripts_opposite_strands():
     """AMBIG signature regions; sj boundaries keep distinct strand; no strand leakage in the flags."""
     n, e = _graph(
         [
@@ -192,7 +195,7 @@ def test_G10_overlapping_transcripts_opposite_strands():
     assert not _flags_at(n, e, 200) & FLAG_TSS_NEG
 
 
-def test_G11_nested_transcript_inside_another_intron():
+def test_g11_nested_transcript_inside_another_intron():
     n, e = _graph(
         [
             _tx([(100, 300), (1500, 1700)], t_id="outer"),
@@ -203,27 +206,27 @@ def test_G11_nested_transcript_inside_another_intron():
     assert len(_sj(e)) == 1
 
 
-def test_G12_shared_exon_endpoint_across_transcripts():
+def test_g12_shared_exon_endpoint_across_transcripts():
     """Exactly one region_bound, one boundary: the region_bound set dedups."""
     n, e = _graph([_tx([(400, 800)], t_id="a"), _tx([(400, 800)], t_id="b")])
     assert _regions(n) == [(0, 400), (400, 800), (800, 2000)]
 
 
-def test_G13_one_bp_region():
+def test_g13_one_bp_region():
     """A region of length 1 is emitted and walkable; human has many thousands of them."""
     n, _e = _graph([_tx([(500, 700)], t_id="a"), _tx([(501, 700)], t_id="b")])
     assert (500, 501) in _regions(n)
     assert int(n["length"].min()) == 1
 
 
-def test_G14_bookended_exons_no_intron():
+def test_g14_bookended_exons_no_intron():
     """Adjacent exons with a zero-length intron: a contiguous boundary, no sj boundary."""
     n, e = _graph([_tx([(400, 700), (700, 1000)])])
     assert _sj(e) == []
     assert 700 in n["end"].tolist()
 
 
-def test_G15_transcript_at_reference_boundaries():
+def test_g15_transcript_at_reference_boundaries():
     """No zero-length region and no duplicate region_bound when an exon touches 0 or ref_length."""
     n, _e = _graph([_tx([(0, 300), (1700, 2000)])])
     assert int(n["length"].min()) > 0
@@ -231,13 +234,13 @@ def test_G15_transcript_at_reference_boundaries():
     assert len(set(_regions(n))) == len(_regions(n))
 
 
-def test_G16_reference_with_no_transcripts():
+def test_g16_reference_with_no_transcripts():
     n, e = _graph([], reflen={"chr1": 2000})
     assert _regions(n) == [(0, 2000)]
     assert len(e) == 0
 
 
-def test_G17_two_references():
+def test_g17_two_references():
     """Region/boundary ids contiguous per reference; no cross-reference boundary."""
     reflen = {"chr1": 1500, "chr2": 1500}
     n, e = _graph(
@@ -250,7 +253,7 @@ def test_G17_two_references():
     assert np.all(ref[e["src"].to_numpy()] == ref[e["dst"].to_numpy()])
 
 
-def test_G18_coincident_opposite_strand_sj():
+def test_g18_coincident_opposite_strand_sj():
     """Two sj boundaries at the same donor/acceptor, distinct strand. GENCODE has none, so this shows the case works
     rather than how often it fires."""
     n, e = _graph(
@@ -326,7 +329,7 @@ def test_reach_is_per_strand_and_does_not_mix():
     assert _reach(e, src, dst, EDGE_KIND_SJ, Strand.NEG) == (0, 0, 200, 1000)
 
 
-def test_a_CONTIGUOUS_boundary_carries_no_reach(sample_graph):
+def test_a_contiguous_boundary_carries_no_reach(sample_graph):
     """Every contiguous row holds 0 in all four reach columns: the one reader of a reach, `build_sj_geometry_arrays`,
     takes only the sj rows. The fixture has transcripts on both strands, an intron on each and a single-exon transcript,
     so a span reach would be nonzero in both strands' columns.
@@ -339,7 +342,7 @@ def test_a_CONTIGUOUS_boundary_carries_no_reach(sample_graph):
         assert nonzero == 0, f"{nonzero} contiguous rows carry a {column} nothing reads"
 
 
-def test_a_SYNTHETIC_nrna_span_is_excluded_from_everything():
+def test_a_synthetic_nrna_span_is_excluded_from_everything():
     """A synthetic nRNA span row contributes no region_bound, no flag and no reach. The filter is ``~is_synthetic``
     alone: ``is_single_exon`` is also true of a real single-exon transcript, so using it would delete real transcripts.
     """
@@ -366,7 +369,7 @@ def sample_graph():
     return (*build_splice_graph(txs, REF), txs)
 
 
-def test_I_all_hold_on_a_valid_graph(sample_graph):
+def test_the_invariants_all_hold_on_a_valid_graph(sample_graph):
     n, e, txs = sample_graph
     validate_graph(n, e, REF, transcripts=txs)
 
@@ -384,7 +387,7 @@ def test_I_all_hold_on_a_valid_graph(sample_graph):
         ("I12 edge_id", lambda n, e: e.__setitem__("edge_id", e["edge_id"] + 5)),
     ],
 )
-def test_I_validators_fire_when_violated(sample_graph, inv, mutate):
+def test_the_invariant_validators_fire_when_violated(sample_graph, inv, mutate):
     n, e, _txs = sample_graph
     n, e = n.copy(), e.copy()
     mutate(n, e)
@@ -392,7 +395,7 @@ def test_I_validators_fire_when_violated(sample_graph, inv, mutate):
         validate_graph(n, e, REF)
 
 
-def test_I11_fires_when_a_sj_edge_is_missing(sample_graph):
+def test_i11_fires_when_a_sj_edge_is_missing(sample_graph):
     n, e, txs = sample_graph
     e = e[e["kind"] != EDGE_KIND_SJ].reset_index(drop=True)
     e["edge_id"] = np.arange(len(e), dtype=np.int64)
@@ -400,7 +403,7 @@ def test_I11_fires_when_a_sj_edge_is_missing(sample_graph):
         validate_graph(n, e, REF, transcripts=txs)
 
 
-def test_I4_fires_when_an_interface_is_not_an_annotation_event(sample_graph):
+def test_i4_fires_when_an_interface_is_not_an_annotation_event(sample_graph):
     """Interior interfaces are exactly the annotation events."""
     n, e, txs = sample_graph
     with pytest.raises(ValueError, match="I4"):
@@ -425,7 +428,7 @@ _RANDOM_CASES = [
 
 
 @pytest.mark.parametrize("txs", _RANDOM_CASES, ids=[f"case{i}" for i in range(len(_RANDOM_CASES))])
-def test_P1_invariants_hold_on_every_case(txs):
+def test_p1_invariants_hold_on_every_case(txs):
     """I1-I13 on every random case, including I3b (the signature, recomputed from each region's midpoint) and I13 (the
     flags are the events), both of which need the transcripts."""
     n, e = build_splice_graph(txs, REF)
@@ -434,7 +437,7 @@ def test_P1_invariants_hold_on_every_case(txs):
         validate_graph(n, e, REF, transcripts=txs)
 
 
-def test_I3b_FIRES_on_a_corrupted_signature():
+def test_i3b_fires_on_a_corrupted_signature():
     """I3b can fail."""
     txs = [_tx([(300, 500), (900, 1100)])]
     n, e = build_splice_graph(txs, REF)
@@ -443,7 +446,7 @@ def test_I3b_FIRES_on_a_corrupted_signature():
         validate_graph(n, e, REF, transcripts=txs)
 
 
-def test_a_single_exon_transcript_is_a_REAL_transcript_with_REAL_termini():
+def test_a_single_exon_transcript_is_a_real_transcript_with_real_termini():
     """A non-synthetic single-exon row is a real transcript with real termini. Excluding ``is_single_exon`` from the
     flags as well as ``is_synthetic`` would delete tens of thousands of real terminus positions on the human annotation,
     the visibility the unmerged partition exists for.
@@ -457,7 +460,7 @@ def test_a_single_exon_transcript_is_a_REAL_transcript_with_REAL_termini():
     assert _flags_at(n, e, 1500) & FLAG_TES_POS, "...and its 3' end IS a TES"
 
 
-def test_P4_determinism_build_twice_is_identical():
+def test_p4_determinism_build_twice_is_identical():
     txs = _RANDOM_CASES[3]
     a_n, a_e = build_splice_graph(txs, REF)
     b_n, b_e = build_splice_graph(list(reversed(txs)), REF)
@@ -465,7 +468,7 @@ def test_P4_determinism_build_twice_is_identical():
     assert a_e.equals(b_e), "boundary table depends on transcript ORDER"
 
 
-def test_P5_every_transcript_walks_on_a_realistic_multilocus_case():
+def test_p5_every_transcript_walks_on_a_realistic_multilocus_case():
     """I11 over a denser case: overlapping loci, both strands, a retained intron and a 1 bp region."""
     txs = [
         _tx([(100, 300), (600, 800), (1100, 1300)], t_id="a"),
@@ -524,7 +527,7 @@ chr1\ttest\texon\t1701\t1900\t.\t-\t.\tgene_id "g2"; transcript_id "t2";
 """
 
 
-def test_TD1_rebuilds_are_byte_identical(tmp_path_factory):
+def test_rebuilds_are_byte_identical(tmp_path_factory):
     """Determinism is an invariant: the output is a pure function of (transcripts, ref_lengths); np.unique sorts, ids
     come from position, boundaries from an explicit total order, with no dict iteration, hashing or parallel reduction.
     """
@@ -551,7 +554,7 @@ def test_index_build_writes_and_loads_the_graph(tmp_path_factory):
     assert int((idx.edges_df["kind"] == EDGE_KIND_SJ).sum()) == 2
 
 
-def test_graph_is_REQUIRED_at_load(tmp_path_factory):
+def test_graph_is_required_at_load(tmp_path_factory):
     """The graph is the partition the scanner deposits into, so an index without one cannot serve a scan; loading one
     anyway would run calibration on the wrong geometry. It must raise and say what to do.
     """
@@ -564,7 +567,7 @@ def test_graph_is_REQUIRED_at_load(tmp_path_factory):
             TranscriptIndex.load(idx.index_dir)
 
 
-def test_strand_coincident_sj_warn_but_still_work():
+def test_strand_coincident_sj_warn_and_build():
     """Biologically impossible: splice motifs are non-palindromic, so the same (donor, acceptor) cannot be a valid
     intron on both strands (GT..AG reverse-complements to CT..AC), and GENCODE has none, so one in a GTF means the
     annotation is wrong. The graph must still be correct (two distinct boundaries, separated by the strand in the sort
@@ -674,7 +677,7 @@ def test_the_csr_addresses_the_flat_region_bound_axis(index):
     assert int(offsets[-1]) == region_bounds.shape[0]
 
 
-def test_every_annotated_intron_is_found_at_its_LEFT_BOUNDARY(index):
+def test_every_annotated_intron_is_found_at_its_left_boundary(index):
     """The four annotated introns, looked up the way the deposit will look them up."""
     arrays = build_sj_arrays(index)
     region_bounds, offsets, _ = build_region_partition_arrays(index)
@@ -698,7 +701,7 @@ def test_every_annotated_intron_is_found_at_its_LEFT_BOUNDARY(index):
         assert got_strand == int(strand)
 
 
-def test_a_shared_donor_keeps_BOTH_sj(index):
+def test_a_shared_donor_keeps_both_sj(index):
     """Alternative 3' splice site: region_bound 400 on chr1 is the donor of two distinct sj. A table storing one sj per
     region_bound would drop one, and the dropped intron would be treated as unannotated.
     """
@@ -711,7 +714,7 @@ def test_a_shared_donor_keeps_BOTH_sj(index):
     assert landed == [700, 1000]
 
 
-def test_a_region_bound_that_is_not_a_LEFT_BOUNDARY_has_an_empty_slice(index):
+def test_a_region_bound_that_is_not_a_left_boundary_has_an_empty_slice(index):
     """Most region_bounds are not donors, so the slice must be empty rather than absent, and the deposit needs no
     special case."""
     arrays = build_sj_arrays(index)

@@ -35,12 +35,43 @@ __all__ = ["FragmentBuffer"]
 
 
 # ---------------------------------------------------------------------------
-# _FinalizedChunk — immutable chunk in compact NumPy arrays
+# FinalizedChunk — immutable chunk in compact NumPy arrays
 # ---------------------------------------------------------------------------
 
 
+#: A chunk's per-fragment arrays and their dtypes, the contract with the native side: one entry per fragment.
+_FRAGMENT_ARRAYS = {
+    "splice_type": np.uint8,
+    "align_strand": np.uint8,
+    "num_hits": np.int32,
+    "ambig_strand": np.uint8,
+    "frag_id": np.int64,
+    "read_length": np.uint16,
+    "genomic_footprint": np.int32,
+    "genomic_start": np.int32,
+    "nm": np.uint16,
+    "clip": np.uint16,
+}
+
+#: A chunk's per-candidate arrays, parallel to ``t_indices`` over ``t_offsets``' CSR, by the column each is spilled
+#: as, with their dtypes.
+_CANDIDATE_ARRAYS = {
+    "t_inds": ("t_indices", np.int32),
+    "frag_lengths": ("frag_lengths", np.int32),
+    "exon_bp": ("exon_bp", np.uint16),
+}
+
+#: A multimapper's place masses, CSR over rows (``place_offsets``), by the column each is spilled as, with their
+#: dtypes; a chunk carries all of them or none.
+_PLACE_ARRAYS = {
+    "place_kind": np.int8,
+    "place_index": np.int64,
+    "place_mass": np.float32,
+}
+
+
 @dataclass(slots=True)
-class _FinalizedChunk:
+class FinalizedChunk:
     """An immutable chunk of fragment data in compact columnar arrays.
 
     Fixed-width fields are typed vectors; transcript index sets are CSR (``t_offsets[i]:t_offsets[i+1]`` indexes
@@ -77,63 +108,28 @@ class _FinalizedChunk:
     place_mass: np.ndarray | None = None  # float32[M_p]
 
     @classmethod
-    def from_raw(cls, raw: dict) -> "_FinalizedChunk":
+    def from_raw(cls, raw: dict) -> "FinalizedChunk":
         """Build a chunk from the dict C++ ``FragmentAccumulator.finalize`` returns. The arrays arrive C-contiguous in
         the declared dtypes, so nothing is copied or cast."""
         return cls(
-            splice_type=raw["splice_type"],
-            align_strand=raw["align_strand"],
-            num_hits=raw["num_hits"],
+            **{name: raw[name] for name in _FRAGMENT_ARRAYS},
+            **{name: raw[name] for name, _dtype in _CANDIDATE_ARRAYS.values()},
             t_offsets=raw["t_offsets"],
-            t_indices=raw["t_indices"],
-            frag_lengths=raw["frag_lengths"],
-            exon_bp=raw["exon_bp"],
-            ambig_strand=raw["ambig_strand"],
-            frag_id=raw["frag_id"],
-            read_length=raw["read_length"],
-            genomic_footprint=raw["genomic_footprint"],
-            genomic_start=raw["genomic_start"],
-            nm=raw["nm"],
-            clip=raw["clip"],
             size=int(raw["size"]),
-            place_offsets=raw.get("place_offsets"),
-            place_kind=raw.get("place_kind"),
-            place_index=raw.get("place_index"),
-            place_mass=raw.get("place_mass"),
+            **{name: raw.get(name) for name in ("place_offsets", *_PLACE_ARRAYS)},
         )
 
     @property
     def memory_bytes(self) -> int:
         """Total bytes consumed by the underlying NumPy arrays."""
-        return sum(
-            a.nbytes
-            for a in (
-                self.splice_type,
-                self.align_strand,
-                self.num_hits,
-                self.t_offsets,
-                self.t_indices,
-                self.frag_lengths,
-                self.exon_bp,
-                self.ambig_strand,
-                self.frag_id,
-                self.read_length,
-                self.genomic_footprint,
-                self.genomic_start,
-                self.nm,
-                self.clip,
-                *(
-                    a
-                    for a in (
-                        self.place_offsets,
-                        self.place_kind,
-                        self.place_index,
-                        self.place_mass,
-                    )
-                    if a is not None
-                ),
-            )
+        names = (
+            *_FRAGMENT_ARRAYS,
+            "t_offsets",
+            *(name for name, _dtype in _CANDIDATE_ARRAYS.values()),
+            "place_offsets",
+            *_PLACE_ARRAYS,
         )
+        return sum(a.nbytes for a in (getattr(self, name) for name in names) if a is not None)
 
     @property
     def fragment_classes(self) -> np.ndarray:
@@ -159,7 +155,7 @@ class _FinalizedChunk:
     def to_scoring_arrays(self) -> dict:
         """The arrays ``StreamingScorer.score_chunk`` reads, by name.
 
-        ``from_raw`` and ``_load_chunk`` both store every array C-contiguous in the dtype the C++ kernel expects, so
+        ``from_raw`` and ``load_chunk`` both store every array C-contiguous in the dtype the C++ kernel expects, so
         these are the chunk's own arrays.
         """
         return {
@@ -184,117 +180,46 @@ class _FinalizedChunk:
 # ---------------------------------------------------------------------------
 
 
-def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
-    """Write a finalized chunk to disk as Arrow IPC with LZ4."""
+def spill_chunk(chunk: FinalizedChunk, path: Path) -> None:
+    """Write a finalized chunk to disk as Arrow IPC with LZ4: each per-fragment array a column, each per-candidate
+    and place-mass array a list column over its CSR."""
     import pyarrow as pa
     import pyarrow.feather as pf
 
-    t_list = pa.ListArray.from_arrays(
-        chunk.t_offsets,
-        chunk.t_indices,
-    )
-    frag_lengths_list = pa.ListArray.from_arrays(
-        chunk.t_offsets,
-        chunk.frag_lengths,
-    )
-    exon_bp_list = pa.ListArray.from_arrays(
-        chunk.t_offsets,
-        chunk.exon_bp,
-    )
-    table = pa.table(
-        {
-            "splice_type": chunk.splice_type,
-            "align_strand": chunk.align_strand,
-            "num_hits": chunk.num_hits,
-            "t_inds": t_list,
-            "frag_lengths": frag_lengths_list,
-            "exon_bp": exon_bp_list,
-            "ambig_strand": chunk.ambig_strand,
-            "frag_id": chunk.frag_id,
-            "read_length": chunk.read_length,
-            "genomic_footprint": chunk.genomic_footprint,
-            "genomic_start": chunk.genomic_start,
-            "nm": chunk.nm,
-            "clip": chunk.clip,
-            **(
-                {}
-                if chunk.place_offsets is None
-                else {
-                    "place_kind": pa.ListArray.from_arrays(
-                        chunk.place_offsets.astype(np.int32), chunk.place_kind
-                    ),
-                    "place_index": pa.ListArray.from_arrays(
-                        chunk.place_offsets.astype(np.int32), chunk.place_index
-                    ),
-                    "place_mass": pa.ListArray.from_arrays(
-                        chunk.place_offsets.astype(np.int32), chunk.place_mass
-                    ),
-                }
-            ),
-        }
-    )
-
-    pf.write_feather(table, str(path), compression="lz4")
+    columns = {name: getattr(chunk, name) for name in _FRAGMENT_ARRAYS}
+    for column, (name, _dtype) in _CANDIDATE_ARRAYS.items():
+        columns[column] = pa.ListArray.from_arrays(chunk.t_offsets, getattr(chunk, name))
+    if chunk.place_offsets is not None:
+        place_offsets = chunk.place_offsets.astype(np.int32)
+        for name in _PLACE_ARRAYS:
+            columns[name] = pa.ListArray.from_arrays(place_offsets, getattr(chunk, name))
+    pf.write_feather(pa.table(columns), str(path), compression="lz4")
 
 
-def _load_chunk(path: Path) -> _FinalizedChunk:
-    """Load a spilled chunk from an Arrow IPC file."""
+def load_chunk(path: Path) -> FinalizedChunk:
+    """Load a spilled chunk from an Arrow IPC file, every array in its declared dtype and owned."""
     import pyarrow.feather as pf
 
     table = pf.read_table(str(path))
-
-    t_col = table.column("t_inds").combine_chunks()
-    t_offsets = t_col.offsets.to_numpy().astype(np.int32)
-    t_indices = t_col.values.to_numpy().copy()
-
-    # per-candidate arrays, parallel to t_indices
-    frag_lengths_col = table.column("frag_lengths").combine_chunks()
-    frag_lengths_arr = frag_lengths_col.values.to_numpy().astype(np.int32, copy=False)
-
-    exon_bp_col = table.column("exon_bp").combine_chunks()
-    exon_bp_arr = exon_bp_col.values.to_numpy().astype(np.uint16, copy=False)
-
-    return _FinalizedChunk(
-        splice_type=table.column("splice_type").to_numpy().copy(),
-        align_strand=table.column("align_strand").to_numpy().copy(),
-        num_hits=table.column("num_hits").to_numpy().copy(),
-        t_offsets=t_offsets,
-        t_indices=t_indices,
-        frag_lengths=frag_lengths_arr,
-        exon_bp=exon_bp_arr,
-        ambig_strand=table.column("ambig_strand").to_numpy().copy(),
-        frag_id=table.column("frag_id").to_numpy().astype(np.int64),
-        read_length=table.column("read_length").to_numpy().copy().astype(np.uint16),
-        genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
-        genomic_start=table.column("genomic_start").to_numpy().copy(),
-        nm=table.column("nm").to_numpy().copy().astype(np.uint16),
-        clip=table.column("clip").to_numpy().copy().astype(np.uint16),
-        size=len(table),
-        **_load_place_masses(table),
-    )
-
-
-def _load_place_masses(table) -> dict:
-    """The spilled chunk's place-mass CSR, or none where it carried none."""
-    if "place_kind" not in table.column_names:
-        return {}
-    kind = table.column("place_kind").combine_chunks()
-    return {
-        "place_offsets": kind.offsets.to_numpy().astype(np.int64),
-        "place_kind": kind.values.to_numpy().astype(np.int8),
-        "place_index": table.column("place_index")
-        .combine_chunks()
-        .values.to_numpy()
-        .astype(np.int64),
-        "place_mass": table.column("place_mass")
-        .combine_chunks()
-        .values.to_numpy()
-        .astype(np.float32),
+    arrays = {
+        name: table.column(name).to_numpy().astype(dtype)
+        for name, dtype in _FRAGMENT_ARRAYS.items()
     }
+    for column, (name, dtype) in _CANDIDATE_ARRAYS.items():
+        values = table.column(column).combine_chunks()
+        arrays[name] = values.values.to_numpy().astype(dtype)
+        if column == "t_inds":
+            arrays["t_offsets"] = values.offsets.to_numpy().astype(np.int32)
+    if "place_kind" in table.column_names:
+        kind = table.column("place_kind").combine_chunks()
+        arrays["place_offsets"] = kind.offsets.to_numpy().astype(np.int64)
+        for name, dtype in _PLACE_ARRAYS.items():
+            arrays[name] = table.column(name).combine_chunks().values.to_numpy().astype(dtype)
+    return FinalizedChunk(**arrays, size=len(table))
 
 
 @dataclass(slots=True)
-class _PendingSpill:
+class PendingSpill:
     """A chunk handed to the background spill writer."""
 
     path: Path
@@ -329,7 +254,7 @@ class _SpillWriter:
         )
         self._thread.start()
 
-    def submit(self, chunk: _FinalizedChunk, pending: _PendingSpill) -> None:
+    def submit(self, chunk: FinalizedChunk, pending: PendingSpill) -> None:
         if self._closed:
             raise RuntimeError("Cannot submit to a closed spill writer.")
         self._slots.acquire()
@@ -339,15 +264,14 @@ class _SpillWriter:
             self._slots.release()
             raise
 
-    def stop(self) -> None:
+    def stop(self, *, wait: bool = True) -> None:
         """Queue the stop; the thread writes what was submitted before it, removes the directory and
-        exits. Joins the thread, except on the thread itself, where garbage collection can run the
-        buffer's finalizer."""
+        exits. With *wait*, joins it."""
         if self._closed:
             return
         self._closed = True
         self._queue.put(self._STOP)
-        if threading.current_thread() is not self._thread:
+        if wait:
             self._thread.join()
 
     def _run(self) -> None:
@@ -366,7 +290,7 @@ class _SpillWriter:
                     pending.memory_bytes / 1024**2,
                     pending.path,
                 )
-                _spill_chunk(chunk, pending.path)
+                spill_chunk(chunk, pending.path)
                 logger.info("Finished spilled chunk -> %s", pending.path)
             except BaseException as exc:
                 pending.error = exc
@@ -406,7 +330,7 @@ class FragmentBuffer:
         self.max_memory_bytes = max_memory_bytes
         self._spill_dir = spill_dir
 
-        self._chunks: deque[_FinalizedChunk | _PendingSpill] = deque()
+        self._chunks: deque[FinalizedChunk | PendingSpill] = deque()
         self._total_size = 0
         self._memory_bytes = 0
         self._n_spilled = 0
@@ -432,7 +356,7 @@ class FragmentBuffer:
 
     # -- Accepting chunks -----------------------------------------------------
 
-    def inject_chunk(self, chunk: _FinalizedChunk) -> None:
+    def inject_chunk(self, chunk: FinalizedChunk) -> None:
         """Append a finalized chunk and spill if over memory budget."""
         self._raise_completed_spill_errors()
         self._total_size += chunk.size
@@ -447,11 +371,11 @@ class FragmentBuffer:
     def _spill_oldest(self) -> bool:
         """Spill the oldest in-memory chunk to disk.  Return True if spilled."""
         for i, chunk in enumerate(self._chunks):
-            if isinstance(chunk, _FinalizedChunk):
+            if isinstance(chunk, FinalizedChunk):
                 writer = self._ensure_spill_writer()
                 path = writer.temp_dir / f"chunk_{self._n_spilled:04d}.arrow"
                 freed = chunk.memory_bytes
-                pending = _PendingSpill(
+                pending = PendingSpill(
                     path=path,
                     done=threading.Event(),
                     memory_bytes=freed,
@@ -476,29 +400,33 @@ class FragmentBuffer:
             self._spill_writer = _SpillWriter(
                 self._spill_dir, capacity=CONSTANTS.resources.spill_queue_chunks
             )
-            # Stops the writer and removes its directory if cleanup() is never called.
-            self._spill_finalizer = weakref.finalize(self, self._spill_writer.stop)
+            # Stops the writer, which then removes its directory, if cleanup() is never called. It never waits:
+            # garbage collection can run it on any thread, the writer's own included, and on one holding a lock the
+            # writer needs (a logging handler's, when a collection runs inside a log call), where waiting would
+            # deadlock.
+            self._spill_finalizer = weakref.finalize(self, self._spill_writer.stop, wait=False)
         return self._spill_writer
 
     def _stop_spill_writer(self) -> None:
         if self._spill_finalizer is not None:
-            self._spill_finalizer()  # runs writer.stop() now; a finalizer runs at most once
+            self._spill_finalizer.detach()  # the stop below, which waits, replaces it
+            self._spill_writer.stop()
             self._spill_finalizer = None
             self._spill_writer = None
 
-    def _spill_error(self, pending: _PendingSpill) -> RuntimeError:
+    def _spill_error(self, pending: PendingSpill) -> RuntimeError:
         return RuntimeError(f"Failed to spill buffer chunk to {pending.path}")
 
-    def _wait_pending_spill(self, pending: _PendingSpill) -> Path:
+    def _wait_pending_spill(self, pending: PendingSpill) -> Path:
         pending.done.wait()
         if pending.error is not None:
             raise self._spill_error(pending) from pending.error
         return pending.path
 
     def _wait_all_pending_spills(self) -> None:
-        failed: _PendingSpill | None = None
+        failed: PendingSpill | None = None
         for chunk_ref in list(self._chunks):
-            if isinstance(chunk_ref, _PendingSpill):
+            if isinstance(chunk_ref, PendingSpill):
                 chunk_ref.done.wait()
                 if chunk_ref.error is not None and failed is None:
                     failed = chunk_ref
@@ -508,7 +436,7 @@ class FragmentBuffer:
     def _raise_completed_spill_errors(self) -> None:
         for chunk_ref in self._chunks:
             if (
-                isinstance(chunk_ref, _PendingSpill)
+                isinstance(chunk_ref, PendingSpill)
                 and chunk_ref.done.is_set()
                 and chunk_ref.error is not None
             ):
@@ -516,14 +444,14 @@ class FragmentBuffer:
 
     # -- Iteration ------------------------------------------------------------
 
-    def iter_chunks_consuming(self) -> Iterator[_FinalizedChunk]:
+    def iter_chunks_consuming(self) -> Iterator[FinalizedChunk]:
         """Yield the chunks in order, releasing each once the caller advances; spilled files are deleted as they are
         read, and the buffer is empty afterwards."""
         while self._chunks:
             chunk_ref = self._chunks.popleft()
-            if isinstance(chunk_ref, _PendingSpill):
+            if isinstance(chunk_ref, PendingSpill):
                 path = self._wait_pending_spill(chunk_ref)
-                chunk = _load_chunk(path)
+                chunk = load_chunk(path)
                 path.unlink(missing_ok=True)
             else:
                 chunk = chunk_ref

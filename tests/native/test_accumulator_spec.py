@@ -96,7 +96,7 @@ def test_one_fragment_recovers_its_own_reciprocal_length():
 # ---------------------------------------------------------------------------
 
 
-def test_a_contained_fragment_touches_ONE_region_and_no_boundary():
+def test_a_contained_fragment_touches_one_region_and_no_boundary():
     acc = _acc()
     assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
     t = acc.tally
@@ -105,7 +105,7 @@ def test_a_contained_fragment_touches_ONE_region_and_no_boundary():
     assert t.boundary_unspliced_count.sum() == 0
 
 
-def test_a_fragment_ENDING_AT_a_boundary_does_not_cross_it():
+def test_a_fragment_ending_at_a_boundary_does_not_cross_it():
     """A boundary is 0 bp wide: crossing needs a base on each side."""
     acc = _acc()
     acc.deposit(0, 120, 200)
@@ -113,14 +113,14 @@ def test_a_fragment_ENDING_AT_a_boundary_does_not_cross_it():
     assert int(acc.tally.region_contained_count[_region(0, 1), 0]) == 1
 
 
-def test_a_fragment_STARTING_AT_a_boundary_does_not_cross_it():
+def test_a_fragment_starting_at_a_boundary_does_not_cross_it():
     acc = _acc()
     acc.deposit(0, 201, 390)
     assert acc.tally.boundary_unspliced_count.sum() == 0
     assert int(acc.tally.region_contained_count[_region(0, 3), 0]) == 1
 
 
-def test_a_fragment_crossing_four_regions_credits_exactly_THREE_boundaries_at_FULL_weight():
+def test_a_fragment_crossing_four_regions_credits_three_boundaries_at_full_weight():
     acc = _acc()
     acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> boundaries at 200, 201, 400
     t = acc.tally
@@ -139,7 +139,7 @@ def test_a_fragment_crossing_four_regions_credits_exactly_THREE_boundaries_at_FU
     assert t.region_contained_count.sum() == 0
 
 
-def test_a_fragment_covering_a_1bp_region_credits_BOTH_boundaries_and_conserves_its_mass():
+def test_a_fragment_covering_a_1bp_region_credits_both_boundaries_and_conserves_mass():
     """1 bp regions are legal (there are thousands at human scale), and nothing may assume a region is longer than one
     base. It is the sharpest case for the conserved mass: the 1 bp slice is shared between two bounding boundaries, so
     the three slices are 50 / 1 / 99 bases of a 150 bp molecule and must still sum to exactly one fragment. A count
@@ -155,7 +155,7 @@ def test_a_fragment_covering_a_1bp_region_credits_BOTH_boundaries_and_conserves_
     assert abs(mass - 1.0) <= 8 * EPS, f"the fragment deposited {mass} fragments, not 1"
 
 
-def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_one_boundary():
+def test_a_fragment_longer_than_a_region_is_not_contained_and_crosses_one_boundary():
     """``contained`` needs ``L <= region``. One base longer and the fragment is a crossing instead, touching the region
     axis nowhere."""
     acc = _acc()
@@ -170,7 +170,7 @@ def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_on
 # ---------------------------------------------------------------------------
 
 
-def test_a_spliced_jump_deposits_NOTHING_on_the_boundaries_it_splices_over():
+def test_a_spliced_jump_deposits_nothing_on_the_boundaries_it_splices_over():
     """The intron [201,900) swallows the boundary at 400; a rule that asked only "does another slice follow?" could not
     tell that from a contiguous crossing."""
     acc = _acc(sj=[SJ])
@@ -183,7 +183,7 @@ def test_a_spliced_jump_deposits_NOTHING_on_the_boundaries_it_splices_over():
     assert int(t.boundary_spliced_count[_boundary(0, 4), 0]) == 0
 
 
-def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
+def test_a_spliced_fragments_own_block_crossings_go_in_the_spliced_bank():
     """A spliced fragment is certified RNA (gDNA cannot be spliced), so a boundary its block crosses is the cleanest RNA
     marker available at a boundary."""
     acc = _acc(sj=[SJ])
@@ -195,7 +195,7 @@ def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
     assert t.boundary_unspliced_count.sum() == 0
 
 
-def test_a_MULTI_SEGMENT_unspliced_fragment_conserves_its_mass_across_BOTH_segments():
+def test_a_multi_segment_unspliced_fragment_conserves_its_mass_across_both_segments():
     """An unannotated intron sits strictly inside n4 = [400,900), so segment 1 crosses the boundary at 400 and segment 2
     the boundary at 900. Every segment touches a boundary, so the conservation law applies unchanged and the mass sums
     to exactly one fragment; a segment touching no boundary would leave its bases nowhere conserved to go.
@@ -209,7 +209,7 @@ def test_a_MULTI_SEGMENT_unspliced_fragment_conserves_its_mass_across_BOTH_segme
     assert abs(mass - 1.0) <= 8 * EPS, f"a two-segment fragment deposited {mass} fragments, not 1"
 
 
-def test_an_UNANNOTATED_intron_credits_no_sj_and_nothing_across_the_gap():
+def test_an_unannotated_intron_credits_no_sj_and_nothing_across_the_gap():
     """Unannotated sj are disproportionately artifactual, so they deposit on the unspliced channel and compete with gDNA
     rather than being certified RNA."""
     acc = _acc(sj=[SJ])
@@ -224,7 +224,7 @@ def test_an_UNANNOTATED_intron_credits_no_sj_and_nothing_across_the_gap():
     assert int(t.boundary_unspliced_count[_boundary(0, 3), 0]) == 0, "the swallowed boundary at 201"
 
 
-def test_a_fragment_straddling_two_regions_without_crossing_a_boundary_is_NOT_contained():
+def test_a_fragment_straddling_two_regions_without_a_crossing_is_not_contained():
     """An unannotated intron can swallow every boundary between two blocks. The fragment then crosses nothing yet
     straddles two regions, so crediting it as contained would put its whole length in a region it only partly overlaps.
     It deposits on no object, and the start count keeps that visible.
@@ -247,7 +247,7 @@ def test_an_unannotated_intron_inside_one_region_is_a_contained_unspliced_fragme
     assert int(t.deposited_lengths[180 - 40]) == 1
 
 
-def test_opposite_strand_sj_at_the_same_coordinates_are_DISTINCT_boundaries():
+def test_opposite_strand_sj_at_the_same_coordinates_are_distinct_boundaries():
     """Biologically impossible (splice motifs are not palindromic), so only a synthetic stress test can reach it."""
     acc = _acc(sj=[(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)])
     acc.deposit(
@@ -261,7 +261,7 @@ def test_opposite_strand_sj_at_the_same_coordinates_are_DISTINCT_boundaries():
 
 
 @pytest.mark.parametrize("order", [("POS_first", 1), ("NEG_first", -1)])
-def test_a_sj_id_is_a_function_of_the_PARTITION_not_of_argument_order(order):
+def test_a_sj_id_is_a_function_of_the_partition_not_of_argument_order(order):
     """The sj-boundary id is the rank in the sort, so the sort must be total; otherwise the id depends on the order the
     caller listed the sj in.
 
@@ -277,7 +277,7 @@ def test_a_sj_id_is_a_function_of_the_PARTITION_not_of_argument_order(order):
     )
 
 
-def test_a_fragment_using_TWO_sj_credits_BOTH():
+def test_a_fragment_using_two_sj_credits_both():
     """Each boundary owns its own expectation, and the strand model is fitted from a separate scan output, so crediting
     every sj a path uses distorts nothing. The two introns are separated by a real exon (abutting introns are
     malformed), so this needs its own partition.
@@ -299,7 +299,7 @@ def test_a_fragment_using_TWO_sj_credits_BOTH():
 # ---------------------------------------------------------------------------
 
 
-def test_the_unspliced_bank_is_indexed_by_GENOME_strand():
+def test_the_unspliced_bank_is_indexed_by_genome_strand():
     acc = _acc()
     acc.deposit(0, 150, 300, align_strand=Strand.NEG)
     t = acc.tally
@@ -307,7 +307,7 @@ def test_the_unspliced_bank_is_indexed_by_GENOME_strand():
     assert int(t.boundary_unspliced_count[_boundary(0, 2), 0]) == 0
 
 
-def test_EVERY_bank_including_the_sj_is_indexed_by_GENOME_strand():
+def test_every_bank_including_the_sj_is_indexed_by_genome_strand():
     """One convention throughout. Sense/antisense is derived, never stored: the sj boundary carries its own genomic
     strand, so a consumer computes ``sense = (fragment strand == sj strand)``. Here a genome-minus fragment splices
     across a ``+`` sj; a sense convention would put it in the antisense column and the genome convention in the minus
@@ -320,7 +320,7 @@ def test_EVERY_bank_including_the_sj_is_indexed_by_GENOME_strand():
     assert int(acc.tally.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
-def test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION():
+def test_the_sj_strand_split_is_retained_for_aligner_artifact_detection():
     """``sj_count`` keeps both aligned-strand columns. A sj is stranded by its splicing motif, so the strand of the
     fragments on it looks redundant, and every consumer sums the two columns; the split is kept for aligner-artifact
     detection.
@@ -367,7 +367,7 @@ def test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION():
     )
 
 
-def test_the_sj_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_does():
+def test_the_sj_mass_keeps_the_same_split_and_it_is_the_only_mass_that_does():
     """The mass twin of the test above. Mass banks carry one value wherever nothing reads a mass per strand; the sj mass
     is the exception, because the artifact detector needs the split and only a mass can separate a sj used by many short
     fragments from one used by few long ones, in a single pass. The mass must land in the same column as the count, or
@@ -398,7 +398,7 @@ def test_the_sj_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_does():
     assert close(float(t_pos.sj_mass.sum()), float(t_pos.sj_mass[0, pos]), 12)
 
 
-def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
+def test_a_sense_fragment_on_the_minus_strand_is_booked_as_minus():
     """Sense-to-motif would say column 0; genome strand says column 1."""
     acc = _acc(sj=[(0, 201, 900, Strand.NEG)])
     acc.deposit(
@@ -415,7 +415,7 @@ def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
 # ---------------------------------------------------------------------------
 
 
-def test_a_fragment_over_the_length_limit_deposits_NOTHING_and_is_COUNTED():
+def test_a_fragment_over_the_length_limit_deposits_nothing_and_is_counted():
     """Bounded influence: without the limit a handful of enormous read groups own almost every boundary crossing in a
     real library. The rejection is counted, so it is not hidden.
     """
@@ -427,7 +427,7 @@ def test_a_fragment_over_the_length_limit_deposits_NOTHING_and_is_COUNTED():
     assert t.qc["dropped_too_long"] == 1
 
 
-def test_the_limit_applies_to_L_and_NOT_to_the_SPAN():
+def test_the_limit_applies_to_the_length_not_the_span():
     """A 300 bp molecule across a 10 kb intron has a 10 kb span, so limiting the span would discard a large share of the
     spliced population while limiting ``L`` discards a small one.
     """
@@ -437,7 +437,7 @@ def test_the_limit_applies_to_L_and_NOT_to_the_SPAN():
     assert int(acc.tally.sj_count[0, 0]) == 1
 
 
-def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
+def test_a_fragment_is_clipped_to_its_reference_and_its_length_is_the_clipped_one():
     acc = _acc()
     acc.deposit(0, 950, 1200)  # chr1 ends at 1000
     t = acc.tally
@@ -445,7 +445,7 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
     assert int(t.deposited_lengths[50]) == 1
 
 
-def test_a_single_region_reference_has_no_boundaries_and_still_accepts_a_fragment():
+def test_a_single_region_reference_has_no_boundaries_and_accepts_a_fragment():
     acc = Accumulator(Partition.from_region_bounds([[0, 1000]], region_types=[[0]]))
     assert acc.n_boundaries == 0
     acc.deposit(0, 100, 300)
@@ -478,7 +478,7 @@ def test_the_per_reference_offsets_do_not_bleed():
 # ---------------------------------------------------------------------------
 
 
-def test_every_accepted_fragment_increments_exactly_ONE_start_count():
+def test_every_accepted_fragment_increments_exactly_one_start_count():
     """The crossing and contained totals can only be checked by re-running the deposit; the start count is checkable
     against a number the scanner knows independently.
     """
@@ -513,7 +513,7 @@ def test_each_pool_is_reached_only_by_its_own_structural_class():
     assert int(p[FragmentPool.DNA_INTERGENIC_EXON].sum()) == 0
 
 
-def test_a_pool_is_binned_at_L_and_only_ONCE_per_fragment():
+def test_a_pool_is_binned_at_the_length_and_once_per_fragment():
     acc = _acc()
     acc.deposit(0, 210, 390, observed_introns=[(300, 340)])  # L = 180 - 40
     p = acc.tally.pool_lengths
@@ -526,7 +526,7 @@ def test_a_pool_is_binned_at_L_and_only_ONCE_per_fragment():
 # preferentially bar fragments whose mates sit far apart, filtering the pool by length.
 
 
-def test_a_multi_boundary_crossing_enters_NO_pool():
+def test_a_multi_boundary_crossing_enters_no_pool():
     """A splash read straddles one probe boundary. A fragment crossing several boundaries has no single structural
     class, and an impure pool is worse than a missing one."""
     acc = _acc()
@@ -556,7 +556,7 @@ def _uniform_accumulator(region_bp, ref_len):
 
 
 @pytest.mark.parametrize("region_bp", [50, 200, 1000])
-def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(region_bp):
+def test_the_crossing_density_recovers_the_true_density_with_no_length_model(region_bp):
     """``E[Σ 1/(L−1)] = ρ`` exactly, for any fragment-length distribution: the identity that lets a boundary need no
     divisor and no length model. It must hold at every region spacing, so the test sweeps the spacing; dividing the
     weight by the number of boundaries crossed would shrink the answer as regions get closer.
@@ -572,7 +572,7 @@ def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(reg
     assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {region_bp} bp regions"
 
 
-def test_the_crossing_COUNT_recovers_density_times_mean_length():
+def test_the_crossing_count_recovers_density_times_mean_length():
     """The companion identity ``E[count] = ρ·(E[L] − 1)``. With the density above it forms the 2×2 that separates two
     components by fragment length alone."""
     ref_len, rho = 200_000, 0.05
@@ -587,7 +587,7 @@ def test_the_crossing_COUNT_recovers_density_times_mean_length():
     assert 0.98 <= per_boundary / expected <= 1.02, f"{per_boundary / expected:.4f}"
 
 
-def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
+def test_the_deposit_is_independent_of_the_order_fragments_arrive_in():
     """Integer addition is associative, so the per-worker merge of the count banks is bit-identical at any thread count."""
     rng = np.random.default_rng(3)
     starts, ends, _ = _corpus(rng, 400, 900)
@@ -632,7 +632,7 @@ def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
         ([(210, 260), (300, 340)], 360, 4),  # well formed: nothing merged
     ],
 )
-def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malformed(
+def test_the_length_is_the_path_segments_total_even_with_malformed_introns(
     introns, expected_length, expected_crossings
 ):
     """One definition of ``L``: the total length of the path's segments.
@@ -654,7 +654,7 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
     )
 
 
-def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_begins():
+def test_the_path_starts_where_its_first_covered_base_is_not_where_the_extent_begins():
     """A leading intron means the molecule does not begin at ``lo``. Attributing it to the region containing ``lo``
     would credit the start count, and possibly the contained deposit, to a region the fragment never touches.
     """
@@ -667,14 +667,14 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     assert int(t.deposited_lengths[20]) == 1
 
 
-def test_a_duplicated_intron_credits_its_sj_ONCE():
+def test_a_duplicated_intron_credits_its_sj_once():
     """Two mates reporting the same intron is one splice event, not two."""
     acc = _acc(sj=[SJ])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900), (201, 900)], sj_strand=Strand.POS)
     assert int(acc.tally.sj_count[0, 0]) == 1
 
 
-def test_ABUTTING_introns_are_MALFORMED_and_merge():
+def test_abutting_introns_are_malformed_and_merge():
     """Two introns sharing an endpoint imply a zero-length exon between them, which is physically impossible (a
     transcript with one is molecularly identical to one without), so the pair is an alignment artifact. The index cannot
     produce it either: building the exon arrays drops a zero-length exon and fuses its flanking introns. Merged here.
@@ -685,7 +685,7 @@ def test_ABUTTING_introns_are_MALFORMED_and_merge():
     assert t.sj_count.sum() == 0, "the merged span 201->900 is not an annotated sj"
 
 
-def test_a_wide_overlap_no_longer_discards_a_good_fragment():
+def test_a_wide_overlap_keeps_a_good_fragment():
     """The ``span − Σ intron`` formula would give a negative ``L`` here and file the fragment as ``dropped_empty``,
     invisible to the start-count invariant because a rejected fragment never reaches it. The path-segment total keeps
     it.
@@ -708,7 +708,7 @@ SPAN_SJ_POS = (0, 400, 900, Strand.POS)
 SPAN_SJ_NEG = (0, 400, 900, Strand.NEG)
 
 
-def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_column():
+def test_a_spliced_and_an_unspliced_fragment_of_one_genome_strand_share_a_column():
     """One array, one convention.
 
     A spliced fragment cannot be contained (both endpoints of an annotated intron are region bounds, so it always
@@ -736,7 +736,7 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1, "the sj bank too"
 
 
-def test_a_spliced_SENSE_fragment_books_BOUNDARY_AND_sj_by_GENOME_strand():
+def test_a_spliced_sense_fragment_books_boundary_and_sj_by_genome_strand():
     """Sense-to-motif would say column 0 for both; genome strand says 1."""
     acc = _acc(sj=[SPAN_SJ_NEG])
     acc.deposit(
@@ -756,7 +756,7 @@ def test_a_spliced_SENSE_fragment_books_BOUNDARY_AND_sj_by_GENOME_strand():
 
 
 @pytest.mark.parametrize("undefined", [Strand.NONE, Strand.AMBIGUOUS])
-def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined):
+def test_an_undefined_strand_is_rejected_not_silently_booked_as_minus(undefined):
     """The channel is the genome strand, so a fragment without one has no channel. Written as "the plus column if POS
     else the minus column", every strand that is not POS (NONE and AMBIGUOUS too) would land in the minus column,
     crediting the fragment to the wrong strand. The rejection is counted on its own QC denominator instead. AMBIGUOUS is
@@ -781,7 +781,7 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
 # the strand to discriminate with.
 
 
-def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
+def test_two_surviving_hypotheses_deposit_on_nothing_and_are_buffered_whole():
     """An undetermined path makes no partial deposit and is not lost. The fragment would otherwise deposit richly (it
     crosses boundaries, uses an annotated sj and lands in a length pool), so a leak into any bank shows. It must be
     retained, since this is the population the second pass drains.
@@ -817,7 +817,7 @@ def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
     assert t.gap_resolution["gap_deferred_rna_or_gdna"] == 1
 
 
-def test_ONE_SURVIVING_HYPOTHESIS_DEPOSITS_even_though_its_splice_was_never_sequenced():
+def test_one_surviving_hypothesis_deposits_though_its_splice_was_never_sequenced():
     """The pair for the test above: determinacy, not provenance. Both fragments have a splice that was never sequenced;
     this one has only one explanation for its gap, so its ``L`` is not in doubt and it deposits, including into the
     pure-RNA length pool. Barring it on provenance would exclude fragments whose mates sit far apart and bias the pool's
@@ -837,7 +837,7 @@ def test_ONE_SURVIVING_HYPOTHESIS_DEPOSITS_even_though_its_splice_was_never_sequ
     assert t.gap_resolution["gap_resolved_spliced"] == 1
 
 
-def test_a_strand_undefined_AMBIGUOUS_fragment_is_counted_as_STRAND_UNDEFINED():
+def test_a_strand_undefined_ambiguous_fragment_is_counted_as_strand_undefined():
     """Every fragment counts exactly once, so the precedence is part of the contract. A fragment that is both is filed
     under the strand: the deferred queue sizes the population the second pass can recover, and that pass resolves the
     path, not the strand the read aligned to. Holding the fragment would promise a recovery that cannot happen and put a
@@ -858,7 +858,7 @@ def test_a_strand_undefined_AMBIGUOUS_fragment_is_counted_as_STRAND_UNDEFINED():
     assert not t.deferred, "a fragment with no column must not enter the deferred queue"
 
 
-def test_a_hypothesis_LONGER_THAN_THE_LIMIT_is_ruled_out_and_the_rest_stands():
+def test_a_hypothesis_longer_than_the_limit_is_ruled_out_and_the_rest_stands():
     """``max_fragment_length`` is the rule that already makes TOO_LONG a rejection. Short-read chemistry does not
     sequence molecules past the limit, so a hypothesis implying a longer ``L`` is not a molecule this library contains.
     Applied to the genomic hypothesis it is the rule "a fragment whose genomic span exceeds the limit must be RNA",
@@ -881,7 +881,7 @@ def test_a_hypothesis_LONGER_THAN_THE_LIMIT_is_ruled_out_and_the_rest_stands():
     assert not t.deferred
 
 
-def test_when_the_limit_would_rule_out_EVERY_hypothesis_the_survivors_stand():
+def test_when_the_limit_would_rule_out_every_hypothesis_the_survivors_stand():
     """Filtering to nothing would claim "this molecule cannot exist", which the filter cannot conclude: it describes
     what the chemistry sequences, and the fragment is in the BAM. So the survivors stand and the ordinary ``TOO_LONG``
     rejection counts the fragment.
@@ -907,7 +907,7 @@ def test_when_the_limit_would_rule_out_EVERY_hypothesis_the_survivors_stand():
 # would delete the whole spliced-RNA signal for that aligner.
 
 
-def test_a_MISSING_sj_strand_MATCHES_on_coordinates_alone():
+def test_a_missing_sj_strand_matches_on_coordinates_alone():
     """An aligner that writes neither ``XS`` nor ``ts`` gives every spliced fragment ``sj_strand = NONE``. If the sj
     lookup demanded a strand, that BAM would lose all its annotated sj, and the loss would look like a stale annotation.
     """
@@ -918,7 +918,7 @@ def test_a_MISSING_sj_strand_MATCHES_on_coordinates_alone():
     assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 1, "certified RNA"
 
 
-def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_sj():
+def test_an_ambiguous_sj_strand_is_contradictory_and_credits_no_sj():
     """AMBIGUOUS is contradictory evidence, not missing evidence.
 
     ``sj_strand`` is the OR of a per-record tag, so AMBIGUOUS (``POS | NEG``) means the two mates disagreed about the
@@ -944,7 +944,7 @@ def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_sj():
     assert int(t.boundary_unspliced_count.sum()) > 0, "it competes with gDNA, the safe direction"
 
 
-def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
+def test_a_definite_but_wrong_sj_strand_misses():
     """A definite strand that disagrees with the sj boundary's own strand is a real disagreement: that coordinate pair
     is not annotated on the observed strand, so it is an unannotated intron."""
     acc = _acc(sj=[SJ])  # (0, 201, 900, POS)
@@ -961,7 +961,7 @@ def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
 # ---------------------------------------------------------------------------
 
 
-def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
+def test_both_genome_strands_land_in_the_one_length_moment_slot():
     """``count`` keeps two genome-strand columns; the length moments keep one, because the strand a read aligned to says
     nothing about whether the molecule was gDNA or RNA. So a plus and a minus fragment at the same object must both
     reach the single slot. A collapse that kept only one strand's deposits would otherwise be caught only by C++ parity,
@@ -993,7 +993,7 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
 # fragment books its START in its own region.
 
 
-def test_every_deposited_fragment_has_exactly_one_START():
+def test_every_deposited_fragment_has_exactly_one_start():
     """The ledger: ΣS == deposited, summed over both strand columns, across a mixed population (contained, crossing,
     spliced) on two references."""
     acc = _acc(sj=[SJ])
@@ -1009,7 +1009,7 @@ def test_every_deposited_fragment_has_exactly_one_START():
     assert int(t.region_start_count.sum()) == deposited
 
 
-def test_a_CONTAINED_fragment_increments_START_in_its_own_region():
+def test_a_contained_fragment_increments_start_in_its_own_region():
     acc = _acc()
     acc.deposit(0, 120, 180)  # wholly inside r0 = [100, 200) per CHR1_REGION_BOUNDS
     t = acc.tally
@@ -1018,7 +1018,7 @@ def test_a_CONTAINED_fragment_increments_START_in_its_own_region():
     assert (t.region_contained_count.sum(axis=1) <= t.region_start_count.sum(axis=1)).all()
 
 
-def test_the_START_bank_carries_the_ALIGN_STRAND_column():
+def test_the_start_bank_carries_the_align_strand_column():
     """A NEG deposit must land in column 1, so a bank that sums the strands or fixes column 0 fails."""
     acc = _acc()
     acc.deposit(0, 120, 180, align_strand=Strand.NEG)

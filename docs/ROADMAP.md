@@ -6,10 +6,10 @@ is git.
 
 ## State
 
-`src/` is unchanged since 81fc67b6, and ec996bba is a frozen PREVIEW candidate for 0.8.0. Its validation is closed. On
-the 16-condition ladder, on the simulator's alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope
-strata: Brier 0.23–0.88 of 0.7.1's on identical reads, and transcript error 0.10–0.47 of 0.7.1's. It also states eight
-failures, each an open entry:
+`src/`'s numbers are 81fc67b6's: the code pass after it is a proven numeric no-op (`rename_identity.py`, bit-identical
+on the three frozen references). The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
+alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
+identical reads, and transcript error 0.10–0.47 of 0.7.1's. It also states eight failures, each an open entry:
 - unstranded sparse capture, where most true gDNA is called RNA in every build, and the deferred stratum (unstranded ×
   capture ON) (`ISSUES: unstranded-capture-calls-gdna-rna`);
 - capture outside the annotation's partition: with exact probe copies, gDNA called RNA rises ×2.7–2.8 at stranded
@@ -23,8 +23,8 @@ failures, each an open entry:
 - annotation omission: unannotated unspliced RNA booked gDNA, and retained genes damaged ×1.4–3.0
   (`ISSUES: annotation-omission`).
 
-The preview decision is the owner's. The validation's receipts are in
-`$RIGEL_RUNS/prototypes/2026-11-02_preview_validation/`.
+No preview ships (the owner's ruling, 2026-11-04): a pre-release waits for the capture reader and a review of the open
+issues. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_preview_validation/`.
 
 ## Claims that hold
 
@@ -41,16 +41,15 @@ The preview decision is the owner's. The validation's receipts are in
 
 ## Next
 
-1. **Finish the cleanup and commit.** The permanent docs, CLAUDE.md and memory are rewritten, and what they retired is
-   in `$RIGEL_RUNS/archive/cleanup_2026-11-03/`. The owner commits; then the open-issues page is rebuilt.
-2. **The preview decision, the owner's.** Whether ec996bba ships as a preview with its supported uses and the eight
-   failures stated: `ISSUES: unstranded-capture-calls-gdna-rna`, `ISSUES: capture-outside-the-annotation-partition`,
-   `ISSUES: the-reader-reads-false-gdna-as-capture`, `ISSUES: the-em-prior-share-excludes-drawn-multimappers`,
-   `ISSUES: vcap-exome-dna-called-rna`, `ISSUES: annotation-omission`; before any tag, `ISSUES: the-release-builds`.
-3. **The capture-reader session, developed with the owner.** It starts from
+1. **The capture-reader session, developed with the owner.** It starts from
    `ISSUES: the-reader-reads-false-gdna-as-capture`, with `ISSUES: capture-outside-the-annotation-partition`,
    `ISSUES: unstranded-capture-calls-gdna-rna`, `ISSUES: vcap-exome-dna-called-rna` and
    `ISSUES: an-anchor-only-landscape-reads-as-capture` read beside it. Its A/Bs need the efficiencies-at-1 arm and the
    paired proper score in the tree (`ISSUES: instrument-ledger`). The trade-off between strata is the owner's to set.
+2. **A review of the open issues**, each entry read for a problem a pre-release cannot carry.
+3. **The pre-release**, with its supported uses and its stated failures: `ISSUES: unstranded-capture-calls-gdna-rna`,
+   `ISSUES: capture-outside-the-annotation-partition`, `ISSUES: the-reader-reads-false-gdna-as-capture`,
+   `ISSUES: the-em-prior-share-excludes-drawn-multimappers`, `ISSUES: vcap-exome-dna-called-rna`,
+   `ISSUES: annotation-omission`, as the capture reader leaves them; before any tag, `ISSUES: the-release-builds`.
 
 After that, `ISSUES.md`'s next tier, in its order.

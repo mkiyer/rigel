@@ -291,9 +291,8 @@ def _run_golden_test(scenario_name, result, index, update_golden):
         pytest.skip(f"Golden files updated for '{scenario_name}'")
 
     if not _golden_exists(scenario_name):
-        _save_golden(scenario_name, output)
-        pytest.skip(
-            f"Golden files created for '{scenario_name}' (first run). Re-run to verify stability."
+        pytest.fail(
+            f"no golden files for '{scenario_name}': record them with --update-golden, read the diff, and re-run"
         )
 
     expected = _load_golden(scenario_name)

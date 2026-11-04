@@ -20,17 +20,25 @@ import pytest
 
 from rigel import scan_payload
 from rigel.calibration.splice_graph import EDGE_KIND_CONTIGUOUS, EDGE_KIND_SJ
-from rigel.scan_cache import (
+from rigel.scan_payload import AccumulatorPayload
+
+#: The scan cache is an instrument's helper (`scripts/design/_scan_cache.py`), imported by name as the instruments
+#: import it.
+import _scan_cache as scan_cache
+from _scan_cache import (
     REACH_COLUMNS,
     ScanCacheKeyError,
+    _payload_field_types,
+    _schema_names,
     calibration_inputs,
     check_scan_cache,
+    deposit_digest,
     index_derived_inputs,
-    read_scan_cache,
+    payload_schema_digest,
     reach_digest,
+    read_scan_cache,
     write_scan_cache,
 )
-from rigel.scan_payload import AccumulatorPayload
 
 
 SEED = 1234
@@ -116,7 +124,7 @@ def _assert_round_trip(before, after, name: str) -> None:
         assert after == before, name
 
 
-class TestTheCachedTallyIsTheSCANNEDTally:
+class TestTheCachedTallyIsTheScannedTally:
     """Byte-identity, field by field: the cached inputs must be the scanned inputs, array for array and
     dtype for dtype."""
 
@@ -134,7 +142,7 @@ class TestTheCachedTallyIsTheSCANNEDTally:
                 getattr(original, field.name), getattr(cache.payload, field.name), field.name
             )
 
-    def test_THE_SIDE_BUFFER_SURVIVES_THE_ROUND_TRIP_AND_IS_NOT_EMPTY(self, scanned, tmp_path):
+    def test_the_side_buffer_survives_the_round_trip_and_is_not_empty(self, scanned, tmp_path):
         """Byte-identity over an empty bank is free, so the fixture must defer something.
 
         And the bank must come back as a ``DeferredFragments``, not as whatever JSON happened to hold. The write
@@ -157,7 +165,7 @@ class TestTheCachedTallyIsTheSCANNEDTally:
             assert np.array_equal(after, before), f"deferred.{field.name} content moved"
         assert cache.payload.gap_resolution == original.gap_resolution
 
-    def test_the_strand_model_survives_FIELD_BY_FIELD_including_its_per_sj_table(
+    def test_the_strand_model_survives_field_by_field_including_its_per_sj_table(
         self, scanned, tmp_path
     ):
         """The 2x2 is the marginal of the per-sj table; the junction fit behind κ needs the table
@@ -176,7 +184,7 @@ class TestTheCachedTallyIsTheSCANNEDTally:
         )
         _assert_round_trip(original, cache.strand_model, "strand_model")
 
-    def test_a_NEW_strand_counter_is_written_and_read_back_not_defaulted(
+    def test_an_added_strand_counter_is_written_and_read_back_not_defaulted(
         self, scanned, tmp_path, monkeypatch
     ):
         """Perturbation: a counter added to ``StrandModel`` must reach the cache. Every field has a
@@ -207,7 +215,7 @@ class TestTheCachedTallyIsTheSCANNEDTally:
         )
         _assert_round_trip(widened, read_scan_cache(cache_dir, index).strand_model, "strand_model")
 
-    def test_a_strand_model_field_the_cache_cannot_store_is_REFUSED(
+    def test_a_strand_model_field_the_cache_cannot_store_is_refused(
         self, scanned, tmp_path, monkeypatch
     ):
         """A sub-model is cached as its int counters, one int64 vector, and its per-sj table. A field that
@@ -231,7 +239,7 @@ class TestTheCachedTallyIsTheSCANNEDTally:
                 scan_config=scan,
             )
 
-    def test_THE_FL_HISTOGRAMS_ARE_THE_PAYLOAD_AND_ARE_NOT_CACHED_SEPARATELY(
+    def test_the_fl_histograms_are_the_payload_and_are_not_cached_separately(
         self, scanned, tmp_path
     ):
         """There is nothing to cache beside the payload.
@@ -242,7 +250,7 @@ class TestTheCachedTallyIsTheSCANNEDTally:
         """
         import dataclasses
 
-        from rigel.calibration.fl import build_fl_models
+        from rigel.pipeline import library_fl_models
 
         _cache_dir, cache = round_trip(scanned, tmp_path)
 
@@ -252,8 +260,9 @@ class TestTheCachedTallyIsTheSCANNEDTally:
         )
 
         # And the models rebuild from the cached payload alone, identically to the live scan's.
-        live = build_fl_models(scanned[3])
-        cached = build_fl_models(cache.payload)
+        index = scanned[0]
+        live = library_fl_models(scanned[3], index)
+        cached = library_fl_models(cache.payload, index)
         assert np.array_equal(cached.global_counts, live.global_counts)
         assert np.array_equal(cached.rna_counts, live.rna_counts)
         assert np.array_equal(cached.gdna_counts, live.gdna_counts)
@@ -268,7 +277,7 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="graph_hash"):
             read_scan_cache(cache_dir, scanned[0])
 
-    def test_a_changed_REACH_is_refused(self, scanned, tmp_path):
+    def test_a_changed_reach_is_refused(self, scanned, tmp_path):
         """The one neither existing hash covers: an index rebuild can move the splice-junction
         reaches with `partition_hash` and `graph_hash` byte-identical, and this notices."""
         cache_dir, _cache = round_trip(scanned, tmp_path)
@@ -278,7 +287,7 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="reach"):
             read_scan_cache(cache_dir, scanned[0])
 
-    def test_a_cache_from_a_DIFFERENT_ACCUMULATOR_SCHEMA_is_refused(self, scanned, tmp_path):
+    def test_a_cache_from_a_different_accumulator_schema_is_refused(self, scanned, tmp_path):
         """The gap none of the other three keys covers: the accumulator's own field list.
 
         `graph_hash` describes the index, `reach_digest` the reaches, the recorded `scan_config` the scan
@@ -292,7 +301,7 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="schema"):
             read_scan_cache(cache_dir, scanned[0])
 
-    def test_a_cache_predating_the_key_ENTIRELY_is_refused(self, scanned, tmp_path):
+    def test_a_cache_predating_the_key_entirely_is_refused(self, scanned, tmp_path):
         """A manifest with no such entry is refused: absent must not read as agreement, or a stale cache
         verifies clean."""
         cache_dir, _cache = round_trip(scanned, tmp_path)
@@ -302,7 +311,7 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="schema"):
             read_scan_cache(cache_dir, scanned[0])
 
-    def test_a_cache_scanned_under_another_SPLICE_BLACKLIST_is_refused(self, scanned, tmp_path):
+    def test_a_cache_scanned_under_another_splice_blacklist_is_refused(self, scanned, tmp_path):
         """The scan strips every junction the index's splice blacklist names and holds back a fragment whose every
         junction it rejects, so a blacklist is part of the tally. `graph_hash`, the reach digest, the schema digest
         and the scan settings all stay byte-identical when it changes."""
@@ -313,7 +322,7 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="blacklist"):
             read_scan_cache(cache_dir, scanned[0])
 
-    def test_a_cache_with_NO_BLACKLIST_RECORD_is_refused(self, scanned, tmp_path):
+    def test_a_cache_with_no_blacklist_record_is_refused(self, scanned, tmp_path):
         """Absent must not read as "no blacklist": a manifest without the entry says nothing about the
         blacklist the scan ran under."""
         cache_dir, _cache = round_trip(scanned, tmp_path)
@@ -323,9 +332,8 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="blacklist"):
             read_scan_cache(cache_dir, scanned[0])
 
-    def test_the_schema_digest_moves_when_a_PAYLOAD_FIELD_moves(self):
+    def test_the_schema_digest_moves_when_a_payload_field_moves(self):
         """Teeth on the digest itself: it must be a function of the field list, not a constant."""
-        from rigel.scan_cache import payload_schema_digest
 
         before = payload_schema_digest()
         original = scan_payload.AccumulatorPayload.__dataclass_fields__
@@ -337,7 +345,7 @@ class TestTheKeyRefusesAMovedIndex:
             scan_payload.AccumulatorPayload.__dataclass_fields__ = original
         assert payload_schema_digest() == before
 
-    def test_the_deposit_digest_is_STABLE_across_calls_and_across_PROCESSES(self):
+    def test_the_deposit_digest_is_stable_across_calls_and_across_processes(self):
         """A key that wobbles refuses every cache, which is as useless as one that never moves.
 
         Across processes as well as calls: the digest deposits one fixed fragment set in one fixed
@@ -347,15 +355,14 @@ class TestTheKeyRefusesAMovedIndex:
         import subprocess
         import sys
 
-        from rigel.scan_cache import deposit_digest
-
         first = deposit_digest()
         assert first == deposit_digest()
         other = subprocess.run(
             [
                 sys.executable,
                 "-c",
-                "from rigel.scan_cache import deposit_digest;print(deposit_digest())",
+                f"import sys; sys.path.insert(0, {str(Path(scan_cache.__file__).parent)!r}); "
+                "from _scan_cache import deposit_digest; print(deposit_digest())",
             ],
             capture_output=True,
             text=True,
@@ -363,15 +370,13 @@ class TestTheKeyRefusesAMovedIndex:
         ).stdout.strip()
         assert other == first, f"digest differs across processes: {other} != {first}"
 
-    def test_the_deposit_digest_ENTERS_the_schema_digest(self):
+    def test_the_deposit_digest_enters_the_schema_digest(self):
         """The deposit digest is folded into the key.
 
         ``payload_schema_digest`` hashes field names and column counts, and a deposit-rule change moves
         neither, so without the deposit digest a cache written under the old rule would be accepted and
         serve old values to new code.
         """
-        from rigel import scan_cache
-
         before = scan_cache.payload_schema_digest()
         original = scan_cache.deposit_digest
         try:
@@ -384,7 +389,7 @@ class TestTheKeyRefusesAMovedIndex:
             scan_cache.deposit_digest = original
         assert scan_cache.payload_schema_digest() == before
 
-    def test_a_changed_DEPOSIT_RULE_moves_the_digest(self):
+    def test_a_changed_deposit_rule_moves_the_digest(self):
         """The digest is a function of behaviour, not of names.
 
         Perturbation: the deposit rule in the executable specification, which the C++ is held byte-identical
@@ -413,12 +418,10 @@ class TestTheKeyRefusesAMovedIndex:
             Accumulator.deposit = original
         assert reference_deposit_digest(Accumulator, Partition) == before
 
-    def test_the_deposit_digest_AGREES_between_the_NATIVE_and_the_SPECIFICATION(self):
+    def test_the_deposit_digest_agrees_between_the_native_and_the_specification(self):
         """The key certifies what the production scanner deposited, so it is computed from the C++, which
         must agree with the specification on the digest fixture."""
         from native._accumulator_reference import Accumulator, Partition
-
-        from rigel.scan_cache import deposit_digest
 
         from native._digest_fixture import reference_deposit_digest
 
@@ -427,14 +430,13 @@ class TestTheKeyRefusesAMovedIndex:
             "an artifact the scanner does not produce"
         )
 
-    def test_the_schema_digest_moves_when_a_BANK_CHANGES_SHAPE(self):
+    def test_the_schema_digest_moves_when_a_bank_changes_shape(self):
         """A bank's column count is part of the key, and a name-only digest cannot see it.
 
         A bank moving from two genome-strand columns to one keeps its name, dtype and axis, and
         ``_payload_from_parts`` puts the ``.npz`` arrays straight into the payload with no shape check, so a
         stale cache would be accepted and fail with a shape error far from its cause.
         """
-        from rigel.scan_cache import payload_schema_digest
 
         before = payload_schema_digest()
         original = scan_payload.SINGLE_COLUMN_AXES
@@ -449,7 +451,7 @@ class TestTheKeyRefusesAMovedIndex:
             scan_payload.SINGLE_COLUMN_AXES = original
         assert payload_schema_digest() == before
 
-    def test_the_schema_digest_moves_when_a_NESTED_BANK_FIELD_moves(self):
+    def test_the_schema_digest_moves_when_a_nested_bank_field_moves(self):
         """A digest over ``AccumulatorPayload``'s top-level field names alone cannot see a change inside a
         nested bank: renaming a ``ScanQC`` field would let a stale cache be accepted and then fail deep in
         ``_payload_from_parts`` with a bare ``TypeError``.
@@ -457,7 +459,6 @@ class TestTheKeyRefusesAMovedIndex:
         Tested one level down on each of the three nested banks, because the claim is that each bank is
         covered, and a recursion that skipped one would still recurse.
         """
-        from rigel.scan_cache import _payload_field_types, _schema_names, payload_schema_digest
 
         before = payload_schema_digest()
         names = set(_schema_names())
@@ -488,7 +489,7 @@ class TestTheKeyRefusesAMovedIndex:
                 nested.__dataclass_fields__ = original
         assert payload_schema_digest() == before
 
-    def test_the_schema_digest_moves_when_a_STRAND_MODEL_field_moves(self):
+    def test_the_schema_digest_moves_when_a_strand_model_field_moves(self):
         """The strand half of the cache is keyed as the payload is. Every ``StrandModels`` and
         ``StrandModel`` field has a default, so a cache written before a field existed would load with
         that field silently defaulted; the key refuses such a cache instead.
@@ -497,7 +498,6 @@ class TestTheKeyRefusesAMovedIndex:
         counters are also reordered: they are stored as one vector and read back by position, so a
         reorder that keeps every name would swap two counts.
         """
-        from rigel.scan_cache import payload_schema_digest
         from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
 
         before = payload_schema_digest()
@@ -523,7 +523,7 @@ class TestTheKeyRefusesAMovedIndex:
             StrandModel.__dataclass_fields__ = original
         assert payload_schema_digest() == before
 
-    def test_a_changed_TALLY_setting_is_refused(self, scanned, tmp_path):
+    def test_a_changed_tally_setting_is_refused(self, scanned, tmp_path):
         """Two scans of one BAM under different tally settings are different tallies: the key refuses one
         read against the other's settings."""
         index, _bam, scan, *_ = scanned
@@ -532,7 +532,7 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="scan"):
             read_scan_cache(cache_dir, index, other)
 
-    def test_the_manifest_check_refuses_a_changed_TALLY_setting_too(self, scanned, tmp_path):
+    def test_the_manifest_check_refuses_a_changed_tally_setting_too(self, scanned, tmp_path):
         """`build_scan_cache.py` decides a skip and `preflight.py` calls a cache valid from the manifest alone
         (`check_scan_cache`), so the manifest check compares the recorded settings too; otherwise both would
         accept a cache that every reader holding settings refuses."""
@@ -545,15 +545,15 @@ class TestTheKeyRefusesAMovedIndex:
                 cache_dir, index, scan_config=dataclasses.replace(scan, sj_strand_tag="XS")
             )
 
-    def test_a_THREAD_COUNT_is_not_part_of_the_key(self, scanned, tmp_path):
+    def test_a_thread_count_is_not_part_of_the_key(self, scanned, tmp_path):
         """A thread count divides the work and not the tally, so a cache scanned under one budget reads under
         any other; a key that hashed it would refuse every cache whenever the default changed."""
-        index, _bam, scan, *_ = scanned
+        index, _bam, scan, payload, _strand = scanned
         cache_dir, _cache = round_trip(scanned, tmp_path)
         other = dataclasses.replace(scan, total_threads=7, bgzf_threads=3)
-        read_scan_cache(cache_dir, index, other)
+        _assert_round_trip(payload, read_scan_cache(cache_dir, index, other).payload, "payload")
 
-    def test_the_key_is_DERIVED_from_the_recorded_settings_and_no_stored_string_decides(
+    def test_the_key_is_derived_from_the_recorded_settings_and_no_stored_string_decides(
         self, scanned, tmp_path
     ):
         """The manifest records the settings the scan ran under, and the key is computed from them at
@@ -571,7 +571,7 @@ class TestTheKeyRefusesAMovedIndex:
             read_scan_cache(cache_dir, index, scan)
 
     @pytest.mark.parametrize("column", REACH_COLUMNS)
-    def test_the_reach_digest_depends_on_EVERY_reach_column_of_a_JUNCTION(self, scanned, column):
+    def test_the_reach_digest_depends_on_every_reach_column_of_a_junction(self, scanned, column):
         """Perturbation: teeth on the digest itself, one column at a time, on a splice-junction row, the
         rows `build_sj_geometry_arrays` reads.
 
@@ -590,7 +590,7 @@ class TestTheKeyRefusesAMovedIndex:
         assert reach_digest(index) == before
 
     @pytest.mark.parametrize("column", REACH_COLUMNS)
-    def test_a_CONTIGUOUS_boundary_reach_is_not_part_of_the_key(self, scanned, column):
+    def test_a_contiguous_boundary_reach_is_not_part_of_the_key(self, scanned, column):
         """Nothing reads a contiguous boundary's reach: the one reader of a reach,
         `build_sj_geometry_arrays`, takes the splice-junction rows. Moving every contiguous row's value
         must leave the digest where it was, because a key over values no consumer sees refuses a good
@@ -608,7 +608,7 @@ class TestTheKeyRefusesAMovedIndex:
         finally:
             index.edges_df[column] = original
 
-    def test_a_cache_whose_graph_hash_disagrees_with_the_INDEX_is_refused(self, scanned, tmp_path):
+    def test_a_cache_whose_graph_hash_disagrees_with_the_index_is_refused(self, scanned, tmp_path):
         """Distinct from the manifest-tampering test above, which trips the self-consistency check
         first and so never reaches the index comparison. Move the manifest and the payload together: a
         cache that is internally consistent but describes a different index."""
@@ -648,13 +648,13 @@ class TestTheCacheDescribesItsBAM:
         stat = path.stat()
         os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
-    def test_a_BAM_REWRITTEN_in_place_is_refused(self, scanned, tmp_path):
+    def test_a_bam_rewritten_in_place_is_refused(self, scanned, tmp_path):
         index, local, cache_dir = self._cache_of(scanned, tmp_path)
         local.write_bytes(local.read_bytes() + b"\0")
         with pytest.raises(ScanCacheKeyError, match="BAM"):
             read_scan_cache(cache_dir, index)
 
-    def test_a_BAM_rewritten_to_the_SAME_SIZE_is_refused(self, scanned, tmp_path):
+    def test_a_bam_rewritten_to_the_same_size_is_refused(self, scanned, tmp_path):
         """Size alone cannot decide: one changed byte under a new modification time must fail the content
         check."""
         index, local, cache_dir = self._cache_of(scanned, tmp_path)
@@ -665,19 +665,19 @@ class TestTheCacheDescribesItsBAM:
         with pytest.raises(ScanCacheKeyError, match="BAM"):
             read_scan_cache(cache_dir, index)
 
-    def test_a_COPY_of_the_BAM_still_matches(self, scanned, tmp_path):
+    def test_a_copy_of_the_bam_matches(self, scanned, tmp_path):
         """The same bytes under a new modification time are the same BAM: the content digest decides."""
         index, local, cache_dir = self._cache_of(scanned, tmp_path)
         self._touch_later(local)
-        read_scan_cache(cache_dir, index)
+        _assert_round_trip(scanned[3], read_scan_cache(cache_dir, index).payload, "payload")
 
-    def test_a_BAM_no_longer_at_its_path_is_not_checked(self, scanned, tmp_path):
+    def test_a_bam_missing_from_its_path_is_not_checked(self, scanned, tmp_path):
         """A cache carried to another machine without its BAM still loads: there is nothing to compare."""
         index, local, cache_dir = self._cache_of(scanned, tmp_path)
         local.unlink()
-        read_scan_cache(cache_dir, index)
+        _assert_round_trip(scanned[3], read_scan_cache(cache_dir, index).payload, "payload")
 
-    def test_a_cache_recording_only_the_BAM_PATH_is_refused(self, scanned, tmp_path):
+    def test_a_cache_recording_only_the_bam_path_is_refused(self, scanned, tmp_path):
         """A manifest that records only a path is refused: a path says nothing about the bytes."""
         index, local, cache_dir = self._cache_of(scanned, tmp_path)
         manifest = json.loads((cache_dir / "manifest.json").read_text())
@@ -686,7 +686,7 @@ class TestTheCacheDescribesItsBAM:
         with pytest.raises(ScanCacheKeyError, match="BAM"):
             read_scan_cache(cache_dir, index)
 
-    def test_the_build_script_finds_a_STALE_cache_from_the_manifest_alone(self, scanned, tmp_path):
+    def test_the_build_script_finds_a_stale_cache_from_the_manifest_alone(self, scanned, tmp_path):
         """`build_scan_cache.py` asks `check_scan_cache` before it skips an existing cache, so a BAM re-simulated
         in place is re-scanned; the check reads the manifest and never the arrays."""
         index, local, cache_dir = self._cache_of(scanned, tmp_path)
@@ -750,7 +750,7 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert required <= set(inputs), f"missing: {required - set(inputs)}"
         assert inputs["gdna_fl_pmf"].sum() == pytest.approx(1.0, abs=1e-9)
 
-    def test_calibration_inputs_ACTUALLY_DRIVE_calibrate(self, scanned, tmp_path):
+    def test_calibration_inputs_actually_drive_calibrate(self, scanned, tmp_path):
         """The signature check above cannot see a mis-sized argument, only a missing name.
 
         `sj` must address the same graph the payload was scanned on; an axis of the wrong length
@@ -765,10 +765,10 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert result.n_regions > 0
         assert result.n_sj == cache.payload.n_sj
 
-    def test_calibration_inputs_hand_calibrate_the_DRAINED_frame(self, scanned, tmp_path):
+    def test_calibration_inputs_hand_calibrate_the_drained_frame(self, scanned, tmp_path):
         """Production drains the side buffer before calibrating, so the instrument-facing input builder
         hands out the drained payload, and publishes the lift box that puts cached oracle partitions
-        into the same frame (`calibration._oracle.lift_drain_parts`). An instrument reading the
+        into the same frame (`_oracle.lift_drain_parts`). An instrument reading the
         undrained frame would score a different library from the one production calibrates."""
         _cache_dir, cache = round_trip(scanned, tmp_path)
         # the cache stores pass one, by design (write_scan_cache refuses a drained payload)
@@ -802,14 +802,13 @@ class TestNothingDerivableFromTheIndexIsStored:
 # ══ the drain and the cache ═════════════════════════════════════════════════════════════════════════
 
 
-def test_the_schema_digest_sees_fields_nested_TWO_levels_deep():
+def test_the_schema_digest_sees_fields_nested_two_levels_deep():
     """`DrainQC` nests a `GapCensus` inside itself, so a digest that recurses exactly one level cannot
     see `drain__census_before__*` at all.
 
     And `drain` is `DrainQC | None`, for which `dataclasses.is_dataclass` is False, so a plain check
     drops the whole bank rather than just its nesting. Both halves are gated here.
     """
-    from rigel.scan_cache import _schema_names
 
     names = set(_schema_names())
     assert "drain" in names
@@ -823,14 +822,13 @@ def test_the_schema_digest_sees_fields_nested_TWO_levels_deep():
     )
 
 
-def test_the_cache_REFUSES_a_drained_payload(scanned, tmp_path):
+def test_the_cache_refuses_a_drained_payload(scanned, tmp_path):
     """The cache holds a scan. Caching a drained payload would bake one draw into it, and the second pass
     relies on one scan being drained repeatedly at different seeds without re-reading the BAM. It would also
     silently serialise `DrainQC.census_before` through `json.dumps(default=str)` as a stringified repr.
     """
     import dataclasses
 
-    from rigel.scan_cache import write_scan_cache
     from rigel.scan_payload import DrainQC, GapCensus
 
     index, bam, scan_config, payload, strand_model = scanned
@@ -859,10 +857,9 @@ def test_the_cache_REFUSES_a_drained_payload(scanned, tmp_path):
         )
 
 
-def test_an_UNDRAINED_payload_still_round_trips_with_the_new_field(scanned, tmp_path):
+def test_an_undrained_payload_round_trips_with_drain_none(scanned, tmp_path):
     """The other side of the refusal: the field must not break the ordinary path, and `drain` must
     come back as `None` rather than as the string ``"None"``."""
-    from rigel.scan_cache import read_scan_cache, write_scan_cache
 
     index, bam, scan_config, payload, strand_model = scanned
     assert payload.drain is None

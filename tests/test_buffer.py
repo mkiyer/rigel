@@ -3,7 +3,7 @@
 The accumulator behind it, the chunks the buffer takes and hands back, `frag_id` assignment, the
 fragment classes, spilling to disk and reading back, the finalizer, and the resolved-fragment surface.
 Every chunk is built the way the scanner builds it — C++ `ResolvedFragment`s from
-`FragmentResolver.resolve_fragment`, appended to the native `FragmentAccumulator`, finalized and handed
+the resolver's `resolve_fragment` test seam, appended to the native `FragmentAccumulator`, finalized and handed
 to `FragmentBuffer.inject_chunk` — so these exercise the real native path rather than a Python stand-in
 that could diverge from it.
 """
@@ -16,17 +16,16 @@ import numpy as np
 import pytest
 
 import rigel.buffer as buffer_mod
-from rigel.native import FragmentAccumulator
-from rigel.types import Strand, GenomicInterval
+from rigel._resolve_impl.testing import FragmentAccumulator
+from rigel.types import Strand
 from rigel.splice import SpliceType
-from _resolution_reference import make_fragment, resolve_fragment
+from _resolution_reference import GenomicInterval, make_fragment, resolve_fragment
 from rigel.buffer import (
     FragmentBuffer,
     FRAG_AMBIG_SAME_STRAND,
     FRAG_MULTIMAPPER,
-    _FinalizedChunk,
+    FinalizedChunk,
 )
-
 
 # =====================================================================
 # Fixtures -- use shared mini_index from conftest.py
@@ -60,7 +59,7 @@ def _inject(buf, fragments, chunk_size=100, frag_ids=None):
             fragments[lo : lo + chunk_size], frag_ids[lo : lo + chunk_size]
         ):
             acc.append(resolved, frag_id)
-        buf.inject_chunk(_FinalizedChunk.from_raw(acc.finalize()))
+        buf.inject_chunk(FinalizedChunk.from_raw(acc.finalize()))
 
 
 def _consume(buf):
@@ -501,7 +500,7 @@ class TestDiskSpill:
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         _inject(buf, [r] * 40, chunk_size=20)
 
-        spill_paths = [c.path for c in buf._chunks if isinstance(c, buffer_mod._PendingSpill)]
+        spill_paths = [c.path for c in buf._chunks if isinstance(c, buffer_mod.PendingSpill)]
         assert spill_paths
         chunks = _consume(buf)
 
@@ -517,18 +516,18 @@ class TestDiskSpill:
         while blocked on its queue would be one chunk over the budget. A chunk takes no weak reference; its arrays
         do, and die with it."""
         written = []
-        original = buffer_mod._spill_chunk
+        original = buffer_mod.spill_chunk
 
         def spill(chunk, path):
             written.append(weakref.ref(chunk.frag_id))
             original(chunk, path)
 
-        monkeypatch.setattr(buffer_mod, "_spill_chunk", spill)
+        monkeypatch.setattr(buffer_mod, "spill_chunk", spill)
         buf = FragmentBuffer(max_memory_bytes=1, spill_dir=tmp_path)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         _inject(buf, [r] * 20, chunk_size=20)
         try:
-            (pending,) = [c for c in buf._chunks if isinstance(c, buffer_mod._PendingSpill)]
+            (pending,) = [c for c in buf._chunks if isinstance(c, buffer_mod.PendingSpill)]
             pending.done.wait()
             gc.collect()
             assert len(written) == 1 and written[0]() is None
@@ -544,14 +543,14 @@ class TestDiskSpill:
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         _inject(buf, [r] * 60, chunk_size=20)
         yielded, alive_at_load = [], []
-        original = buffer_mod._load_chunk
+        original = buffer_mod.load_chunk
 
         def load(path):
             gc.collect()
             alive_at_load.append([ref() is not None for ref in yielded])
             return original(path)
 
-        monkeypatch.setattr(buffer_mod, "_load_chunk", load)
+        monkeypatch.setattr(buffer_mod, "load_chunk", load)
         try:
             for chunk in buf.iter_chunks_consuming():
                 yielded.append(weakref.ref(chunk.frag_id))
@@ -564,7 +563,7 @@ class TestDiskSpill:
         def fail_spill(chunk, path):
             raise OSError("synthetic spill failure")
 
-        monkeypatch.setattr(buffer_mod, "_spill_chunk", fail_spill)
+        monkeypatch.setattr(buffer_mod, "spill_chunk", fail_spill)
         buf = FragmentBuffer(
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -579,7 +578,7 @@ class TestDiskSpill:
         assert _spill_dirs(tmp_path) == []
 
     def test_cleanup_waits_for_pending_spill(self, mini_index, tmp_path, monkeypatch):
-        real_spill = buffer_mod._spill_chunk
+        real_spill = buffer_mod.spill_chunk
         started = threading.Event()
         allow_write = threading.Event()
 
@@ -588,7 +587,7 @@ class TestDiskSpill:
             assert allow_write.wait(timeout=5)
             real_spill(chunk, path)
 
-        monkeypatch.setattr(buffer_mod, "_spill_chunk", slow_spill)
+        monkeypatch.setattr(buffer_mod, "spill_chunk", slow_spill)
         buf = FragmentBuffer(
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -597,7 +596,7 @@ class TestDiskSpill:
         _inject(buf, [r] * 10, chunk_size=10)
 
         assert started.wait(timeout=5)
-        (pending,) = [c for c in buf._chunks if isinstance(c, buffer_mod._PendingSpill)]
+        (pending,) = [c for c in buf._chunks if isinstance(c, buffer_mod.PendingSpill)]
         assert not pending.done.is_set()
 
         cleanup_done = threading.Event()
@@ -697,10 +696,54 @@ class TestFinalizer:
         assert _spill_dirs(tmp_path)
 
         alive = weakref.ref(buf)
+        thread = buf._spill_writer._thread
         del buf
         gc.collect()
 
         assert alive() is None
+        thread.join(timeout=5)  # the finalizer queues the stop without waiting for it
+        assert not thread.is_alive()
+        assert _spill_dirs(tmp_path) == []
+
+    def test_finalizer_never_waits_on_the_writer(self, mini_index, tmp_path, monkeypatch):
+        """Garbage collection can run the finalizer on a thread holding a lock the writer needs: a logging handler's,
+        when a collection runs inside a log call while the writer logs its chunk. Waiting on the writer there would
+        deadlock, so the finalizer only queues the stop; the writer still writes what it holds once the lock is free,
+        removes the directory and exits."""
+        real_spill = buffer_mod.spill_chunk
+        lock = threading.Lock()  # the logging handler's lock, in miniature
+        writing = threading.Event()
+        holding, ready, finalized = threading.Event(), threading.Event(), threading.Event()
+        box = {}
+
+        def spill_under_the_lock(chunk, path):
+            writing.set()
+            with lock:
+                real_spill(chunk, path)
+
+        def collect_inside_a_log_call():
+            with lock:
+                holding.set()
+                if ready.wait(timeout=5):
+                    box["finalizer"]()  # what garbage collection would call, on this thread
+            finalized.set()
+
+        monkeypatch.setattr(buffer_mod, "spill_chunk", spill_under_the_lock)
+        threading.Thread(target=collect_inside_a_log_call, daemon=True).start()
+        assert holding.wait(timeout=5)
+        buf = FragmentBuffer(max_memory_bytes=1, spill_dir=tmp_path)
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        _inject(buf, [r] * 10, chunk_size=10)
+        assert writing.wait(timeout=5)  # the writer holds the chunk and waits for the lock
+        box["finalizer"] = buf._spill_finalizer
+        thread = buf._spill_writer._thread
+        ready.set()
+
+        assert finalized.wait(timeout=5), (
+            "the finalizer waited on a writer blocked on its caller's lock"
+        )
+        thread.join(timeout=5)
+        assert not thread.is_alive()
         assert _spill_dirs(tmp_path) == []
 
     def test_finalizer_on_the_writer_thread_does_not_wait_on_itself(
@@ -709,7 +752,7 @@ class TestFinalizer:
         """Garbage collection can run the finalizer on the spill writer's own thread. There it must
         neither join nor wait on that thread; the thread still writes what it holds, removes the
         directory and exits."""
-        real_spill = buffer_mod._spill_chunk
+        real_spill = buffer_mod.spill_chunk
         ready = threading.Event()
         finalized = threading.Event()
         errors = []
@@ -725,7 +768,7 @@ class TestFinalizer:
             finally:
                 finalized.set()
 
-        monkeypatch.setattr(buffer_mod, "_spill_chunk", spill_then_finalize)
+        monkeypatch.setattr(buffer_mod, "spill_chunk", spill_then_finalize)
         buf = FragmentBuffer(max_memory_bytes=1, spill_dir=tmp_path)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         _inject(buf, [r] * 10, chunk_size=10)

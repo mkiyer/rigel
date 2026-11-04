@@ -1,7 +1,6 @@
-"""Hybrid capture for the simulator: configuration (:mod:`.config`), the runtime sampler (:mod:`.sampler`) and
-probe design (:mod:`.design`)."""
+"""Hybrid capture for the simulator: the configuration (:mod:`.config`) and the runtime sampler (:mod:`.sampler`)."""
 
-from .config import CaptureConfig, CaptureScenario
+from .config import CaptureConfig
 from .sampler import CaptureSampler, ProbeInterval
 
-__all__ = ["CaptureConfig", "CaptureScenario", "CaptureSampler", "ProbeInterval"]
+__all__ = ["CaptureConfig", "CaptureSampler", "ProbeInterval"]

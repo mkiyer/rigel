@@ -60,7 +60,7 @@ def _revcomp(seq: str) -> str:
 # ── the masks ────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_unknown_runs_are_the_N_runs_of_a_sequence():
+def test_unknown_runs_are_the_n_runs_of_a_sequence():
     seq = "ACNNNGTNACGTNN"
     got = unknown_runs(np.frombuffer(seq.encode(), dtype=np.uint8))
     assert got.tolist() == [list(r) for r in _runs_of(seq)]
@@ -228,7 +228,7 @@ def test_an_unchanged_mask_keeps_the_memo_and_a_changed_one_clears_it():
 # ── the reads ────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_no_simulated_read_covers_an_unknown_base_and_gdna_goes_where_sequence_is_known(tmp_path):
+def test_no_read_covers_an_unknown_base_and_gdna_goes_where_sequence_is_known(tmp_path):
     """End to end: a reference half of which is unknown sequence, beside one with none. No read holds an `N`, no
     fragment's interval (its read name) overlaps an unknown run, and gDNA splits between the two references by their
     known opportunity, not their length.

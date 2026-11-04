@@ -9,7 +9,6 @@ each gate states the band it uses and where that band comes from.
 """
 
 import hashlib
-import importlib.util
 import json
 import os
 import re
@@ -19,9 +18,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rigel.sim.whole_genome import apply_sparse_nrna, parse_yaml_config, run_simulation
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
+
+import _shared
+import simulate_reads
+from _sim_abundance import apply_nrna_ratio, apply_sparse_nrna
+from _sim_config import parse_yaml_config
+from _sim_grid import run_simulation
+from ruler_vs_truth import fl_pmf
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,7 +63,7 @@ def _entity(transcript_id: str, start: int, end: int, t_index: int) -> Transcrip
     return t
 
 
-def test_sparse_nascent_pools_onto_entities_and_the_SPAN_is_the_unit():
+def test_sparse_nascent_pools_onto_entities_and_the_span_is_the_unit():
     """Nascent molecules live on the index's nascent entities, and under the sparse model the entity
     is also the unit of the on/off draw: one gene span is transcribed or it is not, however many
     isoforms share it. A span whose only contributor is silent gets nothing, single-exon transcripts
@@ -89,8 +94,6 @@ def test_sparse_nascent_pools_onto_entities_and_the_SPAN_is_the_unit():
 def test_a_multi_exon_contributor_with_no_entity_is_a_defect_not_a_skip():
     """Every multi-exon transcript of a rigel index links to an entity; a transcript list that does
     not is not the index's, and pooling onto a missing entity raises rather than dropping molecules."""
-    from rigel.sim.whole_genome import apply_nrna_ratio
-
     orphan = _transcript("orphan", 100.0, [(0, 100), (200, 300)])
     orphan.t_index = 0
     with pytest.raises(ValueError, match="nascent entity"):
@@ -108,7 +111,6 @@ def test_the_fl_pmf_is_the_one_the_engine_draws_from():
 
     from rigel.sim.sampling import truncated_normal_frag_lengths
     from rigel.sim.wgs_config import SimulationParams
-    from rigel.sim.whole_genome import fl_pmf
 
     sim = SimulationParams(frag_mean=206, frag_std=98, frag_min=50, frag_max=500)
     widths, p = fl_pmf(sim)
@@ -210,7 +212,7 @@ def test_an_unknown_key_is_refused_at_the_top_level_and_in_each_section(tmp_path
     ],
     ids=["shares", "transcript_filter"],
 )
-def test_a_retired_key_is_refused_not_run_on_a_default(tmp_path, body, key):
+def test_a_key_nothing_reads_is_refused_not_run_on_a_default(tmp_path, body, key):
     """`nrna.shares` and `transcript_filter` are read by nothing, so each is refused as an unknown key
     rather than accepted: `nrna: {shares: [0.2], ratio_labels: [s20]}` would run `additive_ratio` at
     ratio 0.0, a nascent-free condition named `s20`, and the transcriptome is the index's, so there is
@@ -303,8 +305,7 @@ def test_every_in_repo_sim_config_parses(monkeypatch):
     the instruments default to (`RUNS` in `scripts/design/_shared.py`), and every path such a config
     names lands under it. Perturbations: without the variable every such config is refused; a path in
     one written under another root fails the last assertion."""
-    monkeypatch.syspath_prepend(str(ROOT / "scripts" / "design"))
-    runs = importlib.import_module("_shared").RUNS
+    runs = _shared.RUNS
     monkeypatch.setenv("RIGEL_RUNS", str(runs))
     # the template's `outdir` names `$USER`; set it for a shell that has none
     monkeypatch.setenv("USER", os.environ.get("USER") or "rigel")
@@ -337,7 +338,7 @@ def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list
     return contributors, entities
 
 
-def test_the_on_fraction_leaves_most_gene_spans_at_EXACTLY_zero():
+def test_the_on_fraction_leaves_most_gene_spans_at_exactly_zero():
     """Sparsity is the model, and it is only observable below full eligibility: at
     ``on_fraction = 1.0`` the Bernoulli draw cannot be seen at all.
 
@@ -361,7 +362,7 @@ def test_the_on_fraction_leaves_most_gene_spans_at_EXACTLY_zero():
     )
 
 
-def test_on_fraction_zero_transcribes_NOTHING_and_one_transcribes_EVERY_ELIGIBLE_span():
+def test_on_fraction_zero_transcribes_nothing_and_one_every_eligible_span():
     """The two closed ends, exactly: a fraction is a fraction only if its endpoints are honoured."""
     contributors, entities = _sparse_population(40)
     assert apply_sparse_nrna(contributors + entities, (1.0, 1000.0), on_fraction=0.0, seed=5) == 0.0
@@ -372,7 +373,7 @@ def test_on_fraction_zero_transcribes_NOTHING_and_one_transcribes_EVERY_ELIGIBLE
     assert all(e.nrna_abundance > 0.0 for e in entities)
 
 
-def test_the_level_is_LOG_uniform_over_the_range_not_linear():
+def test_the_level_is_log_uniform_over_the_range_not_linear():
     """Where nascent is present its level spans decades, very low in some spans and high in others.
     A linear draw on (1, 1000) puts 90 % of its mass in the top decade and cannot express "very low";
     a log-uniform draw spreads the orders of magnitude evenly, so the decade occupancies are
@@ -394,7 +395,7 @@ def test_the_level_is_LOG_uniform_over_the_range_not_linear():
     assert min(per_decade) > 0.15, f"a decade is nearly empty: {[round(x, 3) for x in per_decade]}"
 
 
-def test_the_nascent_LEVEL_IS_INDEPENDENT_OF_THE_MATURE_LEVEL():
+def test_the_nascent_level_is_independent_of_the_mature_level():
     """The nascent level is drawn independently of the mature level, so ``nascent > mature`` is a real
     case the tool has to survive. A ratio model setting ``nascent = mature x ratio`` makes the two
     perfectly rank-correlated and puts a ceiling under exactly that case.
@@ -422,7 +423,7 @@ def test_the_nascent_LEVEL_IS_INDEPENDENT_OF_THE_MATURE_LEVEL():
     )
 
 
-def test_the_on_off_DRAW_IS_PER_SPAN_NOT_PER_ISOFORM():
+def test_the_on_off_draw_is_per_span_not_per_isoform():
     """The unit of sparsity, gated where it is observable. With ``k`` isoforms sharing one gene span,
     a per-contributor draw gives that span a ``1 - (1 - p)^k`` chance of carrying nascent (at
     ``p = 0.1`` and ``k = 5`` that is 41 %, four times the configured sparsity), while a per-span draw
@@ -461,7 +462,7 @@ def test_the_on_off_DRAW_IS_PER_SPAN_NOT_PER_ISOFORM():
     )
 
 
-def test_the_SEED_actually_drives_the_draw():
+def test_the_seed_actually_drives_the_draw():
     """Two seeds disagree, and one seed reproduces itself exactly.
 
     Every other gate here is statistical, so replacing `default_rng(seed)` with a constant seed passes
@@ -482,7 +483,7 @@ def test_the_SEED_actually_drives_the_draw():
     assert (a > 0).sum() and (b > 0).sum(), "a draw with nothing on cannot distinguish anything"
 
 
-def test_a_multi_exon_contributor_with_no_ENTITY_raises_in_the_SPARSE_path_too():
+def test_a_multi_exon_contributor_with_no_entity_raises_in_the_sparse_path_too():
     """The sparse path raises on its own: with the rule gated only through `apply_nrna_ratio`, replacing
     its raise with `continue` would pass every test. A transcript list without entities is not a rigel
     index's, and dropping its molecules silently is the failure the rule exists to stop."""
@@ -492,7 +493,7 @@ def test_a_multi_exon_contributor_with_no_ENTITY_raises_in_the_SPARSE_path_too()
         apply_sparse_nrna([orphan], (1.0, 100.0), on_fraction=1.0, seed=1)
 
 
-def test_the_FUNCTION_validates_its_own_range_and_fraction_not_just_the_PARSER():
+def test_the_function_validates_its_own_range_and_fraction_not_just_the_parser():
     """The parser is not the only door. `apply_sparse_nrna` is public, and a caller that builds its
     arguments directly never passes through `parse_yaml_config`, so the function's own guards are all
     that stands between a range of `(0, 100)` and `log(0) = -inf` inside the draw. Perturbation:
@@ -591,7 +592,7 @@ def test_a_gtf_the_index_was_not_built_from_is_refused(tiny_reference, tmp_path)
     assert not list(outdir.glob("gdna_*")) and not (outdir / "manifest.json").exists()
 
 
-def test_no_oracle_on_a_config_without_fastqs_is_refused_before_anything_is_simulated(
+def test_no_oracle_on_a_config_without_fastqs_is_refused_before_simulating(
     tiny_reference, tmp_path, monkeypatch
 ):
     """`simulate_reads.py --no-oracle` turns the oracle BAM off after the config is read, so the parser
@@ -601,15 +602,10 @@ def test_no_oracle_on_a_config_without_fastqs_is_refused_before_anything_is_simu
     genome, gtf, index = tiny_reference
     outdir = tmp_path / "out"
     config = _tiny_config(tmp_path / "sim.yaml", genome, gtf, index, outdir, "emit_fastq: false\n")
-    spec = importlib.util.spec_from_file_location(
-        "_simulate_reads", ROOT / "scripts" / "sim" / "simulate_reads.py"
-    )
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
     monkeypatch.setattr(sys, "argv", ["simulate_reads.py", "--config", str(config), "--no-oracle"])
 
     with pytest.raises(ValueError, match="oracle_bam and emit_fastq are both false"):
-        script.main()
+        simulate_reads.main()
     assert not outdir.exists()
 
 
@@ -624,7 +620,6 @@ def test_the_length_sampler_is_unbiased_and_its_law_is_exact():
 
     from rigel.sim.sampling import truncated_normal_frag_lengths
     from rigel.sim.wgs_config import SimulationParams
-    from rigel.sim.whole_genome import fl_pmf
 
     sim = SimulationParams(frag_mean=206, frag_std=98, frag_min=50, frag_max=500)
     widths, p = fl_pmf(sim)
@@ -649,7 +644,6 @@ def test_the_length_law_is_the_rounded_normals_mass_at_each_integer():
 
     from rigel.sim.sampling import truncated_normal_frag_lengths
     from rigel.sim.wgs_config import SimulationParams
-    from rigel.sim.whole_genome import fl_pmf
 
     mean, std, lo, hi = 100.3, 1.5, 97, 104
     widths, p = fl_pmf(SimulationParams(frag_mean=mean, frag_std=std, frag_min=lo, frag_max=hi))

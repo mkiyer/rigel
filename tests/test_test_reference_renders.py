@@ -14,56 +14,43 @@ rule is watched firing on an all-plus chromosome.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
-import pytest
+import build_test_reference
 
 REPO = Path(__file__).resolve().parents[1]
 SIM = REPO / "scripts" / "sim"
 SPEC = SIM / "test_reference" / "test_chr.yaml"
 
 
-@pytest.fixture(scope="module")
-def builder():
-    spec = importlib.util.spec_from_file_location(
-        "build_test_reference", SIM / "build_test_reference.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+def test_the_yaml_is_well_formed():
+    spec = build_test_reference.load_spec(SPEC)
+    assert build_test_reference.check_spec(spec) == []
 
 
-def test_the_yaml_is_well_formed(builder):
-    spec = builder.load_spec(SPEC)
-    assert builder.check_spec(spec) == []
-
-
-def test_every_checked_in_render_matches_the_yaml(builder):
-    spec = builder.load_spec(SPEC)
-    drift = builder.check_renders(spec, SPEC.parent)
+def test_every_checked_in_render_matches_the_yaml():
+    spec = build_test_reference.load_spec(SPEC)
+    drift = build_test_reference.check_renders(spec, SPEC.parent)
     assert drift == [], (
         f"{drift} differ from what {SPEC.name} renders — run "
         "`python scripts/sim/build_test_reference.py` (never edit a render by hand)"
     )
 
 
-def test_both_strands_are_equally_represented(builder):
+def test_both_strands_are_equally_represented():
     """Every gene carries an explicit strand and the chromosome keeps equal representation, so a sign
     error in a strand-dependent rule cannot hide on a one-strand substrate."""
-    spec = builder.load_spec(SPEC)
+    spec = build_test_reference.load_spec(SPEC)
     pos = sum(1 for g in spec.genes if g.strand == "+")
     neg = len(spec.genes) - pos
     assert pos > 0 and neg > 0 and abs(pos - neg) <= 1, (pos, neg)
 
 
-def test_every_type_sits_on_both_strands(builder):
+def test_every_type_sits_on_both_strands():
     """A block type that only ever appears on one strand is the one-strand substrate in disguise.
     A both-stranded locus is two genes on opposite strands sharing one type: their ids carry a role
     suffix, ``_H`` the host and ``_A`` the antisense, which is not part of the type."""
-    spec = builder.load_spec(SPEC)
+    spec = build_test_reference.load_spec(SPEC)
     by_type: dict[str, set[str]] = {}
     for g in spec.genes:
         parts = g.gene_id.split("_", 1)
@@ -77,7 +64,12 @@ def test_every_type_sits_on_both_strands(builder):
     assert one_sided == [], one_sided
 
 
-def test_the_balance_rule_fires_on_a_one_strand_chromosome(builder):
-    g = builder.Gene("g", "+", False, [])
-    assert builder.check_strand_balance([g, g, g]) != []
-    assert builder.check_strand_balance([g, builder.Gene("h", "-", False, [])]) == []
+def test_the_balance_rule_fires_on_a_one_strand_chromosome():
+    g = build_test_reference.Gene("g", "+", False, [])
+    assert build_test_reference.check_strand_balance([g, g, g]) != []
+    assert (
+        build_test_reference.check_strand_balance(
+            [g, build_test_reference.Gene("h", "-", False, [])]
+        )
+        == []
+    )

@@ -6,7 +6,7 @@ two contained gDNA pools (intergenic, intronic; dominant off capture), two cross
 lengths read the laws (gDNA opportunities on the gDNA law, RNA opportunities on the RNA law), and so does the EM's
 scorer; this is not a per-fragment length likelihood. RNA's law is read from its own spliced counts
 (:func:`own_count_law`). gDNA's is the uniform-frame law, what a gDNA fragment looks like before capture selects it,
-recovered by a two-pool contrast (:func:`_deconvolved_gdna_counts`) and empirical-Bayes-shrunk toward the all-fragment
+recovered by a two-pool contrast (:func:`deconvolved_gdna_counts`) and empirical-Bayes-shrunk toward the all-fragment
 law, so a thin pool falls back to that anchor without a threshold. No gDNA pool is pure, and nothing here may assume
 one is. The EM's two length tables are decided later (:mod:`rigel.calibration.shared_length_law`), because that
 decision needs calibration's capture efficiencies. Layer 2, opportunity.
@@ -43,7 +43,6 @@ if TYPE_CHECKING:
 __all__ = [
     "FLModels",
     "build_fl_models",
-    "gdna_contained_fl_mass",
     "gdna_fl_mass",
     "rna_fl_mass",
 ]
@@ -71,8 +70,7 @@ class FLModels:
       EB-smoothed toward ``global_pmf`` (:func:`build_fl_models`).
     * ``*_counts`` — the raw histograms they were built from (RNA's de-tilted), surfaced as QC through
       :meth:`rna_model`, :meth:`gdna_model` and :meth:`global_model`. ``gdna_counts`` is the uniform-frame histogram:
-      the two-pool contrast when region inputs are given, else the de-tilted four-pool sum, or the contained pair with
-      no opportunity.
+      the two-pool contrast, or the de-tilted four-pool sum where the contrast declines.
 
     ``rna_pmf_var`` and ``gdna_pmf_var`` are each pmf's per-length sampling variance, which
     :mod:`rigel.calibration.shared_length_law` reads to tell a difference from noise. RNA's is the own-count law's
@@ -97,8 +95,8 @@ class FLModels:
     gdna_pmf_var: np.ndarray = None
 
     def _empirical(self, counts: np.ndarray) -> "FragmentLengthModel":
-        """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``, so its summary statistics and
-        ``to_dict()`` read the raw histogram with no scoring-side smoothing, like the scanner's QC models."""
+        """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``, so its summary statistics read the
+        raw histogram with no scoring-side smoothing, like the scanner's QC models."""
         from ..frag_length_model import FragmentLengthModel
 
         return FragmentLengthModel(max_size=self.max_size, counts=counts.copy())
@@ -131,17 +129,9 @@ def gdna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
     """The gDNA length histogram: all four structural gDNA pools, summed.
 
     Meaningful only with :meth:`GdnaOpportunity.combined_probability` as its divisor: the pools tilt in opposite
-    directions, so the raw sum is biased long.
+    directions, so the raw sum is biased long. The two-pool contrast's fallback (:func:`build_fl_models`).
     """
     return _pool_sum(payload, _GDNA_POOLS)
-
-
-def gdna_contained_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
-    """Only the two contained gDNA pools: the fallback with no opportunity divisor.
-
-    Accurate off capture but short under it, because capture moves the long fragments into the crossing pools.
-    """
-    return _pool_sum(payload, _GDNA_CONTAINED_POOLS)
 
 
 def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
@@ -150,7 +140,7 @@ def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
     return _pool_sum(payload, _RNA_POOLS)
 
 
-def _resolution_weight(signal_sq: float, noise_sq: float) -> float:
+def resolution_weight(signal_sq: float, noise_sq: float) -> float:
     """``S / (S + N)``: how much of an observed split is signal rather than its own sampling noise.
 
     It replaces a ``|split| > standard error`` threshold with the same comparison made continuously: 0 for pure noise,
@@ -180,7 +170,7 @@ def _region_counts(payload, regions: "RegionArrays") -> np.ndarray:
     return counts
 
 
-def _contained_purities(payload: "AccumulatorPayload", regions: "RegionArrays"):
+def contained_purities(payload: "AccumulatorPayload", regions: "RegionArrays"):
     """The one-sided gDNA rate over the two contained pools' observable support, and each pool's gDNA share at it.
 
     Supports are summed over each region's observable pieces (``region_arrays.observable_pieces``); a region masked
@@ -209,7 +199,7 @@ def _contained_purities(payload: "AccumulatorPayload", regions: "RegionArrays"):
     return fit.rate, (weights[0], weights[1]), (totals[0], totals[1])
 
 
-def _deconvolved_gdna_counts(
+def deconvolved_gdna_counts(
     payload: "AccumulatorPayload",
     gdna_opportunity: "GdnaOpportunity",
     regions: "RegionArrays",
@@ -219,7 +209,7 @@ def _deconvolved_gdna_counts(
     No contained pool is pure (the intronic pool carries RNA inside introns, the intergenic pool unannotated
     transcription, biasing a pool's mean by ``RNA_share × (len_RNA − len_gDNA)``), but the two share one opportunity
     geometry, since RNA there is genomically contiguous as gDNA is. After de-tilting each is the same two shapes at a
-    different gDNA share ``a_p = rho·E_p/n_p`` (:func:`_contained_purities`), so the contaminant cancels::
+    different gDNA share ``a_p = rho·E_p/n_p`` (:func:`contained_purities`), so the contaminant cancels::
 
         f_0 = a_0*g + (1-a_0)*r        f_1 = a_1*g + (1-a_1)*r
         =>  g = [ (1-a_1)*f_0 - (1-a_0)*f_1 ] / (a_0 - a_1)
@@ -241,7 +231,7 @@ def _deconvolved_gdna_counts(
     contrast's own coefficients: each de-tilted pool contributes ``f_p² / c_p`` (de-tilting rescales a length and adds
     no evidence), combined coefficient by coefficient so their covariance is included.
     """
-    purities = _contained_purities(payload, regions)
+    purities = contained_purities(payload, regions)
     if purities is None:  # no gDNA density
         return None, None
     _rate, (a0, a1), totals = purities
@@ -252,7 +242,7 @@ def _deconvolved_gdna_counts(
     se = float(np.sqrt(a0 * a0 / totals[0] + a1 * a1 / totals[1]))
     # blend the inversion toward the mixture by how well the separation is resolved: lam = 1 accepts it whole, lam = 0
     # declines it, continuously between
-    lam_sep = _resolution_weight(sep * sep, se * se)
+    lam_sep = resolution_weight(sep * sep, se * se)
 
     # each contained pool takes its own opportunity, never the combined divisor of the four-pool sum
     total = np.asarray(gdna_opportunity.total, dtype=np.float64)
@@ -312,9 +302,7 @@ def _plugin_variance(law: np.ndarray, raw: np.ndarray) -> np.ndarray:
     """A normalised law's per-length plug-in variance ``law² / raw``: a length's relative variance is one over the raw
     count behind it, which de-tilting rescales and does not add to. A length with no raw count carries none."""
     law = np.asarray(law, dtype=np.float64)
-    n = min(law.size, np.asarray(raw).size)
-    c = np.zeros(law.size)
-    c[:n] = np.asarray(raw, dtype=np.float64)[:n]
+    c = _fitted(raw, law.size)
     return np.divide(law * law, c, out=np.zeros(law.size), where=c > 0.0)
 
 
@@ -367,10 +355,6 @@ def own_count_law(
 
     Gate: ``tests/calibration/test_fl.py``.
     """
-    from scipy.linalg import cho_solve_banded, cholesky_banded, solve_banded
-    from scipy.optimize import minimize_scalar
-
-    k = CONSTANTS.fragment_length
     m = np.asarray(anchor, dtype=np.float64)
     size = m.size
     counts = _fitted(raw, size)
@@ -385,33 +369,54 @@ def own_count_law(
     if held.size == 0 or total <= 0.0:
         return m.copy(), np.zeros(size, dtype=np.float64), 0.0
     lo, hi = int(held[0]), int(held[-1]) + 1
-    c = counts[lo:hi]
     live = (reach[lo:hi] > 0.0) & (m[lo:hi] > 0.0)
     offset = np.zeros(hi - lo)
     offset[live] = np.log(total * reach[lo:hi][live] * m[lo:hi][live])
-    ceiling = float(np.log(np.finfo(np.float64).max))
-    width = hi - lo
+    step, d, factor = _fit_step(_Deviation(counts[lo:hi], live, offset))
+    law = np.zeros(size, dtype=np.float64)
+    var = np.zeros(size, dtype=np.float64)
+    law[lo:hi], var[lo:hi] = _law_and_variance(m[lo:hi], d, factor)
+    return law, var, step
 
-    def objective(d: np.ndarray, step: float) -> tuple[float, np.ndarray]:
-        eta = np.clip(offset + d, -ceiling, ceiling)
-        mu = np.where(live, np.exp(eta), 0.0)
+
+#: The log of the largest double: the clip that keeps a Poisson mean ``e^eta`` finite.
+_LOG_MAX = float(np.log(np.finfo(np.float64).max))
+
+
+@dataclass(frozen=True)
+class _Deviation:
+    """The deviation ``d`` of a pool's law from the anchor over the anchor's held lengths: the pool's Poisson
+    likelihood (``c`` its counts, ``offset`` the log mean at ``d = 0``, ``live`` where the pool can reach a length)
+    under a first-order random walk over the lengths, of step variance ``step``."""
+
+    c: np.ndarray
+    live: np.ndarray
+    offset: np.ndarray
+
+    def objective(self, d: np.ndarray, step: float) -> tuple[float, np.ndarray]:
+        """The negative log posterior at ``d``, up to a constant, and the Poisson means."""
+        eta = np.clip(self.offset + d, -_LOG_MAX, _LOG_MAX)
+        mu = np.where(self.live, np.exp(eta), 0.0)
         penalty = float(np.sum(np.diff(d) ** 2)) / (2.0 * step)
-        return float(np.sum(mu - np.where(live, c * eta, 0.0))) + penalty, mu
+        return float(np.sum(mu - np.where(self.live, self.c * eta, 0.0))) + penalty, mu
 
-    def solve(step: float, d: np.ndarray):
+    def mode(self, step: float, d: np.ndarray):
         """The deviation's mode at one step variance: Newton with step halving on a convex objective."""
-        f, mu = objective(d, step)
+        from scipy.linalg import cho_solve_banded, cholesky_banded
+
+        k = CONSTANTS.fragment_length
+        f, mu = self.objective(d, step)
         for _ in range(k.law_newton_steps):
             walk = np.zeros_like(d)
             diff = np.diff(d)
             walk[:-1] -= diff
             walk[1:] += diff
-            grad = (mu - np.where(live, c, 0.0)) + walk / step
+            grad = (mu - np.where(self.live, self.c, 0.0)) + walk / step
             direction = cho_solve_banded((cholesky_banded(_walk_hessian(mu, step)), False), -grad)
             scale = 1.0
             while True:
                 trial = d + scale * direction
-                f_trial, mu_trial = objective(trial, step)
+                f_trial, mu_trial = self.objective(trial, step)
                 # halve until the objective falls, or until the step no longer moves the iterate at all
                 if f_trial <= f or scale * np.abs(direction).max() <= np.finfo(np.float64).eps * (
                     1.0 + np.abs(d).max()
@@ -426,17 +431,33 @@ def own_count_law(
                 break
         return d, f, mu
 
-    state = {"d": np.zeros(width)}
+    def evidence(self, log_step: float, d0: np.ndarray):
+        """``(log evidence, mode, Hessian factor)`` at step variance ``exp(log_step)``, Newton started from ``d0``."""
+        from scipy.linalg import cholesky_banded
 
-    def evidence(log_step: float):
         step = float(np.exp(log_step))
-        d, f, mu = solve(step, state["d"])
-        state["d"] = d
+        d, f, mu = self.mode(step, d0)
         factor = cholesky_banded(_walk_hessian(mu, step))
+        width = d.size
         log_det = 2.0 * float(np.log(factor[1]).sum())
         # the path's first-difference precision has pseudo-determinant `width`; its constant mode is the likelihood's
         log_prior = 0.5 * (np.log(width) - (width - 1) * np.log(step))
         return -f + log_prior - 0.5 * log_det, d, factor
+
+
+def _fit_step(walk: _Deviation) -> tuple[float, np.ndarray, np.ndarray]:
+    """``(step, mode, Hessian factor)`` at the step variance of maximal Laplace evidence, searched between
+    ``CONSTANTS.fragment_length.law_step_min`` and ``law_step_max``. Each evaluation starts Newton from the last one's
+    mode."""
+    from scipy.optimize import minimize_scalar
+
+    k = CONSTANTS.fragment_length
+    state = {"d": np.zeros(walk.c.size)}
+
+    def evidence(log_step: float):
+        value, d, factor = walk.evidence(log_step, state["d"])
+        state["d"] = d
+        return value, d, factor
 
     search = minimize_scalar(
         lambda x: -evidence(x)[0],
@@ -446,18 +467,22 @@ def own_count_law(
     )
     step = float(np.exp(search.x))
     _, d, factor = evidence(float(search.x))
-    law = np.zeros(size, dtype=np.float64)
-    w = m[lo:hi] * np.exp(np.clip(d - d.max(), -ceiling, 0.0))
+    return step, d, factor
+
+
+def _law_and_variance(m: np.ndarray, d: np.ndarray, factor: np.ndarray):
+    """The normalised law ``m · e^d / Z`` and its per-length delta-method variance through the Hessian's factor."""
+    from scipy.linalg import solve_banded
+
+    w = m * np.exp(np.clip(d - d.max(), -_LOG_MAX, 0.0))
     f = w / w.sum()
-    law[lo:hi] = f
+    width = f.size
     # H = UᵀU with U the upper banded factor, so (e_l − f)ᵀ H⁻¹ (e_l − f) = |U⁻ᵀ (e_l − f)|², every l in one solve
     lower = np.zeros((2, width), dtype=np.float64)
     lower[0] = factor[1]
     lower[1, :-1] = factor[0, 1:]
     whitened = solve_banded((1, 0), lower, np.eye(width) - f[:, None])
-    var = np.zeros(size, dtype=np.float64)
-    var[lo:hi] = f * f * np.einsum("ij,ij->j", whitened, whitened)
-    return law, var, step
+    return f, f * f * np.einsum("ij,ij->j", whitened, whitened)
 
 
 def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):
@@ -475,10 +500,9 @@ def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):
 def build_fl_models(
     payload: "AccumulatorPayload",
     *,
-    sj_opportunity: np.ndarray | None = None,
-    gdna_opportunity: "GdnaOpportunity | None" = None,
-    regions: "RegionArrays | None" = None,
-    prior_ess: float = CONSTANTS.fragment_length.pool_prior_ess,
+    sj_opportunity: np.ndarray,
+    gdna_opportunity: "GdnaOpportunity",
+    regions: "RegionArrays",
 ) -> FLModels:
     """Build the global, RNA and gDNA FL pmfs from one payload, in one frame.
 
@@ -490,7 +514,8 @@ def build_fl_models(
     shrinking toward it would read a ruler mismatch as composition.
 
     RNA's law is its own counts' at their sj opportunity (:func:`own_count_law`); gDNA's is EB-shrunk toward the anchor
-    with one Dirichlet ``prior_ess``. Each pool is divided by its own opportunity, because the two selections differ:
+    with one Dirichlet ``CONSTANTS.fragment_length.pool_prior_ess``. Each pool is divided by its own opportunity,
+    because the two selections differ:
 
     * ``sj_opportunity`` — ``pi(w)``, the chance a uniformly placed length-``w`` fragment crosses an annotated sj
       (:mod:`rigel.calibration.sj_opportunity`); longer fragments do so more often.
@@ -498,44 +523,34 @@ def build_fl_models(
       (:mod:`rigel.calibration.gdna_opportunity`). A contained pool's opportunity falls with length and a crossing
       pool's rises, so one divisor over the pooled sum reads the gDNA mean too long.
 
-    ``regions`` enables the two-pool contrast (:func:`_deconvolved_gdna_counts`). It must be the index's frame
-    (:meth:`~rigel.calibration.region_arrays.RegionArrays.from_index`), the partition the scanner deposits into,
-    carrying the unobservable mask every contained support is read over. :func:`_fl_models_from_histograms` is the
-    kernel over three free histograms, for tests.
+    gDNA's histogram is the two-pool contrast (:func:`deconvolved_gdna_counts`) over ``regions``, the index's frame
+    (:meth:`~rigel.calibration.region_arrays.RegionArrays.from_index`): the partition the scanner deposits into,
+    carrying the unobservable mask every contained support is read over. Where the contrast declines it is the four
+    pools de-tilted by their combined opportunity. :func:`fl_models_from_histograms` is the kernel over three free
+    histograms, for tests.
     """
-    if gdna_opportunity is None:
-        gdna_counts = gdna_contained_fl_mass(payload)
-        gdna_var = _plugin_variance(_normalized(gdna_counts), gdna_counts)
-    else:
+    gdna_counts, gdna_var = deconvolved_gdna_counts(payload, gdna_opportunity, regions)
+    if gdna_counts is None:
         gdna_raw = gdna_fl_mass(payload)
         gdna_counts = detilt_pool(gdna_raw, gdna_opportunity.combined_probability())
         gdna_var = _plugin_variance(_normalized(gdna_counts), gdna_raw)
-        if regions is not None:
-            deconvolved, deconvolved_var = _deconvolved_gdna_counts(
-                payload, gdna_opportunity, regions
-            )
-            if deconvolved is not None:
-                gdna_counts, gdna_var = deconvolved, deconvolved_var
-
-    return _fl_models_from_histograms(
+    return fl_models_from_histograms(
         global_counts=payload.deposited_lengths,
         rna_counts=rna_fl_mass(payload),
         rna_selection=sj_opportunity,
         gdna_counts=gdna_counts,
         max_size=int(payload.max_length),
-        prior_ess=prior_ess,
         pool_counts=payload.pool_lengths,
         gdna_var=gdna_var,
     )
 
 
-def _fl_models_from_histograms(
+def fl_models_from_histograms(
     *,
     global_counts: np.ndarray,
     rna_counts: np.ndarray,
     gdna_counts: np.ndarray,
     max_size: int,
-    prior_ess: float = CONSTANTS.fragment_length.pool_prior_ess,
     pool_counts: np.ndarray | None = None,
     rna_selection: np.ndarray | None = None,
     gdna_var: np.ndarray | None = None,
@@ -556,6 +571,7 @@ def _fl_models_from_histograms(
     global_pmf = _normalized(global_aligned)
     rna_pmf, rna_var, _step = own_count_law(rna_raw, rna_selection, global_pmf)
     n_rna = float(rna_raw.sum())
+    prior_ess = CONSTANTS.fragment_length.pool_prior_ess
     gdna_pmf, n_gdna = _smooth_eb(gdna_aligned, global_pmf, prior_ess)
 
     # gDNA's law's variance: its raw law's, at the square of the empirical-Bayes weight its counts carry

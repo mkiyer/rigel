@@ -22,9 +22,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from _bam_builder import R1_FWD, R2_REV, record, write_bam
 from _index_builder import StandInStore, rebuild_with_splice_blacklist, stand_in_store
-from rigel.config import IndexConfig
+from rigel.config import BamScanConfig, IndexConfig
 from rigel.index import MANIFEST_JSON, SJ_BLACKLIST_FEATHER, SJ_BLACKLIST_TSV, TranscriptIndex
+from rigel.pipeline import scan_and_buffer
 from rigel.splice_blacklist import aggregate_splice_blacklist
 
 #: The blacklist's columns, in the order the index stores them.
@@ -193,13 +195,23 @@ def _load_and_warnings(index_dir: Path, caplog) -> tuple[TranscriptIndex, list[s
     return index, [m for m in warned if "blacklist" in m]
 
 
+def _n_blacklisted(bam: str, index: TranscriptIndex) -> int:
+    """The junctions a scan of *bam* dropped as splice artifacts: what the index's resolver holds, read back."""
+    stats, _strand, _buffer, _payload = scan_and_buffer(bam, index, BamScanConfig(total_threads=1))
+    return int(stats.n_sj_blacklisted)
+
+
 class TestIndexRoundTrip:
     def test_a_blacklist_built_from_a_store_loads_into_the_resolver(
         self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
+        """The resolver is read through a scan, not through the count the load reports: a junction on ``(300, 400)``
+        whose left anchor (10) is inside its row's envelope (12) is dropped, one anchored 50 on both sides is kept,
+        and the same BAM on the index before the blacklist drops nothing."""
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta, gtf, out_dir)
+        before = TranscriptIndex.load(out_dir)
         rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
 
         on_disk = pd.read_feather(out_dir / SJ_BLACKLIST_FEATHER)
@@ -208,7 +220,20 @@ class TestIndexRoundTrip:
         assert index.sj_blacklist_size == len(_BLACKLIST)
         assert warned == []
 
-    def test_the_index_DIGESTS_the_blacklist_it_applies(
+        bam = write_bam(
+            tmp_path / "sj.bam",
+            [
+                record("anchored_10", R1_FWD, 290, "10M100N90M", 450),
+                record("anchored_10", R2_REV, 450, "100M", 290),
+                record("anchored_50", R1_FWD, 250, "50M100N50M", 450),
+                record("anchored_50", R2_REV, 450, "100M", 250),
+            ],
+            {"chr1": 2000},
+        )
+        assert _n_blacklisted(bam, index) == 1
+        assert _n_blacklisted(bam, before) == 0
+
+    def test_the_index_digests_the_blacklist_it_applies(
         self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
         """The scan cache keys on the blacklist the resolver was given, so the digest is "none" exactly when none
@@ -252,7 +277,7 @@ class TestIndexRoundTrip:
     def test_a_rebuild_without_a_store_applies_no_blacklist(
         self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
-        """Built with a blacklist, then rebuilt in place without a store: the old one is not applied."""
+        """Built with a blacklist, then rebuilt in place without a store: the earlier one is not applied."""
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta, gtf, out_dir)
@@ -263,7 +288,7 @@ class TestIndexRoundTrip:
         assert index.sj_blacklist_size == 0
         assert warned == []
 
-    def test_a_rebuild_without_a_store_removes_the_old_blacklist(
+    def test_a_rebuild_without_a_store_removes_the_blacklist_files(
         self, tmp_path: Path, mini_index_inputs
     ) -> None:
         fasta, gtf = mini_index_inputs

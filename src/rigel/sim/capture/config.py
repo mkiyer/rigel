@@ -1,9 +1,8 @@
-"""Hybrid-capture configuration: ``CaptureConfig`` parameterises the weight model of :mod:`.sampler`, and
-``CaptureScenario`` labels one setting in a condition grid."""
+"""Hybrid-capture configuration: ``CaptureConfig`` parameterises the weight model of :mod:`.sampler`."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -34,11 +33,3 @@ class CaptureConfig:
     off_target_weight: float = 1.0
     binding_per_base: float = 10.0
     min_overlap: int = 1
-
-
-@dataclass
-class CaptureScenario:
-    """One labeled hybrid-capture setting in a simulation condition grid."""
-
-    label: str = "default"
-    config: CaptureConfig = field(default_factory=CaptureConfig)

@@ -3,23 +3,23 @@
  * the two disagree, the Python file is right. Every ordering decision in `deposit` is load-bearing, and the
  * comments say why: read them before reordering anything.
  */
-#include "accumulator.h"
+#include "calibration/accumulator.h"
 
 #include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
-#include "../path_length.h"
+#include "path_length.h"
 
 namespace rigel::accumulator {
 
 void DepositCounters::merge_from(const DepositCounters& other) noexcept {
-    deposited                += other.deposited;
-    dropped_too_long         += other.dropped_too_long;
-    dropped_empty            += other.dropped_empty;
-    dropped_strand_undefined += other.dropped_strand_undefined;
-    deferred_undetermined_gap += other.deferred_undetermined_gap;
+    deposited                    += other.deposited;
+    dropped_too_long             += other.dropped_too_long;
+    dropped_empty                += other.dropped_empty;
+    dropped_strand_undefined     += other.dropped_strand_undefined;
+    deferred_undetermined_gap    += other.deferred_undetermined_gap;
     deferred_multiple_placements += other.deferred_multiple_placements;
 }
 
@@ -30,263 +30,13 @@ void GapCensus::merge_from(const GapCensus& other) noexcept {
     deferred_both          += other.deferred_both;
 }
 
-void DeferredFragments::append_placement(const OfferedFragment& fragment,
-                                         std::int64_t ref_id,
-                                         std::int64_t clipped_start,
-                                         std::int64_t clipped_end) {
-    ref.push_back(ref_id);
-    start.push_back(clipped_start);
-    end.push_back(clipped_end);
-    align_strand.push_back(fragment.align_strand);
-    sj_strand.push_back(fragment.sj_strand);
-    for (std::size_t i = 0; i < fragment.n_observed_introns; ++i) {
-        observed_introns.push_back(fragment.observed_introns[i].start);
-        observed_introns.push_back(fragment.observed_introns[i].end);
-    }
-    observed_intron_offsets.push_back(static_cast<std::int64_t>(observed_introns.size() / 2));
-    for (std::size_t h = 0; h < fragment.n_hypotheses; ++h) {
-        const GapHypothesis& hypothesis = fragment.hypotheses[h];
-        hypothesis_sj_strand.push_back(hypothesis.sj_strand);
-        for (std::size_t i = 0; i < hypothesis.n_introns; ++i) {
-            hypothesis_introns.push_back(hypothesis.introns[i].start);
-            hypothesis_introns.push_back(hypothesis.introns[i].end);
-        }
-        hypothesis_intron_offsets.push_back(static_cast<std::int64_t>(hypothesis_introns.size() / 2));
-    }
-    hypothesis_offsets.push_back(static_cast<std::int64_t>(hypothesis_sj_strand.size()));
-    nm.push_back(fragment.nm);
-    clip.push_back(fragment.clip);
-}
-
-void DeferredFragments::merge_from(const DeferredFragments& other) {
-    // CSR concatenation: offsets append shifted by this queue's extent, skipping `other`'s leading 0.
-    const auto shift_append = [](std::vector<std::int64_t>& into,
-                                 const std::vector<std::int64_t>& from) {
-        const std::int64_t base = into.back();
-        for (std::size_t i = 1; i < from.size(); ++i) into.push_back(base + from[i]);
-    };
-    shift_append(placement_offsets, other.placement_offsets);
-    ref.insert(ref.end(), other.ref.begin(), other.ref.end());
-    start.insert(start.end(), other.start.begin(), other.start.end());
-    end.insert(end.end(), other.end.begin(), other.end.end());
-    align_strand.insert(align_strand.end(), other.align_strand.begin(), other.align_strand.end());
-    sj_strand.insert(sj_strand.end(), other.sj_strand.begin(), other.sj_strand.end());
-    shift_append(observed_intron_offsets, other.observed_intron_offsets);
-    observed_introns.insert(observed_introns.end(),
-                            other.observed_introns.begin(), other.observed_introns.end());
-    shift_append(hypothesis_offsets, other.hypothesis_offsets);
-    hypothesis_sj_strand.insert(hypothesis_sj_strand.end(),
-                                other.hypothesis_sj_strand.begin(), other.hypothesis_sj_strand.end());
-    shift_append(hypothesis_intron_offsets, other.hypothesis_intron_offsets);
-    hypothesis_introns.insert(hypothesis_introns.end(),
-                              other.hypothesis_introns.begin(), other.hypothesis_introns.end());
-    nm.insert(nm.end(), other.nm.begin(), other.nm.end());
-    clip.insert(clip.end(), other.clip.begin(), other.clip.end());
-}
-
-namespace {
-
-/// Python's sequence comparison (a prefix sorts first), returning -1, 0 or 1. A flat run of (start, end) pairs
-/// compares as Python's tuple of pairs, so one helper serves the observed and the implied intron runs.
-inline int lex_compare(const std::int64_t* a, std::size_t na,
-                       const std::int64_t* b, std::size_t nb) noexcept
-{
-    const std::size_t common = std::min(na, nb);
-    for (std::size_t i = 0; i < common; ++i) {
-        if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
-    }
-    if (na == nb) return 0;
-    return na < nb ? -1 : 1;
-}
-
-inline int scalar_compare(std::int64_t a, std::int64_t b) noexcept {
-    if (a == b) return 0;
-    return a < b ? -1 : 1;
-}
-
-}  // namespace
-
-int DeferredFragments::compare_placements(std::size_t a, std::size_t b) const noexcept {
-    for (const std::vector<std::int64_t>* column : {&ref, &start, &end, &align_strand, &sj_strand}) {
-        const int c = scalar_compare((*column)[a], (*column)[b]);
-        if (c != 0) return c;
-    }
-    const auto observed_run = [this](std::size_t i) {
-        const std::size_t lo = static_cast<std::size_t>(observed_intron_offsets[i]);
-        const std::size_t hi = static_cast<std::size_t>(observed_intron_offsets[i + 1]);
-        return std::pair{observed_introns.data() + 2 * lo, 2 * (hi - lo)};
-    };
-    const auto [a_obs, a_n_obs] = observed_run(a);
-    const auto [b_obs, b_n_obs] = observed_run(b);
-    const int c_obs = lex_compare(a_obs, a_n_obs, b_obs, b_n_obs);
-    if (c_obs != 0) return c_obs;
-
-    const std::size_t a_h0 = static_cast<std::size_t>(hypothesis_offsets[a]);
-    const std::size_t a_h1 = static_cast<std::size_t>(hypothesis_offsets[a + 1]);
-    const std::size_t b_h0 = static_cast<std::size_t>(hypothesis_offsets[b]);
-    const std::size_t b_h1 = static_cast<std::size_t>(hypothesis_offsets[b + 1]);
-    const std::size_t common = std::min(a_h1 - a_h0, b_h1 - b_h0);
-    for (std::size_t k = 0; k < common; ++k) {
-        const std::size_t ga = a_h0 + k, gb = b_h0 + k;
-        const auto intron_run = [this](std::size_t g) {
-            const std::size_t lo = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
-            const std::size_t hi = static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]);
-            return std::pair{hypothesis_introns.data() + 2 * lo, 2 * (hi - lo)};
-        };
-        const auto [a_in, a_n_in] = intron_run(ga);
-        const auto [b_in, b_n_in] = intron_run(gb);
-        int c = lex_compare(a_in, a_n_in, b_in, b_n_in);
-        if (c != 0) return c;
-        c = scalar_compare(hypothesis_sj_strand[ga], hypothesis_sj_strand[gb]);
-        if (c != 0) return c;
-    }
-    return scalar_compare(static_cast<std::int64_t>(a_h1 - a_h0), static_cast<std::int64_t>(b_h1 - b_h0));
-}
-
-void DeferredFragments::copy_placement(const DeferredFragments& from, std::size_t i) {
-    ref.push_back(from.ref[i]);
-    start.push_back(from.start[i]);
-    end.push_back(from.end[i]);
-    align_strand.push_back(from.align_strand[i]);
-    sj_strand.push_back(from.sj_strand[i]);
-    for (std::size_t p = static_cast<std::size_t>(from.observed_intron_offsets[i]);
-         p < static_cast<std::size_t>(from.observed_intron_offsets[i + 1]); ++p) {
-        observed_introns.push_back(from.observed_introns[2 * p]);
-        observed_introns.push_back(from.observed_introns[2 * p + 1]);
-    }
-    observed_intron_offsets.push_back(static_cast<std::int64_t>(observed_introns.size() / 2));
-    for (std::size_t g = static_cast<std::size_t>(from.hypothesis_offsets[i]);
-         g < static_cast<std::size_t>(from.hypothesis_offsets[i + 1]); ++g) {
-        hypothesis_sj_strand.push_back(from.hypothesis_sj_strand[g]);
-        for (std::size_t p = static_cast<std::size_t>(from.hypothesis_intron_offsets[g]);
-             p < static_cast<std::size_t>(from.hypothesis_intron_offsets[g + 1]); ++p) {
-            hypothesis_introns.push_back(from.hypothesis_introns[2 * p]);
-            hypothesis_introns.push_back(from.hypothesis_introns[2 * p + 1]);
-        }
-        hypothesis_intron_offsets.push_back(static_cast<std::int64_t>(hypothesis_introns.size() / 2));
-    }
-    hypothesis_offsets.push_back(static_cast<std::int64_t>(hypothesis_sj_strand.size()));
-    nm.push_back(from.nm[i]);
-    clip.push_back(from.clip[i]);
-}
-
-const OfferedFragment& DeferredFragments::offered_of(std::size_t p, std::size_t h0, std::size_t h1,
-                                                     OfferedStorage& st) const {
-    st.observed.clear();
-    st.implied.clear();
-    st.spans.clear();
-    for (std::size_t q = static_cast<std::size_t>(observed_intron_offsets[p]);
-         q < static_cast<std::size_t>(observed_intron_offsets[p + 1]); ++q) {
-        st.observed.push_back({0, static_cast<std::int32_t>(observed_introns[2 * q]),
-                               static_cast<std::int32_t>(observed_introns[2 * q + 1]), 0});
-    }
-    const std::size_t g0 = static_cast<std::size_t>(hypothesis_offsets[p]) + h0;
-    const std::size_t g1 = static_cast<std::size_t>(hypothesis_offsets[p]) + h1;
-    // Reserved up front: the spans below point into these vectors, so they must not reallocate while filling.
-    st.implied.reserve(static_cast<std::size_t>(hypothesis_intron_offsets[g1] - hypothesis_intron_offsets[g0]));
-    st.spans.reserve(g1 - g0);
-    for (std::size_t g = g0; g < g1; ++g) {
-        const std::size_t i0 = st.implied.size();
-        for (std::size_t q = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
-             q < static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]); ++q) {
-            st.implied.push_back({0, static_cast<std::int32_t>(hypothesis_introns[2 * q]),
-                                  static_cast<std::int32_t>(hypothesis_introns[2 * q + 1]), 0});
-        }
-        st.spans.push_back({st.implied.data() + i0, st.implied.size() - i0,
-                            static_cast<std::int32_t>(hypothesis_sj_strand[g])});
-    }
-    st.offered.start = start[p];
-    st.offered.end = end[p];
-    st.offered.observed_introns = st.observed.data();
-    st.offered.n_observed_introns = st.observed.size();
-    st.offered.align_strand = static_cast<std::int32_t>(align_strand[p]);
-    st.offered.sj_strand = static_cast<std::int32_t>(sj_strand[p]);
-    st.offered.hypotheses = st.spans.data();
-    st.offered.n_hypotheses = st.spans.size();
-    st.offered.nm = static_cast<std::int32_t>(nm[p]);
-    st.offered.clip = static_cast<std::int32_t>(clip[p]);
-    return st.offered;
-}
-
-void DeferredFragments::clear() {
-    for (std::vector<std::int64_t>* v : {&ref, &start, &end, &align_strand, &sj_strand, &observed_introns,
-                                         &hypothesis_sj_strand, &hypothesis_introns, &nm, &clip}) {
-        v->clear();
-    }
-    for (std::vector<std::int64_t>* v : {&placement_offsets, &observed_intron_offsets, &hypothesis_offsets,
-                                         &hypothesis_intron_offsets}) {
-        v->clear();
-        v->push_back(0);
-    }
-}
-
-void DeferredFragments::canonicalise() {
-    const std::size_t n = n_records();
-    if (n < 2) return;
-
-    // The specification's key: the sequence of the placements' `compare_placements` keys, a prefix sorting first.
-    const auto record_less = [this](std::size_t a, std::size_t b) {
-        const std::size_t a0 = static_cast<std::size_t>(placement_offsets[a]);
-        const std::size_t a1 = static_cast<std::size_t>(placement_offsets[a + 1]);
-        const std::size_t b0 = static_cast<std::size_t>(placement_offsets[b]);
-        const std::size_t b1 = static_cast<std::size_t>(placement_offsets[b + 1]);
-        const std::size_t common = std::min(a1 - a0, b1 - b0);
-        for (std::size_t k = 0; k < common; ++k) {
-            const int c = compare_placements(a0 + k, b0 + k);
-            if (c != 0) return c < 0;
-        }
-        if (a1 - a0 != b1 - b0) return (a1 - a0) < (b1 - b0);
-        // (nm, clip) breaks only a content tie, so it never reorders records the content orders (the draw's stream
-        // follows that order); it makes the order total, and a set's offer keeps the fewest-mismatch copy.
-        for (std::size_t k = 0; k < common; ++k) {
-            if (nm[a0 + k] != nm[b0 + k]) return nm[a0 + k] < nm[b0 + k];
-            if (clip[a0 + k] != clip[b0 + k]) return clip[a0 + k] < clip[b0 + k];
-        }
-        return false;
-    };
-
-    std::vector<std::size_t> order(n);
-    for (std::size_t i = 0; i < n; ++i) order[i] = i;
-    // Not stable, and need not be: records that tie on the whole key are byte-identical.
-    std::sort(order.begin(), order.end(), record_less);
-
-    bool identity = true;
-    for (std::size_t i = 0; i < n && identity; ++i) identity = (order[i] == i);
-    if (identity) return;  // already canonical: a repeat export copies nothing
-
-    DeferredFragments out;
-    out.placement_offsets.reserve(n + 1);
-    out.ref.reserve(ref.size());
-    out.start.reserve(start.size());
-    out.end.reserve(end.size());
-    out.align_strand.reserve(align_strand.size());
-    out.sj_strand.reserve(sj_strand.size());
-    out.observed_intron_offsets.reserve(observed_intron_offsets.size());
-    out.observed_introns.reserve(observed_introns.size());
-    out.hypothesis_offsets.reserve(hypothesis_offsets.size());
-    out.hypothesis_sj_strand.reserve(hypothesis_sj_strand.size());
-    out.hypothesis_intron_offsets.reserve(hypothesis_intron_offsets.size());
-    out.hypothesis_introns.reserve(hypothesis_introns.size());
-    for (const std::size_t r : order) {
-        for (std::size_t p = static_cast<std::size_t>(placement_offsets[r]);
-             p < static_cast<std::size_t>(placement_offsets[r + 1]); ++p) {
-            out.copy_placement(*this, p);
-        }
-        out.close_record();
-    }
-    *this = std::move(out);
-}
-
 // ============================================================================
 // construction
 // ============================================================================
 
-Accumulator::Accumulator(std::vector<std::int64_t> region_bounds,
-                         std::vector<std::uint8_t> region_types,
-                         int max_length,
-                         std::int32_t ref_id)
-    : region_bounds_(std::move(region_bounds)), ref_id_(ref_id), max_length_(max_length)
-{
+Accumulator::Accumulator(std::vector<std::int64_t> region_bounds, std::vector<std::uint8_t> region_types,
+                         int max_length, std::int32_t ref_id)
+    : region_bounds_(std::move(region_bounds)), ref_id_(ref_id), max_length_(max_length) {
     if (ref_id_ < 0) {
         throw std::invalid_argument(
             "accumulator: ref_id must be >= 0, got " + std::to_string(ref_id_) +
@@ -335,10 +85,8 @@ Accumulator::Accumulator(std::vector<std::int64_t> region_bounds,
     deposited_lengths_.assign(static_cast<std::size_t>(max_length_) + 1, 0u);
 }
 
-void Accumulator::set_sj(std::vector<std::int32_t> offsets,
-                                std::vector<std::int32_t> boundary_right,
-                                std::vector<std::int8_t>  sj_strand)
-{
+void Accumulator::set_sj(std::vector<std::int32_t> offsets, std::vector<std::int32_t> boundary_right,
+                         std::vector<std::int8_t> sj_strand) {
     if (!offsets.empty() && offsets.size() != region_bounds_.size() + 1) {
         throw std::invalid_argument(
             "accumulator: sj CSR offsets must have length n_region_bounds + 1 = " +
@@ -378,10 +126,8 @@ std::int64_t Accumulator::exact_region_bound(std::int64_t position) const noexce
     return it - region_bounds_.begin();
 }
 
-std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
-                                     std::int64_t intron_end,
-                                     std::int32_t sj_strand) const noexcept
-{
+std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start, std::int64_t intron_end,
+                                     std::int32_t sj_strand) const noexcept {
     if (sj_offsets_.empty()) return -1;
     // Both ends of every annotated intron are region_bounds, so an intron whose ends are not is unannotated
     // without consulting the table.
@@ -404,30 +150,37 @@ std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
     return -1;
 }
 
-void Accumulator::sj_edge_ids(const std::int64_t* starts,
-                              const std::int64_t* ends,
-                              const std::int32_t* sj_strand,
-                              std::size_t n,
-                              std::int64_t* out) const noexcept
-{
+void Accumulator::sj_edge_ids(const std::int64_t* starts, const std::int64_t* ends, const std::int32_t* sj_strand,
+                              std::size_t n, std::int64_t* out) const noexcept {
     for (std::size_t i = 0; i < n; ++i) out[i] = sj_edge_id(starts[i], ends[i], sj_strand[i]);
+}
+
+std::pair<std::int64_t, std::int64_t> Accumulator::crossed_bounds(std::int64_t seg_start,
+                                                                  std::int64_t seg_end) const noexcept {
+    const std::int64_t first =
+        std::upper_bound(region_bounds_.begin(), region_bounds_.end(), seg_start) - region_bounds_.begin();
+    const std::int64_t last =
+        std::lower_bound(region_bounds_.begin(), region_bounds_.end(), seg_end) - region_bounds_.begin();
+    return {first, last};
+}
+
+bool Accumulator::clip(const OfferedFragment& fragment, std::int64_t& start, std::int64_t& end) const noexcept {
+    if (region_bounds_.size() < 2) return false;
+    start = std::max(fragment.start, region_bounds_.front());
+    end = std::min(fragment.end, region_bounds_.back());
+    return end > start;
 }
 
 // ============================================================================
 // the deposit
 // ============================================================================
 
-std::int64_t Accumulator::hypothesis_length(const OfferedFragment& fragment,
-                                           const GapHypothesis& hypothesis,
-                                           std::int64_t start,
-                                           std::int64_t end,
-                                           DepositScratch& scratch) const
-{
+std::int64_t Accumulator::hypothesis_length(const OfferedFragment& fragment, const GapHypothesis& hypothesis,
+                                            std::int64_t start, std::int64_t end, DepositScratch& scratch) const {
     // The one definition of L, `path_length`, which the resolver also scores candidates by. Observed and implied
     // introns are disjoint (the enumeration never searches a gap the CIGAR explained), so this is their union.
-    return path_length(fragment.observed_introns, fragment.n_observed_introns,
-                       hypothesis.introns, hypothesis.n_introns,
-                       start, end, scratch.introns, scratch.segments);
+    return path_length(fragment.observed_introns, fragment.n_observed_introns, hypothesis.introns,
+                       hypothesis.n_introns, start, end, scratch.introns, scratch.segments);
 }
 
 DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScratch& scratch) {
@@ -444,20 +197,11 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         return DepositOutcome::kEmpty;
     }
 
-    // Every fragment has at least one hypothesis, the unspliced one (the specification's default
-    // `UNSPLICED_ONLY`), so an empty set is answered as that one.
-    static const GapHypothesis kUnsplicedOnly{nullptr, 0, STRAND_NONE};
-    OfferedFragment offered_or_default = fragment;
-    if (fragment.n_hypotheses == 0) {
-        offered_or_default.hypotheses = &kUnsplicedOnly;
-        offered_or_default.n_hypotheses = 1;
-    }
-    const OfferedFragment& arbitrated = offered_or_default;
-
     // ── arbitration: which hypotheses survive, and is exactly one left? ───────────────────────────
+    const OfferedFragment arbitrated = with_unspliced_default(fragment);
     bool any_spliced_hypothesis = false;
     arbitrate(arbitrated, start, end, scratch, /*all_stand_if_empty=*/true, &any_spliced_hypothesis);
-    auto& survivors = scratch.survivors;
+    const auto& survivors = scratch.survivors;
     if (any_spliced_hypothesis) record_gap_resolution(arbitrated, survivors);
 
     if (survivors.size() > 1) {
@@ -465,22 +209,16 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         ++counters_.deferred_undetermined_gap;
         return DepositOutcome::kDeferred;
     }
-    return deposit_survivor(arbitrated, arbitrated.hypotheses[survivors.front().index], column, start,
-                            end, scratch);
+    return deposit_survivor(arbitrated, arbitrated.hypotheses[survivors.front().index], column, start, end,
+                            scratch);
 }
 
 int Accumulator::admit(const OfferedFragment& fragment, std::int64_t* start, std::int64_t* end) const noexcept {
     const int column = strand_column(fragment.align_strand);
     if (column < 0) return -1;
-    if (region_bounds_.size() < 2) return -2;
     // Clip to the reference. L is the clipped length, and the clip precedes arbitration because a hypothesis is
     // filtered on its L.
-    const std::int64_t s = std::max(fragment.start, region_bounds_.front());
-    const std::int64_t e = std::min(fragment.end,   region_bounds_.back());
-    if (e <= s) return -2;
-    *start = s;
-    *end = e;
-    return column;
+    return clip(fragment, *start, *end) ? column : -2;
 }
 
 void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t start, std::int64_t end,
@@ -493,38 +231,20 @@ void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t star
     survivors.clear();
     bool any = false;
     for (std::size_t h = 0; h < arbitrated.n_hypotheses; ++h) {
-        const std::int64_t candidate_length =
-            hypothesis_length(arbitrated, arbitrated.hypotheses[h], start, end, scratch);
+        survivors.push_back({h, hypothesis_length(arbitrated, arbitrated.hypotheses[h], start, end, scratch)});
         any |= !arbitrated.hypotheses[h].is_unspliced();
-        survivors.push_back({h, candidate_length});
     }
-    const std::size_t n_offered = survivors.size();
-    survivors.erase(std::remove_if(survivors.begin(), survivors.end(),
-                                   [this](const ScoredHypothesis& s) {
-                                       return s.length > max_length_;
-                                   }),
-                    survivors.end());
-    if (survivors.empty() && all_stand_if_empty) {
-        for (std::size_t h = 0; h < n_offered; ++h) {
-            const std::int64_t candidate_length =
-                hypothesis_length(arbitrated, arbitrated.hypotheses[h], start, end, scratch);
-            survivors.push_back({h, candidate_length});
-        }
-    }
+    const auto too_long = [this](const ScoredHypothesis& s) { return s.length > max_length_; };
+    if (!all_stand_if_empty || !std::all_of(survivors.begin(), survivors.end(), too_long))
+        survivors.erase(std::remove_if(survivors.begin(), survivors.end(), too_long), survivors.end());
     if (any_spliced != nullptr) *any_spliced = any;
 }
 
 DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, const GapHypothesis& chosen,
-                                             const int column, const std::int64_t start,
-                                             const std::int64_t end, DepositScratch& scratch) {
+                                             const int column, const std::int64_t start, const std::int64_t end,
+                                             DepositScratch& scratch) {
     // Re-normalised rather than cached per hypothesis: one code path from a hypothesis to its introns.
     const std::int64_t length = hypothesis_length(fragment, chosen, start, end, scratch);
-
-    // An implied strand is used only when no motif was sequenced on this fragment: an observed motif is evidence,
-    // an implied strand only an inference from the annotation.
-    const std::int32_t sj_strand =
-        fragment.sj_strand == STRAND_NONE ? chosen.sj_strand : fragment.sj_strand;
-
     if (length <= 0) {
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
@@ -534,114 +254,28 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
         return DepositOutcome::kTooLong;
     }
 
-    // ── which annotated sj does this path use? this also picks the boundary bank ────────────────
-    // Resolved before the crossing loop, because `spliced` chooses the bank the crossings land in; and per intron
-    // position into `sj_id_at_gap` (-1 where unannotated), because the conserved mass needs to know which of a
-    // block's ends is a sj, and a filtered list loses the alignment between intron `i` and the gap after block `i`.
-    auto& sj_ids      = scratch.sj_ids;
-    auto& sj_id_at_gap = scratch.sj_id_at_gap;
-    sj_ids.clear();
-    sj_id_at_gap.assign(scratch.introns.size(), -1);
-    // The motif tag is read once per record, so AMBIGUOUS means the mates disagreed about one molecule:
-    // contradictory evidence, so no splice is trusted and every intron stays -1.
-    if (sj_strand != STRAND_AMBIGUOUS) {
-        for (std::size_t gap = 0; gap < scratch.introns.size(); ++gap) {
-            const auto& [intron_start, intron_end] = scratch.introns[gap];
-            const std::int64_t id = sj_edge_id(intron_start, intron_end, sj_strand);
-            if (id >= 0) {
-                sj_id_at_gap[gap] = static_cast<std::int32_t>(id);
-                sj_ids.push_back(static_cast<std::int32_t>(id));
-            }
-        }
-    }
-    const bool spliced = !sj_ids.empty();
+    // An implied strand is used only when no motif was sequenced on this fragment: an observed motif is evidence,
+    // an implied strand only an inference from the annotation. Which annotated sj the path uses is resolved before
+    // the crossings, because `spliced` chooses the bank the crossings land in.
+    const std::int32_t sj_strand = fragment.sj_strand == STRAND_NONE ? chosen.sj_strand : fragment.sj_strand;
+    const bool spliced = resolve_annotated_sj(sj_strand, scratch);
+    const std::size_t col = static_cast<std::size_t>(column);
 
     // The path's own first and last covered base, not the fragment's extent: introns [(150,480)] over [150,500)
     // put the whole path in [480,500), and the extent would credit a region the path never touches.
-    const std::int64_t first_base = scratch.segments.front().first;
-    const std::int64_t last_base  = scratch.segments.back().second - 1;
-
-    const std::int64_t first_region = region_of_pos(first_base);
-    const std::int64_t last_region  = region_of_pos(last_base);
-    region_start_count_[static_cast<std::size_t>(first_region) * kNStrandColumns +
-                        static_cast<std::size_t>(column)] += 1u;
+    const std::int64_t first_region = region_of_pos(scratch.segments.front().first);
+    const std::int64_t last_region  = region_of_pos(scratch.segments.back().second - 1);
+    region_start_count_[static_cast<std::size_t>(first_region) * kNStrandColumns + col] += 1u;
     // The deposited-length histogram moves with the start count and the deposited counter, so all three describe
     // one set of fragments by construction. `length` is already clipped and within the limit.
     deposited_lengths_[static_cast<std::size_t>(length)] += 1u;
     ++counters_.deposited;
 
-    // ── crossings, per contiguous segment of the path ─────────────────────────────────────────────
-    // A boundary is crossed iff it lies strictly inside a segment, so per segment the crossed boundaries are a
-    // contiguous index range. 0 at L == 1: a length-1 molecule cannot cross a 0-bp boundary, and 1/(L-1) would
-    // divide by zero; an L == 1 path on an annotated sj then books a count against density 0, which is correct.
+    // 0 at L == 1: a length-1 molecule cannot cross a 0-bp boundary, and 1/(L-1) would divide by zero; an L == 1
+    // path on an annotated sj then books a count against density 0, which is correct.
     const double inv_boundary = length >= 2 ? 1.0 / static_cast<double>(length - 1) : 0.0;
-    const std::size_t   col          = static_cast<std::size_t>(column);
-
-    std::int64_t n_crossed = 0;
-    std::int64_t sole_boundary = -1;
-    for (std::size_t block = 0; block < scratch.segments.size(); ++block) {
-        const auto& [seg_start, seg_end] = scratch.segments[block];
-        const std::int64_t first =
-            std::upper_bound(region_bounds_.begin(), region_bounds_.end(), seg_start) - region_bounds_.begin();
-        const std::int64_t last =
-            std::lower_bound(region_bounds_.begin(), region_bounds_.end(), seg_end) - region_bounds_.begin();
-
-        for (std::int64_t boundary_idx = first; boundary_idx < last; ++boundary_idx) {
-            // A spliced crossing books no length moment: it is certified RNA, which nothing deconvolves.
-            Boundary& boundary = boundaries_[static_cast<std::size_t>(boundary_idx - 1)];
-            if (spliced) {
-                boundary.spliced_count[col] += 1u;
-            } else {
-                boundary.unspliced_count[col] += 1u;
-                boundary.unspliced_inv_length_sum += inv_boundary;
-            }
-        }
-        // ── the conserved mass, per slice ───────────────────────────────────────────────────────────
-        // The crossed region_bounds split this block into `last - first + 1` slices; each slice's `slice_len / length`
-        // is shared equally among the objects bounding it, so Sum over the fragment = Sum slice_len / length = 1. A
-        // block's ends are bounds wherever its intron resolved to an annotated sj, so one unit is shared across
-        // boundaries and sj together. Coverage-weighted rather than 1/K: both conserve, but only this one says where
-        // the fragment sat. An unbounded block deposits nothing: the contained case, or an unannotated intron's.
-        {
-            const std::int32_t left_sj =
-                block > 0 ? sj_id_at_gap[block - 1] : -1;
-            const std::int32_t right_sj =
-                block < sj_id_at_gap.size() ? sj_id_at_gap[block] : -1;
-            const std::int64_t n_slices = last - first + 1;
-            for (std::int64_t i = 0; i < n_slices; ++i) {
-                const std::int64_t lo = (i == 0) ? seg_start : region_bounds_[static_cast<std::size_t>(first + i - 1)];
-                const std::int64_t hi = (i == n_slices - 1) ? seg_end : region_bounds_[static_cast<std::size_t>(first + i)];
-                const std::int64_t left_boundary  = (i > 0) ? first + i - 1 : -1;
-                const std::int64_t right_boundary = (i < n_slices - 1) ? first + i : -1;
-                // The block's own ends are sj bounds and its interior ends boundaries, so each side of a slice
-                // has at most one bound.
-                const std::int32_t left_jid  = (left_boundary  < 0) ? left_sj  : -1;
-                const std::int32_t right_jid = (right_boundary < 0) ? right_sj : -1;
-                const std::int64_t n_bounds = (left_boundary >= 0 ? 1 : 0) + (right_boundary >= 0 ? 1 : 0)
-                                            + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
-                if (n_bounds == 0) continue;
-                // A coverage fraction in (0, 1], deposited directly as double.
-                const double share = static_cast<double>(hi - lo)
-                                   / (static_cast<double>(length) * static_cast<double>(n_bounds));
-                for (const std::int64_t boundary_idx : {left_boundary, right_boundary}) {
-                    if (boundary_idx < 0) continue;
-                    Boundary& boundary = boundaries_[static_cast<std::size_t>(boundary_idx - 1)];
-                    if (spliced) boundary.spliced_mass += share;
-                    else         boundary.unspliced_mass += share;
-                }
-                for (const std::int32_t jid : {left_jid, right_jid}) {
-                    // `count`'s column (below), so `mass[c] / count[c]` is a per-strand mean.
-                    if (jid >= 0) sj_[static_cast<std::size_t>(jid)].mass[col] += share;
-                }
-            }
-        }
-        if (last > first) {
-            sole_boundary = (n_crossed == 0 && last - first == 1) ? first : -1;
-            n_crossed += last - first;
-        }
-    }
-
-    for (const std::int32_t id : sj_ids) {
+    const std::int64_t sole_boundary = deposit_crossings(spliced, col, length, inv_boundary, scratch);
+    for (const std::int32_t id : scratch.sj_ids) {
         SpliceJunction& sj = sj_[static_cast<std::size_t>(id)];
         sj.count[col] += 1u;
         sj.inv_length_sum += inv_boundary;
@@ -652,7 +286,7 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
     // leaving a fragment that crosses nothing yet straddles two regions. It deposits on no object but still
     // increments region_start_count, so the loss is visible.
     std::int64_t contained_region = -1;
-    if (sj_ids.empty() && first_region == last_region) {
+    if (!spliced && first_region == last_region) {
         contained_region = first_region;
         regions_[static_cast<std::size_t>(contained_region)].contained_count[col] += 1u;
     }
@@ -665,9 +299,95 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
     return DepositOutcome::kDeposited;
 }
 
+std::int64_t Accumulator::deposit_crossings(bool spliced, std::size_t col, std::int64_t length, double inv_boundary,
+                                            const DepositScratch& scratch) {
+    // A boundary is crossed iff it lies strictly inside a segment, so per segment the crossed boundaries are a
+    // contiguous index range.
+    std::int64_t n_crossed = 0;
+    std::int64_t sole_boundary = -1;
+    for (std::size_t segment = 0; segment < scratch.segments.size(); ++segment) {
+        const std::int64_t seg_start = scratch.segments[segment].first;
+        const std::int64_t seg_end = scratch.segments[segment].second;
+        const std::pair<std::int64_t, std::int64_t> crossed = crossed_bounds(seg_start, seg_end);
+        const std::int64_t first = crossed.first, last = crossed.second;
+        for (std::int64_t bound = first; bound < last; ++bound) {
+            // A spliced crossing books no length moment: it is certified RNA, which nothing deconvolves.
+            Boundary& boundary = boundaries_[static_cast<std::size_t>(bound - 1)];
+            if (spliced) {
+                boundary.spliced_count[col] += 1u;
+            } else {
+                boundary.unspliced_count[col] += 1u;
+                boundary.unspliced_inv_length_sum += inv_boundary;
+            }
+        }
+        for_each_mass_share(segment, seg_start, seg_end, first, last, length, scratch.sj_id_at_gap,
+                            [&](std::int8_t kind, std::int64_t id, double share) {
+                                if (kind == kPlaceBoundary) {
+                                    Boundary& boundary = boundaries_[static_cast<std::size_t>(id)];
+                                    if (spliced) boundary.spliced_mass += share;
+                                    else         boundary.unspliced_mass += share;
+                                } else {
+                                    // `count`'s column, so `mass[c] / count[c]` is a per-strand mean.
+                                    sj_[static_cast<std::size_t>(id)].mass[col] += share;
+                                }
+                            });
+        if (last > first) {
+            sole_boundary = (n_crossed == 0 && last - first == 1) ? first : -1;
+            n_crossed += last - first;
+        }
+    }
+    return sole_boundary;
+}
+
+bool Accumulator::resolve_annotated_sj(std::int32_t sj_strand, DepositScratch& scratch) const {
+    // Per intron position, because the conserved mass needs to know which of a segment's ends is a sj, and a filtered
+    // list loses the alignment between intron `i` and the gap after segment `i`.
+    scratch.sj_ids.clear();
+    scratch.sj_id_at_gap.assign(scratch.introns.size(), -1);
+    // The motif tag is read once per record, so AMBIGUOUS means the mates disagreed about one molecule:
+    // contradictory evidence, so no splice is trusted and every intron stays -1.
+    if (sj_strand == STRAND_AMBIGUOUS) return false;
+    for (std::size_t gap = 0; gap < scratch.introns.size(); ++gap) {
+        const std::int64_t id = sj_edge_id(scratch.introns[gap].first, scratch.introns[gap].second, sj_strand);
+        if (id >= 0) {
+            scratch.sj_id_at_gap[gap] = static_cast<std::int32_t>(id);
+            scratch.sj_ids.push_back(static_cast<std::int32_t>(id));
+        }
+    }
+    return !scratch.sj_ids.empty();
+}
+
+template <class Visit>
+void Accumulator::for_each_mass_share(std::size_t segment, std::int64_t seg_start, std::int64_t seg_end,
+                                      std::int64_t first, std::int64_t last, std::int64_t length,
+                                      const std::vector<std::int32_t>& sj_id_at_gap, Visit&& visit) const {
+    const std::int32_t left_sj = segment > 0 ? sj_id_at_gap[segment - 1] : -1;
+    const std::int32_t right_sj = segment < sj_id_at_gap.size() ? sj_id_at_gap[segment] : -1;
+    const std::int64_t n_slices = last - first + 1;
+    for (std::int64_t i = 0; i < n_slices; ++i) {
+        const std::int64_t lo = (i == 0) ? seg_start : region_bounds_[static_cast<std::size_t>(first + i - 1)];
+        const std::int64_t hi = (i == n_slices - 1) ? seg_end : region_bounds_[static_cast<std::size_t>(first + i)];
+        const std::int64_t left_bound  = (i > 0) ? first + i - 1 : -1;
+        const std::int64_t right_bound = (i < n_slices - 1) ? first + i : -1;
+        // The segment's own ends are sj bounds and its interior ends boundaries, so each side of a slice has at
+        // most one bound.
+        const std::int32_t left_jid  = (left_bound  < 0) ? left_sj  : -1;
+        const std::int32_t right_jid = (right_bound < 0) ? right_sj : -1;
+        const std::int64_t n_bounds = (left_bound >= 0 ? 1 : 0) + (right_bound >= 0 ? 1 : 0)
+                                    + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
+        if (n_bounds == 0) continue;
+        // A coverage fraction in (0, 1], deposited directly as double.
+        const double share = static_cast<double>(hi - lo)
+                           / (static_cast<double>(length) * static_cast<double>(n_bounds));
+        for (const std::int64_t bound : {left_bound, right_bound})
+            if (bound >= 0) visit(kPlaceBoundary, bound - 1, share);
+        for (const std::int32_t jid : {left_jid, right_jid})
+            if (jid >= 0) visit(kPlaceSj, jid, share);
+    }
+}
+
 void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
-                                        const std::vector<ScoredHypothesis>& survivors) noexcept
-{
+                                        const std::vector<ScoredHypothesis>& survivors) noexcept {
     // The one site, so the subclasses cannot drift apart. The caller has established that at least one hypothesis
     // is spliced; counting any other fragment would make the umbrella's denominator the whole library.
     std::int64_t n_spliced = 0;
@@ -688,10 +408,8 @@ void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
     }
 }
 
-std::int64_t Accumulator::fragment_pool(bool spliced,
-                                        std::int64_t contained_region,
-                                        std::int64_t sole_boundary) const noexcept
-{
+std::int64_t Accumulator::fragment_pool(bool spliced, std::int64_t contained_region,
+                                        std::int64_t sole_boundary) const noexcept {
     // Priority: a splice on the one surviving path is certified RNA; a contained fragment is typed by its
     // region; a single-boundary crossing is a "splash" read typed by its two flanks. Anything else (an exonic
     // contained fragment, a multi-boundary crossing) is a mixture and enters nothing.
@@ -718,78 +436,38 @@ std::int64_t Accumulator::fragment_pool(bool spliced,
     return -1;
 }
 
-std::int64_t Accumulator::length_under(const OfferedFragment& fragment,
-                                       std::size_t hypothesis_index,
-                                       DepositScratch& scratch) const
-{
+std::int64_t Accumulator::length_under(const OfferedFragment& fragment, std::size_t hypothesis_index,
+                                       DepositScratch& scratch) const {
     // The clip `deposit` applies, in the same order: L is measured after clipping to the reference.
-    if (region_bounds_.size() < 2 || hypothesis_index >= fragment.n_hypotheses) return 0;
-    const std::int64_t start = std::max(fragment.start, region_bounds_.front());
-    const std::int64_t end   = std::min(fragment.end,   region_bounds_.back());
-    if (end <= start) return 0;
+    std::int64_t start = 0, end = 0;
+    if (hypothesis_index >= fragment.n_hypotheses || !clip(fragment, start, end)) return 0;
     return hypothesis_length(fragment, fragment.hypotheses[hypothesis_index], start, end, scratch);
 }
 
-void Accumulator::placement_masses(const OfferedFragment& fragment,
-                                   DepositScratch& scratch,
-                                   std::vector<PlaceMass>& out) const
-{
+void Accumulator::placement_masses(const OfferedFragment& fragment, DepositScratch& scratch,
+                                   std::vector<PlaceMass>& out) const {
     // `deposit_survivor`'s clip, sj resolution, crossing and containment on the observed path, writing nothing.
     out.clear();
-    if (region_bounds_.size() < 2) return;
-    const std::int64_t start = std::max(fragment.start, region_bounds_.front());
-    const std::int64_t end   = std::min(fragment.end,   region_bounds_.back());
-    if (end <= start) return;
-    static const GapHypothesis kObservedOnly{nullptr, 0, STRAND_NONE};
-    const std::int64_t length = hypothesis_length(fragment, kObservedOnly, start, end, scratch);
+    std::int64_t start = 0, end = 0;
+    if (!clip(fragment, start, end)) return;
+    const std::int64_t length = hypothesis_length(fragment, kUnsplicedHypothesis, start, end, scratch);
     if (length <= 0) return;
+    const bool spliced = resolve_annotated_sj(fragment.sj_strand, scratch);
 
-    auto& sj_id_at_gap = scratch.sj_id_at_gap;
-    sj_id_at_gap.assign(scratch.introns.size(), -1);
-    bool spliced = false;
-    if (fragment.sj_strand != STRAND_AMBIGUOUS) {
-        for (std::size_t gap = 0; gap < scratch.introns.size(); ++gap) {
-            const auto& [intron_start, intron_end] = scratch.introns[gap];
-            const std::int64_t id = sj_edge_id(intron_start, intron_end, fragment.sj_strand);
-            if (id >= 0) {
-                sj_id_at_gap[gap] = static_cast<std::int32_t>(id);
-                spliced = true;
-            }
-        }
-    }
-
-    for (std::size_t block = 0; block < scratch.segments.size(); ++block) {
-        const auto& [seg_start, seg_end] = scratch.segments[block];
-        const std::int64_t first =
-            std::upper_bound(region_bounds_.begin(), region_bounds_.end(), seg_start) - region_bounds_.begin();
-        const std::int64_t last =
-            std::lower_bound(region_bounds_.begin(), region_bounds_.end(), seg_end) - region_bounds_.begin();
-        const std::int32_t left_sj  = block > 0 ? sj_id_at_gap[block - 1] : -1;
-        const std::int32_t right_sj = block < sj_id_at_gap.size() ? sj_id_at_gap[block] : -1;
-        const std::int64_t n_slices = last - first + 1;
-        for (std::int64_t i = 0; i < n_slices; ++i) {
-            const std::int64_t lo = (i == 0) ? seg_start : region_bounds_[static_cast<std::size_t>(first + i - 1)];
-            const std::int64_t hi = (i == n_slices - 1) ? seg_end : region_bounds_[static_cast<std::size_t>(first + i)];
-            const std::int64_t left_boundary  = (i > 0) ? first + i - 1 : -1;
-            const std::int64_t right_boundary = (i < n_slices - 1) ? first + i : -1;
-            const std::int32_t left_jid  = (left_boundary  < 0) ? left_sj  : -1;
-            const std::int32_t right_jid = (right_boundary < 0) ? right_sj : -1;
-            const std::int64_t n_bounds = (left_boundary >= 0 ? 1 : 0) + (right_boundary >= 0 ? 1 : 0)
-                                        + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
-            if (n_bounds == 0) continue;
-            const double share = static_cast<double>(hi - lo)
-                               / (static_cast<double>(length) * static_cast<double>(n_bounds));
-            for (const std::int64_t boundary_idx : {left_boundary, right_boundary})
-                if (boundary_idx >= 0) out.push_back({kPlaceBoundary, boundary_idx - 1, share});
-            for (const std::int32_t jid : {left_jid, right_jid})
-                if (jid >= 0) out.push_back({kPlaceSj, jid, share});
-        }
+    for (std::size_t segment = 0; segment < scratch.segments.size(); ++segment) {
+        const std::int64_t seg_start = scratch.segments[segment].first;
+        const std::int64_t seg_end = scratch.segments[segment].second;
+        const std::pair<std::int64_t, std::int64_t> crossed = crossed_bounds(seg_start, seg_end);
+        for_each_mass_share(segment, seg_start, seg_end, crossed.first, crossed.second, length, scratch.sj_id_at_gap,
+                            [&out](std::int8_t kind, std::int64_t id, double share) {
+                                out.push_back({kind, id, share});
+                            });
     }
     const std::int64_t first_region = region_of_pos(scratch.segments.front().first);
     const std::int64_t last_region  = region_of_pos(scratch.segments.back().second - 1);
     if (!spliced && first_region == last_region) out.push_back({kPlaceRegion, first_region, 1.0});
 
-    // One entry per object: a boundary bounds two slices of one block.
+    // One entry per object: a boundary bounds two slices of one segment.
     std::sort(out.begin(), out.end(), [](const PlaceMass& a, const PlaceMass& b) {
         return a.kind != b.kind ? a.kind < b.kind : a.index < b.index;
     });
@@ -810,9 +488,9 @@ const DeferredFragments& Accumulator::deferred_canonical() {
 // the per-worker merge
 // ============================================================================
 
-void Accumulator::merge_from(const Accumulator& other) {
-    // Every precondition is checked before anything is merged, so a refusal leaves `this` unchanged. Self-merge
-    // first: every other check passes against itself, and the held-record bank would append to itself forever.
+void Accumulator::check_mergeable(const Accumulator& other) const {
+    // Self-merge first: every other check passes against itself, and the held-record bank would append to itself
+    // forever.
     if (&other == this) {
         throw std::invalid_argument("accumulator: an accumulator cannot merge itself");
     }
@@ -842,25 +520,23 @@ void Accumulator::merge_from(const Accumulator& other) {
             std::to_string(sj_.size()) + ", other has " +
             std::to_string(other.sj_.size()) + ")");
     }
+}
 
+void Accumulator::merge_from(const Accumulator& other) {
+    // Every precondition is checked before anything is merged, so a refusal leaves `this` unchanged.
+    check_mergeable(other);
     gap_census_.merge_from(other.gap_census_);
     deferred_.merge_from(other.deferred_);
 
-    for (std::size_t i = 0; i < regions_.size(); ++i) {
-        for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-            regions_[i].contained_count[c]   += other.regions_[i].contained_count[c];
-        }
-    }
-    for (std::size_t i = 0; i < region_start_count_.size(); ++i) {
-        region_start_count_[i] += other.region_start_count_[i];
-    }
-    for (std::size_t i = 0; i < deposited_lengths_.size(); ++i) {
-        deposited_lengths_[i] += other.deposited_lengths_[i];
-    }
+    for (std::size_t i = 0; i < regions_.size(); ++i)
+        for (std::size_t c = 0; c < kNStrandColumns; ++c)
+            regions_[i].contained_count[c] += other.regions_[i].contained_count[c];
+    for (std::size_t i = 0; i < region_start_count_.size(); ++i) region_start_count_[i] += other.region_start_count_[i];
+    for (std::size_t i = 0; i < deposited_lengths_.size(); ++i) deposited_lengths_[i] += other.deposited_lengths_[i];
     for (std::size_t i = 0; i < boundaries_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-            boundaries_[i].unspliced_count[c]   += other.boundaries_[i].unspliced_count[c];
-            boundaries_[i].spliced_count[c]     += other.boundaries_[i].spliced_count[c];
+            boundaries_[i].unspliced_count[c] += other.boundaries_[i].unspliced_count[c];
+            boundaries_[i].spliced_count[c]   += other.boundaries_[i].spliced_count[c];
         }
         // Outside the column loop: one value per boundary, not per strand.
         boundaries_[i].unspliced_inv_length_sum += other.boundaries_[i].unspliced_inv_length_sum;
@@ -869,244 +545,14 @@ void Accumulator::merge_from(const Accumulator& other) {
     }
     for (std::size_t i = 0; i < sj_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-            sj_[i].count[c]   += other.sj_[i].count[c];
+            sj_[i].count[c] += other.sj_[i].count[c];
             // Inside the column loop: the sj mass is the one mass with a strand (`SpliceJunction::mass`).
-            sj_[i].mass[c]    += other.sj_[i].mass[c];
+            sj_[i].mass[c]  += other.sj_[i].mass[c];
         }
         sj_[i].inv_length_sum += other.sj_[i].inv_length_sum;
     }
-    for (std::size_t i = 0; i < pool_lengths_.size(); ++i) {
-        pool_lengths_[i] += other.pool_lengths_[i];
-    }
+    for (std::size_t i = 0; i < pool_lengths_.size(); ++i) pool_lengths_[i] += other.pool_lengths_[i];
     counters_.merge_from(other.counters_);
-}
-
-// ============================================================================
-// AccumulatorSet
-// ============================================================================
-
-AccumulatorSet::AccumulatorSet(const std::int64_t* region_bounds,
-                               std::size_t n_positions,
-                               const std::int64_t* ref_region_bound_offsets,
-                               std::size_t n_refs,
-                               const std::uint8_t* region_types,
-                               std::size_t n_region_types,
-                               int max_length)
-{
-    if (ref_region_bound_offsets == nullptr || static_cast<std::size_t>(ref_region_bound_offsets[n_refs]) != n_positions) {
-        throw std::invalid_argument(
-            "accumulator set: ref_region_bound_offsets must end at n_positions = " + std::to_string(n_positions));
-    }
-    accs_.reserve(n_refs);
-
-    // Reference f's first region and boundary on the flat axes: the counts the earlier references own.
-    std::size_t region_base = 0, boundary_base = 0;
-    for (std::size_t f = 0; f < n_refs; ++f) {
-        const std::size_t lo = static_cast<std::size_t>(ref_region_bound_offsets[f]);
-        const std::size_t hi = static_cast<std::size_t>(ref_region_bound_offsets[f + 1]);
-        std::vector<std::int64_t> ref_region_bounds(region_bounds + lo, region_bounds + hi);
-        const std::size_t n_regions = hi - lo >= 2 ? hi - lo - 1 : 0;
-
-        std::vector<std::uint8_t> types;
-        if (region_types != nullptr && n_region_types > 0 && n_regions > 0) {
-            if (region_base + n_regions > n_region_types) {
-                throw std::invalid_argument(
-                    "accumulator set: region_types has " + std::to_string(n_region_types) +
-                    " entries but reference " + std::to_string(f) + " needs " +
-                    std::to_string(region_base + n_regions));
-            }
-            types.assign(region_types + region_base, region_types + region_base + n_regions);
-        }
-        accs_.emplace_back(std::move(ref_region_bounds), std::move(types), max_length,
-                           static_cast<std::int32_t>(f));
-        region_base_.push_back(static_cast<std::int64_t>(region_base));
-        boundary_base_.push_back(static_cast<std::int64_t>(boundary_base));
-        sj_base_.push_back(0);
-        region_base += n_regions;
-        boundary_base += hi - lo >= 2 ? hi - lo - 2 : 0;
-    }
-}
-
-void AccumulatorSet::placement_masses(std::int32_t ref_id,
-                                      const OfferedFragment& fragment,
-                                      DepositScratch& scratch,
-                                      std::vector<PlaceMass>& out) const
-{
-    at(ref_id).placement_masses(fragment, scratch, out);
-    const std::size_t f = static_cast<std::size_t>(ref_id);
-    for (auto& m : out) {
-        m.index += m.kind == kPlaceRegion ? region_base_[f] : m.kind == kPlaceBoundary ? boundary_base_[f] : sj_base_[f];
-    }
-}
-
-void AccumulatorSet::set_sj(const std::int64_t* offsets,
-                                   std::size_t n_offsets,
-                                   const std::int64_t* boundary_right,
-                                   const std::int8_t* sj_strand,
-                                   std::size_t n_sj,
-                                   const std::int64_t* ref_region_bound_offsets)
-{
-    if (offsets == nullptr || ref_region_bound_offsets == nullptr) {
-        throw std::invalid_argument(
-            "accumulator set: set_sj needs both the CSR offsets and ref_region_bound_offsets");
-    }
-    const std::size_t n_region_bounds = static_cast<std::size_t>(ref_region_bound_offsets[accs_.size()]);
-    if (n_offsets != n_region_bounds + 1) {
-        throw std::invalid_argument(
-            "accumulator set: sj CSR offsets must have length n_region_bounds + 1 = " +
-            std::to_string(n_region_bounds + 1) + ", got " + std::to_string(n_offsets));
-    }
-    if (static_cast<std::size_t>(offsets[n_region_bounds]) != n_sj) {
-        throw std::invalid_argument(
-            "accumulator set: the sj CSR ends at " + std::to_string(offsets[n_region_bounds]) +
-            " but " + std::to_string(n_sj) + " sj were given");
-    }
-
-    std::vector<std::int32_t> ref_offsets, ref_boundary_right;
-    std::vector<std::int8_t>  ref_strand;
-    for (std::size_t f = 0; f < accs_.size(); ++f) {
-        const std::int64_t c0 = ref_region_bound_offsets[f];
-        const std::int64_t c1 = ref_region_bound_offsets[f + 1];
-        if (c1 <= c0) continue;  // a reference with no region_bounds owns no regions and no sj
-        const std::int64_t j0 = offsets[c0];
-        const std::int64_t j1 = offsets[c1];
-        sj_base_[f] = j0;
-
-        ref_offsets.clear();
-        ref_offsets.reserve(static_cast<std::size_t>(c1 - c0) + 1);
-        for (std::int64_t c = c0; c <= c1; ++c) {
-            ref_offsets.push_back(static_cast<std::int32_t>(offsets[c] - j0));
-        }
-        ref_boundary_right.clear();
-        ref_strand.clear();
-        ref_boundary_right.reserve(static_cast<std::size_t>(j1 - j0));
-        ref_strand.reserve(static_cast<std::size_t>(j1 - j0));
-        for (std::int64_t k = j0; k < j1; ++k) {
-            ref_boundary_right.push_back(static_cast<std::int32_t>(boundary_right[k] - c0));
-            ref_strand.push_back(sj_strand[k]);
-        }
-        accs_[f].set_sj(ref_offsets, ref_boundary_right, ref_strand);
-    }
-}
-
-Accumulator& AccumulatorSet::at(std::int32_t ref_id) {
-    if (ref_id < 0 || static_cast<std::size_t>(ref_id) >= accs_.size()) {
-        throw std::out_of_range("accumulator set: ref_id " + std::to_string(ref_id) + " of " +
-                                std::to_string(accs_.size()));
-    }
-    return accs_[static_cast<std::size_t>(ref_id)];
-}
-
-const Accumulator& AccumulatorSet::at(std::int32_t ref_id) const {
-    if (ref_id < 0 || static_cast<std::size_t>(ref_id) >= accs_.size()) {
-        throw std::out_of_range("accumulator set: ref_id " + std::to_string(ref_id) + " of " +
-                                std::to_string(accs_.size()));
-    }
-    return accs_[static_cast<std::size_t>(ref_id)];
-}
-
-void AccumulatorSet::merge_from(const AccumulatorSet& other) {
-    if (accs_.size() != other.accs_.size()) {
-        throw std::invalid_argument(
-            "accumulator set: merge_from requires the same reference count (this has " +
-            std::to_string(accs_.size()) + ", other has " + std::to_string(other.accs_.size()) + ")");
-    }
-    for (std::size_t f = 0; f < accs_.size(); ++f) accs_[f].merge_from(other.accs_[f]);
-    deferred_.merge_from(other.deferred_);
-    counters_.merge_from(other.counters_);
-}
-
-const DeferredFragments& AccumulatorSet::deferred_canonical() {
-    deferred_.canonicalise();
-    return deferred_;
-}
-
-DepositOutcome AccumulatorSet::offer(const Placement* placements, std::size_t n, OfferScratch& sc) {
-    if (n == 0) throw std::invalid_argument("accumulator set: offer needs at least one placement");
-    // One placement is the unique mapper's path, bit for bit.
-    if (n == 1) return at(placements[0].ref_id).deposit(placements[0].offered, sc.deposit);
-
-    static const GapHypothesis kUnsplicedOnly{nullptr, 0, STRAND_NONE};
-    std::size_t strand_rejected = 0, empty_rejected = 0;
-    sc.admitted.clear();
-    for (std::size_t i = 0; i < n; ++i) {
-        const Placement& pl = placements[i];
-        if (pl.ref_id < 0 || static_cast<std::size_t>(pl.ref_id) >= accs_.size()) {
-            ++empty_rejected;
-            continue;
-        }
-        std::int64_t s = 0, e = 0;
-        const int column = accs_[static_cast<std::size_t>(pl.ref_id)].admit(pl.offered, &s, &e);
-        if (column == -1) { ++strand_rejected; continue; }
-        if (column == -2) { ++empty_rejected; continue; }
-        OfferedFragment offered = pl.offered;
-        if (offered.n_hypotheses == 0) {
-            offered.hypotheses = &kUnsplicedOnly;
-            offered.n_hypotheses = 1;
-        }
-        sc.admitted.append(offered, pl.ref_id, s, e);  // one record per admitted placement, clipped
-    }
-    if (sc.admitted.n_records() == 0) {
-        // Every placement excluded: rejected once on this set's counters, as strand-undefined only when the strand
-        // was every exclusion.
-        if (strand_rejected > 0 && empty_rejected == 0) {
-            ++counters_.dropped_strand_undefined;
-            return DepositOutcome::kStrandUndefined;
-        }
-        ++counters_.dropped_empty;
-        return DepositOutcome::kEmpty;
-    }
-    // Canonical order (one record per placement), identical placements collapsed to one.
-    sc.admitted.canonicalise();
-    sc.kept.clear();
-    for (std::size_t p = 0; p < sc.admitted.n_placements(); ++p) {
-        if (p == 0 || sc.admitted.compare_placements(p - 1, p) != 0) sc.kept.push_back(p);
-    }
-    const auto n_hyp = [&sc](std::size_t p) {
-        return static_cast<std::size_t>(sc.admitted.hypothesis_offsets[p + 1] - sc.admitted.hypothesis_offsets[p]);
-    };
-    const auto ref_of = [&sc](std::size_t p) { return static_cast<std::int32_t>(sc.admitted.ref[p]); };
-
-    if (sc.kept.size() == 1) {
-        // One placement left: the fragment's one open question, if any, is its gap -- `deposit`'s.
-        const std::size_t p = sc.kept[0];
-        const OfferedFragment& one = sc.admitted.offered_of(p, 0, n_hyp(p), sc.storage);
-        return at(ref_of(p)).deposit(one, sc.deposit);
-    }
-
-    // ── the union arbitration: every (placement, hypothesis) within the limit ────────────────────
-    sc.union_survivors.clear();
-    for (std::size_t k = 0; k < sc.kept.size(); ++k) {
-        const std::size_t p = sc.kept[k];
-        const OfferedFragment& whole = sc.admitted.offered_of(p, 0, n_hyp(p), sc.storage);
-        accs_[static_cast<std::size_t>(ref_of(p))].arbitrate(
-            whole, sc.admitted.start[p], sc.admitted.end[p], sc.deposit, /*all_stand_if_empty=*/false,
-            nullptr);
-        for (const ScoredHypothesis& sh : sc.deposit.survivors) sc.union_survivors.emplace_back(k, sh.index);
-    }
-    if (sc.union_survivors.empty()) {
-        // The filter would empty the union: every pair stands, and the drain's kTooLong counts the chosen one.
-        for (std::size_t k = 0; k < sc.kept.size(); ++k) {
-            for (std::size_t h = 0; h < n_hyp(sc.kept[k]); ++h) sc.union_survivors.emplace_back(k, h);
-        }
-    }
-    if (sc.union_survivors.size() == 1) {
-        // One pair left: deposited at its placement with that hypothesis alone, and the umbrella census restored,
-        // since its question has no single answer for this fragment.
-        const auto [k, h] = sc.union_survivors[0];
-        const std::size_t p = sc.kept[k];
-        const OfferedFragment& one = sc.admitted.offered_of(p, h, h + 1, sc.storage);
-        Accumulator& a = accs_[static_cast<std::size_t>(ref_of(p))];
-        const GapCensus before = a.gap_census();
-        const DepositOutcome outcome = a.deposit(one, sc.deposit);
-        a.restore_gap_census(before);
-        return outcome;
-    }
-    // Held whole: every kept placement and hypothesis, in canonical order, as one record.
-    for (const std::size_t p : sc.kept) deferred_.copy_placement(sc.admitted, p);
-    deferred_.close_record();
-    ++counters_.deferred_multiple_placements;
-    return DepositOutcome::kDeferredPlacements;
 }
 
 }  // namespace rigel::accumulator

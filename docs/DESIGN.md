@@ -52,9 +52,10 @@ the direction. `deconvolve` is a different verb: gDNA is deconvolved off, RNA is
 
 ## 0b. The 0.8.0 scope
 
-The version on disk is `0.7.1` (`pyproject.toml`). 0.8.0 is a release of the TOOL, shipped as a preview: validation
+The version on disk is `0.7.1` (`pyproject.toml`). 0.8.0 is a release of the TOOL: validation
 sets its supported uses and limitations, its known failures are reported beside its gains, and a claim of robustness
 across inputs stays unsupported while a known instability persists (`ISSUES: the-reader-reads-false-gdna-as-capture`).
+No preview ships: a pre-release waits for the capture reader and a review of the open issues.
 
 | the question | the number | the instrument |
 |---|---|---|
@@ -97,7 +98,7 @@ Three stages, in `pipeline.run_pipeline`:
 1. **Scan** (`scan_and_buffer`): one C++ htslib pass pairs mates (§3), resolves fragments against the index, trains the
    strand model, buffers every resolved fragment for the EM (`FragmentBuffer`) and deposits per-object tallies into the
    accumulator (`AccumulatorPayload`), holding whole a fragment with several surviving explanations.
-2. **Second pass, then calibration**: `_drain_side_buffer` draws one explanation per held fragment and re-deposits it
+2. **Second pass, then calibration**: `drain_side_buffer` draws one explanation per held fragment and re-deposits it
    (§4); `calibration.calibrate` deconvolves every region and boundary of the drained tally into gDNA, RNA+ and RNA− by
    message passing over the region chain (§5–§7).
 3. **Quantify** (`quant_from_buffer`): the length tables are decided (§8), the buffer is scored and routed, and a
@@ -105,14 +106,16 @@ Three stages, in `pipeline.run_pipeline`:
    two scalars, a gDNA count and a gDNA effective length, never per transcript (§9).
 
 An optional pass re-reads the BAM and stamps every record (§10). The native modules (`native.py`) are `_bam_impl`
-(`bam_scanner.cpp`, `calibration/accumulator.cpp`), `_resolve_impl`, `_scoring_impl`, `_em_impl`, `_solve_impl`
-(`solve_kernel.cpp` with `psi_kernel.h`, `transfer_kernel.h`, `transfer_rows.h`) and the vendored `_cgranges_impl`.
+(`native/scan/`, `native/calibration/`), `_resolve_impl` (`native/resolve/`), `_scoring_impl`, `_em_impl` (`em_solver.cpp` with `em_*.h`
+and `connected_components.h`) and `_solve_impl` (`solve_kernel.cpp` with `psi_kernel.h`, `transfer_kernel.h`,
+`transfer_rows.h`, `transfer_store.h`). Each carries a `testing` submodule (`native/testing/`), its seams bound for
+the tests. The resolver's overlap index is the vendored `cgranges`, compiled into `_resolve_impl` and `_bam_impl`.
 
 **Where a number lives.** `config` holds what a run may set (`PipelineConfig`; `IndexConfig` for `rigel index`) and
 what the code fixes (`CONSTANTS`, each field documented with why it has its value). Code reads a constant by name and
-never restates one; an experiment varies one on a copy (`Constants.replaced`). Outside `config` live only identifiers
-and formats, named mathematical definitions, and values the kernels export (`native.transfer_rows.ARM_EPS`,
-`JEFFREYS_REF`, `OWN_EVIDENCE_EPS`); `tests/test_constants.py` refuses any other bare module constant.
+never restates one; an experiment varies one on a copy (`dataclasses.replace`). Outside `config` live only identifiers
+and formats, named mathematical definitions, and values the kernels export (`native.transfer_rows.ARM_EPS`, and
+to the gates `_solve_impl.testing`'s `JEFFREYS_REF` and `OWN_EVIDENCE_EPS`); `tests/test_constants.py` refuses any other bare module constant.
 
 ---
 
@@ -176,7 +179,7 @@ aligner splices plain genomic DNA, and the fragment is a `SPLICE_ARTIFACT`, read
 
 ### 3.2 A template's hits
 
-The scan pairs mates itself, for any aligner, by geometry alone; STAR's HI is not read (`bam_scanner.cpp`'s
+The scan pairs mates itself, for any aligner, by geometry alone; STAR's HI is not read (`scan/template_hits.cpp`'s
 `template_hits`, `hit_verdict`; `tests/test_hit_verdict.py`).
 
 - **Locations and candidates.** The records of one alignment (mate, reference, strand, leftmost position, CIGAR with
@@ -258,7 +261,7 @@ unspliced hits align — onto the payload, so a cached scan drains at its own ra
 
 ## 4. The second pass
 
-`pipeline._drain_side_buffer` → `second_pass.score_held_fragments` → `choose_hypotheses` → `drain`.
+`pipeline.drain_side_buffer` → `second_pass.score_held_fragments` → `choose_hypotheses` → `drain`.
 
 - **It runs before calibration, and that is the structural decision**: every input of the score is pass one's, so
   calibration runs once, on the complete tally. Fit once, score once, drain once: the confident set is biased short,
@@ -290,7 +293,7 @@ one hypothesis wins the whole fragment (`TRAPS: fractional-mass-is-the-problem`)
 reconciled with it. What the floor leaves is `ISSUES: the-draw-reads-unique-traffic`; gDNA drawn onto a spliced path is
 `ISSUES: drain-contaminates-certified-rna`. **Instruments read the drained tally**: they drain cached scans at the
 production seed (`scan_cache.calibration_inputs`) and lift oracle partitions into that frame by replaying the whole's
-drawn choices (the oracle in `tests/calibration/_oracle.py`).
+drawn choices (the oracle in `scripts/design/_oracle.py`).
 
 ---
 
@@ -318,8 +321,8 @@ placed (`tests/calibration/test_layering.py`).
 | 3 · geometry + per-slot solve | `region_geometry` `simplex_logodds` | one slot's own numbers, and ψ |
 | 4 · strand | `strand_balance` | which strand a fragment came from |
 | 5 · density and prior | `landscape` `capture_efficiency` | how dense a component is, and the priors |
-| 6 · the solve | `region_init` `blocks` `sweep` `messages/` | what one neighbour tells another |
-| 7 · assemble | `calibrate` `priors` `result` `derive` `track` | turning the solve into a result |
+| 6 · the solve | `diagnostics` `sweep` `messages/` | what one neighbour tells another |
+| 7 · assemble | `calibrate` `priors` `result` `track` | turning the solve into a result |
 
 ### 5.2 Calibration is message passing
 
@@ -356,10 +359,10 @@ solved, G2 one strand and resolved by it, G3 both strands (AMBIG).
   likelihood over the per-junction strand table is maximised jointly, and κ is the `Beta(1, 1)` posterior mean over the
   reads its maximum credits to RNA (`junction_fit.genuine_sense_fraction`, `strand_balance`). Every κ consumer reads
   this one count.
-- **The strand overdispersion is 0 for both components — binomial — by policy** (`calibrate._fit_strand`): no
+- **The strand overdispersion is 0 for both components — binomial — by policy** (`calibrate._sweep_inputs`): no
   population measures one cleanly, and an od set too high mutes the channel. It returns only when proven needed, first
   as an RNA-only value from the deepest junctions, developed on real data across libraries.
-- **The strand channel is live iff the protocol preserves strand** (`region_init.strand_discriminability`): the Bayes
+- **The strand channel is live iff the protocol preserves strand** (`strand_balance.strand_discriminability`): the Bayes
   factor of a free κ against κ = ½ on the spliced 2×2, `ln BF = N·ln 2 + ln B(κ̂(N + 2), (1 − κ̂)(N + 2)) > 0`, with no
   multiple of σ chosen and no gDNA term. A library with no spliced read is unstranded, never an error. gDNA's strand
   term is ½.
@@ -395,8 +398,8 @@ alone) and the delivered message rows. It never reads the spliced mass.
 | file | role |
 |---|---|
 | `sweep.py` | THE BACKBONE: the structure, the library, the locus blocks, one native call (`native.solve_blocks`), the assertions; it knows nothing of capture, splices, levels or lanes (`test_sweep_backbone.py`) |
-| `blocks.py` | `view_fields`, the per-slot arrays the kernel takes; `SweepCapture`, the instruments' view |
-| `messages/__init__.py` | the interface (`Policy`: a name, a strand model, a library) and `ChainView`, with no belief field |
+| `diagnostics.py` | `SweepDiagnostics` and `CalibrationDiagnostics`, the instruments' records of a solve; production passes none |
+| `messages/__init__.py` | the interface (`Policy`: a name, a strand model, a library) and `ChainView`, with no belief field, and `view_fields`, the per-slot arrays the kernel takes |
 | `messages/silent.py` | `SilentPolicy`, which sends nothing: the measured floor (`message_policy = "silent"`) |
 | `messages/transfer.py` | `TransferPolicy`, the shipped default; its builders, passes and solve are `native/transfer_kernel.h`'s |
 
@@ -406,7 +409,7 @@ alone) and the delivered message rows. It never reads the spliced mass.
 - **One native call, one path.** `native.solve_blocks` runs each block end to end on its own thread and arena and
   reduces nothing across blocks but integer counts, so the answer is bit-identical at every thread count and block
   size (`sweep_block_slots` and `n_threads` are resources). The gates read the one implementation through bindings
-  (`native.transfer_prepare`, `transfer_pass`, `transfer_solve`; `tests/calibration/_transfer_harness.py`).
+  (`_solve_impl.testing`'s `transfer_prepare`, `transfer_pass`, `transfer_solve`; `tests/calibration/_transfer_harness.py`).
 - **Every sweep runs the whole layer**, which reads observations, geometry and the library, never a belief or the
   landscape; a refit's messages equal the last refit's and are recomputed, never cached.
 - **The one contract**: a message may use the destination's constants and observations, never its belief
@@ -511,7 +514,7 @@ component-agnostic; who trains it is the caller's (`calibrate._fit_gdna_hyperpri
 - **The location floor**: a slot trains only where `Var(log f_g) ≤ 1 nat²` (`CONSTANTS.landscape.located_var`, the
   one-fragment wall through `Var(log c) = 1/c`); above it precision is a continuous weight (`landscape._reliability`).
 - **The grid spans every slot the prior is read at** (`fit_landscape(domain=…)`), so the training cut never moves
-  the axis; a location-free kernel is placed by the previous refit's landscape (`landscape._estep_kernels`), a counted
+  the axis; a location-free kernel is placed by the previous refit's landscape (`landscape.estep_kernels`), a counted
   one keeps its own location.
 
 A provisional allocation is not an observed origin: no first landscape trains on intronic observations as known gDNA.
@@ -669,7 +672,7 @@ candidate; only the crossing term converts, by the boundary's own `mass / count`
 > overlapping on one reference are one place, read at their best** (`scoring.cpp`'s `merge_places`). **A place's weight
 > is the deposit rule's mass at the reader's efficiencies, `w = Σ_o m_o·c_o`, on every candidate there**
 > (`capture_eff_length.place_log_weights`). **A hit with no transcript candidate is an intergenic place: uncaptured, at
-> calibration's bulk gDNA rate, a per-unit background no locus carries, never pruned** (`em_solver.cpp`'s
+> calibration's bulk gDNA rate, a per-unit background no locus carries, never pruned** (`em_locus.h`'s
 > `IntergenicTerm`; `EQUATIONS.md`, a multimapper's places).
 
 Intergenic is uncaptured (`priors.intergenic_gdna_rate`) because an aligner puts captured genic fragments on
@@ -703,7 +706,7 @@ contiguous alternative clips what it cannot place, and a free clip would read it
 > cutoff on one fragment's posterior.** `sample` rounds each component's fractional count within its locus by largest
 > remainder, draws each fragment from its posterior re-weighted by count still owed over mass still to come, and
 > repairs a stranded fragment by moving a chain of fragments onto the counts, or onto counts within one of every
-> fractional count where those are unreachable (`em_solver.cpp`'s `assign_posteriors`; `EQUATIONS.md`, whole counts).
+> fractional count where those are unreachable (`em_assign.h`'s `assign_posteriors`; `EQUATIONS.md`, whole counts).
 
 It is feasible, not optimal, and is kept over the exact optimum per read because that optimum gives up calibration:
 each component gets a representative sample of the fragments it could have produced. A molecule belongs to one

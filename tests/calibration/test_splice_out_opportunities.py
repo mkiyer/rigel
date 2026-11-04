@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration import splice_graph as SG
-from rigel._solve_impl import transfer_prepare
+from rigel._solve_impl.testing import transfer_prepare
 from _transfer_harness import NONE, Prepared, _rule
 
 GAPS = [(250, 78), (78, 250), (150, 150)]

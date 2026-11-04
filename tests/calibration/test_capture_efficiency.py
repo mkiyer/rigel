@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from _synthetic import contained_support, normal_pmf, spike_pmf
 
 import rigel.calibration.capture_efficiency as CE
 from rigel.calibration.capture_efficiency import capture_efficiencies
@@ -24,22 +25,8 @@ from rigel.calibration.landscape import DensityLandscape, census, fit_landscape,
 RHO_CAP, RHO_DEP = 1.0, 1e-3
 
 
-def _pmf(mean=200.0, sd=50.0, lo=100, hi=300) -> np.ndarray:
-    w = np.arange(hi + 1, dtype=np.float64)
-    p = np.exp(-0.5 * ((w - mean) / sd) ** 2)
-    p[(w < lo) | (w > hi)] = 0.0
-    return p / p.sum()
-
-
-PMF = _pmf()
+PMF = normal_pmf()
 S_E = float(crossing_eff_length(PMF, np.array([UNBOUNDED_REACH]), np.array([UNBOUNDED_REACH]))[0])
-
-
-def _support(lengths, pmf=PMF) -> np.ndarray:
-    """The contained support ``E_f[(ℓ − w + 1)⁺]`` per piece, 0 for a piece shorter than every fragment."""
-    w = np.arange(pmf.shape[0], dtype=np.float64)
-    L = np.asarray(lengths, dtype=np.float64)[:, None]
-    return (pmf[None, :] * np.maximum(L - w[None, :] + 1.0, 0.0)).sum(1)
 
 
 def _fitted(rng_seed: int, n_dep: int, n_cap: int, n_anchor: int) -> DensityLandscape:
@@ -85,7 +72,7 @@ def _hand(levels, masses, widths=0.3, lo=1e-7, hi=100.0, n=300) -> DensityLandsc
 def _field(lengths, density, crossing_density):
     """Contained counts ``ρ_r S_r`` per region and crossing counts ``ρ_e S_E`` per boundary: each object's own count at
     its own density, all an efficiency reads."""
-    S = _support(lengths)
+    S = contained_support(lengths, PMF)
     k_reg = np.asarray(density, dtype=np.float64) * S
     k_bnd = np.asarray(crossing_density, dtype=np.float64) * S_E
     return k_reg, S, k_bnd, np.full(k_bnd.shape[0], S_E)
@@ -196,7 +183,7 @@ def test_a_level_below_the_bulk_reads_below_one():
 
 
 @pytest.mark.parametrize("captured_mass", [0.4, 0.6])
-def test_a_well_measured_capture_ratio_survives_the_captured_level_becoming_the_majority(
+def test_a_well_measured_capture_ratio_survives_a_captured_majority(
     captured_mass,
 ):
     """Two levels, 0.001 and 0.1 fragments per bp, read by objects with a million positions each: the true ratio is
@@ -304,7 +291,7 @@ def test_the_row_tiles_change_nothing_and_equal_the_dense_reader(monkeypatch):
     tiled = capture_efficiencies(ls, k, S, k[:10], S[:10]).efficiency_region
     np.testing.assert_allclose(tiled, _dense_reference(ls, k, S), rtol=1e-12)
     for rows in (1, 7, 333, k.size):
-        monkeypatch.setattr(CE, "_block_rows", lambda n_grid, n_arrays, rows=rows: rows)
+        monkeypatch.setattr(CE, "block_rows", lambda n_grid, n_arrays, rows=rows: rows)
         got = capture_efficiencies(ls, k, S, k[:10], S[:10]).efficiency_region
         assert np.array_equal(got, tiled), f"rows {rows}: {int((got != tiled).sum())} objects moved"
 
@@ -347,15 +334,7 @@ def test_calibrate_publishes_exactly_one_and_no_bulk_without_a_landscape():
     efficiencies of exactly 1 on both axes; and it carries gDNA's conserved share at every boundary, its two flanking
     regions' shares on the gDNA pmf at the unbounded reach of a template that does not end
     (`effective_length.conserved_cut_shares`)."""
-    import sys
-
-    sys.path.insert(0, "tests/calibration")
-    from _synthetic import (
-        make_gdna_fl_pmf,
-        make_strand_models,
-        make_synthetic_payload,
-        make_synthetic_sj,
-    )
+    from _synthetic import make_strand_models, make_synthetic_payload, make_synthetic_sj
 
     from rigel.calibration import calibrate
     from rigel.config import CalibrationConfig
@@ -370,9 +349,10 @@ def test_calibrate_publishes_exactly_one_and_no_bulk_without_a_landscape():
         region_arrays=ra,
         strand_model=make_strand_models(0.95, 40),
         gdna_fl_pmf=pmf,
-        rna_fl_pmf=make_gdna_fl_pmf(),
+        rna_fl_pmf=spike_pmf(),
         config=CalibrationConfig(calib_refit_iters=0),
         sj=make_synthetic_sj(),
+        boundary_flags=np.zeros(int(payload.n_boundaries), np.uint16),
     )
     assert res.gdna_bulk_density is None
     assert res.gdna_capture_saturation == 1.0

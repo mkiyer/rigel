@@ -11,7 +11,6 @@ make the oracle agree with anything.
 """
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,6 @@ import pandas as pd
 import pysam
 import pytest
 
-from rigel.sim.manifest import condition_dir_name, gdna_label_for_rate, write_manifest
 from rigel.sim.read_name import (
     STRAND_FORWARD,
     STRAND_REVERSE,
@@ -29,10 +27,19 @@ from rigel.sim.read_name import (
     format_rna_name,
     parse_origin,
 )
-from rigel.sim.truth import count_origins_from_fastq, write_molar_truth, write_post_capture_truth
-from rigel.sim.whole_genome import assign_file_abundances
+from rigel.sim.wgs_config import SimulationParams
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
+
+
+from _sim_abundance import assign_file_abundances
+from _sim_config import WholeGenomeSimConfig
+from _sim_grid import condition_dir_name, gdna_label_for_rate, write_manifest
+from _sim_truth import (
+    summarize_post_capture_truth,
+    write_molar_truth,
+    write_post_capture_truth,
+)
 
 
 def _truth_transcript(
@@ -165,7 +172,7 @@ def test_count_origins_from_fastq(tmp_path):
         "@gdna:chr1:0-100:r:2/1\nACGT\n+\nIIII\n"
     )
 
-    counts = count_origins_from_fastq(fastq)
+    counts = summarize_post_capture_truth([], fastq_path=fastq)["origin_counts"]
 
     assert counts["mrna"] == 1
     assert counts["nrna"] == 1
@@ -317,7 +324,7 @@ def test_a_condition_truth_table_is_refused_as_an_abundance_input(tmp_path):
     also carries the realised counts under ``mrna_abundance`` / ``nrna_abundance``, which the ``sim``
     format would read as molecules, so both are refused by the realised column.
 
-    Perturbation: dropping the refusal in ``whole_genome._detect_abundance_format`` reads the second
+    Perturbation: dropping the refusal in ``_sim_abundance._detect_abundance_format`` reads the second
     table's fragment counts as molar abundances."""
     fastq = tmp_path / "reads.fq"
     fastq.write_text("@spliced:0-100:f:0/1\nACGT\n+\nIIII\n")
@@ -370,20 +377,11 @@ def test_condition_dir_name_and_gdna_labels():
 
 
 def test_manifest_round_trip(tmp_path):
-    @dataclass
-    class SimSection:
-        frag_mean: int = 250
-
-    class Config:
-        simulation = SimSection()
-        gdna = {"frag_mean": 350}
-        nrna = {"modes": ["none"]}
-        abundance = {"kind": "lognormal"}
-
+    config = WholeGenomeSimConfig(simulation=SimulationParams(frag_mean=250))
     conditions = [{"name": "gdna_none_ss_1.00_nrna_none", "n_rna": 10}]
     index = {"path": "/idx", "manifest": {"sources": {"gtf": {"path": "/a.gtf", "sha256": "ab"}}}}
 
-    path = write_manifest(tmp_path, Config(), conditions, index=index)
+    path = write_manifest(tmp_path, config, conditions, index=index)
     loaded = json.loads(path.read_text())
 
     assert path == tmp_path / "manifest.json"
@@ -396,42 +394,41 @@ def test_the_condition_grid_names_each_truth_file_under_one_key(tmp_path):
     """A condition's manifest entry and its ``truth_summary.json`` record where its truth tables are, and
     each path is under one key, the same key in both files.
 
-    Perturbation: a second key for a path in ``orchestrator.run_condition_grid``'s entry, a top-level
-    copy in ``manifest.write_manifest``, or a summary key spelt otherwise."""
-    from rigel.sim.capture import CaptureConfig, CaptureScenario
+    Perturbation: a second key for a path in ``_sim_grid._condition_entry``, a top-level copy in
+    ``_sim_grid.write_manifest``, or a summary key spelt otherwise."""
     from rigel.sim.genome import random_dna_array
-    from rigel.sim.orchestrator import run_condition_grid
-    from rigel.sim.wgs_config import GDNASimConfig, NRNAConfig, SimulationParams
+    from rigel.sim.wgs_config import GDNASimConfig
+
+    from _sim_grid import run_condition_grid
 
     fasta = tmp_path / "genome.fa"
     fasta.write_text(">chr1\n" + "".join(random_dna_array(3000, np.random.default_rng(5))) + "\n")
     pysam.faidx(str(fasta))
-    transcripts = _molar_transcripts()
     outdir = tmp_path / "panel"
-    entries = run_condition_grid(
-        outdir=outdir,
-        genome_path=fasta,
-        transcripts=transcripts,
-        base_abundances=[(t.abundance, t.nrna_abundance) for t in transcripts],
-        sim=SimulationParams(
+    config = WholeGenomeSimConfig(
+        genome=str(fasta),
+        outdir=str(outdir),
+        simulation=SimulationParams(
             n_rna_fragments=200,
+            sim_seed=3,
             frag_mean=80,
             frag_std=10,
             frag_min=50,
             frag_max=120,
             read_length=40,
         ),
-        gdna=GDNASimConfig(frag_mean=80, frag_std=10, frag_min=50, frag_max=120),
-        nrna=NRNAConfig(),
-        genomic_refs=["chr1"],
-        gdna_pairs=[("g50", 1.0)],
-        gdna_od_pairs=[("od00", 0.0)],
+        gdna=GDNASimConfig(
+            rates=[1.0],
+            rate_labels=["g50"],
+            genomic_refs=["chr1"],
+            frag_mean=80,
+            frag_std=10,
+            frag_min=50,
+            frag_max=120,
+        ),
         strand_specificities=[0.99],
-        nrna_pairs=[("file", "file", None, 0)],
-        capture_scenarios=[CaptureScenario("off", CaptureConfig())],
-        include_capture_in_names=False,
-        base_seed=3,
     )
+    entries = run_condition_grid(config, _molar_transcripts(), has_file_nrna=True)
     (entry,) = entries
     tables = ("pre_capture_abundances", "post_capture_abundances", "post_capture_fragment_lengths")
     paths = {key: value for key, value in entry.items() if str(value).endswith((".tsv", ".json"))}
@@ -445,9 +442,7 @@ def test_the_condition_grid_names_each_truth_file_under_one_key(tmp_path):
         assert Path(summary[key]) == outdir / entry[key], key
     assert "files" not in summary
 
-    manifest_path = write_manifest(
-        outdir, type("Config", (), {})(), entries, index={"path": "/idx", "manifest": {}}
-    )
+    manifest_path = write_manifest(outdir, config, entries, index={"path": "/idx", "manifest": {}})
     manifest = json.loads(manifest_path.read_text())
     assert not any(str(value).endswith(".tsv") for value in manifest.values()), (
         "the manifest names a truth table outside its condition's entry"
@@ -456,7 +451,7 @@ def test_the_condition_grid_names_each_truth_file_under_one_key(tmp_path):
 
 def test_a_transcript_at_position_zero_has_its_whole_genomic_span():
     """A transcript starting at base 0 has its whole span, not the 0 a truthiness test of its start gives."""
-    from rigel.sim.truth import _transcript_metadata
+    from _sim_truth import _transcript_metadata
     from rigel.transcript import Transcript
     from rigel.types import Interval
 

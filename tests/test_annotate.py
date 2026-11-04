@@ -17,7 +17,6 @@ import numpy as np
 import pytest
 
 from rigel.annotate import (
-    AnnotationTable,
     AF_ANNOTATED,
     AF_ANNOTATED_BIT,
     AF_GDNA_BIT,
@@ -30,7 +29,7 @@ from rigel.annotate import (
     AF_NASCENT_BIT,
     AF_RESOLVED,
     AF_UNRESOLVED,
-    winner_flag,
+    AnnotationTable,
     winner_flags,
 )
 
@@ -45,9 +44,9 @@ VALID_ZF_VALUES = {
     AF_MULTIMAPPER_DROP,
 }
 
-#: Bits 3 and 6, retired: another ZF layout gave them meanings (a single-exon or synthetic-span winner, a
+#: Bits 3 and 6 are unused: another ZF layout gives them meanings (a single-exon or synthetic-span winner, a
 #: chimera call), so a value carrying either reads only under that layout, and none is written.
-RETIRED_BITS = 0x08 | 0x40
+UNUSED_BITS = 0x08 | 0x40
 
 #: Every bit the table names; a ZF value carries no other.
 NAMED_BITS = (
@@ -83,8 +82,8 @@ def _assert_zf_invariants(zf: int) -> None:
         assert is_resolved and is_gdna and not (is_annotated or is_nascent), (
             f"ZF={zf:#x}: is_intergenic misplaced"
         )
-    # 4: the retired bits are never set, nor any bit the table does not name
-    assert not zf & RETIRED_BITS, f"ZF={zf:#x}: a retired bit (0x08, 0x40) is set"
+    # 4: the unused bits are never set, nor any bit the table does not name
+    assert not zf & UNUSED_BITS, f"ZF={zf:#x}: an unused bit (0x08, 0x40) is set"
     assert not zf & ~NAMED_BITS, f"ZF={zf:#x}: a bit outside the table is set"
 
 
@@ -101,45 +100,44 @@ class TestAnnotationTable:
         assert tbl.size == 0
         assert tbl.capacity == 100
 
-    def test_add(self):
-        tbl = AnnotationTable.create(10)
-        tbl.add(
-            frag_id=42,
-            best_tid=5,
-            best_gid=2,
-            tx_flags=AF_ANNOTATED,
-            posterior=0.95,
-            frag_class=0,
-            n_candidates=3,
+    @staticmethod
+    def _rows(n: int, start: int = 0) -> dict:
+        ids = np.arange(start, start + n)
+        return dict(
+            frag_ids=ids.astype(np.int64),
+            best_tids=ids.astype(np.int32),
+            best_gids=np.zeros(n, np.int32),
+            tx_flags=np.full(n, AF_ANNOTATED, np.uint8),
+            posteriors=np.full(n, 0.95, np.float32),
+            frag_classes=np.zeros(n, np.int8),
+            n_candidates=np.full(n, 3, np.int16),
         )
+
+    def test_add_batch(self):
+        tbl = AnnotationTable.create(10)
+        tbl.add_batch(**self._rows(1, start=42))
         assert tbl.size == 1
         assert tbl.frag_ids[0] == 42
-        assert tbl.best_tid[0] == 5
-        assert tbl.best_gid[0] == 2
+        assert tbl.best_tid[0] == 42
+        assert tbl.best_gid[0] == 0
         assert tbl.tx_flags[0] == AF_ANNOTATED
         assert abs(tbl.posterior[0] - 0.95) < 0.01
         assert tbl.frag_class[0] == 0
         assert tbl.n_candidates[0] == 3
+        assert tbl.locus_id[0] == -1  # left for write_annotated_bam to fill
 
     def test_grow(self):
         tbl = AnnotationTable.create(2)
         for i in range(10):
-            tbl.add(
-                frag_id=i,
-                best_tid=i,
-                best_gid=0,
-                tx_flags=AF_ANNOTATED,
-                posterior=1.0,
-                frag_class=0,
-                n_candidates=1,
-            )
+            tbl.add_batch(**self._rows(1, start=i))
         assert tbl.size == 10
         assert tbl.capacity >= 10
         np.testing.assert_array_equal(tbl.frag_ids[: tbl.size], np.arange(10))
         np.testing.assert_array_equal(tbl.best_tid[: tbl.size], np.arange(10))
+        assert (tbl.locus_id[: tbl.size] == -1).all()
 
     def test_zf_canonical_values(self):
-        """All canonical ZF values satisfy the invariants, and none reuses a retired bit (0x08, 0x40)."""
+        """All canonical ZF values satisfy the invariants, and none sets an unused bit (0x08, 0x40)."""
         # Documented composed values
         assert AF_UNRESOLVED == 0x00
         assert AF_ANNOTATED == 0x03
@@ -147,7 +145,7 @@ class TestAnnotationTable:
         assert AF_GDNA_EM == 0x05
         assert AF_GDNA_INTERGENIC == 0x25
         assert AF_MULTIMAPPER_DROP == 0x80
-        # All canonical values satisfy the invariants, which include the retired bits' absence
+        # All canonical values satisfy the invariants, which include the unused bits' absence
         for v in VALID_ZF_VALUES:
             _assert_zf_invariants(v)
         # Resolved-ness is coherent
@@ -159,15 +157,13 @@ class TestAnnotationTable:
 
     def test_a_transcript_win_is_annotated_or_nascent(self):
         """A transcript's win reads as the output tables report its RNA: a synthetic span's is nascent
-        (0x11), every reference transcript's annotated (0x03), single-exon included, so the helpers take
-        only ``is_synthetic``. The scalar and the vectorized form agree."""
-        assert winner_flag(False) == AF_ANNOTATED == 0x03
-        assert winner_flag(True) == AF_NASCENT == 0x11
+        (0x11), every reference transcript's annotated (0x03), single-exon included, so the helper takes
+        only ``is_synthetic``."""
+        assert (AF_ANNOTATED, AF_NASCENT) == (0x03, 0x11)
         is_synthetic = np.array([False, True, False, True])
         flags = winner_flags(is_synthetic)
         assert flags.dtype == np.uint8
-        np.testing.assert_array_equal(flags, [0x03, 0x11, 0x03, 0x11])
-        assert [winner_flag(bool(s)) for s in is_synthetic] == flags.tolist()
+        np.testing.assert_array_equal(flags, [AF_ANNOTATED, AF_NASCENT, AF_ANNOTATED, AF_NASCENT])
         for v in flags.tolist():
             _assert_zf_invariants(v)
         assert winner_flags(np.zeros(0, dtype=bool)).dtype == np.uint8
@@ -248,6 +244,11 @@ def winner_kinds_scenario(tmp_path):
 
 
 @pytestmark_scenario
+def _record_key(r):
+    """A BAM record's identity, qname, flag, reference and position, so duplicates count even when tags differ."""
+    return (r.query_name, int(r.flag), int(r.reference_id), int(r.reference_start))
+
+
 class TestAnnotatedBamIntegration:
     """End-to-end: scenario → run_pipeline with annotated_bam_path."""
 
@@ -428,16 +429,6 @@ class TestAnnotatedBamIntegration:
             ),
         )
 
-        def _record_key(r):
-            # Identity of a BAM record = qname + flag + ref + pos.
-            # Allows counting duplicates even if tags differ.
-            return (
-                r.query_name,
-                int(r.flag),
-                int(r.reference_id),
-                int(r.reference_start),
-            )
-
         # ---- 1. Record-count parity ----
         with pysam.AlignmentFile(str(result.bam_path), "rb") as fin:
             in_records = [_record_key(r) for r in fin.fetch(until_eof=True)]
@@ -554,14 +545,6 @@ class TestAnnotatedBamIntegration:
                 annotated_bam_path=annotated_bam,
             ),
         )
-
-        def _record_key(r):
-            return (
-                r.query_name,
-                int(r.flag),
-                int(r.reference_id),
-                int(r.reference_start),
-            )
 
         with pysam.AlignmentFile(str(augmented), "rb") as fin:
             in_keys = [_record_key(r) for r in fin.fetch(until_eof=True)]
@@ -992,7 +975,7 @@ class TestAnnotatedBamIntegration:
     def test_zf_names_the_category_of_the_winning_transcript(self, winner_kinds_scenario, tmp_path):
         """ZF names a transcript's win as the output tables report its RNA: every reference transcript's
         fragments read annotated (0x03), single-exon included, alone or covering its sibling's span, and a
-        synthetic span's read nascent (0x11); no record sets a retired bit. The single-exon and span
+        synthetic span's read nascent (0x11); no record sets an unused bit. The single-exon and span
         fragments are unspliced, so the EM decides them; the multi-exon
         transcripts' spliced ones are also decided on the deterministic path, so both stamp sites are read.
         """

@@ -273,15 +273,15 @@ def test_an_unpaired_read_pair_is_withheld_for_the_furthest_check_any_hit_reache
 def test_counts_that_do_not_reconcile_stop_the_run(index, tmp_path, field):
     """The outcomes sum to the read pairs, the statuses to the records, the unpaired reasons to the unpaired, the placed
     to the fragments, by construction: one counter off, and the scan's check stops the run."""
-    from rigel.pipeline import _check_scan_accounting
+    from rigel.pipeline import check_scan_accounting
 
     stats, _strand, _buffer, _payload = scan_and_buffer(
         _bam(tmp_path, _counters_bam_records()), index, BamScanConfig(total_threads=1)
     )
-    _check_scan_accounting(stats)
+    check_scan_accounting(stats)
     setattr(stats, field, getattr(stats, field) + 1)
     with pytest.raises(RuntimeError, match="do not reconcile"):
-        _check_scan_accounting(stats)
+        check_scan_accounting(stats)
 
 
 def test_the_scan_checks_its_counts(index, tmp_path, monkeypatch):
@@ -289,7 +289,7 @@ def test_the_scan_checks_its_counts(index, tmp_path, monkeypatch):
     import rigel.pipeline as pipeline
 
     checked = []
-    monkeypatch.setattr(pipeline, "_check_scan_accounting", checked.append)
+    monkeypatch.setattr(pipeline, "check_scan_accounting", checked.append)
     stats, _strand, _buffer, _payload = scan_and_buffer(
         _bam(tmp_path, _counters_bam_records()), index, BamScanConfig(total_threads=1)
     )

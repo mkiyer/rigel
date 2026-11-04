@@ -227,7 +227,7 @@ ADDITIVE_AXES: tuple[tuple[str, str], ...] = (
 
 #: The deferred bank's per-placement arrays, in the order :meth:`Tally.deferred_arrays` emits them. The last two are
 #: the hit's sequence, which the canonical sort reads only when a record's content otherwise ties.
-_DEFERRED_RECORD_FIELDS = ("ref", "start", "end", "align_strand", "sj_strand", "nm", "clip")
+DEFERRED_RECORD_FIELDS = ("ref", "start", "end", "align_strand", "sj_strand", "nm", "clip")
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,35 +315,15 @@ class DeferredFragments:
         The nested CSRs are checked rather than trusted: an offset array of the right length can still be
         inconsistent, and a truncated bank would score a fragment against another fragment's hypotheses.
         """
-        names = [field.name for field in dataclasses.fields(cls)]
-        missing = set(names) - set(deferred)
-        if missing:
-            raise ValueError(
-                f"the scan's deferred bank is missing {sorted(missing)}. Every array is part of one "
-                f"record, so a missing one is a fragment the second pass cannot replay."
-            )
-        arrays: dict[str, np.ndarray] = {}
-        for name in names:
-            array = np.ascontiguousarray(deferred[name])
-            if array.dtype != np.int64:
-                raise ValueError(
-                    f"deferred[{name!r}] has dtype {array.dtype}, expected int64. One bank, one dtype — "
-                    f"a narrowed or widened array compares equal by value and would hide the change."
-                )
-            if array.ndim != 1:
-                raise ValueError(
-                    f"deferred[{name!r}] has shape {array.shape}, expected one dimension"
-                )
-            arrays[name] = array
-
+        arrays = _int64_columns(deferred, [field.name for field in dataclasses.fields(cls)])
         n = int(arrays["placement_offsets"].shape[0]) - 1
         if n < 0:
             raise ValueError(
                 "deferred['placement_offsets'] is empty; offsets are cumulative and start at 0, so an "
                 "empty bank is [0] and never []"
             )
-        n_placements = int(arrays["placement_offsets"][-1]) if n >= 0 else 0
-        for name in _DEFERRED_RECORD_FIELDS:
+        n_placements = int(arrays["placement_offsets"][-1])
+        for name in DEFERRED_RECORD_FIELDS:
             if arrays[name].shape != (n_placements,):
                 raise ValueError(
                     f"deferred[{name!r}] has {arrays[name].shape[0]} entries but placement_offsets "
@@ -361,24 +341,7 @@ class DeferredFragments:
             ("hypothesis_offsets", "hypothesis_sj_strand", 1),
             ("hypothesis_intron_offsets", "hypothesis_introns", 2),
         ):
-            offsets = arrays[offsets_name]
-            if offsets.shape[0] == 0 or int(offsets[0]) != 0:
-                raise ValueError(
-                    f"deferred[{offsets_name!r}] must start at 0; offsets are cumulative and an empty "
-                    f"level is [0]"
-                )
-            if np.any(np.diff(offsets) < 0):
-                bad = int(np.argmax(np.diff(offsets) < 0))
-                raise ValueError(
-                    f"deferred[{offsets_name!r}] decreases at {bad}; a CSR offset array cannot go "
-                    f"backwards"
-                )
-            if int(offsets[-1]) * stride != arrays[values_name].shape[0]:
-                raise ValueError(
-                    f"deferred[{offsets_name!r}] ends at {int(offsets[-1])} but "
-                    f"{values_name} has {arrays[values_name].shape[0]} entries "
-                    f"({int(offsets[-1])} x {stride} expected)"
-                )
+            _check_csr(arrays, offsets_name, values_name, stride)
         n_hypotheses = int(arrays["hypothesis_offsets"][-1])
         if arrays["hypothesis_intron_offsets"].shape[0] != n_hypotheses + 1:
             raise ValueError(
@@ -405,6 +368,51 @@ class DeferredFragments:
         """Hypothesis ``h``'s implied introns as a ``[k, 2]`` view; empty ⇒ the unspliced hypothesis."""
         lo, hi = int(self.hypothesis_intron_offsets[h]), int(self.hypothesis_intron_offsets[h + 1])
         return self.hypothesis_introns[2 * lo : 2 * hi].reshape(hi - lo, 2)
+
+
+def _int64_columns(deferred: dict[str, Any], names: list[str]) -> dict[str, np.ndarray]:
+    """The deferred bank's arrays, each present, ``int64`` and one-dimensional."""
+    missing = set(names) - set(deferred)
+    if missing:
+        raise ValueError(
+            f"the scan's deferred bank is missing {sorted(missing)}. Every array is part of one "
+            f"record, so a missing one is a fragment the second pass cannot replay."
+        )
+    arrays: dict[str, np.ndarray] = {}
+    for name in names:
+        array = np.ascontiguousarray(deferred[name])
+        if array.dtype != np.int64:
+            raise ValueError(
+                f"deferred[{name!r}] has dtype {array.dtype}, expected int64. One bank, one dtype — "
+                f"a narrowed or widened array compares equal by value and would hide the change."
+            )
+        if array.ndim != 1:
+            raise ValueError(f"deferred[{name!r}] has shape {array.shape}, expected one dimension")
+        arrays[name] = array
+    return arrays
+
+
+def _check_csr(
+    arrays: dict[str, np.ndarray], offsets_name: str, values_name: str, stride: int
+) -> None:
+    """One CSR level of the deferred bank: offsets that start at 0, never decrease and end at the values' count."""
+    offsets = arrays[offsets_name]
+    if offsets.shape[0] == 0 or int(offsets[0]) != 0:
+        raise ValueError(
+            f"deferred[{offsets_name!r}] must start at 0; offsets are cumulative and an empty "
+            f"level is [0]"
+        )
+    if np.any(np.diff(offsets) < 0):
+        bad = int(np.argmax(np.diff(offsets) < 0))
+        raise ValueError(
+            f"deferred[{offsets_name!r}] decreases at {bad}; a CSR offset array cannot go backwards"
+        )
+    if int(offsets[-1]) * stride != arrays[values_name].shape[0]:
+        raise ValueError(
+            f"deferred[{offsets_name!r}] ends at {int(offsets[-1])} but "
+            f"{values_name} has {arrays[values_name].shape[0]} entries "
+            f"({int(offsets[-1])} x {stride} expected)"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,8 +586,11 @@ class AccumulatorPayload:
     def from_scan_result(
         cls, scan_result: dict[str, Any], graph_hash: str | None = None
     ) -> "AccumulatorPayload":
+        """The scan's ``result["calibration"]`` dict, validated: every bank's dtype, shape and axis, the partition's
+        offsets against its region-bound axis, and the ledgers that must close (the start bank and the length
+        histogram each book every deposited fragment once; the deferred bank holds exactly the fragments the held
+        counters count)."""
         cal = scan_result["calibration"]
-
         n_refs = int(cal["n_refs"])
         n_cols = int(cal["n_strand_columns"])
         if n_cols != N_STRAND_COLUMNS:
@@ -589,45 +600,12 @@ class AccumulatorPayload:
                 f"disagree about the channel axis."
             )
         max_length = int(cal["max_length"])
-
-        offsets = {
-            name: _offsets(cal, name, n_refs)
-            for name in (
-                "ref_region_bound_offsets",
-                "ref_region_offsets",
-                "ref_boundary_offsets",
-                "ref_sj_offsets",
-            )
+        region_bounds, offsets = _partition(cal, n_refs)
+        rows_on = {
+            "region": int(offsets["ref_region_offsets"][-1]),
+            "boundary": int(offsets["ref_boundary_offsets"][-1]),
+            "sj": int(offsets["ref_sj_offsets"][-1]),
         }
-        region_bounds = np.ascontiguousarray(cal["region_bounds"], dtype=np.int64)
-        if int(offsets["ref_region_bound_offsets"][-1]) != region_bounds.shape[0]:
-            raise ValueError(
-                f"ref_region_bound_offsets ends at {int(offsets['ref_region_bound_offsets'][-1])} but region_bounds has "
-                f"{region_bounds.shape[0]} entries"
-            )
-
-        # Re-derived from the region-bound axis rather than trusted: every consumer slices by these, and an offset
-        # array of the right length can still be inconsistent.
-        per_ref_region_bounds = np.diff(offsets["ref_region_bound_offsets"])
-        for name, per_ref in (
-            ("ref_region_offsets", np.maximum(per_ref_region_bounds - 1, 0)),
-            ("ref_boundary_offsets", np.maximum(per_ref_region_bounds - 2, 0)),
-        ):
-            expected = np.zeros(n_refs + 1, np.int64)
-            np.cumsum(per_ref, out=expected[1:])
-            if not np.array_equal(offsets[name], expected):
-                bad = int(np.argmax(offsets[name] != expected))
-                raise ValueError(
-                    f"{name}[{bad}] is {int(offsets[name][bad])} but the region_bound axis implies "
-                    f"{int(expected[bad])}. A reference contributing c region_bounds owns c-1 regions and c-2 "
-                    f"interior boundaries, and none at all below two region_bounds."
-                )
-
-        n_regions = int(offsets["ref_region_offsets"][-1])
-        n_boundaries = int(offsets["ref_boundary_offsets"][-1])
-        n_sj = int(offsets["ref_sj_offsets"][-1])
-
-        rows_on = {"region": n_regions, "boundary": n_boundaries, "sj": n_sj}
         banks: dict[str, np.ndarray] = {}
         for name, axis, dtype in BANK_AXES:
             banks[name] = _bank(cal, name, rows_on[axis], dtype)
@@ -642,55 +620,13 @@ class AccumulatorPayload:
                 f"region_start_count sums to {n_booked} but {qc.deposited} fragments were deposited; "
                 f"the ledger books every deposited fragment exactly once in region_start_count."
             )
-
-        pool_lengths = _exact_dtype(cal, "pool_lengths", np.int64)
-        if pool_lengths.size != N_FRAGMENT_POOLS * (max_length + 1):
-            raise ValueError(
-                f"pool_lengths has {pool_lengths.size} entries, expected "
-                f"{N_FRAGMENT_POOLS} x (max_length + 1) = {N_FRAGMENT_POOLS * (max_length + 1)}"
-            )
-
-        deposited_lengths = _exact_dtype(cal, "deposited_lengths", np.uint32)
-        if deposited_lengths.shape != (max_length + 1,):
-            raise ValueError(
-                f"deposited_lengths has shape {deposited_lengths.shape}, expected ({max_length + 1},)"
-            )
-        # Every deposited fragment is also binned by length, once: this histogram anchors every length law.
-        n_binned = int(deposited_lengths.sum())
-        if n_binned != qc.deposited:
-            raise ValueError(
-                f"deposited_lengths sums to {n_binned} but {qc.deposited} fragments were "
-                "deposited; the unconditional length histogram must bin every one of them exactly once."
-            )
-
-        deferred = DeferredFragments.from_dict(cal["deferred"])
-        # The bank must hold exactly the fragments the held counters count; a truncated cache would arrive short.
-        held = qc.deferred_undetermined_gap + qc.deferred_multiple_placements
-        if deferred.n_fragments != held:
-            raise ValueError(
-                f"the deferred bank holds {deferred.n_fragments} fragments but "
-                f"qc.deferred_undetermined_gap + qc.deferred_multiple_placements is {held}; the counters "
-                f"and the fragments they count must be the same population, or the second pass silently "
-                f"drains a different one."
-            )
-        multi = np.diff(deferred.placement_offsets) > 1
-        if int(multi.sum()) != qc.deferred_multiple_placements:
-            raise ValueError(
-                f"the deferred bank holds {int(multi.sum())} multi-placement records but "
-                f"qc.deferred_multiple_placements is {qc.deferred_multiple_placements}."
-            )
-        gap_resolution = GapCensus.from_dict(cal["gap_resolution"])
-        if gap_resolution.deferred != qc.deferred_undetermined_gap:
-            raise ValueError(
-                f"the gap census's three deferred_* sum to {gap_resolution.deferred} but "
-                f"qc.deferred_undetermined_gap is {qc.deferred_undetermined_gap}; the subclasses are "
-                f"exhaustive by construction, so this is a partition that does not close."
-            )
+        pool_lengths, deposited_lengths = _length_banks(cal, max_length, qc)
+        deferred, gap_resolution = _held_fragments(cal, qc)
         return cls(
             region_bounds=region_bounds,
             **offsets,
             **banks,
-            pool_lengths=pool_lengths.reshape(N_FRAGMENT_POOLS, max_length + 1),
+            pool_lengths=pool_lengths,
             deposited_lengths=deposited_lengths,
             deferred=deferred,
             gap_resolution=gap_resolution,
@@ -701,6 +637,95 @@ class AccumulatorPayload:
             aligned_bases=int(cal["unique_unspliced_bases"]),
             graph_hash=graph_hash,
         )
+
+
+def _partition(cal: dict[str, Any], n_refs: int) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """The region-bound axis and the four per-reference offset arrays. The region and boundary offsets are re-derived
+    from the region-bound axis rather than trusted: every consumer slices by them, and an offset array of the right
+    length can still be inconsistent."""
+    offsets = {
+        name: _offsets(cal, name, n_refs)
+        for name in (
+            "ref_region_bound_offsets",
+            "ref_region_offsets",
+            "ref_boundary_offsets",
+            "ref_sj_offsets",
+        )
+    }
+    region_bounds = np.ascontiguousarray(cal["region_bounds"], dtype=np.int64)
+    if int(offsets["ref_region_bound_offsets"][-1]) != region_bounds.shape[0]:
+        raise ValueError(
+            f"ref_region_bound_offsets ends at {int(offsets['ref_region_bound_offsets'][-1])} but region_bounds has "
+            f"{region_bounds.shape[0]} entries"
+        )
+    per_ref_region_bounds = np.diff(offsets["ref_region_bound_offsets"])
+    for name, per_ref in (
+        ("ref_region_offsets", np.maximum(per_ref_region_bounds - 1, 0)),
+        ("ref_boundary_offsets", np.maximum(per_ref_region_bounds - 2, 0)),
+    ):
+        expected = np.zeros(n_refs + 1, np.int64)
+        np.cumsum(per_ref, out=expected[1:])
+        if not np.array_equal(offsets[name], expected):
+            bad = int(np.argmax(offsets[name] != expected))
+            raise ValueError(
+                f"{name}[{bad}] is {int(offsets[name][bad])} but the region_bound axis implies "
+                f"{int(expected[bad])}. A reference contributing c region_bounds owns c-1 regions and c-2 "
+                f"interior boundaries, and none at all below two region_bounds."
+            )
+    return region_bounds, offsets
+
+
+def _length_banks(
+    cal: dict[str, Any], max_length: int, qc: ScanQC
+) -> tuple[np.ndarray, np.ndarray]:
+    """The five pools' length histograms, ``[5, max_length + 1]``, and the unconditional one, which must bin every
+    deposited fragment exactly once: it anchors every length law."""
+    pool_lengths = _exact_dtype(cal, "pool_lengths", np.int64)
+    if pool_lengths.size != N_FRAGMENT_POOLS * (max_length + 1):
+        raise ValueError(
+            f"pool_lengths has {pool_lengths.size} entries, expected "
+            f"{N_FRAGMENT_POOLS} x (max_length + 1) = {N_FRAGMENT_POOLS * (max_length + 1)}"
+        )
+    deposited_lengths = _exact_dtype(cal, "deposited_lengths", np.uint32)
+    if deposited_lengths.shape != (max_length + 1,):
+        raise ValueError(
+            f"deposited_lengths has shape {deposited_lengths.shape}, expected ({max_length + 1},)"
+        )
+    n_binned = int(deposited_lengths.sum())
+    if n_binned != qc.deposited:
+        raise ValueError(
+            f"deposited_lengths sums to {n_binned} but {qc.deposited} fragments were "
+            "deposited; the unconditional length histogram must bin every one of them exactly once."
+        )
+    return pool_lengths.reshape(N_FRAGMENT_POOLS, max_length + 1), deposited_lengths
+
+
+def _held_fragments(cal: dict[str, Any], qc: ScanQC) -> tuple[DeferredFragments, GapCensus]:
+    """The side buffer and the gap census. The bank must hold exactly the fragments the held counters count (a
+    truncated cache would arrive short), and the census's deferred classes must sum to its counter."""
+    deferred = DeferredFragments.from_dict(cal["deferred"])
+    held = qc.deferred_undetermined_gap + qc.deferred_multiple_placements
+    if deferred.n_fragments != held:
+        raise ValueError(
+            f"the deferred bank holds {deferred.n_fragments} fragments but "
+            f"qc.deferred_undetermined_gap + qc.deferred_multiple_placements is {held}; the counters "
+            f"and the fragments they count must be the same population, or the second pass silently "
+            f"drains a different one."
+        )
+    multi = np.diff(deferred.placement_offsets) > 1
+    if int(multi.sum()) != qc.deferred_multiple_placements:
+        raise ValueError(
+            f"the deferred bank holds {int(multi.sum())} multi-placement records but "
+            f"qc.deferred_multiple_placements is {qc.deferred_multiple_placements}."
+        )
+    gap_resolution = GapCensus.from_dict(cal["gap_resolution"])
+    if gap_resolution.deferred != qc.deferred_undetermined_gap:
+        raise ValueError(
+            f"the gap census's three deferred_* sum to {gap_resolution.deferred} but "
+            f"qc.deferred_undetermined_gap is {qc.deferred_undetermined_gap}; the subclasses are "
+            f"exhaustive by construction, so this is a partition that does not close."
+        )
+    return deferred, gap_resolution
 
 
 def _offsets(cal: dict[str, Any], name: str, n_refs: int) -> np.ndarray:

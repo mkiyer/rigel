@@ -60,7 +60,7 @@ def _aggregate(transcripts, theta, max_length):
 # ---------------------------------------------------------------------------
 
 
-def test_A_j_matches_an_ENUMERATING_oracle_over_every_small_configuration():
+def test_the_opportunity_matches_an_enumerating_oracle_on_every_small_configuration():
     """Exhaustive over 1-4 exons x exon lengths 1-7 x every ``w`` up to ``L + 2``. The oracle walks every start position
     and tests it against every sj coordinate; the formula works with the complement (a window crossing nothing lies
     wholly inside one exon, and exons are disjoint). They share no code, so agreement is evidence.
@@ -79,7 +79,7 @@ def test_A_j_matches_an_ENUMERATING_oracle_over_every_small_configuration():
     "exons",
     [[1, 2000], [2000, 1], [50] * 20, [1, 1, 1], [500, 500], [713], [1], [200, 1, 200]],
 )
-def test_A_j_matches_the_oracle_at_REALISTIC_scales_too(exons):
+def test_the_opportunity_matches_the_oracle_at_realistic_scales(exons):
     """The exhaustive sweep is all tiny. A 1 bp exon beside a 2 kb one is the shape that breaks an off-by-one, and 20 x
     50 bp is the many-short-exons transcript the tilt is steepest on."""
     total = int(sum(exons))
@@ -89,7 +89,7 @@ def test_A_j_matches_the_oracle_at_REALISTIC_scales_too(exons):
             assert a[w] == _oracle_a_j(exons, w), (exons, w)
 
 
-def test_the_five_properties_the_derivation_CLAIMS_are_CHECKED_not_stated():
+def test_the_five_properties_the_derivation_claims_are_checked_not_stated():
     """P1-P5 of the derivation, each a property the correction depends on."""
     # P1 — a single-exon transcript can never populate the sj pool
     _, a = _aggregate([[500]], [1.0], 600)
@@ -117,7 +117,7 @@ def test_the_five_properties_the_derivation_CLAIMS_are_CHECKED_not_stated():
     assert many[30] > few[30]
 
 
-def test_the_vectorised_aggregate_is_the_SCALAR_formula_SUMMED():
+def test_the_vectorised_aggregate_is_the_scalar_formula_summed():
     """The kernel builds ``T`` and ``A`` from two length spectra with a double reverse-cumsum; this re-derives them one
     transcript at a time by direct enumeration on a mixed transcriptome.
     """
@@ -136,7 +136,7 @@ def test_the_vectorised_aggregate_is_the_SCALAR_formula_SUMMED():
 # ---------------------------------------------------------------------------
 
 
-def test_the_crossing_probability_is_a_PROBABILITY_and_saturates_at_one():
+def test_the_crossing_probability_is_a_probability_and_saturates_at_one():
     pi = crossing_probability(*_csr([[10, 10]]), np.array([1.0]), 30)
     assert np.all((pi >= 0.0) & (pi <= 1.0))
     # Bin 0 included: the complement identity is negative there (a zero-length window sits on a boundary, so every
@@ -151,7 +151,7 @@ def test_the_crossing_probability_is_a_PROBABILITY_and_saturates_at_one():
     assert pi[21] == 0.0
 
 
-def test_a_SINGLE_EXON_annotation_makes_the_correction_INERT_not_a_division_by_zero():
+def test_a_single_exon_annotation_makes_the_correction_inert_not_a_division_by_zero():
     """No sj anywhere means no opportunity anywhere, so the correction has nothing to say and must neither divide by
     zero nor delete the pool."""
     pi = crossing_probability(*_csr([[500], [900]]), np.array([1.0, 1.0]), 600)
@@ -188,7 +188,12 @@ def _enumerate_library(transcripts, theta, pmf):
     return library, pool
 
 
-def test_the_correction_RECOVERS_the_library_distribution_from_an_ENUMERATED_pool():
+def _mean_length(h) -> float:
+    """The mean of a length histogram."""
+    return float(np.dot(np.arange(h.size), h) / h.sum())
+
+
+def test_the_correction_recovers_the_library_distribution_from_an_enumerated_pool():
     """Enumerate every placement to get the library histogram and its sj-crossing subset, then de-tilt the subset: it
     must come back to the library histogram, shape-exactly since the de-tilt preserves the total, with nothing tuned and
     no tolerance beyond float.
@@ -212,7 +217,7 @@ def test_the_correction_RECOVERS_the_library_distribution_from_an_ENUMERATED_poo
     assert not np.allclose(pool, want, rtol=1e-3)
 
 
-def test_the_correction_moves_the_pool_MEAN_onto_the_librarys():
+def test_the_correction_moves_the_pool_mean_onto_the_librarys():
     """The same statement in the one number the calibrator consumes."""
     transcripts = [[30, 40], [12] * 6, [70], [25, 8, 61], [100, 3]]
     theta = [5.0, 2.0, 9.0, 1.0, 4.0]
@@ -221,14 +226,11 @@ def test_the_correction_moves_the_pool_MEAN_onto_the_librarys():
     library, pool = _enumerate_library(transcripts, theta, pmf)
     pi = crossing_probability(*_csr(transcripts), np.array(theta), len(pmf) - 1)
 
-    def mean(h):
-        return float(np.dot(np.arange(h.size), h) / h.sum())
-
-    assert mean(pool) > mean(library)  # the tilt exists, and it is long
-    assert mean(detilt_pool(pool, pi)) == pytest.approx(mean(library), rel=1e-12)
+    assert _mean_length(pool) > _mean_length(library)  # the tilt exists, and it is long
+    assert _mean_length(detilt_pool(pool, pi)) == pytest.approx(_mean_length(library), rel=1e-12)
 
 
-def test_the_ratio_form_is_what_makes_a_WRONG_theta_SAFE():
+def test_the_ratio_form_is_what_makes_a_wrong_theta_safe():
     """With a deliberately wrong theta (all the weight on the transcript with the shortest exons, which has the steepest
     tilt), dividing by ``A`` alone overshoots past the library mean, worse than no correction. The ratio form ``A / T``
     must not, because a reweighting moves ``A`` and ``T`` together.
@@ -239,17 +241,16 @@ def test_the_ratio_form_is_what_makes_a_WRONG_theta_SAFE():
     pmf[10:81] = 1.0 / 71.0
     library, pool = _enumerate_library(transcripts, theta, pmf)
 
-    def mean(h):
-        return float(np.dot(np.arange(h.size), h) / h.sum())
-
     wrong = np.array([0.0, 1.0, 0.0, 0.0, 0.0])  # every copy is the many-short-exon transcript
     lengths, offsets = _csr(transcripts)
     pi_wrong = crossing_probability(lengths, offsets, wrong, len(pmf) - 1)
     _, a_wrong = sj_opportunity(lengths, offsets, wrong, len(pmf) - 1)
 
-    ratio_err = abs(mean(detilt_pool(pool, pi_wrong)) - mean(library))
-    a_only_err = abs(mean(detilt_pool(pool, a_wrong / max(a_wrong.max(), 1.0))) - mean(library))
-    raw_err = abs(mean(pool) - mean(library))
+    ratio_err = abs(_mean_length(detilt_pool(pool, pi_wrong)) - _mean_length(library))
+    a_only_err = abs(
+        _mean_length(detilt_pool(pool, a_wrong / max(a_wrong.max(), 1.0))) - _mean_length(library)
+    )
+    raw_err = abs(_mean_length(pool) - _mean_length(library))
 
     assert ratio_err < raw_err, (ratio_err, raw_err)
     assert a_only_err > raw_err, (a_only_err, raw_err)
@@ -260,7 +261,7 @@ def test_the_ratio_form_is_what_makes_a_WRONG_theta_SAFE():
 # ---------------------------------------------------------------------------
 
 
-def test_the_detilt_preserves_the_EVIDENCE_COUNT():
+def test_the_detilt_preserves_the_evidence_count():
     """The de-tilt changes the pool's shape, never how much evidence it represents: ``build_fl_models`` shrinks each
     pool toward the anchor with a Dirichlet pseudo-count whose strength is the pool total, so inflating the total would
     weaken the shrinkage as a side effect.
@@ -273,7 +274,7 @@ def test_the_detilt_preserves_the_EVIDENCE_COUNT():
     assert not np.allclose(out, counts)
 
 
-def test_the_detilt_cannot_INVENT_mass_where_the_pool_has_none():
+def test_the_detilt_cannot_invent_mass_where_the_pool_has_none():
     pi = crossing_probability(*_csr([[40, 60]]), np.array([1.0]), 120)
     counts = np.zeros(121)
     counts[50] = 100.0
@@ -287,7 +288,7 @@ def test_the_detilt_cannot_INVENT_mass_where_the_pool_has_none():
 # ---------------------------------------------------------------------------
 
 
-def test_the_index_adapter_uses_the_REAL_transcripts_and_only_those(mini_index):
+def test_the_index_adapter_uses_the_real_transcripts_and_only_those(mini_index):
     """``~is_synthetic`` alone: the synthetic nascent spans are not sequenced molecules, and weighting them would put
     opportunity on exon structures the library does not contain. ``is_single_exon`` is not a realness filter: a real
     single-exon transcript is a real transcript.
@@ -313,7 +314,7 @@ def test_the_index_adapter_uses_the_REAL_transcripts_and_only_those(mini_index):
     assert not np.allclose(pi, crossing_probability(*_csr(every), np.ones(len(every)), max_length))
 
 
-def test_the_index_adapter_agrees_with_the_ENUMERATING_oracle_on_a_real_index(mini_index):
+def test_the_index_adapter_agrees_with_the_enumerating_oracle_on_a_real_index(mini_index):
     """The adapter, the kernel and a hand enumeration on the same three transcripts, so a wrong exon-length unpacking
     cannot hide behind the kernel."""
     pi = crossing_probability_from_index(mini_index, 400)
@@ -330,13 +331,10 @@ def test_the_index_adapter_agrees_with_the_ENUMERATING_oracle_on_a_real_index(mi
 # ---------------------------------------------------------------------------
 
 
-def test_build_fl_models_WITHOUT_the_divisor_is_unchanged():
-    """``None`` means "no annotation was offered", and then the pool is unchanged, so the correction is one thing varied
-    rather than a rewrite of the EB path.
-    """
-    from types import SimpleNamespace
-
-    from rigel.calibration.fl import build_fl_models
+def test_the_sj_divisor_reaches_the_rna_pool_alone_and_keeps_its_evidence():
+    """The models' kernel reads the spliced pool at its sj opportunity: the divisor moves RNA's law, leaves gDNA's
+    untouched, and adds no evidence weight."""
+    from rigel.calibration.fl import fl_models_from_histograms
     from rigel.scan_payload import N_FRAGMENT_POOLS, POOL_DNA_INTERGENIC, POOL_RNA_SPLICED
 
     pools = np.zeros((N_FRAGMENT_POOLS, 51), dtype=np.int64)
@@ -345,19 +343,21 @@ def test_build_fl_models_WITHOUT_the_divisor_is_unchanged():
     pools[POOL_DNA_INTERGENIC, 30] = 500
     anchor = pools.sum(axis=0)  # every pool count is a deposited fragment
     anchor[25] += 900
-    payload = SimpleNamespace(pool_lengths=pools, deposited_lengths=anchor, max_length=50)
 
-    plain = build_fl_models(payload)
-    explicit = build_fl_models(payload, sj_opportunity=None)
-    np.testing.assert_array_equal(plain.rna_pmf, explicit.rna_pmf)
-    np.testing.assert_array_equal(plain.gdna_pmf, explicit.gdna_pmf)
+    def models(selection):
+        return fl_models_from_histograms(
+            global_counts=anchor,
+            rna_counts=pools[POOL_RNA_SPLICED],
+            rna_selection=selection,
+            gdna_counts=pools[POOL_DNA_INTERGENIC],
+            max_size=50,
+        )
 
     pi = np.zeros(51)
     pi[1:] = np.linspace(0.1, 0.9, 50)
-    tilted = build_fl_models(payload, sj_opportunity=pi)
+    plain, tilted = models(None), models(pi)
     assert not np.allclose(tilted.rna_pmf, plain.rna_pmf), "the divisor reached nothing"
-    (
-        np.testing.assert_array_equal(tilted.gdna_pmf, plain.gdna_pmf),
-        "the sj divisor must not touch the gDNA pool",
-    )
+    np.testing.assert_array_equal(
+        tilted.gdna_pmf, plain.gdna_pmf
+    )  # the sj divisor must not touch the gDNA pool
     assert tilted.n_rna == pytest.approx(plain.n_rna), "the EB evidence weight moved"

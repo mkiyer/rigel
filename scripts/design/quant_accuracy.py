@@ -44,7 +44,6 @@ import argparse
 import dataclasses
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -53,26 +52,38 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-_REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO / "tests" / "calibration"))
-sys.path.insert(0, str(_REPO / "scripts" / "design"))
-
-from _oracle import ORIGINS, OracleTruth  # noqa: E402
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, is_zero_gdna, run_shards, set_args, set_field, strata, stratum  # noqa: E402
-
+from _oracle import OracleTruth  # noqa: E402
+from _shared import (  # noqa: E402
+    DEFAULT_INDEX,
+    DEFAULT_SUITE,
+    DEFERRED,
+    ORACLE_BAM,
+    add_set_option,
+    capture_config,
+    capture_label,
+    configured,
+    oracle_cache_dir,
+    panel_conditions,
+    run_shards,
+    set_args,
+    sibling,
+    strata,
+    stratum,
+    stratum_selections,
+)
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
-from rigel.config import PipelineConfig  # noqa: E402
+from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import run_pipeline  # noqa: E402
-from rigel.scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
+from _scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
 
 #: ``oracle_alloc_seed`` hands the EM the true relative abundances as allocation weights and keeps the shipped
 #: coverage seed. It is no headroom claim: truth-derived weights also hand over the true support (a zero weight is
 #: absorbing, so every silent transcript is switched off for free).
 #:
 #: The ruler arms substitute the lengths the EM divides by. The ruler (``transcript_capture_eff_lengths``) is built
-#: by ``pipeline._setup_geometry_and_estimator`` before ``assemble_priors`` runs, so no prior arm reaches it::
+#: by ``pipeline.setup_geometry_and_estimator`` before ``assemble_priors`` runs, so no prior arm reaches it::
 #:
 #:     calibrate(...)
 #:       |-- transcript_capture_eff_lengths()  <- the ruler arms substitute here: `effective_lengths_em`
@@ -99,7 +110,7 @@ _ARM_FIELDS = {
 # ── the injection ────────────────────────────────────────────────────────────────────────────────
 
 
-def load_oracle(bam: str, index, pipeline_config, suite: Path, cache_root: Path, tag: str) -> OracleTruth:
+def load_oracle(index, pipeline_config, suite: Path, cache_root: Path, tag: str) -> OracleTruth:
     """The origin-split truth for one condition, read from the scan caches.
 
     Sum-to-full is asserted against the condition's undrained scan cache, so a partition built from another scan
@@ -107,10 +118,9 @@ def load_oracle(bam: str, index, pipeline_config, suite: Path, cache_root: Path,
     ``payload_schema_digest`` or scan config does not match this index, so a stale cache fails loudly.
     """
     scan = pipeline_config.scan
-    root = Path(cache_root) / tag
     try:
         full = read_scan_cache(Path(suite) / "scan_cache" / tag, index, scan).payload
-        parts = {k: read_scan_cache(root / k, index, scan).payload for k in ORIGINS}
+        parts = sibling("_oracle_arms.py").oracle_parts(cache_root, tag, index, scan=scan)
     except (FileNotFoundError, KeyError, ScanCacheKeyError) as exc:
         raise SystemExit(
             f"⛔ {tag}: no valid scan or oracle cache ({exc}). Build both first with "
@@ -173,6 +183,37 @@ def _spearman_pearson(true_v: np.ndarray, est_v: np.ndarray) -> tuple[float, flo
     return sp, pe
 
 
+def _count_scores(t: np.ndarray, e: np.ndarray) -> dict:
+    """The count-against-count scores of a transcript or gene row: truth ``t`` and estimate ``e``, aligned."""
+    d = e - t
+    expressed = t > 0.0
+    silent = ~expressed
+    sp, pe = _spearman_pearson(t[expressed], e[expressed])
+    # symmetric MARD over the expressed set: bounded in [0, 1], finite at a zero estimate
+    denom = np.abs(e[expressed]) + np.abs(t[expressed])
+    mard = float(np.mean(np.abs(d[expressed]) / np.where(denom > 0, denom, 1.0))) if expressed.any() else float("nan")
+    return {
+        "n_tx": int(t.size),
+        "n_expressed": int(expressed.sum()),
+        "n_detected": int((e > 0).sum()),
+        "count_true": float(t.sum()),
+        "count_est": float(e.sum()),
+        "count_abs_err": float(np.abs(d).sum()),
+        "count_net_err": float(d.sum()),
+        "count_over": float(np.maximum(d, 0.0).sum()),
+        "count_under": float(np.maximum(-d, 0.0).sum()),
+        #: contamination the deconvolution left on a silent transcript
+        "fp_mass": float(e[silent].sum()),
+        "fp_n": int((e[silent] > 0).sum()),
+        #: real RNA the tool did not assign to the transcript that produced it
+        "fn_mass": float(t[expressed & (e == 0.0)].sum()),
+        "fn_n": int((expressed & (e == 0.0)).sum()),
+        "spearman": sp,
+        "pearson_log2": pe,
+        "mard": mard,
+    }
+
+
 def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     """Score one arm's transcript table against the condition's realised fragment truth.
 
@@ -191,44 +232,19 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
         m[col] = m[col].fillna(0.0)
     t = m["observed_mrna_fragments"].to_numpy(np.float64)
     e = m["count"].to_numpy(np.float64)
-    d = e - t
     expressed = t > 0.0
-    silent = ~expressed
 
     # truth TPM uses the tool's own effective length, so the length model cancels and the row measures assignment
     eff = np.maximum(m["effective_length"].to_numpy(np.float64), 1.0)
     rate = t / eff
     tpm_true = rate / rate.sum() * 1e6 if rate.sum() > 0 else np.zeros_like(rate)
     tpm_est = m["tpm"].to_numpy(np.float64)
-
-    sp, pe = _spearman_pearson(t[expressed], e[expressed])
-    # symmetric MARD over the expressed set: bounded in [0, 1], finite at a zero estimate
-    denom = np.abs(e[expressed]) + np.abs(t[expressed])
-    mard = float(np.mean(np.abs(d[expressed]) / np.where(denom > 0, denom, 1.0))) if expressed.any() else float("nan")
-    rel = np.abs(d[expressed]) / t[expressed] if expressed.any() else np.array([])
-
+    rel = np.abs((e - t)[expressed]) / t[expressed] if expressed.any() else np.array([])
     return {
-        "n_tx": int(len(m)),
-        "n_expressed": int(expressed.sum()),
-        "n_detected": int((e > 0).sum()),
-        "count_true": float(t.sum()),
-        "count_est": float(e.sum()),
-        "count_abs_err": float(np.abs(d).sum()),
-        "count_net_err": float(d.sum()),
-        "count_over": float(np.maximum(d, 0.0).sum()),
-        "count_under": float(np.maximum(-d, 0.0).sum()),
-        #: contamination the deconvolution left on a silent transcript
-        "fp_mass": float(e[silent].sum()),
-        "fp_n": int((e[silent] > 0).sum()),
-        #: real RNA the tool did not assign to the transcript that produced it
-        "fn_mass": float(t[expressed & (e == 0.0)].sum()),
-        "fn_n": int((expressed & (e == 0.0)).sum()),
-        "spearman": sp,
-        "pearson_log2": pe,
-        "mard": mard,
+        **_count_scores(t, e),
         "median_rel_err": float(np.median(rel)) if rel.size else float("nan"),
         "tpm_abs_err": float(np.abs(tpm_est - tpm_true).sum()),
-        "tpm_fp": float(tpm_est[silent].sum()),
+        "tpm_fp": float(tpm_est[~expressed].sum()),
     }
 
 
@@ -243,36 +259,8 @@ def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     m = truth.merge(quant[["transcript_id", "count"]], on="transcript_id", how="left")
     m["count"] = m["count"].fillna(0.0)
     g = m.groupby("gene_id", observed=True)[["observed_mrna_fragments", "count"]].sum()
-    t = g["observed_mrna_fragments"].to_numpy(np.float64)
-    e = g["count"].to_numpy(np.float64)
-    d = e - t
-    expressed = t > 0.0
-    silent = ~expressed
-    sp, pe = _spearman_pearson(t[expressed], e[expressed])
-    denom = np.abs(e[expressed]) + np.abs(t[expressed])
-    mard = (
-        float(np.mean(np.abs(d[expressed]) / np.where(denom > 0, denom, 1.0)))
-        if expressed.any()
-        else float("nan")
-    )
-    return {
-        "n_tx": int(len(g)),  # genes, named to match the transcript row so one table renders both
-        "n_expressed": int(expressed.sum()),
-        "n_detected": int((e > 0).sum()),
-        "count_true": float(t.sum()),
-        "count_est": float(e.sum()),
-        "count_abs_err": float(np.abs(d).sum()),
-        "count_net_err": float(d.sum()),
-        "count_over": float(np.maximum(d, 0.0).sum()),
-        "count_under": float(np.maximum(-d, 0.0).sum()),
-        "fp_mass": float(e[silent].sum()),
-        "fp_n": int((e[silent] > 0).sum()),
-        "fn_mass": float(t[expressed & (e == 0.0)].sum()),
-        "fn_n": int((expressed & (e == 0.0)).sum()),
-        "spearman": sp,
-        "pearson_log2": pe,
-        "mard": mard,
-    }
+    # `n_tx` counts genes here, named as on the transcript row so one table renders both
+    return _count_scores(g["observed_mrna_fragments"].to_numpy(np.float64), g["count"].to_numpy(np.float64))
 
 
 def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
@@ -324,9 +312,6 @@ def gdna_estimate(library: dict) -> float:
 
 
 # ── an aligned input ─────────────────────────────────────────────────────────────────────────────
-
-#: the simulator's own alignments, every read placed where it was drawn: the input every arm reads by default
-ORACLE_BAM = "sim_oracle.bam"
 
 
 def check_input_bam(suite: Path, names: list[str], arm: str, bam_name: str) -> None:
@@ -381,6 +366,15 @@ def aligner_loss(bam: Path, origin_counts: dict) -> dict:
             "or its records are not in one run (the input is not collated)"
         )
     return {f"unaligned_{k}": v for k, v in lost.items()}
+
+
+def aligned_library_truth(library: dict, bam: Path, summary: dict) -> dict:
+    """The library row's additions for an aligner's input: what the aligner left out by true origin, and the gDNA
+    fraction's truth over the templates that reached Rigel. The truth itself stays the simulator's."""
+    loss = aligner_loss(bam, summary.get("origin_counts", {}))
+    t_g = library["gdna_true"] - loss["unaligned_gdna"]
+    t_r = library["rna_true"] - loss["unaligned_mrna"] - loss["unaligned_nrna"]
+    return {**loss, "gdna_frac_true_aligned": t_g / (t_g + t_r) if (t_g + t_r) > 0 else float("nan")}
 
 
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
@@ -444,9 +438,9 @@ def capture_truth_factor(suite: Path, index, condition: str) -> np.ndarray:
     Computing it integrates the sampler over every fragment length and takes minutes."""
     import hashlib
 
-    label = "on" if condition.endswith("_capture_on") else "off"
+    label = capture_label(condition)
     manifest = json.loads((Path(suite) / "manifest.json").read_text())
-    capture = next(c["config"] for c in manifest["capture_configs"] if c["label"] == label)
+    capture = capture_config(manifest, condition)
     probes = capture.get("probes")
     key_parts = {
         "capture": capture,
@@ -461,8 +455,6 @@ def capture_truth_factor(suite: Path, index, condition: str) -> np.ndarray:
         with np.load(path) as z:
             if str(z["key"]) == key:
                 return anchor_capture_factor(z["factor"], z["probed_frac"], z["L_plain"])
-    from _shared import sibling
-
     truth = sibling("ruler_vs_truth.py").load_truth(index, Path(index.index_dir), Path(suite), condition)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.stem}.{os.getpid()}.npz")
@@ -475,7 +467,7 @@ def install_ruler_arm(arm: str, factor: np.ndarray):
     """Wrap the ruler so the EM divides by ``fl × factor``. Returns ``(restore, fired)``.
 
     ``transcript_capture_eff_lengths`` is patched as a module attribute, which works because
-    ``pipeline._setup_geometry_and_estimator`` imports it at call time. Both arms run the same wrapper: it runs the
+    ``pipeline.setup_geometry_and_estimator`` imports it at call time. Both arms run the same wrapper: it runs the
     shipped ruler, builds the substitute, and records how far the substitute sits from the shipped lengths
     (``truth_delta``) and how far the returned lengths do (``max_abs_delta``); ``oracle_ruler_noop`` returns the
     shipped object. ``check_ruler_arm`` reads the counter.
@@ -529,61 +521,60 @@ def check_ruler_arm(condition: str, arm: str, fired: dict) -> None:
 
 
 def install_truth_weights(weights: np.ndarray):
-    """Pass per-transcript weights into the EM, counting the arm where the solver receives them.
+    """Hand the EM per-transcript weights as the RNA prior's shares. Returns ``(restore, fired)``.
 
     A wrapper rather than a config field: the weights are a per-run array, and an experiment should not add
-    production surface. The counter watches the estimator rather than the injection, so a parameter dropped
-    between the wrapper and the solver cannot read as healthy.
+    production surface. The pipeline passes no ``rna_prior_weight``, so the wrapper sets it on the estimator's public
+    batch call. The counter is not the injection: it counts a call only when the weights reach a transcript that call
+    solves, so a run whose EM never ran, or a truth table that weighs none of the EM's transcripts, cannot read as
+    healthy.
     """
-    import rigel.pipeline as PL
     from rigel.estimator import AbundanceEstimator
 
-    inner = PL._run_locus_em_partitioned
-    inner_em = AbundanceEstimator.run_batch_locus_em_partitioned
+    inner = AbundanceEstimator.run_batch_locus_em_partitioned
     fired = {"n": 0}
 
-    def wrapper(*args, **kw):
-        kw["rna_prior_weight"] = weights
-        return inner(*args, **kw)
-
-    def em_wrapper(self, *args, **kw):
-        w = kw.get("rna_prior_weight")
-        if w is not None and int(np.asarray(w).size) and float(np.asarray(w).sum()) > 0.0:
+    def wrapper(self, partition_tuples, locus_transcript_indices, *args, **kw):
+        solved = np.concatenate([np.asarray(t, dtype=np.int64) for t in locus_transcript_indices])
+        if float(weights[solved].sum()) > 0.0:
             fired["n"] += 1
-        return inner_em(self, *args, **kw)
+        return inner(self, partition_tuples, locus_transcript_indices, *args, rna_prior_weight=weights, **kw)
 
-    PL._run_locus_em_partitioned = wrapper
-    AbundanceEstimator.run_batch_locus_em_partitioned = em_wrapper
+    AbundanceEstimator.run_batch_locus_em_partitioned = wrapper
 
     def restore():
-        PL._run_locus_em_partitioned = inner
-        AbundanceEstimator.run_batch_locus_em_partitioned = inner_em
+        AbundanceEstimator.run_batch_locus_em_partitioned = inner
 
     return restore, fired
+
+
+def install_condition_arm(arm: str, suite: Path, index, condition: str, pipeline_config, oracle_cache: Path | None,
+                          truth: pd.DataFrame):
+    """Install ``arm``'s one substitution for ``condition``; returns ``(restore, fired)``."""
+    if arm == "oracle_alloc_seed":
+        # the shipped coverage seed is kept, so the arm varies one thing against `base`: the allocation
+        return install_truth_weights(truth_weights(truth, index))
+    if arm in _RULER_ARMS:
+        # checked before the fall-through: `install_arm` has no fields for a ruler arm
+        return install_ruler_arm(arm, capture_truth_factor(suite, index, condition))
+    oracle = None
+    if arm != "base":
+        if oracle_cache is None:
+            raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
+        oracle = load_oracle(index, pipeline_config, suite, oracle_cache, condition)
+    return install_arm(arm, oracle)
 
 
 def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
                   oracle_cache: Path | None,
                   bam_name: str = ORACLE_BAM) -> list[dict]:
+    """One arm on one condition: its transcript, gene and library rows."""
     check_input_bam(suite, [condition], arm, bam_name)
     bam = str(suite / condition / bam_name)
     truth = pd.read_csv(suite / condition / "truth_abundances.tsv", sep="\t")
     summary = json.loads((suite / condition / "truth_summary.json").read_text())
 
-    oracle = None
-    if not (arm in ("base", "oracle_alloc_seed") or arm in _RULER_ARMS):
-        if oracle_cache is None:
-            raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
-        oracle = load_oracle(bam, index, pipeline_config, suite, oracle_cache, condition)
-
-    if arm == "oracle_alloc_seed":
-        # the shipped coverage seed is kept, so the arm varies one thing against `base`: the allocation
-        restore, fired = install_truth_weights(truth_weights(truth, index))
-    elif arm in _RULER_ARMS:
-        # checked before the fall-through: `install_arm` has no fields for a ruler arm
-        restore, fired = install_ruler_arm(arm, capture_truth_factor(suite, index, condition))
-    else:
-        restore, fired = install_arm(arm, oracle)
+    restore, fired = install_condition_arm(arm, suite, index, condition, pipeline_config, oracle_cache, truth)
     start = time.perf_counter()
     try:
         result = run_pipeline(bam, index, pipeline_config)
@@ -614,13 +605,7 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
         common["ruler_truth_delta"] = float(fired["truth_delta"])
     library = score_library(result, quant, summary)
     if bam_name != ORACLE_BAM:
-        # the same truth as the simulator's alignments, and beside it what the aligner left out: the gDNA
-        # fraction's truth is then also read over the templates that reached Rigel
-        loss = aligner_loss(Path(bam), summary.get("origin_counts", {}))
-        library.update(loss)
-        t_g = library["gdna_true"] - loss["unaligned_gdna"]
-        t_r = library["rna_true"] - loss["unaligned_mrna"] - loss["unaligned_nrna"]
-        library["gdna_frac_true_aligned"] = t_g / (t_g + t_r) if (t_g + t_r) > 0 else float("nan")
+        library.update(aligned_library_truth(library, Path(bam), summary))
     return [
         {**common, "axis": "transcript", **score_transcripts(quant, truth)},
         # the same scorer over genes, isoform ambiguity summed away
@@ -656,6 +641,181 @@ def _signed(x: float) -> str:
     return f"{x:+,.0f}"
 
 
+#: the "How to read this" section of the markdown report, one bullet a line
+_MD_HOW_TO_READ = (
+    "- **Three pools, and they answer different questions.** `gDNA` is contamination the "
+    "deconvolution must remove; `nascent RNA` is the SYNTHETIC entity this index manufactures for "
+    "each multi-exon gene; `annotated RNA` is the transcript table a user reads. The split is on "
+    "`is_synthetic`, never `is_single_exon` — a single-exon annotated transcript is ANNOTATED RNA.",
+    "- **The gDNA estimate includes intergenic fragments**, which reach no locus and never enter "
+    "the EM. Off capture they are more than half of all gDNA.",
+    "- **Percent error is undefined where the truth is zero** and is printed `n/a`. At `g00` the "
+    "true gDNA count is exactly 0; the raw count beside it is the whole of the answer there.",
+    "- **Read per stratum, never pooled.** Three strata are in scope. `unstranded × capture ON` is "
+    "DEFERRED — reported on every benchmark, never a development target — and it carries most of "
+    "the error, so a pooled total would be its total.",
+    "- **An effect is judged by its size, with genes and pools read beside the transcript table.** "
+    "An A/B pair runs with the scan pinned (`--set scan.total_threads=1`) and is exactly "
+    "reproducible.",
+    "- **`expressed` and `detected` are the scored sets, and the truth table is larger than "
+    "either.** It carries one row per SYNTHETIC nascent entity as well, and those rows are zero on "
+    "both sides — zero truth and zero estimate, since the transcript table drops them — so they "
+    "enter no figure here. A raw row count would read as thousands of transcripts scored perfectly; "
+    "it is not reported for that reason.",
+    "- **There is no false-negative column, because under fractional assignment it cannot fire.** "
+    "A false negative needs an estimate of EXACTLY zero, and a fractional posterior essentially "
+    "never is, so the column would read 0 and look like a perfect score for something "
+    "unmeasured. `under-assigned` is the live quantity and it is reported instead.",
+    "- **`MARD` is the SYMMETRIC mean absolute relative difference**, `|est−true| / (|est|+|true|)` "
+    "averaged over the expressed set, so it is bounded in [0, 1] and finite at a zero estimate — "
+    "0.5 is a 3× error, not a 50 % one. `median rel. err` is the ordinary `|est−true|/true`, over "
+    "the same set. Both are unweighted by mass: a 1-fragment transcript counts as much as a "
+    "25,000-fragment one.",
+    "- **One asymmetry in the pool rows.** The ESTIMATE splits on `is_synthetic` (the entity) while "
+    "the TRUTH splits on the simulator's template kind, and a handful of annotated single-exon "
+    "transcripts serve as their own nascent entity — their nascent fragments count in `nascent "
+    "truth` while the tool's counts for them land in `annotated`. It is a small share of the pool, "
+    "and it cannot be removed by relabelling; it is recorded so the pool rows are not read as one "
+    "partition measured twice.",
+    "- **Every stratum row includes its `g00` rung.** The terminal report excludes the zero-gDNA "
+    "control from its roll-up; this one keeps it, so the two do not agree by construction.",
+)
+
+#: the pool tables: (estimate field, or None for the intergenic-inclusive gDNA estimate; truth field; title)
+_MD_POOLS = (
+    (None, "gdna_true", "gDNA (EM + intergenic)"),
+    ("nrna_est", "nrna_true", "Nascent RNA — SYNTHETIC entities only"),
+    ("mrna_est", "mrna_true", "Annotated RNA — the transcript table"),
+)
+
+#: the transcript and gene sections: (axis, heading, blurb)
+_MD_AXES = (
+    ("transcript", "2. Transcript level — inside the annotated RNA pool",
+     "Scored over the annotated transcripts alone: gDNA and the synthetic nascent entities are "
+     "excluded, so what is left is how well the tool splits the RNA it kept. `Σ|Δ|` sums "
+     "`|estimate − truth|` over every annotated transcript, SILENT ONES INCLUDED, and splits into "
+     "`over-assigned` + `under-assigned`; `false-positive mass` is the part of the over-assignment "
+     "that landed on a transcript the simulator gave ZERO fragments, so it is a subset of `Σ|Δ|` "
+     "and the number this tool exists for."),
+    ("gene", "3. Gene level — the same, with isoform ambiguity summed away",
+     "The same scorer over genes, and the difference from the transcript row is the point: "
+     "summing a gene's isoforms collapses exactly the error that comes from not knowing WHICH "
+     "isoform a fragment came from. What survives is error in deciding whether the fragment was "
+     "RNA from this gene at all, which is the question Rigel is for."),
+)
+
+
+def _by_stratum(conds: list[str]):
+    """``(stratum, its conditions)`` for every stratum that has any, in report order, the zero-gDNA control
+    included."""
+    for st in strata(conds):
+        rows = [c for c in conds if stratum(c) == st]
+        if rows:
+            yield st, rows
+
+
+def _stratum_name(st, gap: str = "  ") -> str:
+    """``strand × capture``, marked when it is the deferred stratum."""
+    return f"{st[0]} × {st[1]}" + (f"{gap}⛔ DEFERRED" if st == DEFERRED else "")
+
+
+def _md_header(primary: dict, pname: str, conds: list[str], path: Path) -> list[str]:
+    """The title, what was scored and when, and how to read the report."""
+    modes = {r.get("assignment_mode") for r in primary.values()}
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(Path(path).stat().st_mtime))
+    return [
+        "# Rigel — end-to-end accuracy on the gDNA ladder",
+        "",
+        f"**Arm** `{pname}` · **{len(conds)} conditions** · **assignment** "
+        f"`{'/'.join(sorted(str(m) for m in modes))}` · **calibration** "
+        f"`message_policy={CalibrationConfig().message_policy!r}` · **scored** {stamp}",
+        "",
+        "Every number is scored against the simulator's own REALISED per-fragment truth — each fragment "
+        "counted exactly once, never a pre-capture molar abundance — so a difference is a fragment the "
+        "tool put somewhere the simulator did not.",
+        "",
+        "## How to read this",
+        "",
+        *_MD_HOW_TO_READ,
+        "",
+    ]
+
+
+def _md_pools(primary: dict, conds: list[str]) -> list[str]:
+    """Section 1: the three pools per scenario, then the library gDNA fraction."""
+    lines = ["## 1. Pool level — where the library's fragments went", "",
+             "One row per scenario, grouped by stratum. `Δ` is `estimate − truth` in fragments.", ""]
+    for est_f, true_f, label in _MD_POOLS:
+        lines += [f"### {label}", "", "| scenario | gDNA level | estimated | truth | Δ | % error |",
+                  "|---|---|---:|---:|---:|---:|"]
+        for st, rows in _by_stratum(conds):
+            lines.append(f"| **{_stratum_name(st)}** | | | | | |")
+            for c in rows:
+                r = primary[(c, "library")]
+                est = gdna_estimate(r) if est_f is None else r[est_f]
+                true = r[true_f]
+                lines.append(f"| `{c}` | {_gdna_level(r)} | {est:,.0f} | {true:,.0f} | "
+                             f"{_signed(est - true)} | {_pct(est, true)} |")
+        lines.append("")
+    lines += ["### Library gDNA fraction — the thermometer", "",
+              "What `rigel quant` reports as the library's gDNA share. This is the number calibration exists "
+              "to produce; the transcript table does not always keep it.", "",
+              "| scenario | estimated | truth | Δ |", "|---|---:|---:|---:|"]
+    for st, rows in _by_stratum(conds):
+        lines.append(f"| **{st[0]} × {st[1]}** | | | |")
+        for c in rows:
+            r = primary[(c, "library")]
+            e, t = r["gdna_frac_est"], r["gdna_frac_true"]
+            lines.append(f"| `{c}` | {e:.4f} | {t:.4f} | {e - t:+.4f} |")
+    return lines + [""]
+
+
+def _md_axis(primary: dict, conds: list[str], axis: str, title: str, blurb: str) -> list[str]:
+    """Section 2 or 3: the transcript or the gene table, one row per scenario."""
+    unit = "expressed" if axis == "transcript" else "expressed genes"
+    head = (f"| scenario | {unit} | detected | Σ\\|Δ\\| | Σ\\|Δ\\| as % of true | net Δ | "
+            "over-assigned | under-assigned | false-positive mass | on n | MARD | Spearman |")
+    if axis == "transcript":
+        head = head.replace("| MARD |", "| median rel. err | MARD |")
+    # count columns with the escaped pipes removed: the two `|` in `Σ\|Δ\|` are cell content, not delimiters
+    ncols = head.replace("\\|", "").count("|") - 1
+    lines = [f"## {title}", "", blurb, "", head, "|---" + "|---:" * (ncols - 1) + "|"]
+    for st, rows in _by_stratum(conds):
+        lines.append(f"| **{_stratum_name(st)}** |" + " |" * (ncols - 1))
+        for c in rows:
+            r = primary[(c, axis)]
+            share = 100.0 * r["count_abs_err"] / r["count_true"] if r["count_true"] > 0 else float("nan")
+            cells = [f"`{c}`", f"{r['n_expressed']:,}", f"{r['n_detected']:,}",
+                     f"{r['count_abs_err']:,.0f}", f"{share:.2f} %", _signed(r["count_net_err"])]
+            cells += [f"{r['count_over']:,.0f}", f"{r['count_under']:,.0f}",
+                      f"{r['fp_mass']:,.0f}", f"{r['fp_n']:,}"]
+            if axis == "transcript":
+                cells.append(f"{r['median_rel_err']:.3f}")
+            cells += [f"{r['mard']:.3f}", f"{r['spearman']:.4f}"]
+            lines.append("| " + " | ".join(cells) + " |")
+    return lines + [""]
+
+
+def _md_rollup(primary: dict, conds: list[str]) -> list[str]:
+    """Section 4: each stratum summed over its gDNA levels, never across strata."""
+    lines = ["## 4. Per stratum, summed over its gDNA levels", "",
+             "⛔ Summed WITHIN a stratum only. The strata are never added together.", "",
+             "| stratum | annotated truth | transcript Σ\\|Δ\\| | % | gene Σ\\|Δ\\| | % | nascent est | "
+             "nascent truth | gDNA est | gDNA truth |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    for st, rows in _by_stratum(conds):
+        tx = sum(primary[(c, "transcript")]["count_abs_err"] for c in rows)
+        gn = sum(primary[(c, "gene")]["count_abs_err"] for c in rows)
+        tt = sum(primary[(c, "transcript")]["count_true"] for c in rows)
+        ne = sum(primary[(c, "library")]["nrna_est"] for c in rows)
+        nt = sum(primary[(c, "library")]["nrna_true"] for c in rows)
+        ge = sum(gdna_estimate(primary[(c, "library")]) for c in rows)
+        gt = sum(primary[(c, "library")]["gdna_true"] for c in rows)
+        lines.append(f"| {_stratum_name(st, ' ')} | {tt:,.0f} | {tx:,.0f} | {100 * tx / tt:.2f} % | {gn:,.0f} | "
+                     f"{100 * gn / tt:.2f} % | {ne:,.0f} | {nt:,.0f} | {ge:,.0f} | {gt:,.0f} |")
+    return lines + [""]
+
+
 def markdown_report(path: Path, out: Path) -> None:
     """Write the per-scenario accuracy report as markdown, the report a release is judged on.
 
@@ -666,193 +826,28 @@ def markdown_report(path: Path, out: Path) -> None:
     but the truth counts them.
     """
     primary, pname = _load(path), Path(path).stem
-
-    modes = {r.get("assignment_mode") for r in primary.values()}
     conds = sorted({c for c, _ax in primary})
-    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(Path(path).stat().st_mtime))
-    from rigel.config import CalibrationConfig as _CC
-
-    L = []
-    w = L.append
-    w("# Rigel — end-to-end accuracy on the gDNA ladder")
-    w("")
-    w(f"**Arm** `{pname}` · **{len(conds)} conditions** · **assignment** "
-      f"`{'/'.join(sorted(str(m) for m in modes))}` · **calibration** "
-      f"`message_policy={_CC().message_policy!r}` · **scored** {stamp}")
-    w("")
-    w("Every number is scored against the simulator's own REALISED per-fragment truth — each fragment "
-      "counted exactly once, never a pre-capture molar abundance — so a difference is a fragment the "
-      "tool put somewhere the simulator did not.")
-    w("")
-    w("## How to read this")
-    w("")
-    w("- **Three pools, and they answer different questions.** `gDNA` is contamination the "
-      "deconvolution must remove; `nascent RNA` is the SYNTHETIC entity this index manufactures for "
-      "each multi-exon gene; `annotated RNA` is the transcript table a user reads. The split is on "
-      "`is_synthetic`, never `is_single_exon` — a single-exon annotated transcript is ANNOTATED RNA.")
-    w("- **The gDNA estimate includes intergenic fragments**, which reach no locus and never enter "
-      "the EM. Off capture they are more than half of all gDNA.")
-    w("- **Percent error is undefined where the truth is zero** and is printed `n/a`. At `g00` the "
-      "true gDNA count is exactly 0; the raw count beside it is the whole of the answer there.")
-    w("- **Read per stratum, never pooled.** Three strata are in scope. `unstranded × capture ON` is "
-      "DEFERRED — reported on every benchmark, never a development target — and it carries most of "
-      "the error, so a pooled total would be its total.")
-    w("- **An effect is judged by its size, with genes and pools read beside the transcript table.** "
-      "An A/B pair runs with the scan pinned (`--set scan.total_threads=1`) and is exactly "
-      "reproducible.")
-    w("- **`expressed` and `detected` are the scored sets, and the truth table is larger than "
-      "either.** It carries one row per SYNTHETIC nascent entity as well, and those rows are zero on "
-      "both sides — zero truth and zero estimate, since the transcript table drops them — so they "
-      "enter no figure here. A raw row count would read as thousands of transcripts scored perfectly; "
-      "it is not reported for that reason.")
-    w("- **There is no false-negative column, because under fractional assignment it cannot fire.** "
-      "A false negative needs an estimate of EXACTLY zero, and a fractional posterior essentially "
-      "never is, so the column would read 0 and look like a perfect score for something "
-      "unmeasured. `under-assigned` is the live quantity and it is reported instead.")
-    w("- **`MARD` is the SYMMETRIC mean absolute relative difference**, `|est−true| / (|est|+|true|)` "
-      "averaged over the expressed set, so it is bounded in [0, 1] and finite at a zero estimate — "
-      "0.5 is a 3× error, not a 50 % one. `median rel. err` is the ordinary `|est−true|/true`, over "
-      "the same set. Both are unweighted by mass: a 1-fragment transcript counts as much as a "
-      "25,000-fragment one.")
-    w("- **One asymmetry in the pool rows.** The ESTIMATE splits on `is_synthetic` (the entity) while "
-      "the TRUTH splits on the simulator's template kind, and a handful of annotated single-exon "
-      "transcripts serve as their own nascent entity — their nascent fragments count in `nascent "
-      "truth` while the tool's counts for them land in `annotated`. It is a small share of the pool, "
-      "and it cannot be removed by relabelling; it is recorded so the pool rows are not read as one "
-      "partition measured twice.")
-    w("- **Every stratum row includes its `g00` rung.** The terminal report excludes the zero-gDNA "
-      "control from its roll-up; this one keeps it, so the two do not agree by construction.")
-    w("")
-
-    # ── pools ────────────────────────────────────────────────────────────────────────────────────
-    w("## 1. Pool level — where the library's fragments went")
-    w("")
-    w("One row per scenario, grouped by stratum. `Δ` is `estimate − truth` in fragments.")
-    w("")
-    for pool, est_f, true_f, label in (
-        ("gDNA", None, "gdna_true", "gDNA (EM + intergenic)"),
-        ("nascent", "nrna_est", "nrna_true", "Nascent RNA — SYNTHETIC entities only"),
-        ("annotated", "mrna_est", "mrna_true", "Annotated RNA — the transcript table"),
-    ):
-        w(f"### {label}")
-        w("")
-        w("| scenario | gDNA level | estimated | truth | Δ | % error |")
-        w("|---|---|---:|---:|---:|---:|")
-        for st in strata(conds):
-            rows = [c for c in conds if stratum(c) == st]
-            if not rows:
-                continue
-            tag = f"{st[0]} × {st[1]}" + ("  ⛔ DEFERRED" if st == ("unstranded", "capture ON") else "")
-            w(f"| **{tag}** | | | | | |")
-            for c in rows:
-                r = primary[(c, "library")]
-                est = gdna_estimate(r) if est_f is None else r[est_f]
-                true = r[true_f]
-                w(f"| `{c}` | {_gdna_level(r)} | {est:,.0f} | {true:,.0f} | "
-                  f"{_signed(est - true)} | {_pct(est, true)} |")
-        w("")
-
-    w("### Library gDNA fraction — the thermometer")
-    w("")
-    w("What `rigel quant` reports as the library's gDNA share. This is the number calibration exists "
-      "to produce; the transcript table does not always keep it.")
-    w("")
-    w("| scenario | estimated | truth | Δ |")
-    w("|---|---:|---:|---:|")
-    for st in strata(conds):
-        rows = [c for c in conds if stratum(c) == st]
-        if not rows:
-            continue
-        w(f"| **{st[0]} × {st[1]}** | | | |")
-        for c in rows:
-            r = primary[(c, "library")]
-            e, t = r["gdna_frac_est"], r["gdna_frac_true"]
-            w(f"| `{c}` | {e:.4f} | {t:.4f} | {e - t:+.4f} |")
-    w("")
-
-    # ── transcript and gene ──────────────────────────────────────────────────────────────────────
-    for axis, title, blurb in (
-        ("transcript", "2. Transcript level — inside the annotated RNA pool",
-         "Scored over the annotated transcripts alone: gDNA and the synthetic nascent entities are "
-         "excluded, so what is left is how well the tool splits the RNA it kept. `Σ|Δ|` sums "
-         "`|estimate − truth|` over every annotated transcript, SILENT ONES INCLUDED, and splits into "
-         "`over-assigned` + `under-assigned`; `false-positive mass` is the part of the over-assignment "
-         "that landed on a transcript the simulator gave ZERO fragments, so it is a subset of `Σ|Δ|` "
-         "and the number this tool exists for."),
-        ("gene", "3. Gene level — the same, with isoform ambiguity summed away",
-         "The same scorer over genes, and the difference from the transcript row is the point: "
-         "summing a gene's isoforms collapses exactly the error that comes from not knowing WHICH "
-         "isoform a fragment came from. What survives is error in deciding whether the fragment was "
-         "RNA from this gene at all, which is the question Rigel is for."),
-    ):
-        w(f"## {title}")
-        w("")
-        w(blurb)
-        w("")
-        unit = "expressed" if axis == "transcript" else "expressed genes"
-        head = (f"| scenario | {unit} | detected | Σ\\|Δ\\| | Σ\\|Δ\\| as % of true | net Δ | "
-                "over-assigned | under-assigned | false-positive mass | on n | MARD | Spearman |")
-        if axis == "transcript":
-            head = head.replace("| MARD |", "| median rel. err | MARD |")
-        # count columns with the escaped pipes removed: the two `|` in `Σ\|Δ\|` are cell content, not delimiters
-        ncols = head.replace("\\|", "").count("|") - 1
-        w(head)
-        w("|---" + "|---:" * (ncols - 1) + "|")
-        for st in strata(conds):
-            rows = [c for c in conds if stratum(c) == st]
-            if not rows:
-                continue
-            tag = f"{st[0]} × {st[1]}" + ("  ⛔ DEFERRED" if st == ("unstranded", "capture ON") else "")
-            w(f"| **{tag}** |" + " |" * (ncols - 1))
-            for c in rows:
-                r = primary[(c, axis)]
-                share = 100.0 * r["count_abs_err"] / r["count_true"] if r["count_true"] > 0 else float("nan")
-                cells = [f"`{c}`", f"{r['n_expressed']:,}", f"{r['n_detected']:,}",
-                         f"{r['count_abs_err']:,.0f}", f"{share:.2f} %", _signed(r["count_net_err"])]
-                cells += [f"{r['count_over']:,.0f}", f"{r['count_under']:,.0f}",
-                          f"{r['fp_mass']:,.0f}", f"{r['fp_n']:,}"]
-                if axis == "transcript":
-                    cells.append(f"{r['median_rel_err']:.3f}")
-                cells += [f"{r['mard']:.3f}", f"{r['spearman']:.4f}"]
-                w("| " + " | ".join(cells) + " |")
-        w("")
-
-    # ── rollup ───────────────────────────────────────────────────────────────────────────────────
-    w("## 4. Per stratum, summed over its gDNA levels")
-    w("")
-    w("⛔ Summed WITHIN a stratum only. The strata are never added together.")
-    w("")
-    w("| stratum | annotated truth | transcript Σ\\|Δ\\| | % | gene Σ\\|Δ\\| | % | nascent est | "
-      "nascent truth | gDNA est | gDNA truth |")
-    w("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
-    for st in strata(conds):
-        rows = [c for c in conds if stratum(c) == st]
-        if not rows:
-            continue
-        tx = sum(primary[(c, "transcript")]["count_abs_err"] for c in rows)
-        gn = sum(primary[(c, "gene")]["count_abs_err"] for c in rows)
-        tt = sum(primary[(c, "transcript")]["count_true"] for c in rows)
-        ne = sum(primary[(c, "library")]["nrna_est"] for c in rows)
-        nt = sum(primary[(c, "library")]["nrna_true"] for c in rows)
-        ge = sum(gdna_estimate(primary[(c, "library")]) for c in rows)
-        gt = sum(primary[(c, "library")]["gdna_true"] for c in rows)
-        tag = f"{st[0]} × {st[1]}" + (" ⛔ DEFERRED" if st == ("unstranded", "capture ON") else "")
-        w(f"| {tag} | {tt:,.0f} | {tx:,.0f} | {100 * tx / tt:.2f} % | {gn:,.0f} | "
-          f"{100 * gn / tt:.2f} % | {ne:,.0f} | {nt:,.0f} | {ge:,.0f} | {gt:,.0f} |")
-    w("")
-    w("---")
-    w("")
-    w(f"Generated by `scripts/design/quant_accuracy.py --markdown` from `{pname}.jsonl`.")
-    w("")
-
+    lines = [
+        *_md_header(primary, pname, conds, path),
+        *_md_pools(primary, conds),
+        *(line for axis, title, blurb in _MD_AXES for line in _md_axis(primary, conds, axis, title, blurb)),
+        *_md_rollup(primary, conds),
+        "---",
+        "",
+        f"Generated by `scripts/design/quant_accuracy.py --markdown` from `{pname}.jsonl`.",
+        "",
+    ]
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(L))
-    print(f"  ⭐ markdown report -> {out}  ({len(L)} lines, {len(conds)} conditions)")
+    out.write_text("\n".join(lines))
+    print(f"  ⭐ markdown report -> {out}  ({len(lines)} lines, {len(conds)} conditions)")
 
 
-def report(paths: list[Path]) -> None:
-    """Print one or more arms' tables per stratum, never pooled: a panel total hides a sign flip between strata."""
-    arms = [(_load(p), Path(p).stem) for p in paths]
+#: the library row's pool fields; an arm file without them has no per-condition pool table
+_POOL_FIELDS = ("gdna_est", "gdna_true", "nrna_est", "nrna_true", "mrna_est", "mrna_true", "n_intergenic_gdna")
+
+
+def _check_comparable(arms: list[tuple[dict, str]]) -> None:
+    """Refuse arms scored under different assignment modes or over different row sets."""
     modes = {(name, r.get("assignment_mode")) for a, name in arms for r in a.values()}
     if len({m for _n, m in modes}) > 1:
         # `--set em.assignment_mode=fractional` moves every count, so a mix would report the mode's effect as
@@ -868,56 +863,34 @@ def report(paths: list[Path]) -> None:
                 f"⛔ {name} has a different row set ({len(a)} vs {len(keys)}) — an arm that is "
                 "missing conditions must not be aggregated against one that is not."
             )
-    conds = sorted({c for c, _ax in keys})
 
+
+def _print_sums(arms, conds, title: str, field: str, axis: str = "transcript") -> None:
+    """One summed quantity per stratum and arm, with the last arm over the first beside it."""
     print()
-    print("=" * 112)
-    print("  ⭐⭐⭐ TRANSCRIPT-LEVEL ACCURACY, end to end, scored against the REALISED fragment truth")
-    from rigel.config import CalibrationConfig as _CC
+    print(f"  {title}")
+    head = f"    {'stratum':<26}"
+    for _a, name in arms:
+        head += f" {name[:16]:>16}"
+    if len(arms) > 1:
+        head += f" {'arm/base':>10}"
+    print(head)
+    print("    " + "-" * (26 + 17 * len(arms) + 11))
+    for label, sel in stratum_selections(conds):
+        vals = []
+        for a, _n in arms:
+            sub = [a[(c, axis)][field] for c in conds if sel(c) and (c, axis) in a]
+            vals.append(sum(sub) if sub else float("nan"))
+        row = f"    {label:<26}"
+        for v in vals:
+            row += " " + f"{v:>14,.0f}".rjust(16)
+        if len(arms) > 1:
+            row += f" {vals[-1] / vals[0]:>10.3f}" if vals[0] else f" {'—':>10}"
+        print(row)
 
-    _cc = _CC()
-    print(f"  {len(conds)} conditions   arms: {', '.join(n for _a, n in arms)}"
-          f"   calibration: the shipped defaults (message_policy={_cc.message_policy!r})")
-    print("=" * 112)
 
-    def block(title, field, fmt="{:>14,.0f}", ratio=True, axis="transcript"):
-        print()
-        print(f"  {title}")
-        head = f"    {'stratum':<26}"
-        for _a, name in arms:
-            head += f" {name[:16]:>16}"
-        if ratio and len(arms) > 1:
-            head += f" {'arm/base':>10}"
-        print(head)
-        print("    " + "-" * (26 + 17 * len(arms) + 11))
-
-        def line(label, sel):
-            vals = []
-            for a, _n in arms:
-                sub = [a[(c, axis)][field] for c in conds if sel(c) and (c, axis) in a]
-                vals.append(sum(sub) if sub else float("nan"))
-            row = f"    {label:<26}"
-            for v in vals:
-                row += " " + fmt.format(v).rjust(16)
-            if ratio and len(arms) > 1:
-                row += f" {vals[-1] / vals[0]:>10.3f}" if vals[0] else f" {'—':>10}"
-            print(row)
-
-        for st in strata(conds):
-            line(" x ".join(st), lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
-
-    block("① TOTAL MISASSIGNED FRAGMENTS  Σ|count_est − count_true|  ·  TRANSCRIPT level",
-          "count_abs_err")
-    if any((conds[0], "gene") in a for a, _n in arms):
-        block("①g   … the SAME quantity at GENE level — isoform ambiguity summed away, so what is "
-              "left is\n       error in deciding whether the fragment was RNA from this gene at all",
-              "count_abs_err", axis="gene")
-    block("② ⭐ FALSE-POSITIVE MASS — estimate on transcripts the simulator gave ZERO fragments",
-          "fp_mass")
-    block("③ FALSE-NEGATIVE MASS — real RNA the tool assigned nowhere", "fn_mass")
-    block("④ TPM error, Σ|Δ| out of 1e6 (assignment only — see the docstring)", "tpm_abs_err")
-
-    # rank statistics do not sum; report the mass-free mean and say so
+def _print_rank(arms, conds) -> None:
+    """⑤: the rank statistics, which do not sum, as a mean over conditions."""
     print()
     print("  ⑤ RANK / SHAPE (a mean over conditions — these do not add)")
     head = f"    {'stratum':<26}"
@@ -925,8 +898,7 @@ def report(paths: list[Path]) -> None:
         head += f" {name[:10] + ' sprmn':>17}{name[:10] + ' mard':>17}"
     print(head)
     print("    " + "-" * (26 + 34 * len(arms)))
-
-    def rank_line(label, sel):
+    for label, sel in stratum_selections(conds):
         row = f"    {label:<26}"
         for a, _n in arms:
             sub = [a[(c, "transcript")] for c in conds if sel(c)]
@@ -935,64 +907,56 @@ def report(paths: list[Path]) -> None:
             row += f" {sp:>16.4f} {md:>16.4f}"
         print(row)
 
-    for st in strata(conds):
-        rank_line(" x ".join(st), lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
 
-    # ── ⑥ the pool level ─────────────────────────────────────────────────────────────────────────
-    #
-    # "Nascent" is a simulator input, not a solver population: `nrna_est` is mass the EM assigned to the
-    # synthetic entities, so this table scores assignment. On an `nrna_none` panel `nrna_true` is 0 and every
-    # fragment in that column is a false positive with nothing to cancel it, so the column is printed even there.
+def _print_pools(arms, conds) -> None:
+    """⑥: where the library's fragments went, per stratum and arm.
+
+    "Nascent" is a simulator input, not a solver population: `nrna_est` is mass the EM assigned to the synthetic
+    entities, so this table scores assignment. On an `nrna_none` panel `nrna_true` is 0 and every fragment in that
+    column is a false positive with nothing to cancel it, so the column is printed even there."""
     print()
     print("  ⑥ ⭐⭐⭐ POOL LEVEL — where the library's fragments went: gDNA vs NASCENT vs ANNOTATED")
     print("     ⛔ 'nascent' is a SIMULATOR input, never a population the solver has (AXIOM 0). This")
     print("        scores ASSIGNMENT. On a nrna_none panel nascent truth is 0, so that column is pure")
     print("        false positive and Δ% is undefined rather than large.")
-    _POOL_FIELDS = ("gdna_est", "gdna_true", "nrna_est", "nrna_true", "mrna_est", "mrna_true",
-                    "n_intergenic_gdna")
     for a, name in arms:
         print()
         print(f"    arm: {name}")
         print(f"    {'stratum':<26} {'pool':<20} {'est':>15} {'true':>15} {'Δ':>15} {'Δ%':>8}")
         print("    " + "-" * 102)
+        for label, sel in stratum_selections(conds):
+            _print_pool_rows(a, conds, label, sel)
 
-        def pool_rows(label, sel, a=a):
-            def tot(field):
-                return sum(a[(c, "library")][field] for c in conds
-                           if sel(c) and (c, "library") in a)
 
-            # The gDNA total includes the intergenic fragments: `gdna_est` is `gdna_em_count`, which excludes
-            # fragments that reached no locus, while `gdna_true` includes them. The `of which` rows carry no
-            # truth; only the total is scored, and it is `cli.py`'s `count_gdna`, the `fraction_gdna` numerator.
-            gdna_em, inter = tot("gdna_est"), tot("n_intergenic_gdna")
-            rows = [
-                ("gDNA (total)", gdna_em + inter, tot("gdna_true")),
-                ("  of which EM", gdna_em, None),
-                ("  of which intergenic", inter, None),
-                ("nascent", tot("nrna_est"), tot("nrna_true")),
-                ("annotated", tot("mrna_est"), tot("mrna_true")),
-            ]
-            first = True
-            for pretty, est, tru in rows:
-                if tru is None:
-                    print(f"    {label if first else '':<26} {pretty:<20} {est:>15,.0f} "
-                          f"{'—':>15} {'—':>15} {'—':>8}")
-                else:
-                    d = est - tru
-                    # a relative error against a true zero is undefined, not large
-                    pct = f"{100.0 * d / tru:>7.1f}%" if tru > 0 else "     n/a"
-                    print(f"    {label if first else '':<26} {pretty:<20} {est:>15,.0f} "
-                          f"{tru:>15,.0f} {d:>+15,.0f} {pct:>8}")
-                first = False
+def _print_pool_rows(a: dict, conds, label: str, sel) -> None:
+    def tot(field):
+        return sum(a[(c, "library")][field] for c in conds if sel(c) and (c, "library") in a)
 
-        for st in strata(conds):
-            pool_rows(" x ".join(st),
-                      lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
+    # The gDNA total includes the intergenic fragments: `gdna_est` is `gdna_em_count`, which excludes fragments
+    # that reached no locus, while `gdna_true` includes them. The `of which` rows carry no truth; only the total is
+    # scored, and it is `cli.py`'s `count_gdna`, the `fraction_gdna` numerator.
+    gdna_em, inter = tot("gdna_est"), tot("n_intergenic_gdna")
+    rows = [
+        ("gDNA (total)", gdna_em + inter, tot("gdna_true")),
+        ("  of which EM", gdna_em, None),
+        ("  of which intergenic", inter, None),
+        ("nascent", tot("nrna_est"), tot("nrna_true")),
+        ("annotated", tot("mrna_est"), tot("mrna_true")),
+    ]
+    for i, (pretty, est, tru) in enumerate(rows):
+        first = label if i == 0 else ""
+        if tru is None:
+            print(f"    {first:<26} {pretty:<20} {est:>15,.0f} {'—':>15} {'—':>15} {'—':>8}")
+            continue
+        d = est - tru
+        # a relative error against a true zero is undefined, not large
+        pct = f"{100.0 * d / tru:>7.1f}%" if tru > 0 else "     n/a"
+        print(f"    {first:<26} {pretty:<20} {est:>15,.0f} {tru:>15,.0f} {d:>+15,.0f} {pct:>8}")
 
-    # ── ⑦ the pool level, per condition ──────────────────────────────────────────────────────────
-    #
-    # the stratum roll-up says which stratum is off; this says what happened in each scenario: the same three
-    # pools and intergenic-inclusive gDNA, one line per condition
+
+def _print_pools_per_condition(arms, conds) -> None:
+    """⑦: the same three pools, intergenic-inclusive gDNA, one line per condition: the stratum roll-up says which
+    stratum is off, this says what happened in each scenario."""
     for a, name in arms:
         probe = next((a[(c, "library")] for c in conds if (c, "library") in a), None)
         if probe is None or any(f not in probe for f in _POOL_FIELDS):
@@ -1008,7 +972,9 @@ def report(paths: list[Path]) -> None:
                   f"{r['nrna_est']:>11,.0f} {r['nrna_true']:>10,.0f} "
                   f"{r['mrna_est']:>13,.0f} {r['mrna_true']:>13,.0f}")
 
-    # the library thermometer
+
+def _print_thermometer(arms, conds) -> None:
+    """⑧: the library gDNA fraction per condition, truth beside every arm."""
     print()
     print("  ⑧ LIBRARY gDNA FRACTION — the thermometer")
     head = f"    {'condition':<44} {'truth':>8}"
@@ -1022,7 +988,9 @@ def report(paths: list[Path]) -> None:
             row += f" {a[(c, 'library')]['gdna_frac_est']:>14.4f}"
         print(row)
 
-    # per condition, the deliverable
+
+def _print_errors_per_condition(arms, conds) -> None:
+    """⑨: misassigned fragments and false-positive mass per condition, the deliverable."""
     print()
     print("  ⑨ PER CONDITION — misassigned fragments and false-positive mass")
     head = f"    {'condition':<44}"
@@ -1038,10 +1006,40 @@ def report(paths: list[Path]) -> None:
         print(row)
 
 
+def report(paths: list[Path]) -> None:
+    """Print one or more arms' tables per stratum, never pooled: a panel total hides a sign flip between strata."""
+    arms = [(_load(p), Path(p).stem) for p in paths]
+    _check_comparable(arms)
+    conds = sorted({c for c, _ax in arms[0][0]})
+
+    print()
+    print("=" * 112)
+    print("  ⭐⭐⭐ TRANSCRIPT-LEVEL ACCURACY, end to end, scored against the REALISED fragment truth")
+    print(f"  {len(conds)} conditions   arms: {', '.join(n for _a, n in arms)}"
+          f"   calibration: the shipped defaults (message_policy={CalibrationConfig().message_policy!r})")
+    print("=" * 112)
+
+    _print_sums(arms, conds, "① TOTAL MISASSIGNED FRAGMENTS  Σ|count_est − count_true|  ·  TRANSCRIPT level",
+                "count_abs_err")
+    if any((conds[0], "gene") in a for a, _n in arms):
+        _print_sums(arms, conds, "①g   … the SAME quantity at GENE level — isoform ambiguity summed away, so what is "
+                    "left is\n       error in deciding whether the fragment was RNA from this gene at all",
+                    "count_abs_err", axis="gene")
+    _print_sums(arms, conds, "② ⭐ FALSE-POSITIVE MASS — estimate on transcripts the simulator gave ZERO fragments",
+                "fp_mass")
+    _print_sums(arms, conds, "③ FALSE-NEGATIVE MASS — real RNA the tool assigned nowhere", "fn_mass")
+    _print_sums(arms, conds, "④ TPM error, Σ|Δ| out of 1e6 (assignment only — see the docstring)", "tpm_abs_err")
+    _print_rank(arms, conds)
+    _print_pools(arms, conds)
+    _print_pools_per_condition(arms, conds)
+    _print_thermometer(arms, conds)
+    _print_errors_per_condition(arms, conds)
+
+
 # ── main ─────────────────────────────────────────────────────────────────────────────────────────
 
 
-def main() -> int:
+def _parse_args():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--report", nargs="+", type=Path, default=None,
                     help="print the per-stratum tables from arm jsonl files and exit")
@@ -1059,54 +1057,39 @@ def main() -> int:
                     help="defaults to <suite>/oracle_cache when that directory exists")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--jobs", type=int, default=1)
-    ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
-                    help="a config value applied to every arm, repeatable (e.g. --set "
-                         "em.assignment_mode=fractional); the same parser as every instrument's --set")
-    args = ap.parse_args()
+    add_set_option(ap, "a config value applied to every arm, repeatable (e.g. --set "
+                       "em.assignment_mode=fractional); the same parser as every instrument's --set")
+    return ap.parse_args()
 
-    if args.report:
-        report(args.report)
-        if args.markdown:
-            markdown_report(args.report[0], args.markdown)
-        return 0
-    if args.markdown:
-        raise SystemExit("--markdown needs --report FILES... (it renders arm jsonl, it runs nothing)")
-    if args.arm is None or args.out is None:
-        raise SystemExit("--arm and --out are required (or use --report)")
 
-    names = args.conditions or sorted(
-        p.name for p in args.suite.iterdir() if (p / ORACLE_BAM).is_file()
+def _build_capture_truth(suite: Path, index_dir: Path, names: list[str]) -> None:
+    """The ruler arms' capture truth, once per capture label: it takes minutes per label and every condition
+    shares it, so it is built here, before shards could race to build it."""
+    truth_index = TranscriptIndex.load(str(index_dir))
+    for label in sorted({capture_label(n) for n in names}):
+        first = next(n for n in names if capture_label(n) == label)
+        capture_truth_factor(suite, truth_index, first)
+
+
+def _run_sharded(args, names: list[str], cache: Path | None) -> int:
+    outs = run_shards(
+        Path(__file__).resolve(), names, args.jobs, args.out.parent / f".{args.out.stem}_shards",
+        lambda out, shard: ["--arm", args.arm, "--suite", str(args.suite), "--index", str(args.index),
+                            "--out", str(out), "--bam", args.bam, "--conditions", *shard,
+                            *([] if cache is None else ["--oracle-cache", str(cache)]),
+                            *set_args(args.settings)],
     )
-    check_input_bam(args.suite, names, args.arm, args.bam)
-    cache = args.oracle_cache
-    if cache is None and (args.suite / "oracle_cache").is_dir():
-        cache = args.suite / "oracle_cache"
-    if args.arm in _RULER_ARMS:
-        # the capture truth takes minutes per label and every condition shares it: build it once, here, before
-        # shards could race to build it
-        truth_index = TranscriptIndex.load(str(args.index))
-        for label in sorted({n.endswith("_capture_on") for n in names}):
-            first = next(n for n in names if n.endswith("_capture_on") == label)
-            capture_truth_factor(args.suite, truth_index, first)
+    with args.out.open("w") as fh:
+        for o in outs:
+            fh.write(o.read_text())
+    print(f"  ⭐ {args.arm}: {sum(1 for _ in args.out.open())} rows -> {args.out}")
+    return 0
 
-    if args.jobs > 1 and len(names) > 1:
-        outs = run_shards(
-            Path(__file__).resolve(), names, args.jobs, args.out.parent / f".{args.out.stem}_shards",
-            lambda out, shard: ["--arm", args.arm, "--suite", str(args.suite), "--index", str(args.index),
-                                "--out", str(out), "--bam", args.bam, "--conditions", *shard,
-                                *([] if cache is None else ["--oracle-cache", str(cache)]),
-                                *set_args(args.settings)],
-        )
-        with args.out.open("w") as fh:
-            for o in outs:
-                fh.write(o.read_text())
-        print(f"  ⭐ {args.arm}: {sum(1 for _ in args.out.open())} rows -> {args.out}")
-        return 0
 
+def _run_serial(args, names: list[str], cache: Path | None) -> int:
     index = TranscriptIndex.load(str(args.index))
-    pipeline_config = PipelineConfig()
+    pipeline_config = configured(args.settings)
     for spec in args.settings:
-        pipeline_config = set_field(pipeline_config, spec)
         print(f"  ⭐ --set {spec}", flush=True)
     rows = []
     for name in names:
@@ -1119,6 +1102,28 @@ def main() -> int:
             fh.write(json.dumps(r) + "\n")
     print(f"  ⭐ {args.arm}: {len(rows)} rows -> {args.out}")
     return 0
+
+
+def main() -> int:
+    args = _parse_args()
+    if args.report:
+        report(args.report)
+        if args.markdown:
+            markdown_report(args.report[0], args.markdown)
+        return 0
+    if args.markdown:
+        raise SystemExit("--markdown needs --report FILES... (it renders arm jsonl, it runs nothing)")
+    if args.arm is None or args.out is None:
+        raise SystemExit("--arm and --out are required (or use --report)")
+
+    names = panel_conditions(args.suite, args.conditions)
+    check_input_bam(args.suite, names, args.arm, args.bam)
+    cache = oracle_cache_dir(args.suite, args.oracle_cache)
+    if args.arm in _RULER_ARMS:
+        _build_capture_truth(args.suite, args.index, names)
+    if args.jobs > 1 and len(names) > 1:
+        return _run_sharded(args, names, cache)
+    return _run_serial(args, names, cache)
 
 
 if __name__ == "__main__":

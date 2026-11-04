@@ -27,26 +27,34 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .capture_efficiency import CaptureReading, capture_efficiencies
+from .diagnostics import CalibrationDiagnostics, SweepDiagnostics
+from .effective_length import observable_cut_shares
+from .landscape import DensityLandscape, fit_landscape
 from .messages.silent import SilentPolicy
 from .messages.transfer import TransferPolicy
-from .region_chain import BOUNDARY, REGION
+from .region_chain import (
+    BOUNDARY,
+    REGION,
+    RegionChain,
+    RegionDeconv,
+    build_region_chain,
+    on_object_axis,
+)
 from .region_geometry import (
+    RegionGeometry,
+    RegionStatics,
     build_region_geometry,
     build_region_statics,
     init_beliefs,
     region_gdna_geometry,
+    slot_signature,
 )
-from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
-from .derive import gdna_density_global
-from .capture_efficiency import CaptureReading, capture_efficiencies
-from .effective_length import observable_cut_shares
-from .blocks import SweepCapture
-from .region_chain import build_region_chain
 from .result import CalibrationResult
-from .landscape import DensityLandscape, fit_landscape
 from .signature import RegionType, coarse_type_array
-from .strand_balance import fit_strand_balance
+from .strand_balance import StrandBalance, fit_strand_balance
 from .substrate import CalibrationSubstrate
+from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from ..config import CONSTANTS
 from ..types import Strand
 
@@ -58,41 +66,6 @@ if TYPE_CHECKING:
     from .splice_graph import SpliceJunctionGeometry
 
 logger = logging.getLogger(__name__)
-
-
-def _empty_sj_geometry() -> "SpliceJunctionGeometry":
-    """An sj axis with no rows, for a graph whose references are all single-exon.
-
-    A payload scanned against such a graph has ``n_sj == 0``, so an empty axis is the only consistent input; the
-    alignment check in :func:`calibrate` catches a mismatch.
-    """
-    from .splice_graph import SpliceJunctionGeometry
-
-    e_i = np.zeros(0, dtype=np.int64)
-    return SpliceJunctionGeometry(
-        src_region=e_i,
-        dst_region=e_i.copy(),
-        strand=np.zeros(0, dtype=np.int8),
-        reach_lo=np.zeros(0, dtype=np.float64),
-        reach_hi=np.zeros(0, dtype=np.float64),
-    )
-
-
-def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
-    """Split a per-slot divisor back onto the region and contiguous-boundary axes.
-
-    A projection, not a recomputation: the result must report exactly the divisor the solver used, so the observable
-    supports ``build_region_geometry`` applied are never computed a second time.
-    """
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    eff = np.asarray(eff_slots, dtype=np.float64)
-    is_region, is_boundary = kind == REGION, kind == BOUNDARY
-    region_eff = np.zeros(int(payload.n_regions), dtype=np.float64)
-    boundary_eff = np.zeros(int(payload.n_boundaries), dtype=np.float64)
-    region_eff[obj[is_region]] = eff[is_region]
-    boundary_eff[obj[is_boundary]] = eff[is_boundary]
-    return region_eff, boundary_eff
 
 
 def _fit_gdna_hyperprior(
@@ -117,8 +90,7 @@ def _fit_gdna_hyperprior(
     isr = np.asarray(chain.kind) == REGION
     fp = np.asarray(statics.free_pos, dtype=bool)
     fn = np.asarray(statics.free_neg, dtype=bool)
-    rtype = coarse_type_array(np.asarray(region_arrays.signature))
-    ridx = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
+    slot_type = coarse_type_array(slot_signature(chain, region_arrays.signature))
     constants = CONSTANTS.calibration
     expressed = (
         isr & (eff_global > constants.opportunity_floor) & (mass_global > constants.mass_floor)
@@ -128,7 +100,7 @@ def _fit_gdna_hyperprior(
         isr
         & (eff_global > constants.opportunity_floor)
         & (mass_global <= constants.mass_floor)
-        & (rtype[ridx] != RegionType.EXON)
+        & (slot_type != RegionType.EXON)
     )
     sel = expressed & ~(fp & fn)
     # The grid must span every slot the prior is read at, regions and boundaries alike (`fit_landscape`'s
@@ -140,13 +112,12 @@ def _fit_gdna_hyperprior(
     # leaving its ambiguous regions at their prior-free share. `fit_landscape` still refuses fewer than two.
     if int((sel | anchor).sum()) < constants.min_training_regions:
         return None
-    if belief.has_composition is not None:
-        # A slot whose only evidence is a bound, or which has none, does not train the prior
-        # (`RegionBelief.has_composition`): its value is where the prior put it, so training on it would re-seed the
-        # landscape's tail at the density its own total implies. Only a sweep's belief carries the predicate. The
-        # anchor trains regardless: it is a structural statement, not a solve.
-        sel &= np.asarray(belief.has_composition, dtype=bool)
-        sel &= np.asarray(belief.var_gdna, dtype=np.float64) <= CONSTANTS.landscape.located_var
+    # A slot whose only evidence is a bound, or which has none, does not train the prior (`RegionBelief.has_composition`,
+    # which the sweep publishes): its value is where the prior put it, so training on it would re-seed the landscape's
+    # tail at the density its own total implies. The anchor trains regardless: it is a structural statement, not a
+    # solve.
+    sel &= np.asarray(belief.has_composition, dtype=bool)
+    sel &= np.asarray(belief.var_gdna, dtype=np.float64) <= CONSTANTS.landscape.located_var
     sel |= anchor
     mass = np.asarray(mass_global, dtype=np.float64)[sel]
     return fit_landscape(
@@ -155,7 +126,7 @@ def _fit_gdna_hyperprior(
         np.asarray(eff_global, dtype=np.float64)[sel],
         np.asarray(belief.var_gdna, dtype=np.float64)[sel],
         anchor=anchor[sel],
-        # the previous refit's landscape: the E-step on the location-free kernels (`landscape._estep_kernels`)
+        # the previous refit's landscape: the E-step on the location-free kernels (`landscape.estep_kernels`)
         prev=prev,
         domain=(
             np.asarray(mass_global, dtype=np.float64)[domain_sel],
@@ -176,25 +147,57 @@ def lattice_points(window: float, step: float) -> int:
 
 
 @dataclass(frozen=True, slots=True)
-class _Strand:
-    """The library's strand model as the solve reads it: the RNA sense fraction ``κ`` and ``N_rna``, the spliced count
-    it was fit from, which the protocol decision (`region_init.strand_discriminability`) reads."""
+class _SweepInputs:
+    """Everything a sweep reads, fixed for the whole calibration: the chain, its statics and geometry, the region
+    arrays, the strand model, the policy, the config, and the per-slot gDNA support ``(mass_global, eff_global)`` the
+    landscape prior is fit and read on."""
 
-    rna_sense_frac: float
-    n_rna_obs: float
+    chain: RegionChain
+    statics: RegionStatics
+    geometry: RegionGeometry
+    region_arrays: RegionArrays
+    strand: StrandBalance
+    policy: SilentPolicy | TransferPolicy
+    config: CalibrationConfig
+    mass_global: np.ndarray
+    eff_global: np.ndarray
 
 
-def _fit_strand(strand_models) -> _Strand:
-    """The strand model: ``κ``, the posterior-mean spliced sense fraction (`fit_strand_balance`), and its count.
+def _sweep_inputs(
+    payload,
+    substrate,
+    region_arrays,
+    sj,
+    gdna_fl_pmf,
+    rna_fl_pmf,
+    boundary_flags,
+    strand_model,
+    config,
+) -> _SweepInputs:
+    """The chain and its geometry, statics and strand model. The geometry owns every divisor: ``eff_gdna`` /
+    ``eff_rna`` are the contained placements at a region slot and the crossing placements at a boundary slot.
 
     The strand likelihood is binomial for both components, with no overdispersion term: no population measures one
     cleanly on real data (antisense RNA reaches the gDNA seeds, splice artifacts the junctions), and one set too high
     mutes the channel. A library with no spliced read is unstranded, κ = ½ with a dead channel, never an error."""
-    balance = fit_strand_balance(strand_models)
-    return _Strand(float(balance.rna_sense_frac), float(balance.n_observations))
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
+    geometry = build_region_geometry(chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf)
+    strand = fit_strand_balance(strand_model)
+    mass_global, eff_global = region_gdna_geometry(geometry)
+    return _SweepInputs(
+        chain=chain,
+        statics=build_region_statics(chain, region_arrays, boundary_flags),
+        geometry=geometry,
+        region_arrays=region_arrays,
+        strand=strand,
+        policy=_policy(config, strand),
+        config=config,
+        mass_global=mass_global,
+        eff_global=eff_global,
+    )
 
 
-def _policy(config, strand: _Strand):
+def _policy(config, strand: StrandBalance):
     """The message-composition policy the config names. An unknown name raises, because an arm that silently ran a
     different policy than it names could not be trusted. The transfer policy reads the library's κ."""
     if config.message_policy == "silent":
@@ -206,24 +209,7 @@ def _policy(config, strand: _Strand):
     )
 
 
-@dataclass(frozen=True, slots=True)
-class _Solve:
-    """Everything a sweep reads, fixed for the whole calibration: the chain, its statics and geometry,
-    the region arrays, the strand model, the policy, the config, and the per-slot
-    gDNA support ``(mass_global, eff_global)`` the landscape prior is fit and read on."""
-
-    chain: object
-    statics: object
-    geometry: object
-    region_arrays: object
-    strand: _Strand
-    policy: object
-    config: object
-    mass_global: np.ndarray
-    eff_global: np.ndarray
-
-
-def _init_belief(s: _Solve):
+def _init_belief(s: _SweepInputs):
     """The signature-binary G1/G2/G3 belief on the chain, before any sweep."""
     return init_beliefs(
         s.geometry,
@@ -235,7 +221,7 @@ def _init_belief(s: _Solve):
     )
 
 
-def _sweep(s: _Solve, belief, prior, capture=None):
+def _sweep(s: _SweepInputs, belief, prior, diagnostics: SweepDiagnostics | None):
     """One sweep of the chain from ``belief`` under the composition prior ``prior`` (``None``: the prior-free pass).
 
     The λ bracket is ``max(the configured window, the prior's own demand)``. ψ evaluates the landscape at
@@ -256,7 +242,6 @@ def _sweep(s: _Solve, belief, prior, capture=None):
                 lattice_points(window, cfg.sweep_logodds_step),
                 cfg.sweep_logodds_step,
             )
-    n_grid = lattice_points(window, cfg.sweep_logodds_step)
     return solve_chain(
         s.chain,
         s.statics,
@@ -264,18 +249,18 @@ def _sweep(s: _Solve, belief, prior, capture=None):
         belief,
         s.region_arrays,
         rna_sense_frac=s.strand.rna_sense_frac,
-        n_rna_obs=s.strand.n_rna_obs,
-        n_grid=n_grid,
+        n_rna_obs=float(s.strand.n_observations),
+        n_grid=lattice_points(window, cfg.sweep_logodds_step),
         logodds_window=window,
         gdna_prior=prior,
         policy=s.policy,
         block_slots=cfg.sweep_block_slots,
         n_threads=int(cfg.n_threads),
-        _capture=capture,
+        diagnostics=diagnostics,
     )
 
 
-def _solve(s: _Solve, _debug):
+def _solve(s: _SweepInputs, diagnostics: SweepDiagnostics | None):
     """The two phases; returns ``(belief, landscape)``.
 
     Phase 1 solves with no fitted prior: the Beta(½,½) reference, the strand likelihood and the messages.
@@ -287,11 +272,10 @@ def _solve(s: _Solve, _debug):
     recomputes the same messages; caching them would hold memory through calibration behind a key that must name
     every input the layer reads.
 
-    The landscape is ``None`` if no refit fitted one. With ``_debug``, the last sweep fills ``_debug["capture"]`` (a
-    :class:`~.blocks.SweepCapture`)."""
-    capture = SweepCapture() if _debug is not None else None
-    belief = _sweep(s, _init_belief(s), None, capture=capture)
-    hyperprior: DensityLandscape | None = None
+    The landscape is ``None`` if no refit fitted one. Every sweep fills ``diagnostics`` when given one, so it ends
+    holding the last."""
+    belief = _sweep(s, _init_belief(s), None, diagnostics)
+    landscape: DensityLandscape | None = None
     for it in range(int(s.config.calib_refit_iters)):
         fitted = _fit_gdna_hyperprior(
             s.chain,
@@ -300,44 +284,41 @@ def _solve(s: _Solve, _debug):
             s.region_arrays,
             s.mass_global,
             s.eff_global,
-            prev=hyperprior,
+            prev=landscape,
         )
         if fitted is None:
             # the belief stands as solved under the previous landscape, so that landscape is the answer's
             break
-        hyperprior = fitted
-        capture = SweepCapture() if _debug is not None else None
-        belief = _sweep(s, _init_belief(s), hyperprior, capture=capture)
+        landscape = fitted
+        belief = _sweep(s, _init_belief(s), landscape, diagnostics)
         logger.debug(
-            "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",
+            "calibration: PHASE 2 gDNA-landscape refit %d/%d (%d training regions)",
             it + 1,
             s.config.calib_refit_iters,
-            hyperprior.n_train,
+            landscape.n_train,
         )
-    if _debug is not None:
-        _debug["capture"] = capture
-    return belief, hyperprior
+    return belief, landscape
 
 
 def _result(
-    substrate,
-    regions,
-    boundaries,
-    strand: _Strand,
-    region_eff_gdna,
-    boundary_eff_gdna,
-    capture: CaptureReading | None,
-    boundary_conserved_gdna: np.ndarray,
+    s: _SweepInputs, substrate, belief, landscape, gdna_fl_pmf: np.ndarray
 ) -> CalibrationResult:
     """Project the solved chain onto the two payload axes and publish the :class:`CalibrationResult`.
+
+    The published gDNA effective lengths are projected off the geometry, never recomputed, so the published divisor
+    is the one the solver used. gDNA's conserved share at a boundary (`effective_length.observable_cut_shares`) is not a
+    solver divisor: it partitions gDNA's starts over the objects for the EM's gDNA length, and gDNA's template does not
+    end, so a side with nothing masked has unbounded reach.
 
     ``count_rna_spliced_boundary`` is the certified-RNA crossings per boundary (molecules that crossed contiguously
     having spliced elsewhere); `chain_boundary_deconv` adds all of it to ``rna_mass``. A region has no such count:
     its contained population cannot hold a spliced molecule. ``count_rna_sj`` is the jumping population, pure RNA,
-    exported verbatim. Each ``mass_per_crossing`` converts only its own population's incidences to fragments.
-    ``capture`` is ``None`` when no landscape was fitted: every efficiency is then 1, there is no bulk density and
-    the saturation level is 1."""
+    exported verbatim. Each ``mass_per_crossing`` converts only its own population's incidences to fragments."""
     n_regions, n_boundaries = int(substrate.n_regions), int(substrate.n_boundaries)
+    regions = chain_region_deconv(s.chain, belief, substrate)
+    boundaries = chain_boundary_deconv(s.chain, belief, substrate)
+    region_eff = on_object_axis(s.chain, s.geometry.eff_gdna, REGION, n_regions)
+    boundary_eff = on_object_axis(s.chain, s.geometry.eff_gdna, BOUNDARY, n_boundaries)
     return CalibrationResult(
         count_gdna_region=regions.gdna_mass,
         count_rna_region=regions.rna_mass,
@@ -350,9 +331,9 @@ def _result(
         count_rna_sj=np.asarray(substrate.sj.count, dtype=np.float64).sum(axis=1),
         boundary_spliced_mass_per_crossing=substrate.boundary_spliced.mass_per_crossing,
         sj_mass_per_crossing=substrate.sj.mass_per_crossing,
-        gdna_region_eff_len=region_eff_gdna,
-        gdna_boundary_eff_len=boundary_eff_gdna,
-        gdna_boundary_conserved_len=boundary_conserved_gdna,
+        gdna_region_eff_len=region_eff,
+        gdna_boundary_eff_len=boundary_eff,
+        gdna_boundary_conserved_len=observable_cut_shares(s.region_arrays, gdna_fl_pmf),
         # the simplex ψ solved, published per object; the masses above are the same answer with the
         # two RNA strands added together
         gdna_frac_region=regions.gdna_frac,
@@ -361,31 +342,67 @@ def _result(
         gdna_frac_boundary=boundaries.gdna_frac,
         rna_pos_frac_boundary=boundaries.rna_pos_frac,
         rna_neg_frac_boundary=boundaries.rna_neg_frac,
-        gdna_density_global=gdna_density_global(
-            regions, boundaries, region_eff_gdna, boundary_eff_gdna
-        ),
-        gdna_bulk_density=None if capture is None else capture.bulk_density,
-        gdna_capture_saturation=1.0 if capture is None else capture.saturation,
-        gdna_capture_efficiency_region=(
-            np.ones(n_regions) if capture is None else capture.efficiency_region
-        ),
-        gdna_capture_efficiency_boundary=(
-            np.ones(n_boundaries) if capture is None else capture.efficiency_boundary
-        ),
-        rna_sense_frac=strand.rna_sense_frac,
+        gdna_density_global=_gdna_density_global(regions, boundaries, region_eff, boundary_eff),
+        **_capture_fields(landscape, regions, boundaries, region_eff, boundary_eff),
+        rna_sense_frac=s.strand.rna_sense_frac,
         n_regions=n_regions,
         n_boundaries=n_boundaries,
         n_sj=int(substrate.n_sj),
     )
 
 
-def _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf: np.ndarray) -> np.ndarray:
-    """gDNA's conserved share at every boundary over the observable genome (`effective_length.observable_cut_shares`).
-    gDNA's template does not end, so a side with nothing masked has unbounded reach."""
-    return observable_cut_shares(region_arrays, gdna_fl_pmf)
+def _gdna_density_global(
+    regions: RegionDeconv,
+    boundaries: RegionDeconv,
+    region_eff: np.ndarray,
+    boundary_eff: np.ndarray,
+) -> float:
+    """The library-average gDNA density, a QC scalar: ``Σ gDNA mass / Σ gDNA effective length`` over both axes.
+
+    A ratio of sums, never a mean of ratios: a rate pooled over unequal supports is not the average of the per-object
+    rates. ``0.0`` when there is no support anywhere: an empty library has no density, and a floored division would
+    report one.
+    """
+    total_g = float(
+        np.asarray(regions.gdna_mass, dtype=np.float64).sum()
+        + np.asarray(boundaries.gdna_mass, dtype=np.float64).sum()
+    )
+    total_l = float(
+        np.asarray(region_eff, dtype=np.float64).sum()
+        + np.asarray(boundary_eff, dtype=np.float64).sum()
+    )
+    return total_g / total_l if total_l > 0.0 else 0.0
 
 
-def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> None:
+def _capture_fields(
+    landscape: DensityLandscape | None,
+    regions: RegionDeconv,
+    boundaries: RegionDeconv,
+    region_eff: np.ndarray,
+    boundary_eff: np.ndarray,
+) -> dict:
+    """The result's capture reading: each object's own gDNA density read against the last landscape's bulk, with the
+    landscape as a two-group prior and the object's count as the likelihood (`capture_efficiency`). With no
+    landscape every efficiency is exactly 1, there is no bulk density and the saturation level is 1."""
+    if landscape is None:
+        return dict(
+            gdna_bulk_density=None,
+            gdna_capture_saturation=1.0,
+            gdna_capture_efficiency_region=np.ones(region_eff.shape[0]),
+            gdna_capture_efficiency_boundary=np.ones(boundary_eff.shape[0]),
+        )
+    reading: CaptureReading = capture_efficiencies(
+        landscape, regions.gdna_mass, region_eff, boundaries.gdna_mass, boundary_eff
+    )
+    return dict(
+        gdna_bulk_density=reading.bulk_density,
+        gdna_capture_saturation=reading.saturation,
+        gdna_capture_efficiency_region=reading.efficiency_region,
+        gdna_capture_efficiency_boundary=reading.efficiency_boundary,
+    )
+
+
+def _log_summary(result: CalibrationResult, strand: StrandBalance, substrate, sj) -> None:
     """Log the sizes, the density scalar, the strand model and the capture reading.
 
     The sj sense fraction is logged beside κ as QC: a large gap flags a strand-model / accumulator mismatch. Sense is
@@ -420,27 +437,9 @@ def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> N
     )
 
 
-def calibrate(
-    payload: "AccumulatorPayload",
-    region_arrays: "RegionArrays",
-    strand_model: "StrandModels",
-    gdna_fl_pmf: "np.ndarray",
-    rna_fl_pmf: "np.ndarray",
-    config: "CalibrationConfig",
-    sj: "SpliceJunctionGeometry | None" = None,
-    _debug: dict | None = None,
-    boundary_flags: "np.ndarray | None" = None,
-) -> CalibrationResult:
-    """Deconvolve the library into gDNA / RNA per object and publish the :class:`CalibrationResult`.
-
-    The stages run in the module docstring's order. ``sj`` is the splice graph's sj axis
-    (:func:`~rigel.calibration.splice_graph.build_sj_geometry_arrays`) in the accumulator's sj slot order; ``None``
-    means the graph has no sj boundaries (a single-exon-only reference), which is not the same as "no sj flux".
-    ``boundary_flags`` is the graph's per-contiguous-boundary structural bits, carried onto the chain as
-    ``RegionStatics.boundary_flags``. A zero ``gdna_density_global`` and a zero per-object gDNA mass are valid outputs.
-    """
-    substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
-    sj = _empty_sj_geometry() if sj is None else sj
+def _check_sj_axis(sj: "SpliceJunctionGeometry", substrate: CalibrationSubstrate) -> None:
+    """Refuse an sj axis whose length disagrees with the payload's: one addressing a different graph would place every
+    splice on the wrong boundary."""
     if int(sj.n_sj) != int(substrate.n_sj):
         raise ValueError(
             f"the sj axis has {int(sj.n_sj)} boundaries but the payload has "
@@ -450,70 +449,56 @@ def calibrate(
             "on the wrong boundary."
         )
 
-    # The chain and its geometry come first, and the geometry owns every divisor: ``eff_gdna`` / ``eff_rna`` are the
-    # contained placements at a region slot and the crossing placements at a boundary slot. The result's gDNA
-    # effective lengths are projected off the geometry (`_project_eff`), so the published divisor is the one the
-    # solver used. gDNA's conserved share at a boundary (`_gdna_boundary_conserved_len`) is not a solver divisor: it
-    # partitions gDNA's starts over the objects for the EM's gDNA length.
-    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
-    geometry = build_region_geometry(chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf)
-    statics = build_region_statics(chain, region_arrays, boundary_flags)
-    region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
 
-    strand = _fit_strand(strand_model)
-    # the per-slot gDNA support the landscape prior is fit and read on
-    mass_global, eff_global = region_gdna_geometry(geometry)
-    solve = _Solve(
-        chain,
-        statics,
-        geometry,
-        region_arrays,
-        strand,
-        _policy(config, strand),
-        config,
-        mass_global,
-        eff_global,
-    )
-    belief, gdna_hyperprior = _solve(solve, _debug)
-    regions = chain_region_deconv(chain, belief, substrate)
-    boundaries = chain_boundary_deconv(chain, belief, substrate)
-    # Each object's own gDNA density read against the last landscape's bulk, with the landscape as a two-group prior
-    # and the object's count as the likelihood (`capture_efficiency`). No landscape: every efficiency is exactly 1.
-    capture = (
-        None
-        if gdna_hyperprior is None
-        else capture_efficiencies(
-            gdna_hyperprior,
-            regions.gdna_mass,
-            region_eff_gdna,
-            boundaries.gdna_mass,
-            boundary_eff_gdna,
-        )
-    )
-    result = _result(
+def calibrate(
+    payload: "AccumulatorPayload",
+    region_arrays: "RegionArrays",
+    strand_model: "StrandModels",
+    gdna_fl_pmf: "np.ndarray",
+    rna_fl_pmf: "np.ndarray",
+    config: "CalibrationConfig",
+    *,
+    sj: "SpliceJunctionGeometry",
+    boundary_flags: "np.ndarray",
+    diagnostics: CalibrationDiagnostics | None = None,
+) -> CalibrationResult:
+    """Deconvolve the library into gDNA / RNA per object and publish the :class:`CalibrationResult`.
+
+    The stages run in the module docstring's order. ``sj`` is the splice graph's sj axis
+    (:func:`~rigel.calibration.splice_graph.build_sj_geometry_arrays`) in the accumulator's sj slot order, and
+    ``boundary_flags`` the graph's per-contiguous-boundary structural bits
+    (:func:`~rigel.calibration.splice_graph.build_boundary_flags_array`), carried onto the chain as
+    ``RegionStatics.boundary_flags``. A zero ``gdna_density_global`` and a zero per-object gDNA mass are valid outputs.
+
+    ``diagnostics``, a record instruments and tests pass, is filled with the solve's intermediates
+    (:class:`~.diagnostics.CalibrationDiagnostics`); production passes none.
+    """
+    substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
+    _check_sj_axis(sj, substrate)
+    inputs = _sweep_inputs(
+        payload,
         substrate,
-        regions,
-        boundaries,
-        strand,
-        region_eff_gdna,
-        boundary_eff_gdna,
-        capture,
-        _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
+        region_arrays,
+        sj,
+        gdna_fl_pmf,
+        rna_fl_pmf,
+        boundary_flags,
+        strand_model,
+        config,
     )
-
-    if _debug is not None:  # inert diagnostic hook — the solved chain internals
-        _debug.update(
-            chain=chain,
-            belief=belief,  # the final belief, after the refits if any
-            geometry=geometry,
-            statics=statics,
-            substrate=substrate,
-            sj=sj,
-            region_arrays=region_arrays,
-            gdna_hyperprior=gdna_hyperprior,  # the deconvolved-gDNA landscape (None if no refit)
-            rna_sense_frac=strand.rna_sense_frac,
-        )
-    _log_summary(result, strand, substrate, sj)
+    belief, landscape = _solve(inputs, None if diagnostics is None else diagnostics.sweep)
+    result = _result(inputs, substrate, belief, landscape, gdna_fl_pmf)
+    if diagnostics is not None:
+        diagnostics.chain = inputs.chain
+        diagnostics.geometry = inputs.geometry
+        diagnostics.statics = inputs.statics
+        diagnostics.substrate = substrate
+        diagnostics.sj = sj
+        diagnostics.region_arrays = region_arrays
+        diagnostics.belief = belief
+        diagnostics.landscape = landscape
+        diagnostics.rna_sense_frac = inputs.strand.rna_sense_frac
+    _log_summary(result, inputs.strand, substrate, sj)
     return result
 
 

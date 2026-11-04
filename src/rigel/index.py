@@ -34,7 +34,7 @@ import pandas as pd
 import pysam
 
 from .config import CONSTANTS, IndexConfig
-from .types import IntervalType, AnnotatedInterval
+from .types import AnnotatedInterval, Interval, IntervalType, Strand
 from .transcript import Transcript
 
 
@@ -157,11 +157,7 @@ def _check_blacklist_references(bl_df: pd.DataFrame, ref_lengths: dict[str, int]
         return
     refs = list(dict.fromkeys(bl_df["ref"].astype(str)))
     beyond = [r for r in refs if r not in ref_lengths]
-
-    def some(names):
-        k = CONSTANTS.qc.report_examples
-        return ", ".join(names[:k]) + (f" and {len(names) - k:,} more" if len(names) > k else "")
-
+    some = CONSTANTS.qc.examples
     if len(beyond) == len(refs):
         raise ValueError(
             f"None of the {len(refs):,} references in the splice blacklist of the alignable store {store} is in the "
@@ -204,7 +200,7 @@ def load_ref_lengths(path: str | Path) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Build helpers (public for testability)
+# The annotation: references, transcripts and their nascent spans
 # ---------------------------------------------------------------------------
 
 
@@ -414,172 +410,152 @@ def _cluster_coordinates(coords: np.ndarray, tolerance: int) -> np.ndarray:
     return ids
 
 
-def create_nrna_transcripts(
-    transcripts: list[Transcript],
-    tolerance: int = IndexConfig.nascent_tolerance,
-) -> tuple[list[Transcript], dict[int, tuple], dict[tuple, int], dict[tuple, "Transcript"]]:
-    """Create synthetic nRNA transcripts and detect their annotated equivalents.
+def _clustered_envelope(coords: np.ndarray, tolerance: int, outer: np.ufunc) -> np.ndarray:
+    """Each coordinate's cluster envelope, in input order: the coordinates, sorted, cluster within *tolerance* bp
+    (:func:`_cluster_coordinates`), and each takes its cluster's outermost value (``np.minimum`` for start sites,
+    ``np.maximum`` for end sites)."""
+    order = np.argsort(coords, kind="mergesort")
+    ids = _cluster_coordinates(coords[order], tolerance)
+    fill = np.iinfo(np.int64).max if outer is np.minimum else np.iinfo(np.int64).min
+    envelope = np.full(ids[-1] + 1 if len(ids) else 0, fill, dtype=np.int64)
+    outer.at(envelope, ids, coords[order])
+    out = np.empty(len(coords), dtype=np.int64)
+    out[order] = envelope[ids]
+    return out
 
-    1. Collect (ref, strand, start, end) for each multi-exon transcript.
-    2. Cluster start and end sites within *tolerance* bp, independently. The merged span is the outer envelope
-       (min start, max end), so a synthetic is never smaller than a contributing transcript.
-    3. A single-exon transcript that already covers a merged span (exact match or full containment) is the span's
-       entity, and its ``span_n_contributors`` counts the span's transcripts.
-    4. Each uncovered span becomes a synthetic single-exon ``Transcript`` (``is_synthetic``, ``is_single_exon``).
-    5. Synthetics are gene-neutral: their sentinel ``g_id`` is their own ``t_id`` and ``g_type`` is
-       ``"nascent_rna"``. A merged span may draw on transcripts of several genes, so inheriting one contributor's gene
-       would be arbitrary; gene summaries are derived downstream from annotated contributors only.
 
-    Parameters
-    ----------
-    transcripts : list[Transcript]
-        Sorted transcript list (``t_index`` already assigned).
-    tolerance : int
-        Maximum distance (bp) for TSS/TES clustering.
-
-    Returns
-    -------
-    synthetics : list[Transcript]
-        Synthetic nRNA transcripts to append to the transcript list.
-        Callers must assign ``t_index`` and ``g_index`` to each returned
-        transcript.
-    t_to_span_key : dict[int, tuple]
-        Mapping from annotated multi-exon transcript ``t_index`` to its
-        merged nRNA span key ``(ref, strand, start, end)``.  Used by
-        the caller to set ``span_t_index`` after ``t_index`` assignment.
-    span_to_syn_idx : dict[tuple, int]
-        Mapping from uncovered span key to the index in *synthetics*.
-    covered_equiv : dict[tuple, Transcript]
-        Mapping from covered span key to the annotated single-exon
-        transcript that covers it.
-    """
-    from .types import Interval, Strand
-
-    # -- Step 1: Collect multi-exon transcript spans --------------------------
-    multi_exon: list[Transcript] = []
-    for t in transcripts:
-        if len(t.exons) >= 2:
-            multi_exon.append(t)
-
-    if not multi_exon:
-        return [], {}, {}, {}
-
-    # -- Step 2: TSS/TES clustering per (ref, strand) ------------------------
-    # Group multi-exon transcripts by (ref, strand)
+def _merged_span_keys(multi_exon: list[Transcript], tolerance: int) -> dict[int, tuple]:
+    """Each multi-exon transcript's merged span ``(ref, strand, start, end)``, by ``t_index``: its start and end sites
+    clustered within *tolerance* bp among the transcripts on its reference and strand, independently, the span being
+    the clusters' outer envelope, so a synthetic is never smaller than a contributing transcript."""
     groups: dict[tuple[str, int], list[Transcript]] = collections.defaultdict(list)
     for t in multi_exon:
         groups[(t.ref, int(t.strand))].append(t)
-
-    # For each transcript, compute merged (representative) start and end.
-    # Store as {t_index: (merged_start, merged_end)}.
-    t_to_merged_span: dict[int, tuple[int, int]] = {}
-
-    for grp in groups.values():
-        # Cluster starts
+    keys: dict[int, tuple] = {}
+    for (ref, strand), grp in groups.items():
         starts = np.array([t.start for t in grp], dtype=np.int64)
-        order_s = np.argsort(starts, kind="mergesort")
-        sorted_starts = starts[order_s]
-        cids_s = _cluster_coordinates(sorted_starts, tolerance)
-
-        # Map cluster_id → min start (outer envelope)
-        n_clusters_s = cids_s[-1] + 1 if len(cids_s) else 0
-        cid_min_start = np.full(n_clusters_s, np.iinfo(np.int64).max, dtype=np.int64)
-        np.minimum.at(cid_min_start, cids_s, sorted_starts)
-
-        # Back-map to original order
-        rep_starts = np.empty(len(grp), dtype=np.int64)
-        for i, oi in enumerate(order_s):
-            rep_starts[oi] = cid_min_start[cids_s[i]]
-
-        # Cluster ends
         ends = np.array([t.end for t in grp], dtype=np.int64)
-        order_e = np.argsort(ends, kind="mergesort")
-        sorted_ends = ends[order_e]
-        cids_e = _cluster_coordinates(sorted_ends, tolerance)
+        spans = zip(
+            _clustered_envelope(starts, tolerance, np.minimum).tolist(),
+            _clustered_envelope(ends, tolerance, np.maximum).tolist(),
+        )
+        for t, (start, end) in zip(grp, spans):
+            keys[t.t_index] = (ref, strand, start, end)
+    return keys
 
-        n_clusters_e = cids_e[-1] + 1 if len(cids_e) else 0
-        cid_max_end = np.full(n_clusters_e, np.iinfo(np.int64).min, dtype=np.int64)
-        np.maximum.at(cid_max_end, cids_e, sorted_ends)
 
-        rep_ends = np.empty(len(grp), dtype=np.int64)
-        for i, oi in enumerate(order_e):
-            rep_ends[oi] = cid_max_end[cids_e[i]]
-
-        for j, t in enumerate(grp):
-            t_to_merged_span[t.t_index] = (int(rep_starts[j]), int(rep_ends[j]))
-
-    # -- Step 3: Dedup merged spans -------------------------------------------
-    # One representative transcript per span, kept only for a stable iteration order; synthetics are
-    # gene-neutral, so nothing is inherited from it
-    merged_spans: dict[tuple, Transcript] = {}  # key → first-seen transcript
-    span_contributor_count: dict[tuple, int] = collections.defaultdict(int)
-    t_to_span_key: dict[int, tuple] = {}  # annotated t_index → span key
-    for t in multi_exon:
-        ms, me = t_to_merged_span[t.t_index]
-        key = (t.ref, int(t.strand), ms, me)
-        if key not in merged_spans:
-            merged_spans[key] = t
-        span_contributor_count[key] += 1
-        t_to_span_key[t.t_index] = key
-
-    # -- Step 4: Detect annotated equivalents ---------------------------------
-    # Build single-exon lookup: (ref, strand) → sorted list of (start, end, t)
-    se_by_loc: dict[tuple[str, int], list[tuple[int, int, Transcript]]] = collections.defaultdict(
+def _covering_transcripts(transcripts: list[Transcript], spans) -> dict[tuple, Transcript]:
+    """The annotated single-exon transcript that covers each span one covers (an exact match or full containment): the
+    first, by start then end, on the span's reference and strand."""
+    by_place: dict[tuple[str, int], list[tuple[int, int, Transcript]]] = collections.defaultdict(
         list
     )
     for t in transcripts:
         if len(t.exons) == 1:
-            se_by_loc[(t.ref, int(t.strand))].append((t.start, t.end, t))
-    for key in se_by_loc:
-        se_by_loc[key].sort(key=lambda x: (x[0], x[1]))
-
-    covered: set[tuple] = set()
-    covered_equiv: dict[tuple, Transcript] = {}  # span_key → equiv transcript
-    for span_key in merged_spans:
+            by_place[(t.ref, int(t.strand))].append((t.start, t.end, t))
+    for candidates in by_place.values():
+        candidates.sort(key=lambda x: (x[0], x[1]))
+    covering: dict[tuple, Transcript] = {}
+    for span_key in spans:
         ref, strand, m_start, m_end = span_key
-        candidates = se_by_loc.get((ref, strand), [])
-        for s_start, s_end, s_tx in candidates:
+        for s_start, s_end, s_tx in by_place.get((ref, strand), []):
             if s_start > m_start:
                 break  # sorted by start, no more can contain
-            if s_start <= m_start and m_end <= s_end:
-                s_tx.span_n_contributors += span_contributor_count[span_key]
-                covered.add(span_key)
-                covered_equiv[span_key] = s_tx
+            if m_end <= s_end:
+                covering[span_key] = s_tx
                 break
+    return covering
 
-    # -- Step 5: Create synthetic transcripts ---------------------------------
-    synthetics: list[Transcript] = []
-    span_to_syn_idx: dict[tuple, int] = {}  # span_key → index in synthetics list
-    for span_key in merged_spans:
-        if span_key in covered:
-            continue
-        ref, strand_int, s, e = span_key
-        t_id = f"RIGEL_NRNA_{ref}_{strand_int}_{s}_{e}"
-        # Synthetic rows are gene-neutral. The sentinel g_id ( = t_id) keeps
-        # the g_id column non-null so downstream categorical/string code works
-        # unchanged; a dedicated g_index is allocated by the index builder.
-        syn = Transcript(
-            ref=ref,
-            strand=Strand(strand_int),
-            exons=[Interval(s, e)],
-            length=e - s,
-            t_id=t_id,
-            g_id=t_id,
-            g_name="",
-            g_type="nascent_rna",
-            is_single_exon=True,
-            is_synthetic=True,
-            span_n_contributors=span_contributor_count[span_key],
-        )
-        span_to_syn_idx[span_key] = len(synthetics)
-        synthetics.append(syn)
 
+def _synthetic_span(span_key: tuple, n_contributors: int) -> Transcript:
+    """The synthetic single-exon transcript over a merged span. It is gene-neutral: its sentinel ``g_id`` is its own
+    ``t_id``, which keeps the ``g_id`` column non-null, and the index builder gives it a ``g_index`` of its own."""
+    ref, strand, start, end = span_key
+    t_id = f"RIGEL_NRNA_{ref}_{strand}_{start}_{end}"
+    return Transcript(
+        ref=ref,
+        strand=Strand(strand),
+        exons=[Interval(start, end)],
+        length=end - start,
+        t_id=t_id,
+        g_id=t_id,
+        g_name="",
+        g_type="nascent_rna",
+        is_single_exon=True,
+        is_synthetic=True,
+        span_n_contributors=n_contributors,
+    )
+
+
+def create_nrna_transcripts(
+    transcripts: list[Transcript],
+    tolerance: int = IndexConfig.nascent_tolerance,
+) -> tuple[list[Transcript], dict[int, tuple], dict[tuple, Transcript]]:
+    """Create synthetic nRNA transcripts and detect their annotated equivalents.
+
+    1. Each multi-exon transcript's start and end sites are clustered within *tolerance* bp, independently, into a
+       merged span (:func:`_merged_span_keys`).
+    2. A single-exon transcript that already covers a merged span (exact match or full containment) is the span's
+       entity, and its ``span_n_contributors`` counts the span's transcripts (:func:`_covering_transcripts`).
+    3. Each uncovered span becomes a synthetic single-exon ``Transcript`` (``is_synthetic``, ``is_single_exon``).
+       Synthetics are gene-neutral (:func:`_synthetic_span`): a merged span may draw on transcripts of several genes,
+       so inheriting one contributor's gene would be arbitrary; gene summaries are derived downstream from annotated
+       contributors only.
+
+    *transcripts* is the sorted transcript list, ``t_index`` already assigned. Returns ``(synthetics, t_to_span_key,
+    covered_equiv)``: the synthetics to append, in their spans' first-seen order (the caller assigns their ``t_index``
+    and ``g_index``); each annotated multi-exon transcript's span key ``(ref, strand, start, end)``, by ``t_index``,
+    from which the caller sets ``span_t_index``; and the annotated single-exon transcript covering each covered span.
+    """
+    multi_exon = [t for t in transcripts if len(t.exons) >= 2]
+    if not multi_exon:
+        return [], {}, {}
+
+    t_to_span_key = _merged_span_keys(multi_exon, tolerance)
+    # each span's contributing transcripts, in the spans' first-seen order
+    contributors: dict[tuple, int] = {}
+    for t in multi_exon:
+        key = t_to_span_key[t.t_index]
+        contributors[key] = contributors.get(key, 0) + 1
+
+    covered_equiv = _covering_transcripts(transcripts, contributors)
+    for span_key, s_tx in covered_equiv.items():
+        s_tx.span_n_contributors += contributors[span_key]
+    synthetics = [
+        _synthetic_span(span_key, n)
+        for span_key, n in contributors.items()
+        if span_key not in covered_equiv
+    ]
     logger.info(
-        f"nRNA: {len(merged_spans)} merged spans "
-        f"({len(covered)} annotated equiv, "
+        f"nRNA: {len(contributors)} merged spans "
+        f"({len(covered_equiv)} annotated equiv, "
         f"{len(synthetics)} synthetic)"
     )
-    return synthetics, t_to_span_key, span_to_syn_idx, covered_equiv
+    return synthetics, t_to_span_key, covered_equiv
+
+
+def _add_nascent_spans(transcripts: list[Transcript], tolerance: int) -> None:
+    """Append the synthetic spans that model the transcripts' nascent RNA (:func:`create_nrna_transcripts`) and set
+    every span entity's ``span_t_index``. Each synthetic gets a ``g_index`` of its own (they are gene-neutral), which
+    keeps ``t.g_index == row in g_df`` and keeps synthetics out of annotated genes' summaries."""
+    logger.info("[START] Creating synthetic nRNA transcripts")
+    synthetics, t_to_span_key, covered_equiv = create_nrna_transcripts(
+        transcripts, tolerance=tolerance
+    )
+    next_g_index = max((t.g_index for t in transcripts), default=-1) + 1
+    span_entity_t_index: dict[tuple, int] = {}
+    for i, syn in enumerate(synthetics):
+        syn.t_index = len(transcripts) + i
+        syn.g_index = next_g_index + i
+        span_entity_t_index[(syn.ref, int(syn.strand), syn.start, syn.end)] = syn.t_index
+    # A covered span's entity is the annotated single-exon transcript that covers it
+    for span_key, equiv_tx in covered_equiv.items():
+        span_entity_t_index[span_key] = equiv_tx.t_index
+        equiv_tx.span_t_index = equiv_tx.t_index
+    for me_tidx, span_key in t_to_span_key.items():
+        transcripts[me_tidx].span_t_index = span_entity_t_index.get(span_key, -1)
+    transcripts.extend(synthetics)
+    logger.info(f"[DONE] {len(synthetics)} synthetics added, {len(transcripts)} total transcripts")
 
 
 def build_splice_sj(transcripts: list[Transcript]) -> pd.DataFrame:
@@ -668,7 +644,7 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
 
 
 @dataclass(frozen=True, slots=True)
-class _IntergenicSpan:
+class IntergenicSpan:
     """A reference span containing no real (non-synthetic) transcript.
 
     Half-open coordinates ``[start, end)``.
@@ -679,7 +655,7 @@ class _IntergenicSpan:
 
 
 @dataclass(frozen=True, slots=True)
-class _GenicSpan:
+class GenicSpan:
     """A reference span covered by one connected (strand-agnostic) transcript cluster.
 
     ``transcripts`` is the cluster's transcript list in input order; it
@@ -692,11 +668,11 @@ class _GenicSpan:
     transcripts: tuple = field(default_factory=tuple)
 
 
-def _iter_reference_layout(
+def iter_reference_layout(
     ref_length: int,
     transcripts: list[Transcript],
-) -> Iterator["_IntergenicSpan | _GenicSpan"]:
-    """Yield interleaved ``_IntergenicSpan`` / ``_GenicSpan`` tiling [0, ref_length).
+) -> Iterator["IntergenicSpan | GenicSpan"]:
+    """Yield interleaved ``IntergenicSpan`` / ``GenicSpan`` tiling [0, ref_length).
 
     ``transcripts`` is the per-reference list (already filtered to one
     reference), and **must be sorted by ``(start, end)``**. Synthetic
@@ -706,17 +682,17 @@ def _iter_reference_layout(
     Invariants:
       - Spans alternate (no two intergenic in a row) and tile the
         reference exactly with no gaps and no overlaps.
-      - Each ``_GenicSpan`` contains at least one (non-synthetic)
+      - Each ``GenicSpan`` contains at least one (non-synthetic)
         transcript with at least one exon.
       - If the reference contains no real transcripts, a single
-        ``_IntergenicSpan(0, ref_length)`` is yielded (when
+        ``IntergenicSpan(0, ref_length)`` is yielded (when
         ``ref_length > 0``).
     """
     real_ts = [t for t in transcripts if not t.is_synthetic]
 
     if not real_ts:
         if ref_length > 0:
-            yield _IntergenicSpan(0, ref_length)
+            yield IntergenicSpan(0, ref_length)
         return
 
     cursor = 0
@@ -728,8 +704,8 @@ def _iter_reference_layout(
         if t.start > cluster_end:
             # Close current cluster.
             if cursor < cluster_start:
-                yield _IntergenicSpan(cursor, cluster_start)
-            yield _GenicSpan(cluster_start, cluster_end, tuple(cluster))
+                yield IntergenicSpan(cursor, cluster_start)
+            yield GenicSpan(cluster_start, cluster_end, tuple(cluster))
             cursor = cluster_end
             cluster_start = t.start
             cluster_end = t.end
@@ -741,28 +717,28 @@ def _iter_reference_layout(
 
     # Final cluster.
     if cursor < cluster_start:
-        yield _IntergenicSpan(cursor, cluster_start)
-    yield _GenicSpan(cluster_start, cluster_end, tuple(cluster))
+        yield IntergenicSpan(cursor, cluster_start)
+    yield GenicSpan(cluster_start, cluster_end, tuple(cluster))
     if cluster_end < ref_length:
-        yield _IntergenicSpan(cluster_end, ref_length)
+        yield IntergenicSpan(cluster_end, ref_length)
 
 
 def _emit_genomic_intervals(
     ref: str,
-    layout: Iterator["_IntergenicSpan | _GenicSpan"],
+    layout: Iterator["IntergenicSpan | GenicSpan"],
 ) -> Iterator[AnnotatedInterval]:
     """Convert a per-reference layout stream into ``AnnotatedInterval`` rows.
 
-    Each ``_IntergenicSpan`` becomes one INTERGENIC interval. Each
-    ``_GenicSpan`` is decomposed via :func:`_gen_transcript_intervals`
+    Each ``IntergenicSpan`` becomes one INTERGENIC interval. Each
+    ``GenicSpan`` is decomposed via :func:`_gen_transcript_intervals`
     (per-exon EXON intervals plus one TRANSCRIPT span per transcript).
     Synthetic transcripts are filtered out by ``_gen_transcript_intervals``.
     """
     for span in layout:
-        if isinstance(span, _IntergenicSpan):
+        if isinstance(span, IntergenicSpan):
             yield AnnotatedInterval(ref, span.start, span.end)
         else:
-            assert isinstance(span, _GenicSpan)
+            assert isinstance(span, GenicSpan)
             for tc in span.transcripts:
                 yield from _gen_transcript_intervals(tc)
 
@@ -804,7 +780,7 @@ def build_index_artifacts(
     intervals: list[AnnotatedInterval] = []
 
     for ref, ref_length in ref_lengths.items():
-        layout = _iter_reference_layout(ref_length, ref_transcripts.get(ref, []))
+        layout = iter_reference_layout(ref_length, ref_transcripts.get(ref, []))
         intervals.extend(_emit_genomic_intervals(ref, layout))
 
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
@@ -812,6 +788,381 @@ def build_index_artifacts(
     regions_df, edges_df = build_splice_graph(transcripts, ref_lengths)
     validate_graph(regions_df, edges_df, ref_lengths, transcripts=transcripts)
     return iv_df, regions_df, edges_df
+
+
+# ---------------------------------------------------------------------------
+# Build steps
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _TableWriter:
+    """Writes each index table as Feather, with its TSV mirror when the build writes them."""
+
+    output_dir: Path
+    compression: str
+    write_tsv: bool
+
+    def __call__(self, df: pd.DataFrame, feather_name: str, tsv_name: str) -> None:
+        df.to_feather(self.output_dir / feather_name, compression=self.compression)
+        if self.write_tsv:
+            df.to_csv(self.output_dir / tsv_name, sep="\t", index=False)
+
+
+@dataclass(frozen=True, slots=True)
+class _GenomeInputs:
+    """What the build reads of the genome: the references, the splice-artifact blacklist (``None`` without an
+    alignable store) and the unobservable mask with the manifest's record of what it is (`rigel.observable`)."""
+
+    ref_lengths: dict[str, int]
+    blacklist: pd.DataFrame | None
+    mask: pd.DataFrame
+    mask_record: dict
+
+    @property
+    def masked_bases(self) -> int:
+        return int((self.mask["end"] - self.mask["start"]).sum())
+
+    @property
+    def genome_bases(self) -> int:
+        return int(sum(self.ref_lengths.values()))
+
+
+def _read_genome(
+    fasta_file: str | Path,
+    alignable_zarr_path: str | Path | None,
+    splice_blacklist_min_count: int,
+) -> _GenomeInputs:
+    """The references, the blacklist and the mask, each read and checked before the first write: a store that cannot
+    be read, is incomplete, or was built for other references or another assembly refuses the build and leaves the
+    index it would replace intact."""
+    logger.info(f"[START] Loading references from {fasta_file}")
+    ref_lengths = load_reference_lengths(fasta_file)
+    logger.info(f"[DONE] Read {len(ref_lengths)} references")
+
+    blacklist = None
+    if alignable_zarr_path is not None:
+        from .splice_blacklist import load_splice_blacklist_from_zarr
+
+        blacklist = load_splice_blacklist_from_zarr(
+            alignable_zarr_path,
+            min_count=splice_blacklist_min_count,
+        )
+        _check_blacklist_references(blacklist, ref_lengths, alignable_zarr_path)
+
+    from .observable import mask_from_fasta, mask_from_store
+
+    if alignable_zarr_path is None:
+        logger.info("[START] Recording the reference's unknown runs (no alignable store)")
+        mask = mask_from_fasta(fasta_file, ref_lengths)
+        record = {"rule": "the reference's unknown bases (N or n)", "read_length": None}
+    else:
+        logger.info(f"[START] Recording the unobservable mask from {alignable_zarr_path}")
+        mask, record = mask_from_store(alignable_zarr_path, ref_lengths, fasta_file)
+    genome = _GenomeInputs(ref_lengths, blacklist, mask, record)
+    logger.info(
+        f"[DONE] {len(mask):,} unobservable runs: {genome.masked_bases:,} of {genome.genome_bases:,} bp"
+    )
+    return genome
+
+
+def _write_annotation_tables(
+    write: _TableWriter, transcripts: list[Transcript], ref_lengths: dict[str, int]
+) -> None:
+    """The transcript table and its alias map, the annotated splice junctions, the genomic intervals and the splice
+    graph's regions and boundaries."""
+    write(transcripts_to_dataframe(transcripts), TRANSCRIPTS_FEATHER, TRANSCRIPTS_TSV)
+    aliases_df = pd.DataFrame(
+        [(alias, t.t_id) for t in transcripts for alias in t.aliases],
+        columns=["dropped_t_id", "kept_t_id"],
+        dtype=object,
+    )
+    write(aliases_df, TRANSCRIPT_ALIASES_FEATHER, TRANSCRIPT_ALIASES_TSV)
+
+    logger.info("[START] Building splice junctions")
+    sj_df = build_splice_sj([t for t in transcripts if not t.is_synthetic])
+    logger.info(f"[DONE] Found {len(sj_df)} splice junctions")
+    write(sj_df, SJ_FEATHER, SJ_TSV)
+
+    logger.info("[START] Building genomic intervals + the splice graph")
+    iv_df, regions_df, edges_df = build_index_artifacts(transcripts, ref_lengths)
+    logger.info(
+        f"[DONE] {len(iv_df)} genomic intervals, {len(regions_df)} regions, {len(edges_df)} boundaries"
+    )
+    write(iv_df, INTERVALS_FEATHER, INTERVALS_TSV)
+    write(regions_df, REGIONS_FEATHER, REGIONS_TSV)
+    write(edges_df, BOUNDARIES_FEATHER, BOUNDARIES_TSV)
+
+
+def _write_genome_tables(write: _TableWriter, genome: _GenomeInputs) -> None:
+    """The splice blacklist, when there is a store (one left by an earlier build is removed first, so a rebuild
+    without a store leaves none behind), and the unobservable mask."""
+    (write.output_dir / SJ_BLACKLIST_FEATHER).unlink(missing_ok=True)
+    (write.output_dir / SJ_BLACKLIST_TSV).unlink(missing_ok=True)
+    if genome.blacklist is not None:
+        write(genome.blacklist, SJ_BLACKLIST_FEATHER, SJ_BLACKLIST_TSV)
+    write(genome.mask, UNOBSERVABLE_FEATHER, UNOBSERVABLE_TSV)
+
+
+def _write_manifest(
+    output_dir: Path,
+    sources: dict[str, str | Path | None],
+    build_flags: dict,
+    genome: _GenomeInputs,
+) -> None:
+    """``manifest.json``: everything needed to rebuild this index — each source's path, size and digest (``null`` for
+    an alignable store not supplied), every flag with its default written out, so a rebuild need not know this
+    version's defaults, and what the mask is and how much of the reference it holds."""
+    logger.info("[START] Digesting build sources for the manifest")
+    manifest = {
+        "format_version": INDEX_FORMAT_VERSION,
+        "rigel_version": _rigel_version(),
+        # `null`, never omitted: null says "no store was supplied", a missing key would say the field is unknown
+        "sources": {
+            name: None if path is None else source_record(path) for name, path in sources.items()
+        },
+        "build_flags": build_flags,
+        # the runs are `unobservable.feather`
+        "observable": {
+            **genome.mask_record,
+            "unobservable_bases": genome.masked_bases,
+            "observable_bases": genome.genome_bases - genome.masked_bases,
+        },
+    }
+    logger.info("[DONE] Sources digested")
+    with open(output_dir / MANIFEST_JSON, "w") as fh:
+        json.dump(manifest, fh, indent=2, sort_keys=True)
+
+
+# ---------------------------------------------------------------------------
+# Load steps
+# ---------------------------------------------------------------------------
+
+#: The files every index has, checked before any is read. The splice blacklist is read only when the manifest
+#: records its store, and the alias table never.
+_REQUIRED_FILES = (
+    REF_LENGTHS_FEATHER,
+    TRANSCRIPTS_FEATHER,
+    REGIONS_FEATHER,
+    BOUNDARIES_FEATHER,
+    INTERVALS_FEATHER,
+    SJ_FEATHER,
+    UNOBSERVABLE_FEATHER,
+)
+
+#: The transcript table's integer columns, each held at its narrowest safe dtype.
+_TRANSCRIPT_INT_DTYPES = {
+    "strand": np.int8,
+    "t_index": np.int32,
+    "g_index": np.int32,
+    "span_t_index": np.int32,
+    "span_n_contributors": np.int16,
+    "length": np.int32,
+}
+
+
+def _checked_manifest(index_dir: str) -> dict:
+    """The index's manifest, refused when absent or of another format version, and every required file present."""
+    manifest = load_manifest(index_dir)
+    if manifest is None:
+        raise IndexLoadError(
+            f"Index at {index_dir} has no manifest.json. "
+            f"Rebuild the index (rigel index --fasta ... --gtf ...). "
+            f"Older indexes are not supported."
+        )
+    on_disk_version = int(manifest.get("format_version", -1))
+    if on_disk_version != INDEX_FORMAT_VERSION:
+        built_by = manifest.get("rigel_version")
+        built_str = f" (built by rigel {built_by})" if built_by else ""
+        raise IndexLoadError(
+            f"Index at {index_dir} has format_version={on_disk_version}"
+            f"{built_str}, but this rigel build (v{_rigel_version()}) "
+            f"requires {INDEX_FORMAT_VERSION}. "
+            f"Rebuild: rigel index --fasta ... --gtf ... -o {index_dir}"
+        )
+    missing = [
+        name for name in _REQUIRED_FILES if not os.path.exists(os.path.join(index_dir, name))
+    ]
+    if missing:
+        raise IndexLoadError(
+            f"Index at {index_dir} is missing {', '.join(missing)}. "
+            f"Rebuild the index (rigel index --fasta ... --gtf ... -o {index_dir})."
+        )
+    return manifest
+
+
+def _load_transcript_table(index_dir: str) -> pd.DataFrame:
+    """The transcript table, its rows in ``t_index`` order, held compactly: string columns categorical (integer codes
+    and a small dictionary), integer columns at their narrowest safe dtype."""
+    t_df = pd.read_feather(os.path.join(index_dir, TRANSCRIPTS_FEATHER))
+    if not (t_df.index == t_df["t_index"]).all():
+        raise IndexLoadError(
+            f"Invalid index in {index_dir}: row index does not match "
+            f"'t_index' column in {TRANSCRIPTS_FEATHER}; rebuild index"
+        )
+    for col in ("ref", "t_id", "g_id", "g_name", "g_type"):
+        t_df[col] = t_df[col].astype("category")
+    for col, dtype in _TRANSCRIPT_INT_DTYPES.items():
+        t_df[col] = t_df[col].astype(dtype)
+    return t_df
+
+
+def _key_runs(*keys: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Sort rows by *keys*, the first the most significant, and find the runs of rows that agree on every key:
+    returns the sort order and each run's first and one-past-last position in it."""
+    order = np.lexsort(keys[::-1])
+    n = len(order)
+    changed = np.empty(n, dtype=bool)
+    if n > 0:
+        changed[0] = True
+    if n > 1:
+        changed[1:] = np.logical_or.reduce([np.diff(key[order]) != 0 for key in keys])
+    first = np.where(changed)[0]
+    return order, first, np.append(first[1:], n)
+
+
+def _collapsed_intervals(iv_df: pd.DataFrame) -> tuple[list, list, list, list, list, list]:
+    """The resolver's overlap index, as the six lists ``FragmentResolver.build_overlap_index`` takes: one interval per
+    unique ``(ref, start, end, interval_type)`` — refs, starts, ends and types — and, in CSR, the sorted transcripts
+    of every row it merges, the intergenic sentinel -1 dropped."""
+    refs = iv_df["ref"].values
+    starts = iv_df["start"].values
+    ends = iv_df["end"].values
+    itypes = iv_df["interval_type"].values
+    _unique_refs, ref_codes = np.unique(refs, return_inverse=True)
+    order, first, last = _key_runs(ref_codes, starts, ends, itypes)
+    t_sorted = iv_df["t_index"].values[order].tolist()
+    t_flat: list[int] = []
+    t_offsets: list[int] = [0]
+    for lo, hi in zip(first.tolist(), last.tolist()):
+        t_flat.extend(sorted({t for t in t_sorted[lo:hi] if t >= 0}))
+        t_offsets.append(len(t_flat))
+    logger.debug(f"Interval index: {len(iv_df)} rows → {len(first)} collapsed")
+    return (
+        refs[order][first].tolist(),
+        starts[order][first].tolist(),
+        ends[order][first].tolist(),
+        itypes[order][first].tolist(),
+        t_flat,
+        t_offsets,
+    )
+
+
+def _exon_intervals(iv_df: pd.DataFrame, t_df: pd.DataFrame) -> dict[int, np.ndarray]:
+    """Each transcript's exons, ``(n_exons, 2)`` int32 ``[start, end)`` sorted by start, by ``t_index``. Synthetics are
+    absent from the interval table (see :func:`_gen_transcript_intervals`), but the exon CSR the native code reads
+    still needs their single exon, ``[start, end)`` from the transcript table."""
+    exon = (iv_df["interval_type"].values == int(IntervalType.EXON)) & (
+        iv_df["t_index"].values >= 0
+    )
+    ex_tidx = iv_df["t_index"].values[exon]
+    ex_start = iv_df["start"].values[exon]
+    ex_end = iv_df["end"].values[exon]
+    # Sorted by (t_index, start) so exons within each transcript are ordered, then split at the group boundaries
+    order = np.lexsort((ex_start, ex_tidx))
+    ex_tidx = ex_tidx[order]
+    coords = np.column_stack((ex_start[order], ex_end[order])).astype(np.int32)
+    unique_tidx, group_starts, group_counts = np.unique(
+        ex_tidx, return_index=True, return_counts=True
+    )
+    t_exon_intervals: dict[int, np.ndarray] = {
+        int(t): coords[s : s + n] for t, s, n in zip(unique_tidx, group_starts, group_counts)
+    }
+    syn_mask = t_df["is_synthetic"].to_numpy(dtype=bool)
+    if syn_mask.any():
+        syn_starts = t_df["start"].to_numpy(dtype=np.int32)[syn_mask]
+        syn_ends = t_df["end"].to_numpy(dtype=np.int32)[syn_mask]
+        for t_idx, start, end in zip(np.where(syn_mask)[0].tolist(), syn_starts, syn_ends):
+            t_exon_intervals[t_idx] = np.array([[start, end]], dtype=np.int32)
+    logger.debug(f"Cached exon intervals for {len(t_exon_intervals)} transcripts")
+    return t_exon_intervals
+
+
+def _sj_exact_match_map(sj_df: pd.DataFrame) -> dict[tuple, frozenset[int]]:
+    """``(ref, start, end, strand) → frozenset(t_index)``: every annotated junction with the transcripts holding it."""
+    refs = sj_df["ref"].values
+    starts = sj_df["start"].values
+    ends = sj_df["end"].values
+    strands = sj_df["strand"].values
+    _unique_refs, ref_codes = np.unique(refs, return_inverse=True)
+    order, first, last = _key_runs(ref_codes, starts, ends, strands)
+    keys = list(
+        zip(
+            refs[order].tolist(),
+            starts[order].tolist(),
+            ends[order].tolist(),
+            strands[order].tolist(),
+        )
+    )
+    t_sorted = sj_df["t_index"].values[order].tolist()
+    sj_map = {keys[lo]: frozenset(t_sorted[lo:hi]) for lo, hi in zip(first.tolist(), last.tolist())}
+    logger.debug(f"Splice junctions: {len(sj_map)} unique, {len(sj_df)} total")
+    return sj_map
+
+
+def _sj_map_csr(sj_map: dict[tuple, frozenset[int]]) -> tuple[list, list, list, list, list, list]:
+    """The junction map as the six lists ``FragmentResolver.build_sj_map`` takes: refs, starts, ends, strands and,
+    in CSR, each junction's sorted transcripts."""
+    refs, starts, ends, strands, t_flat, t_offsets = [], [], [], [], [], [0]
+    for (ref, start, end, strand), tset in sj_map.items():
+        refs.append(ref)
+        starts.append(start)
+        ends.append(end)
+        strands.append(strand)
+        t_flat.extend(sorted(tset))
+        t_offsets.append(len(t_flat))
+    return refs, starts, ends, strands, t_flat, t_offsets
+
+
+def _install_blacklist(resolver, index_dir: str, manifest: dict) -> tuple[int, str]:
+    """Install the splice-artifact blacklist, used only when the manifest records the store it was built from;
+    returns the active junctions' count (0 is detection off) and the digest of the rows handed to the resolver
+    (``"none"`` when none are), which the scan cache's key reads, because the blacklist changes what a scan tallies.
+    A blacklist with no store recorded, or a recorded store with no blacklist, leaves artifact detection off with no
+    other sign, so the load warns."""
+    blacklist_path = os.path.join(index_dir, SJ_BLACKLIST_FEATHER)
+    store = manifest.get("sources", {}).get("alignable_zarr")
+    has_blacklist = os.path.exists(blacklist_path)
+    if store is not None and has_blacklist:
+        logger.debug("Loading splice-artifact blacklist")
+        bl_df = pd.read_feather(blacklist_path)
+        columns = (
+            bl_df["ref"].astype(str).tolist(),
+            bl_df["start"].astype(np.int32).tolist(),
+            bl_df["end"].astype(np.int32).tolist(),
+            bl_df["max_anchor_left"].astype(np.int32).tolist(),
+            bl_df["max_anchor_right"].astype(np.int32).tolist(),
+        )
+        resolver.build_sj_blacklist_map(*columns)
+        logger.info(f"Splice artifact blacklist: {len(bl_df):,} sj active")
+        return int(len(bl_df)), _blacklist_digest(columns)
+    if has_blacklist:
+        logger.warning(
+            f"{SJ_BLACKLIST_FEATHER} is not applied: this index's manifest records no alignable "
+            "store it was built from, so splice-artifact detection is off. Rebuild the index "
+            "with --alignable-zarr to use a blacklist."
+        )
+    elif store is not None:
+        logger.warning(
+            f"This index was built from the alignable store {store['path']}, but its "
+            f"{SJ_BLACKLIST_FEATHER} is missing, so splice-artifact detection is off. "
+            "Rebuild the index."
+        )
+    return 0, "none"
+
+
+def _nrna_parents(t_df: pd.DataFrame) -> np.ndarray:
+    """Each transcript's synthetic span, by ``t_index``, -1 where its span entity is no synthetic. Synthetics are absent
+    from the interval table (see :func:`_gen_transcript_intervals`), so the resolver derives each synthetic candidate
+    from the annotated transcripts a fragment hits, through this index."""
+    is_synth = t_df["is_synthetic"].to_numpy(dtype=bool)
+    span_idx = t_df["span_t_index"].to_numpy(dtype=np.int32)
+    parent = np.full(span_idx.shape, -1, dtype=np.int32)
+    valid = (span_idx >= 0) & (span_idx < is_synth.size)
+    parent_is_synth = np.zeros_like(span_idx, dtype=bool)
+    parent_is_synth[valid] = is_synth[span_idx[valid]]
+    parent[parent_is_synth] = span_idx[parent_is_synth]
+    return parent
 
 
 # ---------------------------------------------------------------------------
@@ -999,49 +1350,14 @@ class TranscriptIndex:
         )
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        feather_kwargs = {"compression": feather_compression}
 
-        # -- Reference lengths ------------------------------------------------
-        logger.info(f"[START] Loading references from {fasta_file}")
-        ref_lengths = load_reference_lengths(fasta_file)
-        logger.info(f"[DONE] Read {len(ref_lengths)} references")
-
-        # -- Splice-junction artifact blacklist: read and checked before the first write, so a store that cannot be
-        #    read, or one built for other references, refuses the build and leaves the index it would replace intact
-        bl_df = None
-        if alignable_zarr_path is not None:
-            from .splice_blacklist import load_splice_blacklist_from_zarr
-
-            bl_df = load_splice_blacklist_from_zarr(
-                alignable_zarr_path,
-                min_count=splice_blacklist_min_count,
-            )
-            _check_blacklist_references(bl_df, ref_lengths, alignable_zarr_path)
-
-        # -- The unobservable mask: read before the first write too, so a store that is incomplete or built for
-        #    another assembly refuses the build and leaves the index it would replace intact
-        from .observable import mask_from_fasta, mask_from_store
-
-        if alignable_zarr_path is None:
-            logger.info("[START] Recording the reference's unknown runs (no alignable store)")
-            mask_df = mask_from_fasta(fasta_file, ref_lengths)
-            mask_record = {"rule": "the reference's unknown bases (N or n)", "read_length": None}
-        else:
-            logger.info(f"[START] Recording the unobservable mask from {alignable_zarr_path}")
-            mask_df, mask_record = mask_from_store(alignable_zarr_path, ref_lengths, fasta_file)
-        masked_bases = int((mask_df["end"] - mask_df["start"]).sum())
-        genome_bases = int(sum(ref_lengths.values()))
-        logger.info(
-            f"[DONE] {len(mask_df):,} unobservable runs: {masked_bases:,} of {genome_bases:,} bp"
-        )
-
-        # -- Transcripts ------------------------------------------------------
+        genome = _read_genome(fasta_file, alignable_zarr_path, splice_blacklist_min_count)
         logger.info(f"[START] Reading transcripts from {gtf_file}")
         transcripts = read_transcripts(
             gtf_file,
             gtf_parse_mode=gtf_parse_mode,
             collapse_duplicate_transcripts=collapse_duplicate_transcripts,
-            ref_lengths=ref_lengths,
+            ref_lengths=genome.ref_lengths,
         )
         if not transcripts:
             raise ValueError(f"GTF {gtf_file} yields no transcripts; an index needs at least one")
@@ -1051,119 +1367,20 @@ class TranscriptIndex:
         # interrupted rebuild with none, which `load` refuses, rather than an old manifest over a
         # mix of old and new files.
         (output_dir / MANIFEST_JSON).unlink(missing_ok=True)
-
-        df = pd.DataFrame(list(ref_lengths.items()), columns=["ref", "length"])
-        df.to_feather(output_dir / REF_LENGTHS_FEATHER, **feather_kwargs)
-        if write_tsv:
-            df.to_csv(output_dir / REF_LENGTHS_TSV, sep="\t", index=False)
-
-        # -- Synthetic nRNA transcripts ---------------------------------------
-        logger.info("[START] Creating synthetic nRNA transcripts")
-        synthetics, t_to_span_key, span_to_syn_idx, covered_equiv = create_nrna_transcripts(
-            transcripts, tolerance=nascent_tolerance
+        write = _TableWriter(output_dir, feather_compression, write_tsv)
+        write(
+            pd.DataFrame(list(genome.ref_lengths.items()), columns=["ref", "length"]),
+            REF_LENGTHS_FEATHER,
+            REF_LENGTHS_TSV,
         )
-        # Each synthetic gets a g_index of its own (they are gene-neutral, see create_nrna_transcripts), which
-        # keeps ``t.g_index == row in g_df`` and keeps synthetics out of annotated genes' summaries
-        next_g_index = max((t.g_index for t in transcripts), default=-1) + 1
-
-        # Assign t_index and g_index to each synthetic; build span→t_index
-        span_entity_t_index: dict[tuple, int] = {}
-        next_t_index = len(transcripts)
-        for syn in synthetics:
-            syn.t_index = next_t_index
-            next_t_index += 1
-            syn.g_index = next_g_index
-            next_g_index += 1
-            span_key = (syn.ref, int(syn.strand), syn.start, syn.end)
-            span_entity_t_index[span_key] = syn.t_index
-
-        # A covered span's entity is the annotated single-exon transcript that covers it
-        for span_key, equiv_tx in covered_equiv.items():
-            span_entity_t_index[span_key] = equiv_tx.t_index
-            equiv_tx.span_t_index = equiv_tx.t_index
-
-        # Set span_t_index on every multi-exon annotated transcript
-        for me_tidx, span_key in t_to_span_key.items():
-            transcripts[me_tidx].span_t_index = span_entity_t_index.get(span_key, -1)
-
-        transcripts.extend(synthetics)
-        logger.info(
-            f"[DONE] {len(synthetics)} synthetics added, {len(transcripts)} total transcripts"
-        )
-
-        # Partition: annotated-only list for region table and splice junctions
-        annotated_transcripts = [t for t in transcripts if not t.is_synthetic]
-
-        t_df = transcripts_to_dataframe(transcripts)
-        t_df.to_feather(output_dir / TRANSCRIPTS_FEATHER, **feather_kwargs)
-        if write_tsv:
-            t_df.to_csv(output_dir / TRANSCRIPTS_TSV, sep="\t", index=False)
-        aliases_df = pd.DataFrame(
-            [(alias, t.t_id) for t in transcripts for alias in t.aliases],
-            columns=["dropped_t_id", "kept_t_id"],
-            dtype=object,
-        )
-        aliases_df.to_feather(output_dir / TRANSCRIPT_ALIASES_FEATHER, **feather_kwargs)
-        if write_tsv:
-            aliases_df.to_csv(output_dir / TRANSCRIPT_ALIASES_TSV, sep="\t", index=False)
-
-        # -- Splice junctions -------------------------------------------------
-        logger.info("[START] Building splice junctions")
-        sj_df = build_splice_sj(annotated_transcripts)
-        logger.info(f"[DONE] Found {len(sj_df)} splice junctions")
-
-        sj_df.to_feather(output_dir / SJ_FEATHER, **feather_kwargs)
-        if write_tsv:
-            sj_df.to_csv(output_dir / SJ_TSV, sep="\t", index=False)
-
-        # -- Genomic intervals + the splice graph -----------------------------
-        logger.info("[START] Building genomic intervals + the splice graph")
-        iv_df, regions_df, edges_df = build_index_artifacts(transcripts, ref_lengths)
-        logger.info(
-            f"[DONE] {len(iv_df)} genomic intervals, {len(regions_df)} regions, {len(edges_df)} boundaries"
-        )
-
-        iv_df.to_feather(output_dir / INTERVALS_FEATHER, **feather_kwargs)
-        if write_tsv:
-            iv_df.to_csv(output_dir / INTERVALS_TSV, sep="\t", index=False)
-
-        regions_df.to_feather(output_dir / REGIONS_FEATHER, **feather_kwargs)
-        edges_df.to_feather(output_dir / BOUNDARIES_FEATHER, **feather_kwargs)
-        if write_tsv:
-            regions_df.to_csv(output_dir / REGIONS_TSV, sep="\t", index=False)
-            edges_df.to_csv(output_dir / BOUNDARIES_TSV, sep="\t", index=False)
-
-        # -- Splice-junction artifact blacklist (from alignable Zarr) -------
-        # Removed first, so a rebuild without a store leaves none behind from an earlier build.
-        (output_dir / SJ_BLACKLIST_FEATHER).unlink(missing_ok=True)
-        (output_dir / SJ_BLACKLIST_TSV).unlink(missing_ok=True)
-        if bl_df is not None:
-            bl_df.to_feather(output_dir / SJ_BLACKLIST_FEATHER, **feather_kwargs)
-            if write_tsv:
-                bl_df.to_csv(output_dir / SJ_BLACKLIST_TSV, sep="\t", index=False)
-
-        # -- The unobservable mask ---------------------------------------------
-        mask_df.to_feather(output_dir / UNOBSERVABLE_FEATHER, **feather_kwargs)
-        if write_tsv:
-            mask_df.to_csv(output_dir / UNOBSERVABLE_TSV, sep="\t", index=False)
-
-        # -- Manifest --------------------------------------------------------
-        # Everything needed to rebuild this index: the sources and every flag, defaults written out, so a
-        # rebuild need not know this version's defaults
-        logger.info("[START] Digesting build sources for the manifest")
-        manifest = {
-            "format_version": INDEX_FORMAT_VERSION,
-            "rigel_version": _rigel_version(),
-            "sources": {
-                "fasta": source_record(fasta_file),
-                "gtf": source_record(gtf_file),
-                # `null`, never omitted: null says "no store was supplied", a missing key would say the field is unknown
-                "alignable_zarr": (
-                    None if alignable_zarr_path is None else source_record(alignable_zarr_path)
-                ),
-            },
+        _add_nascent_spans(transcripts, nascent_tolerance)
+        _write_annotation_tables(write, transcripts, genome.ref_lengths)
+        _write_genome_tables(write, genome)
+        _write_manifest(
+            output_dir,
+            {"fasta": fasta_file, "gtf": gtf_file, "alignable_zarr": alignable_zarr_path},
             # Every parameter of `build` must appear here; a test checks this set against build's signature
-            "build_flags": {
+            {
                 "collapse_duplicate_transcripts": collapse_duplicate_transcripts,
                 "feather_compression": feather_compression,
                 "gtf_parse_mode": gtf_parse_mode,
@@ -1171,17 +1388,8 @@ class TranscriptIndex:
                 "splice_blacklist_min_count": splice_blacklist_min_count,
                 "write_tsv": write_tsv,
             },
-            # What the mask is and how much of the reference it holds; the runs are `unobservable.feather`.
-            "observable": {
-                **mask_record,
-                "unobservable_bases": masked_bases,
-                "observable_bases": genome_bases - masked_bases,
-            },
-        }
-        logger.info("[DONE] Sources digested")
-        with open(output_dir / MANIFEST_JSON, "w") as fh:
-            json.dump(manifest, fh, indent=2, sort_keys=True)
-
+            genome,
+        )
         logger.info(f"Index written to {output_dir}")
 
     # -- load (classmethod) ---------------------------------------------------
@@ -1219,7 +1427,8 @@ class TranscriptIndex:
         *,
         retain_lookup_maps: bool = False,
     ) -> "TranscriptIndex":
-        """Load an index from the Feather files in *index_dir*.
+        """Load an index from the Feather files in *index_dir*: the version gate, the references and the mask, the
+        transcript and gene tables, the splice graph, and the native resolver built from the intervals and junctions.
 
         Parameters
         ----------
@@ -1231,53 +1440,11 @@ class TranscriptIndex:
         self = cls()
         self.index_dir = index_dir
         self._retain_lookup_maps = retain_lookup_maps
+        manifest = _checked_manifest(index_dir)
 
-        # -- manifest (version gate) ------------------------------------------
-        manifest = load_manifest(index_dir)
-        if manifest is None:
-            raise IndexLoadError(
-                f"Index at {index_dir} has no manifest.json. "
-                f"Rebuild the index (rigel index --fasta ... --gtf ...). "
-                f"Older indexes are not supported."
-            )
-        on_disk_version = int(manifest.get("format_version", -1))
-        if on_disk_version != INDEX_FORMAT_VERSION:
-            built_by = manifest.get("rigel_version")
-            built_str = f" (built by rigel {built_by})" if built_by else ""
-            raise IndexLoadError(
-                f"Index at {index_dir} has format_version={on_disk_version}"
-                f"{built_str}, but this rigel build (v{_rigel_version()}) "
-                f"requires {INDEX_FORMAT_VERSION}. "
-                f"Rebuild: rigel index --fasta ... --gtf ... -o {index_dir}"
-            )
-
-        # -- the files every index has, checked before any is read -------------
-        # The splice blacklist is read only when the manifest records its store, and the alias table never.
-        missing = [
-            name
-            for name in (
-                REF_LENGTHS_FEATHER,
-                TRANSCRIPTS_FEATHER,
-                REGIONS_FEATHER,
-                BOUNDARIES_FEATHER,
-                INTERVALS_FEATHER,
-                SJ_FEATHER,
-                UNOBSERVABLE_FEATHER,
-            )
-            if not os.path.exists(os.path.join(index_dir, name))
-        ]
-        if missing:
-            raise IndexLoadError(
-                f"Index at {index_dir} is missing {', '.join(missing)}. "
-                f"Rebuild the index (rigel index --fasta ... --gtf ... -o {index_dir})."
-            )
-
-        # -- reference lengths -------------------------------------------------
         self.ref_lengths = load_ref_lengths(os.path.join(index_dir, REF_LENGTHS_FEATHER))
         self.ref_names = list(self.ref_lengths.keys())
         self.ref_name_to_id = {name: i for i, name in enumerate(self.ref_names)}
-
-        # -- the unobservable mask -----------------------------------------------
         from .observable import check_mask
 
         try:
@@ -1289,46 +1456,19 @@ class TranscriptIndex:
                 f"Index at {index_dir}: {exc}. Rebuild the index (rigel index --fasta ... --gtf ... -o {index_dir})."
             ) from exc
 
-        # -- transcripts ------------------------------------------------------
-        self.t_df = pd.read_feather(os.path.join(index_dir, TRANSCRIPTS_FEATHER))
-        if not (self.t_df.index == self.t_df["t_index"]).all():
-            raise IndexLoadError(
-                f"Invalid index in {index_dir}: row index does not match "
-                f"'t_index' column in {TRANSCRIPTS_FEATHER}; rebuild index"
-            )
-
-        # -- compact in-memory representation ---------------------------------
-        # String columns → categorical (integer codes + small dictionary).
-        for col in ("ref", "t_id", "g_id", "g_name", "g_type"):
-            self.t_df[col] = self.t_df[col].astype("category")
-        # Integer columns → narrowest safe dtype.
-        _INT_DOWNCAST = {
-            "strand": np.int8,
-            "t_index": np.int32,
-            "g_index": np.int32,
-            "span_t_index": np.int32,
-            "span_n_contributors": np.int16,
-            "length": np.int32,
-        }
-        for col, dtype in _INT_DOWNCAST.items():
-            self.t_df[col] = self.t_df[col].astype(dtype)
-
-        # -- gene table (derived) ---------------------------------------------
+        self.t_df = _load_transcript_table(index_dir)
         self.g_df = cls._build_gene_table(self.t_df)
         if not (self.g_df.index == self.g_df["g_index"]).all():
             raise IndexLoadError(
                 f"Invalid index in {index_dir}: derived gene table row index "
                 f"does not match 'g_index'; rebuild index"
             )
-
-        # -- fast numpy lookup arrays -----------------------------------------
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
 
-        # -- the splice graph: the calibration partition -----------------------
-        # Load checks only that the graph is internally consistent and complete; the checks against the
-        # transcripts run at build, so a `signature` or `flags` column that has drifted from the annotation
-        # loads clean
+        # The splice graph, the calibration partition. Load checks only that the graph is internally consistent and
+        # complete; the checks against the transcripts run at build, so a `signature` or `flags` column that has
+        # drifted from the annotation loads clean
         from .calibration.splice_graph import load_boundaries, load_regions, validate_graph
 
         logger.debug("Reading splice graph")
@@ -1336,304 +1476,54 @@ class TranscriptIndex:
         self.edges_df = load_boundaries(os.path.join(index_dir, BOUNDARIES_FEATHER))
         validate_graph(self.regions_df, self.edges_df, self.ref_lengths)
 
-        # -- interval index (unified cgranges) ---------------------------------
         logger.debug("Reading intervals")
         iv_df = pd.read_feather(os.path.join(index_dir, INTERVALS_FEATHER))
-
-        # -- collapsed interval index -----------------------------------------
-        # One collapsed interval per unique (ref, start, end, interval_type), its transcript indices merged into
-        # a frozenset: refs encoded as integers, sorted, group boundaries found by diff, then one pass
         logger.debug("Building collapsed interval index")
-        _iv_refs = iv_df["ref"].values
-        _iv_starts = iv_df["start"].values
-        _iv_ends = iv_df["end"].values
-        _iv_itypes = iv_df["interval_type"].values
-        _iv_tidxs = iv_df["t_index"].values
-
-        # Map string refs → integer codes for fast comparison
-        _unique_refs, _ref_codes = np.unique(_iv_refs, return_inverse=True)
-
-        # Sort by (ref_code, start, end, itype) to group identical keys
-        _sort_order = np.lexsort((_iv_itypes, _iv_ends, _iv_starts, _ref_codes))
-        _rc = _ref_codes[_sort_order]
-        _ss = _iv_starts[_sort_order]
-        _ee = _iv_ends[_sort_order]
-        _it = _iv_itypes[_sort_order]
-        _ti = _iv_tidxs[_sort_order]
-        _rr = _iv_refs[_sort_order]
-
-        # Detect group boundaries where any key column changes
-        n = len(_sort_order)
-        _changed = np.empty(n, dtype=bool)
-        if n > 0:
-            _changed[0] = True
-        if n > 1:
-            _changed[1:] = (
-                (np.diff(_rc) != 0)
-                | (np.diff(_ss) != 0)
-                | (np.diff(_ee) != 0)
-                | (np.diff(_it) != 0)
-            )
-        _group_starts = np.where(_changed)[0]
-        _group_ends = np.append(_group_starts[1:], n)
-
-        # Python lists once, to avoid per-element int()/str() conversion in the loop below
-        _rr_list = _rr.tolist()
-        _ss_list = _ss.tolist()
-        _ee_list = _ee.tolist()
-        _it_list = _it.tolist()
-        _ti_list = _ti.tolist()
-        _gs_list = _group_starts.tolist()
-        _ge_list = _group_ends.tolist()
-
-        iv_type: list[int] = []
-        iv_t_set: list[frozenset[int]] = []
-        _collapse_keys: list[tuple] = []  # keep for FragmentResolver later
-        for label in range(len(_gs_list)):
-            s = _gs_list[label]
-            e = _ge_list[label]
-            ref = _rr_list[s]
-            start = _ss_list[s]
-            end = _ee_list[s]
-            itype = _it_list[s]
-            tset = frozenset(t for t in _ti_list[s:e] if t >= 0)
-            iv_type.append(itype)
-            iv_t_set.append(tset)
-            _collapse_keys.append((ref, start, end, itype))
-        logger.debug(f"Interval index: {len(iv_df)} rows → {len(iv_type)} collapsed")
-
-        # -- per-transcript exon intervals for coverage-weight model ----------
-        # Sorted by (t_index, start), then split at group boundaries
-        _iv_itype_arr = iv_df["interval_type"].values
-        _iv_tidx_arr = iv_df["t_index"].values
-        _iv_start_arr = iv_df["start"].values
-        _iv_end_arr = iv_df["end"].values
-
-        exon_mask = _iv_itype_arr == int(IntervalType.EXON)
-        _ex_tidx = _iv_tidx_arr[exon_mask]
-        _ex_start = _iv_start_arr[exon_mask]
-        _ex_end = _iv_end_arr[exon_mask]
-
-        # Drop negative t_index (intergenic sentinel)
-        valid = _ex_tidx >= 0
-        _ex_tidx = _ex_tidx[valid]
-        _ex_start = _ex_start[valid]
-        _ex_end = _ex_end[valid]
-
-        # Sort by (t_index, start) so exons within each transcript are ordered
-        order = np.lexsort((_ex_start, _ex_tidx))
-        _ex_tidx = _ex_tidx[order]
-        _ex_start = _ex_start[order]
-        _ex_end = _ex_end[order]
-
-        # Find group boundaries via np.unique
-        unique_tidx, group_starts, group_counts = np.unique(
-            _ex_tidx, return_index=True, return_counts=True
-        )
-        # Pre-stack start/end into a single int32 array for fast slicing
-        _ex_coords = np.column_stack((_ex_start, _ex_end)).astype(np.int32)
-
-        t_exon_intervals: dict[int, np.ndarray] = {}
-        for i in range(len(unique_tidx)):
-            s = group_starts[i]
-            t_exon_intervals[int(unique_tidx[i])] = _ex_coords[s : s + group_counts[i]]
-
-        # Synthetics are absent from the interval table (see _gen_transcript_intervals), but the exon CSR the
-        # native code reads and `_t_exon_intervals` still need their single exon, [start, end) from t_df
-        syn_mask = self.t_df["is_synthetic"].to_numpy(dtype=bool)
-        if syn_mask.any():
-            syn_t_idx = np.where(syn_mask)[0].astype(np.int32)
-            syn_starts = self.t_df["start"].to_numpy(dtype=np.int32)[syn_mask]
-            syn_ends = self.t_df["end"].to_numpy(dtype=np.int32)[syn_mask]
-            for i, t_idx in enumerate(syn_t_idx):
-                t_exon_intervals[int(t_idx)] = np.array(
-                    [[syn_starts[i], syn_ends[i]]], dtype=np.int32
-                )
-
-        self._t_exon_intervals = t_exon_intervals
-        logger.debug(f"Cached exon intervals for {len(t_exon_intervals)} transcripts")
-
-        # -- splice junction indexes ------------------------------------------
+        overlap_index = _collapsed_intervals(iv_df)
+        self._t_exon_intervals = _exon_intervals(iv_df, self.t_df)
         logger.debug("Reading splice junctions")
         sj_df = pd.read_feather(os.path.join(index_dir, SJ_FEATHER))
-
-        # Extract raw numpy arrays once
-        _sj_refs = sj_df["ref"].values
-        _sj_starts = sj_df["start"].values
-        _sj_ends = sj_df["end"].values
-        _sj_strands = sj_df["strand"].values
-        _sj_tidxs = sj_df["t_index"].values
-
-        # Exact-match map: vectorised sort + boundary detection
         logger.debug("Building splice junction exact-match map")
-        _sj_uref, _sj_rc = np.unique(_sj_refs, return_inverse=True)
-        _sj_order = np.lexsort((_sj_strands, _sj_ends, _sj_starts, _sj_rc))
-        _sj_rc_s = _sj_rc[_sj_order]
-        _sj_st_s = _sj_starts[_sj_order]
-        _sj_en_s = _sj_ends[_sj_order]
-        _sj_sd_s = _sj_strands[_sj_order]
-        _sj_ti_s = _sj_tidxs[_sj_order]
-        _sj_rf_s = _sj_refs[_sj_order]
+        self.sj_map = _sj_exact_match_map(sj_df)
 
-        _sj_n = len(_sj_order)
-        _sj_changed = np.empty(_sj_n, dtype=bool)
-        if _sj_n > 0:
-            _sj_changed[0] = True
-        if _sj_n > 1:
-            _sj_changed[1:] = (
-                (np.diff(_sj_rc_s) != 0)
-                | (np.diff(_sj_st_s) != 0)
-                | (np.diff(_sj_en_s) != 0)
-                | (np.diff(_sj_sd_s) != 0)
-            )
-        _sj_gstarts = np.where(_sj_changed)[0]
-        _sj_gends = np.append(_sj_gstarts[1:], _sj_n)
+        self.resolver = self._build_resolver(overlap_index, manifest)
+        logger.debug("Built native FragmentResolver for C++ resolution")
+        return self
 
-        # Pre-convert to Python lists for fast iteration
-        _sj_rf_list = _sj_rf_s.tolist()
-        _sj_st_list = _sj_st_s.tolist()
-        _sj_en_list = _sj_en_s.tolist()
-        _sj_sd_list = _sj_sd_s.tolist()
-        _sj_ti_list = _sj_ti_s.tolist()
-        _sj_gs_list = _sj_gstarts.tolist()
-        _sj_ge_list = _sj_gends.tolist()
-
-        sj_map: dict[tuple, frozenset[int]] = {}
-        for i in range(len(_sj_gs_list)):
-            s = _sj_gs_list[i]
-            e = _sj_ge_list[i]
-            key = (_sj_rf_list[s], _sj_st_list[s], _sj_en_list[s], _sj_sd_list[s])
-            sj_map[key] = frozenset(_sj_ti_list[s:e])
-        self.sj_map = sj_map
-
-        logger.debug(f"Splice junctions: {len(self.sj_map)} unique, {len(sj_df)} total")
-
-        # -- C++ FragmentResolver (native fragment resolution) ------------------
+    def _build_resolver(self, overlap_index: tuple, manifest: dict):
+        """The native ``FragmentResolver``: every index fact fragment resolution reads, installed once, so every use
+        of the resolver has them, a scan or not. It owns the junction map afterwards, so the Python copy is freed
+        unless the index retains its lookup maps."""
         from .native import FragmentResolver
 
-        ctx = FragmentResolver()
-
-        # 0. Seed the ref-ID space in ref_names order. The resolver would otherwise number refs in first-seen
-        #    interval order, and the accumulator deposit, which indexes a partition laid out in ref_names order by
-        #    the resolver's ref id, would be mis-routed on a multi-reference genome (one reference hides it).
-        ctx.set_ref_names([str(name) for name in self.ref_names])
-
-        # 1. Overlap index from collapsed data
-        cr_refs = [k[0] for k in _collapse_keys]
-        cr_starts = [k[1] for k in _collapse_keys]
-        cr_ends = [k[2] for k in _collapse_keys]
-        # CSR for transcript sets
-        tset_flat: list[int] = []
-        tset_offsets: list[int] = [0]
-        for ts in iv_t_set:
-            tset_flat.extend(sorted(ts))
-            tset_offsets.append(len(tset_flat))
-        ctx.build_overlap_index(
-            cr_refs,
-            cr_starts,
-            cr_ends,
-            iv_type,
-            tset_flat,
-            tset_offsets,
-        )
-
-        # 2. SJ exact-match map
-        sj_refs_l: list[str] = []
-        sj_starts_l: list[int] = []
-        sj_ends_l: list[int] = []
-        sj_strands_l: list[int] = []
-        sj_t_flat: list[int] = []
-        sj_t_offsets: list[int] = [0]
-        for (ref, start, end, strand), tset in self.sj_map.items():
-            sj_refs_l.append(ref)
-            sj_starts_l.append(start)
-            sj_ends_l.append(end)
-            sj_strands_l.append(strand)
-            sj_t_flat.extend(sorted(tset))
-            sj_t_offsets.append(len(sj_t_flat))
-        ctx.build_sj_map(
-            sj_refs_l,
-            sj_starts_l,
-            sj_ends_l,
-            sj_strands_l,
-            sj_t_flat,
-            sj_t_offsets,
-        )
-        # C++ resolver owns the SJ data now; free the Python dict.
-        if not retain_lookup_maps:
+        resolver = FragmentResolver()
+        # The ref-ID space, seeded in ref_names order. The resolver would otherwise number refs in first-seen interval
+        # order, and the accumulator deposit, which indexes a partition laid out in ref_names order by the resolver's
+        # ref id, would be mis-routed on a multi-reference genome (one reference hides it).
+        resolver.set_ref_names([str(name) for name in self.ref_names])
+        resolver.build_overlap_index(*overlap_index)
+        resolver.build_sj_map(*_sj_map_csr(self.sj_map))
+        if not self._retain_lookup_maps:
             self.sj_map = None
-
-        # 2b. Splice-junction artifact blacklist: used only when the manifest records the store it
-        # was built from. A blacklist with no store recorded, or a recorded store with no blacklist,
-        # leaves artifact detection off with no other sign, so the load warns.
-        blacklist_path = os.path.join(index_dir, SJ_BLACKLIST_FEATHER)
-        store = manifest.get("sources", {}).get("alignable_zarr")
-        has_blacklist = os.path.exists(blacklist_path)
-        if store is not None and has_blacklist:
-            logger.debug("Loading splice-artifact blacklist")
-            bl_df = pd.read_feather(blacklist_path)
-            columns = (
-                bl_df["ref"].astype(str).tolist(),
-                bl_df["start"].astype(np.int32).tolist(),
-                bl_df["end"].astype(np.int32).tolist(),
-                bl_df["max_anchor_left"].astype(np.int32).tolist(),
-                bl_df["max_anchor_right"].astype(np.int32).tolist(),
-            )
-            ctx.build_sj_blacklist_map(*columns)
-            self.sj_blacklist_size = int(len(bl_df))
-            self.sj_blacklist_digest = _blacklist_digest(columns)
-            logger.info(f"Splice artifact blacklist: {len(bl_df):,} sj active")
-        else:
-            self.sj_blacklist_size = 0
-            self.sj_blacklist_digest = "none"
-            if has_blacklist:
-                logger.warning(
-                    f"{SJ_BLACKLIST_FEATHER} is not applied: this index's manifest records no alignable "
-                    "store it was built from, so splice-artifact detection is off. Rebuild the index "
-                    "with --alignable-zarr to use a blacklist."
-                )
-            elif store is not None:
-                logger.warning(
-                    f"This index was built from the alignable store {store['path']}, but its "
-                    f"{SJ_BLACKLIST_FEATHER} is missing, so splice-artifact detection is off. "
-                    "Rebuild the index."
-                )
-
-        # 3. Per-transcript exon CSR: each candidate's introns, for its path through the
-        #    gaps and its length. build_exon_csr() is the single owner of this CSR (it is
-        #    also consumed by scoring), and it frees ``_t_exon_intervals`` unless
-        #    retain_lookup_maps.
+        self.sj_blacklist_size, self.sj_blacklist_digest = _install_blacklist(
+            resolver, self.index_dir, manifest
+        )
+        # Each candidate's introns, for its path through the gaps and its length. build_exon_csr() is the one owner of
+        # this CSR (scoring reads it too), and it frees ``_t_exon_intervals`` unless retain_lookup_maps.
         exon_offsets, exon_starts_flat, exon_ends_flat, _ = self.build_exon_csr()
-        ctx.build_exon_index(
+        resolver.build_exon_index(
             exon_offsets.tolist(),
             exon_starts_flat.tolist(),
             exon_ends_flat.tolist(),
         )
-
-        # 4. The transcript count, which sizes the resolver's scratch buffers.
-        ctx.set_metadata(self.num_transcripts)
-
-        # 4b. Each transcript's strand. It sets every fragment's ambiguous-strand flag (its candidates disagree on
-        #     strand), the strand each gap hypothesis infers from the transcripts that imply it, and the truth label
-        #     of the all-exonic diagnostic strand model. An index fact, so every use of the resolver has it, a scan
-        #     or not.
-        ctx.set_transcript_strands(self.t_to_strand_arr.tolist())
-
-        # 5. nRNA parent index: synthetics are absent from the interval table (see _gen_transcript_intervals), so
-        #    the resolver derives each synthetic candidate from its annotated hits through nrna_parent_
-        is_synth = self.t_df["is_synthetic"].to_numpy(dtype=bool)
-        span_idx = self.t_df["span_t_index"].to_numpy(dtype=np.int32)
-        parent = np.full(span_idx.shape, -1, dtype=np.int32)
-        valid = (span_idx >= 0) & (span_idx < is_synth.size)
-        parent_is_synth = np.zeros_like(span_idx, dtype=bool)
-        parent_is_synth[valid] = is_synth[span_idx[valid]]
-        parent[parent_is_synth] = span_idx[parent_is_synth]
-        ctx.set_nrna_parent_index(parent.tolist())
-
-        self.resolver = ctx
-        logger.debug("Built native FragmentResolver for C++ resolution")
-
-        return self
+        # The transcript count, which sizes the resolver's scratch buffers.
+        resolver.set_metadata(self.num_transcripts)
+        # Each transcript's strand. It sets every fragment's ambiguous-strand flag (its candidates disagree on
+        # strand), the strand each gap hypothesis infers from the transcripts that imply it, and the truth label of
+        # the all-exonic diagnostic strand model.
+        resolver.set_transcript_strands(self.t_to_strand_arr.tolist())
+        resolver.set_nrna_parent_index(_nrna_parents(self.t_df).tolist())
+        return resolver
 
     def get_exon_intervals(self, t_idx: int) -> np.ndarray | None:
         """Return sorted exon ``[start, end)`` intervals for a transcript.

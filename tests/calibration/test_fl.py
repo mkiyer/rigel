@@ -14,14 +14,15 @@ weight squared), which the EM's two length tables read to tell a difference from
 
 from __future__ import annotations
 
+from functools import partial
+
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from rigel.calibration.fl import (
-    _fl_models_from_histograms,
-    gdna_contained_fl_mass,
+    fl_models_from_histograms,
     gdna_fl_mass,
     rna_fl_mass,
 )
@@ -52,7 +53,7 @@ def _pools(n_bins: int = 5) -> np.ndarray:
     return pools
 
 
-def test_the_pool_indices_ARE_the_specifications_FragmentPool():
+def test_the_pool_indices_are_the_specifications_fragment_pool():
     """The reference enum, the C++ enum and these constants are one axis. A disagreement would re-label every pool (the
     gDNA model fitted from the RNA pool) with nothing looking wrong, so this checks against the executable specification
     itself.
@@ -67,7 +68,7 @@ def test_the_pool_indices_ARE_the_specifications_FragmentPool():
     assert POOL_RNA_SPLICED == FragmentPool.RNA_SPLICED
 
 
-def test_gdna_fl_mass_is_ALL_FOUR_gdna_pools():
+def test_gdna_fl_mass_is_all_four_gdna_pools():
     """All four, because the contained pair alone measures the short half of one population. Under hybrid capture the
     surviving off-target gDNA sits beside a probe, and a fragment beside a probe reaches the exon boundary, so it
     becomes crossing rather than contained; the contained pair alone reads short under capture, while all four, each
@@ -79,23 +80,14 @@ def test_gdna_fl_mass_is_ALL_FOUR_gdna_pools():
     np.testing.assert_allclose(g, [0.0, 0.0, 701.0, 903.0, 0.0])
 
 
-def test_gdna_contained_fl_mass_is_the_pair_and_is_the_NO_DIVISOR_FALLBACK():
-    """With no annotation there is no opportunity function, and pooling the four raw would be worse than the contained
-    pair or the de-tilted four. So "no divisor" falls back to the pair, right off capture and knowably short under it,
-    rather than to a sum that is wrong everywhere.
-    """
-    c = gdna_contained_fl_mass(SimpleNamespace(pool_lengths=_pools()))
-    np.testing.assert_allclose(c, [0.0, 0.0, 1.0, 3.0, 0.0])
-
-
-def test_gdna_fl_mass_excludes_the_RNA_pool():
+def test_gdna_fl_mass_excludes_the_rna_pool():
     """The gDNA length model must never see a certified-RNA fragment."""
     pools = np.zeros((N_FRAGMENT_POOLS, 5), dtype=np.int64)
     pools[POOL_RNA_SPLICED, 1] = 12345
     assert float(gdna_fl_mass(SimpleNamespace(pool_lengths=pools)).sum()) == 0.0
 
 
-def test_rna_fl_mass_is_the_ANNOTATED_SJ_pool_alone():
+def test_rna_fl_mass_is_the_annotated_sj_pool_alone():
     """gDNA cannot be spliced, so a fragment on an annotated sj certifies RNA, and only that pool does. The accumulator
     admits a splice whether sequenced or implied by the one hypothesis that survived arbitration: pool membership is by
     determinacy, not provenance."""
@@ -103,7 +95,7 @@ def test_rna_fl_mass_is_the_ANNOTATED_SJ_pool_alone():
     np.testing.assert_allclose(r, [0.0, 0.0, 0.0, 0.0, 11.0])
 
 
-def test_the_two_COMPONENT_accessors_partition_every_pool():
+def test_the_two_component_accessors_partition_every_pool():
     """``gdna_fl_mass`` and ``rna_fl_mass`` are the two component accessors and must be exhaustive and disjoint: a pool
     no accessor returns is discarded evidence, and one two return is double-counted; neither shows in a single-accessor
     test.
@@ -125,8 +117,8 @@ def test_the_two_COMPONENT_accessors_partition_every_pool():
 def test_build_fl_large_pool_is_empirical():
     glob = _spike(100, 1.0e6)
     gdna = _spike(300, 1.0e7)  # huge gDNA pool, dominated by its own evidence
-    fl = _fl_models_from_histograms(
-        global_counts=glob, rna_counts=glob, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
+    fl = fl_models_from_histograms(
+        global_counts=glob, rna_counts=glob, gdna_counts=gdna, max_size=1000
     )
     assert int(np.argmax(fl.gdna_pmf)) == 300
     np.testing.assert_allclose(fl.gdna_pmf.sum(), 1.0)
@@ -135,7 +127,7 @@ def test_build_fl_large_pool_is_empirical():
 
 def test_build_fl_empty_pool_collapses_to_global():
     glob = _spike(100, 1.0e6)
-    fl = _fl_models_from_histograms(
+    fl = fl_models_from_histograms(
         global_counts=glob,
         rna_counts=glob,
         gdna_counts=np.zeros(1001, dtype=np.float64),
@@ -148,8 +140,8 @@ def test_build_fl_empty_pool_collapses_to_global():
 def test_build_fl_small_pool_shrinks_toward_global_no_cliff():
     glob = _spike(100, 1.0e6)  # global mode at 100
     gdna = _spike(300, 1.0)  # a single gDNA fragment at 300
-    fl = _fl_models_from_histograms(
-        global_counts=glob, rna_counts=glob, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
+    fl = fl_models_from_histograms(
+        global_counts=glob, rna_counts=glob, gdna_counts=gdna, max_size=1000
     )
     # Smooth shrinkage (no threshold): with pool_total=1 ≪ ρ_ess=1000 the global
     # anchor (bin 100) dominates the lone gDNA fragment (bin 300).
@@ -160,10 +152,10 @@ def test_build_fl_small_pool_shrinks_toward_global_no_cliff():
 def test_build_fl_just_below_5000_is_not_a_cliff():
     # 4999 vs 5001 differ only marginally: there is no threshold jump.
     glob = _spike(100, 1.0e6)
-    lo = _fl_models_from_histograms(
+    lo = fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 4999.0), max_size=1000
     )
-    hi = _fl_models_from_histograms(
+    hi = fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 5001.0), max_size=1000
     )
     np.testing.assert_allclose(lo.gdna_pmf[300], hi.gdna_pmf[300], rtol=1e-3)
@@ -179,8 +171,8 @@ def test_build_fl_stores_raw_aligned_counts():
     rna = _spike(200, 300.0)
     gdna = _spike(300, 40.0)
     glob = _spike(100, 160.0) + rna + gdna  # every pool count is a deposited fragment
-    fl = _fl_models_from_histograms(
-        global_counts=glob, rna_counts=rna, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
+    fl = fl_models_from_histograms(
+        global_counts=glob, rna_counts=rna, gdna_counts=gdna, max_size=1000
     )
     assert fl.global_counts.shape == (1001,)
     assert int(np.argmax(fl.rna_counts)) == 200
@@ -197,7 +189,7 @@ def test_build_fl_counts_overflow_folds_into_last_bin():
     """Counts beyond max_size fold into the overflow bin when aligned."""
     over = np.zeros(1201, dtype=np.float64)
     over[1150] = 7.0  # beyond max_size=1000
-    fl = _fl_models_from_histograms(
+    fl = fl_models_from_histograms(
         global_counts=_spike(100, 10.0),
         rna_counts=_spike(100, 10.0),
         gdna_counts=over,
@@ -210,12 +202,11 @@ def test_build_fl_counts_overflow_folds_into_last_bin():
 
 def test_accessors_return_empirical_models():
     """rna_model()/gdna_model()/global_model() expose the raw empirical FL."""
-    fl = _fl_models_from_histograms(
+    fl = fl_models_from_histograms(
         global_counts=_spike(100, 500.0) + _spike(200, 300.0) + _spike(325, 40.0),
         rna_counts=_spike(200, 300.0),
         gdna_counts=_spike(325, 40.0),
         max_size=1000,
-        prior_ess=1000.0,
     )
     rna_m = fl.rna_model()
     gdna_m = fl.gdna_model()
@@ -228,8 +219,10 @@ def test_accessors_return_empirical_models():
     # n_observations = pool total.
     assert rna_m.n_observations == 300
     assert gdna_m.n_observations == 40
-    # to_dict() works (drives the summary QC report).
-    assert gdna_m.to_dict()["summary"]["mode"] == 325
+    # the summary QC report reads them as they are
+    from rigel.cli import length_summary
+
+    assert length_summary(gdna_m)["mode"] == 325
 
 
 # ── the two estimands of the gDNA length law, and the routing guarantee between them ─────────
@@ -239,7 +232,7 @@ def _models(**kw):
     rng = np.random.default_rng(5)
     g = rng.random(101)
     r = rng.random(101)
-    return _fl_models_from_histograms(
+    return fl_models_from_histograms(
         global_counts=g + r, rna_counts=r, gdna_counts=g, max_size=100, **kw
     )
 
@@ -261,31 +254,32 @@ def test_gdnas_pmf_carries_its_raw_laws_variance_at_its_eb_weight_squared():
 def test_a_gdna_length_with_no_count_carries_no_variance():
     counts = np.zeros(101)
     counts[[20, 40, 60]] = (5.0, 50.0, 500.0)
-    m = _fl_models_from_histograms(
-        global_counts=counts + 1.0,
-        rna_counts=counts,
-        gdna_counts=counts,
-        max_size=100,
-        prior_ess=0.0,
+    m = fl_models_from_histograms(
+        global_counts=counts + 1.0, rna_counts=counts, gdna_counts=counts, max_size=100
     )
     assert np.count_nonzero(m.gdna_pmf_var) == 3
     np.testing.assert_array_equal(m.gdna_pmf_var == 0.0, counts == 0.0)
 
 
 def test_more_evidence_carries_proportionally_less_variance():
+    """gDNA's raw law's variance is one over its counts, so ten times the counts is a tenth of it, read through each
+    model's own EB weight."""
+    from rigel.config import CONSTANTS
+
     rng = np.random.default_rng(3)
     counts = rng.random(101) * 100.0
-    one = _fl_models_from_histograms(
-        global_counts=counts, rna_counts=counts, gdna_counts=counts, max_size=100, prior_ess=0.0
+    one = fl_models_from_histograms(
+        global_counts=counts, rna_counts=counts, gdna_counts=counts, max_size=100
     )
-    ten = _fl_models_from_histograms(
-        global_counts=counts,
-        rna_counts=10.0 * counts,
-        gdna_counts=10.0 * counts,
-        max_size=100,
-        prior_ess=0.0,
+    ten = fl_models_from_histograms(
+        global_counts=counts, rna_counts=10.0 * counts, gdna_counts=10.0 * counts, max_size=100
     )
-    np.testing.assert_allclose(ten.gdna_pmf_var, one.gdna_pmf_var / 10.0, rtol=1e-12)
+
+    def raw_var(m):
+        weight = m.n_gdna / (m.n_gdna + CONSTANTS.fragment_length.pool_prior_ess)
+        return m.gdna_pmf_var / (weight * weight)
+
+    np.testing.assert_allclose(raw_var(ten), raw_var(one) / 10.0, rtol=1e-12)
     # RNA's is its posterior's: more evidence, less variance at every length its law holds
     on = one.rna_pmf > 1e-4
     assert np.all(ten.rna_pmf_var[on] < one.rna_pmf_var[on])
@@ -302,7 +296,7 @@ def test_the_contrasts_own_variance_is_carried_at_its_eb_weight():
 def test_de_tilting_adds_no_evidence_to_the_rna_law():
     """The builder reads the spliced pool's RAW counts at their sj opportunity: de-tilting rescales a length and adds
     no evidence, so the law and its variance are the own-count law of the raw counts, never of the de-tilted ones."""
-    from rigel.calibration.fl import build_fl_models, own_count_law
+    from rigel.calibration.fl import own_count_law
 
     rng = np.random.default_rng(8)
     pools = np.zeros((N_FRAGMENT_POOLS, 101))
@@ -311,10 +305,23 @@ def test_de_tilting_adds_no_evidence_to_the_rna_law():
     pools[POOL_RNA_SPLICED, :5] = 0.0
     payload = SimpleNamespace(pool_lengths=pools, deposited_lengths=pools.sum(0), max_length=100)
     pi = np.linspace(0.0, 1.0, 101)
-    m = build_fl_models(payload, sj_opportunity=pi, prior_ess=0.0)
+    m = _rna_law_models(payload, pi)
     law, var, _ = own_count_law(pools[POOL_RNA_SPLICED], pi, m.global_pmf)
     np.testing.assert_array_equal(m.rna_pmf, law)
     np.testing.assert_array_equal(m.rna_pmf_var, var)
+
+
+def _rna_law_models(payload, pi):
+    """The models' kernel on a payload's anchor and spliced pool at the sj opportunity ``pi``, as `build_fl_models`
+    hands them to it (RNA's law reads nothing of gDNA's)."""
+    pools = np.asarray(payload.pool_lengths, dtype=np.float64)
+    return fl_models_from_histograms(
+        global_counts=payload.deposited_lengths,
+        rna_counts=pools[POOL_RNA_SPLICED],
+        rna_selection=pi,
+        gdna_counts=pools[POOL_DNA_INTERGENIC],
+        max_size=int(payload.max_length),
+    )
 
 
 # ── RNA's law from its own counts, read as counts ─────────────────────────────────────────────────────────────
@@ -352,47 +359,37 @@ def _h2(a: np.ndarray, b: np.ndarray) -> float:
 def test_a_small_rna_pool_reads_its_own_law_not_the_all_fragment_one():
     """2,000 spliced fragments in a 98 %-gDNA library: RNA's law is its own counts', not gDNA's shape at a weight no
     measurement supplied."""
-    from rigel.calibration.fl import build_fl_models
-
     payload, pi, truth = _rna_payload(2_000)
-    m = build_fl_models(payload, sj_opportunity=pi)
+    m = _rna_law_models(payload, pi)
     assert abs(m.rna_pmf @ _L - truth @ _L) < 3.0
     assert _h2(m.rna_pmf, truth) < 0.02
 
 
 def test_an_empty_rna_pool_is_the_all_fragment_law_exactly():
-    from rigel.calibration.fl import build_fl_models
-
     payload, pi, _ = _rna_payload(0)
-    m = build_fl_models(payload, sj_opportunity=pi)
+    m = _rna_law_models(payload, pi)
     np.testing.assert_array_equal(m.rna_pmf, m.global_pmf)
 
 
 def test_a_deep_rna_pool_is_its_own_law():
-    from rigel.calibration.fl import build_fl_models
-
     payload, pi, truth = _rna_payload(2_000_000)
-    m = build_fl_models(payload, sj_opportunity=pi)
+    m = _rna_law_models(payload, pi)
     assert _h2(m.rna_pmf, truth) < 1e-3
 
 
 def test_a_length_the_pool_could_reach_and_did_not_is_evidence():
     """Past RNA's support the pool reached every length (its crossing chance is high there) and drew nothing, so the law
     is low there. The all-fragment law's long tail is gDNA's and says nothing about RNA."""
-    from rigel.calibration.fl import build_fl_models
-
     payload, pi, truth = _rna_payload(2_000)
-    m = build_fl_models(payload, sj_opportunity=pi)
+    m = _rna_law_models(payload, pi)
     assert m.rna_pmf[300:].sum() < 10.0 * truth[300:].sum() + 1e-3
 
 
 def test_where_the_pool_cannot_reach_the_law_keeps_the_anchors_shape():
     """A length no spliced fragment can have (crossing chance zero) carries no evidence: the law there is the
     all-fragment law's shape, held at one ratio."""
-    from rigel.calibration.fl import build_fl_models
-
     payload, pi, _ = _rna_payload(2_000, anchor_from=10)
-    m = build_fl_models(payload, sj_opportunity=pi)
+    m = _rna_law_models(payload, pi)
     dark = (pi == 0.0) & (m.global_pmf > 0.0)
     assert dark.sum() >= 10
     ratio = m.rna_pmf[dark] / m.global_pmf[dark]
@@ -472,11 +469,9 @@ def test_the_rna_laws_variance_predicts_what_replicate_libraries_show():
 
 
 def test_the_crossing_chance_is_an_exposure_up_to_a_constant():
-    from rigel.calibration.fl import build_fl_models
-
     payload, pi, _ = _rna_payload(2_000)
-    a = build_fl_models(payload, sj_opportunity=pi)
-    b = build_fl_models(payload, sj_opportunity=0.5 * pi)
+    a = _rna_law_models(payload, pi)
+    b = _rna_law_models(payload, 0.5 * pi)
     np.testing.assert_allclose(a.rna_pmf, b.rna_pmf, rtol=1e-6, atol=1e-12)
 
 
@@ -512,10 +507,10 @@ def test_the_contrasts_variance_falls_as_its_evidence_grows():
 
     from _fl_fixture import build_fixture
 
-    from rigel.calibration.fl import _deconvolved_gdna_counts
+    from rigel.calibration.fl import deconvolved_gdna_counts
 
     payload, opp, regions = build_fixture()
-    counts, var = _deconvolved_gdna_counts(payload, opp, regions)
+    counts, var = deconvolved_gdna_counts(payload, opp, regions)
     assert counts is not None
     assert np.all(np.isfinite(var)) and np.all(var >= 0.0) and var.sum() > 0.0
     scaled = dataclasses.replace(
@@ -523,7 +518,7 @@ def test_the_contrasts_variance_falls_as_its_evidence_grows():
         pool_lengths=np.asarray(payload.pool_lengths, dtype=np.float64) * 10.0,
         region_contained_count=np.asarray(payload.region_contained_count, dtype=np.float64) * 10.0,
     )
-    counts10, var10 = _deconvolved_gdna_counts(scaled, opp, regions)
+    counts10, var10 = deconvolved_gdna_counts(scaled, opp, regions)
     assert counts10 is not None
     np.testing.assert_allclose(
         counts10 / counts10.sum(), counts / counts.sum(), rtol=1e-9, atol=1e-15
@@ -570,11 +565,11 @@ def test_the_contrasts_variance_is_its_own_estimators_through_the_clip():
     """
     import dataclasses
 
-    from rigel.calibration.fl import _contained_purities, _deconvolved_gdna_counts
+    from rigel.calibration.fl import contained_purities, deconvolved_gdna_counts
 
     payload, opp, regions, _rho = _clipping_contrast_payload()
-    counts, var = _deconvolved_gdna_counts(payload, opp, regions)
-    _rate, (a0, a1), _n = _contained_purities(payload, regions)
+    counts, var = deconvolved_gdna_counts(payload, opp, regions)
+    _rate, (a0, a1), _n = contained_purities(payload, regions)
     assert counts is not None and a0 > a1
     law = counts / counts.sum()
     pools = np.asarray(payload.pool_lengths, dtype=np.float64)
@@ -590,7 +585,7 @@ def test_the_contrasts_variance_is_its_own_estimators_through_the_clip():
     for _ in range(400):
         drawn = pools.copy()
         drawn[:2] = rng.poisson(pools[:2]).astype(np.float64)
-        c, _v = _deconvolved_gdna_counts(
+        c, _v = deconvolved_gdna_counts(
             dataclasses.replace(payload, pool_lengths=drawn), opp, regions
         )
         assert c is not None
@@ -610,6 +605,13 @@ def test_the_contrasts_variance_is_its_own_estimators_through_the_clip():
 # ── the RNA law the census reads: a law, whatever its scale, and the one FLModels carries ───────────
 
 
+def _normal_law(L, mu) -> np.ndarray:
+    """A normal length law of sd 30 centred on *mu*, over the lengths *L*, with no mass at 0."""
+    p = np.exp(-0.5 * ((L - mu) / 30.0) ** 2)
+    p[0] = 0.0
+    return p / p.sum()
+
+
 def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
     """Four intergenic and four intronic 20-kb regions of pure gDNA at the uniform expectation, and four probed exons:
     the contained pools carry the uniform-frame law ``g`` (mean 150), the two crossing pools a capture-selected law
@@ -624,12 +626,7 @@ def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
 
     n = 400
     L = np.arange(n + 1, dtype=np.float64)
-
-    def law(mu):
-        p = np.exp(-0.5 * ((L - mu) / 30.0) ** 2)
-        p[0] = 0.0
-        return p / p.sum()
-
+    law = partial(_normal_law, L)
     g, g_captured, r, r_ig = law(150.0), law(200.0), law(120.0), law(100.0)
     lengths = np.full(12, 20_000.0)
     lengths[8:] = 300.0
@@ -684,12 +681,12 @@ def test_a_purity_tie_returns_the_contained_pairs_own_mixture():
     does not decline: declining would hand the uniform-frame law to the capture-selected four-pool census, which reads
     long.
     """
-    from rigel.calibration.fl import _contained_purities, _deconvolved_gdna_counts
+    from rigel.calibration.fl import contained_purities, deconvolved_gdna_counts
 
     payload, opp, regions, L = _tie_fixture(0.0)
     with np.errstate(divide="raise", invalid="raise"):  # a tie never divides by its zero separation
-        counts, _var = _deconvolved_gdna_counts(payload, opp, regions)
-    _rate, (a0, a1), _n = _contained_purities(payload, regions)
+        counts, _var = deconvolved_gdna_counts(payload, opp, regions)
+    _rate, (a0, a1), _n = contained_purities(payload, regions)
     assert a0 == a1 == 1.0
     assert counts is not None
     assert _mean_length(counts, L) == pytest.approx(150.0, abs=0.5)
@@ -699,14 +696,16 @@ def test_the_uniform_law_is_continuous_through_a_purity_tie():
     """No cliff at the purity axis, end to end through ``build_fl_models``: the uniform-frame law just past the tie
     (intronic purity below 1) and at the tie must agree, and both must read the uniform-frame law, not the
     capture-selected census 50 bp longer."""
-    from rigel.calibration.fl import _contained_purities, build_fl_models
+    from rigel.calibration.fl import contained_purities, build_fl_models
 
     means, seps = [], []
     for rna in (0.0005, 0.001):
         payload, opp, regions, L = _tie_fixture(rna)
-        _rate, (a0, a1), _n = _contained_purities(payload, regions)
+        _rate, (a0, a1), _n = contained_purities(payload, regions)
         seps.append(a0 - a1)
-        m = build_fl_models(payload, gdna_opportunity=opp, regions=regions)
+        m = build_fl_models(
+            payload, sj_opportunity=np.ones(L.size), gdna_opportunity=opp, regions=regions
+        )
         means.append(_mean_length(m.gdna_pmf, L))
     assert seps[0] == 0.0 < seps[1]  # the fixture straddles the tie
     assert abs(means[0] - means[1]) < 0.5, (
@@ -715,18 +714,18 @@ def test_the_uniform_law_is_continuous_through_a_purity_tie():
     assert means[0] == pytest.approx(150.0, abs=1.0)
 
 
-def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
+def test_a_tie_below_full_purity_is_the_pairs_mixture_too():
     """Two pools of equal purity carry no contrast whatever that purity is, so a tie below 1 also answers with the
     pair's de-tilted mixture, contaminant included. The ``errstate`` guards hold that a tie never divides by its zero
     separation: at ``sep = 0`` the inversion's ``0/0`` would only fall through to the mixture by accident.
     """
-    from rigel.calibration.fl import _contained_purities, _deconvolved_gdna_counts
+    from rigel.calibration.fl import contained_purities, deconvolved_gdna_counts
     from rigel.calibration.sj_opportunity import detilt_pool
 
     payload, opp, regions, L = _tie_fixture(0.005, 0.005)
     with np.errstate(divide="raise", invalid="raise"):
-        counts, _var = _deconvolved_gdna_counts(payload, opp, regions)
-    _rate, (a0, a1), _n = _contained_purities(payload, regions)
+        counts, _var = deconvolved_gdna_counts(payload, opp, regions)
+    _rate, (a0, a1), _n = contained_purities(payload, regions)
     assert a0 - a1 == 0.0 and a0 < 1.0
     assert counts is not None and np.isfinite(counts).all()
     pools = np.asarray(payload.pool_lengths)
@@ -745,14 +744,14 @@ def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
 def test_resolution_weight_is_a_smooth_signal_to_noise_ratio():
     """`lam = S/(S+N)`: 0 when the split is pure noise, 1 when noise vanishes, ½ at S = N, and monotone in between. No
     threshold, so behaviour never jumps."""
-    from rigel.calibration.fl import _resolution_weight
+    from rigel.calibration.fl import resolution_weight
 
-    assert _resolution_weight(0.0, 1.0) == 0.0
-    assert _resolution_weight(1.0, 0.0) == 1.0
-    assert _resolution_weight(1.0, 1.0) == pytest.approx(0.5)
+    assert resolution_weight(0.0, 1.0) == 0.0
+    assert resolution_weight(1.0, 0.0) == 1.0
+    assert resolution_weight(1.0, 1.0) == pytest.approx(0.5)
     prev = -1.0
     for s in np.linspace(0.0, 10.0, 60):
-        lam = _resolution_weight(float(s), 1.0)
+        lam = resolution_weight(float(s), 1.0)
         assert 0.0 <= lam <= 1.0 and lam >= prev
         prev = lam
 
@@ -784,12 +783,7 @@ def _masked_fixture(rna_intergenic: float, rna_intronic: float = 0.05, mask=_UNK
     rho = 0.05
     n = 400
     L = np.arange(n + 1, dtype=np.float64)
-
-    def law(mu):
-        p = np.exp(-0.5 * ((L - mu) / 30.0) ** 2)
-        p[0] = 0.0
-        return p / p.sum()
-
+    law = partial(_normal_law, L)
     g, g_captured, r = law(150.0), law(200.0), law(120.0)
     lengths = np.full(12, 20_000)
     lengths[8:] = 300
@@ -836,18 +830,19 @@ def test_the_one_sided_rate_and_the_purities_read_observable_support():
     of the genome and not what this test is about.
     """
     from rigel.calibration.fl import (
-        _contained_purities,
-        _deconvolved_gdna_counts,
-        _normalized,
-        _pool_sum,
+        contained_purities,
+        deconvolved_gdna_counts,
     )
     from rigel.calibration.effective_length import contained_eff_length
     from rigel.calibration.gdna_density import one_sided_rate
 
     payload, opportunity, regions, _L = _masked_fixture(rna_intergenic=0.005)
-    counts_law, _var = _deconvolved_gdna_counts(payload, opportunity, regions)
-    got_rate, (a_ig, a_in), _n = _contained_purities(payload, regions)
-    pooled = _normalized(_pool_sum(payload, (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)))
+    counts_law, _var = deconvolved_gdna_counts(payload, opportunity, regions)
+    got_rate, (a_ig, a_in), _n = contained_purities(payload, regions)
+    pooled = np.asarray(payload.pool_lengths, float)[[POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC]].sum(
+        axis=0
+    )
+    pooled /= pooled.sum()
     support = np.array([contained_eff_length(np.array(ps, float), pooled).sum() for ps in _PIECES])
     counts = payload.region_contained_count[:8].sum(axis=1)
     live = support > 0.0  # the all-N region is no object
@@ -868,11 +863,11 @@ def test_over_observable_bases_the_contrast_recovers_the_uniform_law():
     shares would fall near zero, their separation drown in its error, the resolution weight go to zero, and the law
     become the pools' mixture, pulled short by the introns' RNA (mean 120).
     """
-    from rigel.calibration.fl import _contained_purities, _deconvolved_gdna_counts
+    from rigel.calibration.fl import contained_purities, deconvolved_gdna_counts
 
     payload, opportunity, regions, L = _masked_fixture(rna_intergenic=0.0)
-    counts, _var = _deconvolved_gdna_counts(payload, opportunity, regions)
-    _rate, (a_ig, _a_in), _n = _contained_purities(payload, regions)
+    counts, _var = deconvolved_gdna_counts(payload, opportunity, regions)
+    _rate, (a_ig, _a_in), _n = contained_purities(payload, regions)
     assert counts is not None
     assert a_ig == 1.0
     assert _mean_length(counts, L) == pytest.approx(150.0, abs=0.1)
@@ -914,9 +909,9 @@ def test_a_frame_of_another_partition_is_refused():
     payload was deposited into: one with another region count is refused, never truncated."""
     from _fl_fixture import regions_of
 
-    from rigel.calibration.fl import _deconvolved_gdna_counts
+    from rigel.calibration.fl import deconvolved_gdna_counts
 
     payload, opportunity, _regions, _L = _tie_fixture(0.0)  # twelve regions
     other = regions_of([20_000] * 11, [0] * 11)
     with pytest.raises(ValueError, match="different partitions"):
-        _deconvolved_gdna_counts(payload, opportunity, other)
+        deconvolved_gdna_counts(payload, opportunity, other)

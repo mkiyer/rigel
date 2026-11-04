@@ -31,8 +31,6 @@ import argparse
 import dataclasses
 import json
 import os
-import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,11 +39,22 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
-_REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO / "tests" / "calibration"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, run_shards, set_args, set_field, strata, stratum  # noqa: E402,F401
+from _shared import (  # noqa: E402
+    DEFAULT_INDEX,
+    DEFAULT_SUITE,
+    ORACLE_BAM,
+    OVERRIDE_FIELDS,
+    SCRATCH,
+    add_set_option,
+    check_override_fields,
+    configured,
+    oracle_cache_dir,
+    panel_conditions,
+    run_json_shards,
+    set_args,
+    stratum,
+    stratum_selections,
+)
 
 from _oracle import OracleTruth  # noqa: E402
 from _oracle_arms import load_or_build_oracle  # noqa: E402
@@ -53,10 +62,9 @@ from _oracle_arms import load_or_build_oracle  # noqa: E402
 import rigel.calibration.priors as PRIORS  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
-from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import (  # noqa: E402
-    _drain_side_buffer,
+    drain_side_buffer,
     length_tables,
     quant_from_buffer,
     scan_and_buffer,
@@ -64,8 +72,6 @@ from rigel.pipeline import (  # noqa: E402
 
 #: The two ``LocusPriors`` fields, in the order every table prints them.
 PRIOR_FIELDS = ("gdna_count", "gdna_eff_len")
-
-
 
 # ── the scoring ──────────────────────────────────────────────────────────────────────────────────
 
@@ -169,13 +175,7 @@ def oracle_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
     masses through the identical ``dataclasses.replace`` and must come back byte-identical.
     """
     override = oracle.override_masses(region_arrays)
-    missing = set(OVERRIDE_FIELDS) - set(override)
-    extra = set(override) - set(OVERRIDE_FIELDS)
-    if missing or extra:
-        raise RuntimeError(
-            f"override_masses no longer writes OVERRIDE_FIELDS: missing={sorted(missing)} "
-            f"extra={sorted(extra)}. The noop gate would be testing a different set than the arm."
-        )
+    check_override_fields(override)
     o = PRIORS.assemble_priors(
         dataclasses.replace(calibration, **override), region_arrays, multi_loci
     )
@@ -256,8 +256,8 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
     n_held = int(payload.deferred.n_fragments)
     # drained at the production seed; the oracle partitions replay the whole's choices, and sum-to-full checks it
     lift: dict = {}
-    payload = _drain_side_buffer(
-        payload, index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
+    payload = drain_side_buffer(
+        payload, index, strand_model, seed=pipeline_config.second_pass_seed, lift=lift
     )
     # sum-to-full is re-run on the loaded parts, cached or rebuilt; it raises if the lift breaks a bank
     oracle = load_or_build_oracle(
@@ -330,14 +330,6 @@ def _agg(scores):
     )
 
 
-def _selections(conds) -> tuple:
-    """The selections every table prints: one per stratum, zero-gDNA conditions excluded."""
-    return tuple(
-        (" x ".join(st), (lambda c, st=st: stratum(c) == st and not is_zero_gdna(c)))
-        for st in strata(conds)
-    )
-
-
 def _rel(x: float) -> str:
     """``rel`` in 8 columns, scientific below 1e-3 so a small residual never prints as zero."""
     if not np.isfinite(x):
@@ -345,19 +337,8 @@ def _rel(x: float) -> str:
     return f"{x:>8.1e}" if 0.0 < abs(x) < 1e-3 else f"{x:>8.4f}"
 
 
-def report(rows: list[dict], settings=()) -> None:
-    """The whole report, from the per-condition JSON rows; serial and sharded runs share this one path."""
-    rows = sorted(rows, key=lambda r: r["condition"])
-    selections = _selections(r["condition"] for r in rows)
-    print()
-    print("=" * 104)
-    print("  ⭐⭐⭐ CALIBRATION'S ENDPOINT vs THE ORACLE — LocusPriors, in FRAGMENTS")
-    config = " ".join(f"--set {spec}" for spec in settings) or "the shipped defaults"
-    print(f"  {len(rows)} conditions   config: {config}   the drained frame (the drain's leak is "
-          "reported below)")
-    print("=" * 104)
-
-    # ── the gate first ──
+def _check_noop_gate(rows: list[dict]) -> None:
+    """Refuse the report when re-injecting the shipped masses did not reproduce ``P`` byte-identically."""
     bad = [(r["condition"], f) for r in rows for f, ok in r["noop_identical"].items() if not ok]
     if bad:
         print(f"\n  ⛔⛔ NOOP GATE FAILED on {len(bad)} (condition, field) pairs — the override "
@@ -368,31 +349,28 @@ def report(rows: list[dict], settings=()) -> None:
     print(f"\n  ✅ noop gate: re-injecting the shipped masses reproduces P byte-identically on all "
           f"{len(rows)} x {len(PRIOR_FIELDS)} arrays (TRAPS: byte-identity-gate)")
 
-    def arm_table(title: str, key: str, note: str = "") -> None:
-        print()
-        print(f"  {title}")
-        if note:
-            print(f"  {note}")
-        print(f"    {'stratum':<26} {'ref total':>14} {'arm total':>14} {'Σ|Δ|':>14} "
-              f"{'rel':>8} {'net':>14} {'canc':>7}")
-        print("    " + "-" * 102)
-        for label, sel in selections:
-            s = _agg([ArmScore(**r[key]) for r in rows if sel(r["condition"])])
-            if s is None:
-                print(f"    {label:<26} {'(empty)':>14}")
-                continue
-            print(f"    {label:<26} {s.total_ref:>14,.0f} {s.total_arm:>14,.0f} "
-                  f"{s.abs_err:>14,.0f} {_rel(s.rel)} {s.net_err:>+14,.0f} "
-                  f"{s.cancellation:>7.1f}")
 
-    arm_table("① P vs O — CALIBRATION'S OWN ERROR (a perfect deconvolution, same assembler) · gdna_count",
-              "P_vs_O")
-    arm_table("② O vs S — THE POOLED SHARE'S OWN CONTRIBUTION, ISOLATED · gdna_count",
-              "O_vs_S",
-              "⛔ What the pooled share moves off gDNA it moves onto RNA, so no gate on the locus total "
-              "can see it (ISSUES: the-pooled-q-in-the-gdna-count).")
+def _print_arm_table(rows: list[dict], title: str, key: str, note: str = "") -> None:
+    """One arm pair's ``gdna_count`` scores, summed per stratum."""
+    print()
+    print(f"  {title}")
+    if note:
+        print(f"  {note}")
+    print(f"    {'stratum':<26} {'ref total':>14} {'arm total':>14} {'Σ|Δ|':>14} "
+          f"{'rel':>8} {'net':>14} {'canc':>7}")
+    print("    " + "-" * 102)
+    for label, sel in stratum_selections(r["condition"] for r in rows):
+        s = _agg([ArmScore(**r[key]) for r in rows if sel(r["condition"])])
+        if s is None:
+            print(f"    {label:<26} {'(empty)':>14}")
+            continue
+        print(f"    {label:<26} {s.total_ref:>14,.0f} {s.total_arm:>14,.0f} "
+              f"{s.abs_err:>14,.0f} {_rel(s.rel)} {s.net_err:>+14,.0f} "
+              f"{s.cancellation:>7.1f}")
 
-    # ── ③ the drained-frame report ──
+
+def _print_drained_frame(rows: list[dict]) -> None:
+    """③: the lift's attribution bound and the drain's spliced-gDNA leak."""
     print()
     print("  ③ THE DRAINED FRAME — the lift's attribution bound, and production's certified-RNA leak")
     d = [r["drain"] for r in rows]
@@ -405,7 +383,9 @@ def report(rows: list[dict], settings=()) -> None:
           f"{n_leak}/{len(d)} conditions — production behaviour, RECORDED "
           "(ISSUES: drain-contaminates-certified-rna), never an oracle refusal.")
 
-    # ── ④ per condition, since a stratum total hides the shape ──
+
+def _print_per_condition(rows: list[dict]) -> None:
+    """④: ``P`` and ``O`` per condition, since a stratum total hides the shape."""
     print()
     print("  ④ PER CONDITION — gdna_count, P and O as fragment totals")
     print(f"    {'condition':<44} {'true f_g':>9} {'O_g':>13} {'P_g':>13} {'P/O':>8} "
@@ -417,6 +397,26 @@ def report(rows: list[dict], settings=()) -> None:
         print(f"    {r['condition']:<44} {r['library']['true_f_gdna']:>9.4f} {g.total_ref:>13,.0f} "
               f"{g.total_arm:>13,.0f} {ratio:>8.3f} {g.abs_err:>13,.0f} {_rel(g.rel)}")
 
+
+def report(rows: list[dict], settings=()) -> None:
+    """The whole report, from the per-condition JSON rows; serial and sharded runs share this one path."""
+    rows = sorted(rows, key=lambda r: r["condition"])
+    print()
+    print("=" * 104)
+    print("  ⭐⭐⭐ CALIBRATION'S ENDPOINT vs THE ORACLE — LocusPriors, in FRAGMENTS")
+    config = " ".join(f"--set {spec}" for spec in settings) or "the shipped defaults"
+    print(f"  {len(rows)} conditions   config: {config}   the drained frame (the drain's leak is "
+          "reported below)")
+    print("=" * 104)
+    _check_noop_gate(rows)
+    _print_arm_table(rows, "① P vs O — CALIBRATION'S OWN ERROR (a perfect deconvolution, same assembler) · gdna_count",
+                     "P_vs_O")
+    _print_arm_table(rows, "② O vs S — THE POOLED SHARE'S OWN CONTRIBUTION, ISOLATED · gdna_count",
+                     "O_vs_S",
+                     "⛔ What the pooled share moves off gDNA it moves onto RNA, so no gate on the locus total "
+                     "can see it (ISSUES: the-pooled-q-in-the-gdna-count).")
+    _print_drained_frame(rows)
+    _print_per_condition(rows)
     print()
     print(f"  total wall clock {sum(r['seconds'] for r in rows):,.0f} s over {len(rows)} conditions")
 
@@ -453,58 +453,42 @@ def main() -> int:
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--oracle-cache", type=Path, default=None,
                     help="defaults to <suite>/oracle_cache when that directory exists")
-    ap.add_argument("--work-dir", type=Path,
-                    default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_prior_oracle")
+    ap.add_argument("--work-dir", type=Path, default=SCRATCH / "rigel_prior_oracle")
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--jobs", type=int, default=1,
                     help="run this many conditions CONCURRENTLY by re-invoking on shards. The "
                          "conditions are independent, so this changes no number.")
-    ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
-                    help="override one PipelineConfig field, typed from the field; repeatable "
-                         "(e.g. --set scan.total_threads=1 for a reproducible run)")
+    add_set_option(ap, "override one PipelineConfig field, typed from the field; repeatable "
+                       "(e.g. --set scan.total_threads=1 for a reproducible run)")
     args = ap.parse_args()
 
-    names = args.conditions or sorted(
-        p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()
-    )
+    names = panel_conditions(args.suite, args.conditions)
     if not names:
         raise SystemExit(f"no conditions with a sim_oracle.bam under {args.suite}")
-    cache = args.oracle_cache
-    if cache is None and (args.suite / "oracle_cache").is_dir():
-        cache = args.suite / "oracle_cache"
+    cache = oracle_cache_dir(args.suite, args.oracle_cache)
 
     if args.jobs > 1 and len(names) > 1:
-        # each run shards into its own directory, and each shard works in a directory beside its output
+        # each shard works in a directory beside its output
+        payload = run_json_shards(
+            Path(__file__).resolve(), names, args.jobs, args.work_dir,
+            lambda out, shard: ["--suite", str(args.suite), "--index", str(args.index),
+                                "--work-dir", str(out.with_suffix("")), "--json", str(out),
+                                "--conditions", *shard,
+                                *([] if cache is None else ["--oracle-cache", str(cache)]),
+                                *set_args(args.settings)],
+        )
+    else:
+        index = TranscriptIndex.load(str(args.index))
+        pipeline_config = configured(args.settings)
         args.work_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=args.work_dir, prefix="shards_") as td:
-            outs = run_shards(
-                Path(__file__).resolve(), names, args.jobs, Path(td),
-                lambda out, shard: ["--suite", str(args.suite), "--index", str(args.index),
-                                    "--work-dir", str(out.with_suffix("")), "--json", str(out),
-                                    "--conditions", *shard,
-                                    *([] if cache is None else ["--oracle-cache", str(cache)]),
-                                    *set_args(args.settings)],
-            )
-            merged = [row for o in outs for row in json.loads(o.read_text())]
-        if args.json is not None:
-            args.json.write_text(json.dumps(merged, indent=1))
-        report(merged, args.settings)
-        return 0
-
-    index = TranscriptIndex.load(str(args.index))
-    pipeline_config = PipelineConfig()
-    for spec in args.settings:
-        pipeline_config = set_field(pipeline_config, spec)
-    args.work_dir.mkdir(parents=True, exist_ok=True)
-    results = []
-    for name in names:
-        bam = str(args.suite / name / "sim_oracle.bam")
-        print(f"  … {name}", flush=True)
-        results.append(measure_condition(
-            bam, index, pipeline_config, args.work_dir, name,
-            oracle_cache=cache,
-        ))
-    payload = to_json(results)
+        results = []
+        for name in names:
+            print(f"  … {name}", flush=True)
+            results.append(measure_condition(
+                str(args.suite / name / ORACLE_BAM), index, pipeline_config, args.work_dir, name,
+                oracle_cache=cache,
+            ))
+        payload = to_json(results)
     if args.json is not None:
         args.json.write_text(json.dumps(payload, indent=1))
     report(payload, args.settings)

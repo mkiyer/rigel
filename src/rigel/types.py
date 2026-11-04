@@ -51,26 +51,10 @@ class Strand(IntEnum):
 
 
 class Interval(NamedTuple):
-    """A 0-based half-open interval ``(start, end)``, such as a ``Transcript``'s exon; ``GenomicInterval`` adds a
-    reference and strand."""
+    """A 0-based half-open interval ``(start, end)``, such as a ``Transcript``'s exon."""
 
     start: int
     end: int
-
-
-# ---------------------------------------------------------------------------
-# GenomicInterval
-# ---------------------------------------------------------------------------
-
-
-class GenomicInterval(NamedTuple):
-    """An interval on a reference and strand, such as an aligned block passed to
-    :meth:`rigel.index.TranscriptIndex.query`."""
-
-    ref: str
-    start: int
-    end: int
-    strand: int = Strand.NONE
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +64,7 @@ class GenomicInterval(NamedTuple):
 
 class IntervalType(IntEnum):
     """An interval's class relative to the annotation. ``EXON`` is one exon of one transcript; ``TRANSCRIPT`` is a
-    transcript's full span ``[start, end)``, so intron overlap is ``transcript_bp - exon_bp``; ``INTERGENIC`` covers
+    transcript's full span ``[start, end)``; ``INTERGENIC`` covers
     the reference outside every transcript."""
 
     EXON = 0

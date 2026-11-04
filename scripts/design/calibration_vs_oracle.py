@@ -25,7 +25,6 @@ import argparse
 import dataclasses
 import json
 import os
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -34,9 +33,27 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
-
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, pool_ledger, run_shards, set_args, set_field, sibling, strata, stratum  # noqa: E402
-
+from _shared import (  # noqa: E402
+    DEFAULT_INDEX,
+    DEFAULT_SUITE,
+    OVERRIDE_FIELDS,
+    SCRATCH,
+    STRATA,
+    add_set_option,
+    check_override_fields,
+    configured,
+    oracle_cache_dir,
+    panel_conditions,
+    pool_ledger,
+    refuses,
+    run_json_shards,
+    scope,
+    set_args,
+    set_field,
+    sibling,
+    stratum,
+    stratum_selections,
+)
 
 OA = sibling("_oracle_arms.py")
 
@@ -45,10 +62,8 @@ from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "calibration"))
-from _oracle import ORIGINS, OracleTruth  # noqa: E402
+from _scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
+from _oracle import OracleTruth  # noqa: E402
 
 #: The two axes ``CalibrationResult`` deconvolves; the sj axis is certified RNA and is never split.
 AXES = OA.AXES
@@ -84,33 +99,25 @@ def signed_histogram(delta: np.ndarray) -> dict:
     return out
 
 
-# ── the gates, run before any number is printed ──────────────────────────────────────────────────
-
-
-def check_override_field_set(override: dict) -> None:
-    """``override_masses`` must write exactly :data:`OVERRIDE_FIELDS`, so ``O`` differs from ``P`` only in the
-    deconvolution."""
-    missing = set(OVERRIDE_FIELDS) - set(override)
-    extra = set(override) - set(OVERRIDE_FIELDS)
-    if missing or extra:
-        raise SystemExit(
-            f"⛔ override_masses no longer writes OVERRIDE_FIELDS: missing={sorted(missing)} "
-            f"extra={sorted(extra)}."
-        )
-
-
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
 
 
-def load_oracle(oracle_cache: Path, condition: str, index, drained_payload, lift):
-    """The origin-split truth for one condition, in the drained frame.
+def score_axis_row(p_arm, o_arm, axis: str) -> dict:
+    """``P`` against ``O`` on one axis: the ``AxisScore``, the signed per-object histogram over the objects with
+    mass, and the gate that RNA mirrors gDNA per object."""
+    def arr(arm, population):
+        return np.asarray(getattr(arm, f"count_{population}_{axis}"), np.float64)
 
-    The full side is the payload ``P`` calibrated; the cached parts are drained by replaying the whole's choices,
-    and sum-to-full validates that lift.
-    """
-    root = Path(oracle_cache) / condition
-    parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
-    return OracleTruth.from_cached_parts(drained_payload, parts, lift)
+    gp, go, rp, ro = arr(p_arm, "gdna"), arr(o_arm, "gdna"), arr(p_arm, "rna"), arr(o_arm, "rna")
+    row = dataclasses.asdict(OA.score_axis(gp, rp, go, ro))
+    # the full distribution; objects with no mass have no answer and are excluded
+    live = go + ro > 0.0
+    row["hist"] = signed_histogram(gp[live] - go[live])
+    # Δ_RNA ≡ −Δ_gDNA per object, since both arms carry the same per-object total; recorded as a gate
+    row["rna_mirrors_gdna_max_dev"] = float(
+        np.abs((rp - ro)[live] + (gp - go)[live]).max() if live.any() else 0.0
+    )
+    return row
 
 
 def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle_cache: Path,
@@ -124,16 +131,16 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     payload = kw["payload"]
     p_arm = calibrate(config=pipeline_config.calibration, **kw)
 
-    oracle = load_oracle(oracle_cache, condition, index, payload, lift)
+    # the cached parts are drained by replaying the whole's choices, and sum-to-full validates that lift
+    oracle = OracleTruth.from_cached_parts(payload, OA.oracle_parts(oracle_cache, condition, index), lift)
     override = oracle.override_masses(region_arrays)
-    check_override_field_set(override)
+    check_override_fields(override)
     o_arm = dataclasses.replace(p_arm, **override)
 
     # both arms must carry the payload's own per-object totals, per axis
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     OA.check_same_basis("P", p_arm, substrate)
     OA.check_same_basis("O", o_arm, substrate)
-
 
     row = {
         "condition": condition,
@@ -143,27 +150,8 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
         "seconds": time.perf_counter() - start,
         "library_f_gdna_P": OA.library_f_gdna(p_arm),
         "library_f_gdna_O": OA.library_f_gdna(o_arm),
-        "axes": {},
+        "axes": {axis: score_axis_row(p_arm, o_arm, axis) for axis in AXES},
     }
-    for axis in AXES:
-        s = OA.score_axis(
-            getattr(p_arm, f"count_gdna_{axis}"), getattr(p_arm, f"count_rna_{axis}"),
-            getattr(o_arm, f"count_gdna_{axis}"), getattr(o_arm, f"count_rna_{axis}"),
-        )
-        row["axes"][axis] = dataclasses.asdict(s)
-        # the full distribution; objects with no mass have no answer and are excluded
-        gp = np.asarray(getattr(p_arm, f"count_gdna_{axis}"), np.float64)
-        go = np.asarray(getattr(o_arm, f"count_gdna_{axis}"), np.float64)
-        total = go + np.asarray(getattr(o_arm, f"count_rna_{axis}"), np.float64)
-        live = total > 0.0
-        row["axes"][axis]["hist"] = signed_histogram(gp[live] - go[live])
-        # Δ_RNA ≡ −Δ_gDNA per object, since both arms carry the same per-object total; recorded as a gate
-        rp = np.asarray(getattr(p_arm, f"count_rna_{axis}"), np.float64)
-        ro = np.asarray(getattr(o_arm, f"count_rna_{axis}"), np.float64)
-        row["axes"][axis]["rna_mirrors_gdna_max_dev"] = float(
-            np.abs((rp - ro)[live] + (gp - go)[live]).max() if live.any() else 0.0
-        )
-
     # ── the pool ledger, in fragments ──
     truth = pool_ledger(Path(suite) / condition)
     row["pools"] = {
@@ -182,26 +170,10 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
 
 # ── reporting ────────────────────────────────────────────────────────────────────────────────────
 
-#: The release scope per stratum, stamped on every row; a stratum in neither strand half reads ``APART``.
-_SCOPE = {
-    ("stranded", "capture OFF"): "IN SCOPE",
-    ("stranded", "capture ON"): "IN SCOPE",
-    ("unstranded", "capture OFF"): "IN SCOPE",
-    ("unstranded", "capture ON"): "DEFERRED",
-}
 
-
-def _scope(st) -> str:
-    return _SCOPE.get(tuple(st), "APART")
-
-
-def _selections(rows: list[dict]) -> tuple:
-    """The selections every table prints: one per stratum, zero-gDNA conditions excluded."""
-    return tuple(
-        (f"{' x '.join(st)}  [{_scope(st)}]", (lambda c, st=st: stratum(c) == tuple(st)
-                                               and not is_zero_gdna(c)))
-        for st in strata(r["condition"] for r in rows)
-    )
+def _selections(rows: list[dict]) -> list:
+    """The selections every table prints: one per stratum, tagged with its scope, zero-gDNA conditions excluded."""
+    return stratum_selections((r["condition"] for r in rows), label=lambda st: f"{' x '.join(st)}  [{scope(st)}]")
 
 
 def _agg_axis(scores: list[dict]) -> dict | None:
@@ -217,9 +189,7 @@ def _agg_axis(scores: list[dict]) -> dict | None:
     return out
 
 
-def report(rows: list[dict]) -> None:
-    """The whole report, from the per-condition JSON rows; serial and sharded runs share this one path."""
-    # ── the gates first ──
+def _print_gates(rows: list[dict]) -> None:
     print()
     print("=" * 118)
     print("  ⭐⭐⭐ CALIBRATION vs ORACLE CALIBRATION — the 0.8.0 metric")
@@ -228,18 +198,14 @@ def report(rows: list[dict]) -> None:
     print()
     print("  ✅ GATE  override_masses writes exactly the override field set")
     print("  ✅ GATE  P and O are on the payload's own per-object totals, both axes (check_same_basis)")
-
-    selections = _selections(rows)
-
-    def sel_rows(pred):
-        return [r for r in rows if pred(r["condition"])]
-
     worst_mirror = max((r["axes"][a]["rna_mirrors_gdna_max_dev"] for r in rows for a in AXES),
                        default=0.0)
     print(f"  ✅ GATE  Δ_RNA ≡ −Δ_gDNA per object on both axes (max deviation {worst_mirror:.3e}), so")
     print("           ONE signed number per object describes the whole error — reported once, not twice")
 
-    # ── ⓪ the pool ledger, in fragments ──
+
+def _print_pool_ledger(rows: list[dict], selections) -> None:
+    """⓪: what went in and what calibration says, in fragments."""
     print()
     print("  ⓪ ⭐⭐⭐ THE POOL LEDGER — FRAGMENT COUNTS, not ratios. What went in, and what calibration says.")
     print("     ⛔ THREE pools on the truth side, TWO on the answer side: `calibrate` splits gDNA from RNA")
@@ -247,8 +213,7 @@ def report(rows: list[dict]) -> None:
     print(f"    {'condition / stratum':<44} {'true gDNA':>12} {'true mRNA':>12} {'true nRNA':>10} "
           f"{'P gDNA':>13} {'P RNA':>13} {'ΔgDNA vs O':>13} {'P/O gDNA':>9}")
     print("    " + "-" * 142)
-    for title, pred in selections:
-        sub = sel_rows(pred)
+    for title, sub in selections:
         if not sub:
             continue
         t = {k: sum(r["pools"][k] for r in sub) for k in
@@ -264,38 +229,42 @@ def report(rows: list[dict]) -> None:
     print("    ⚠ `P/O gDNA` is the like-for-like comparison. The simulator's own count is the OUTER")
     print("      reference and differs from O by the accumulator's retention, which is a different axis.")
 
-    # ── ① the composition, per axis ──
+
+def _print_composition(selections) -> None:
+    """①: P against O, mass-weighted, per axis."""
     for axis in AXES:
         print()
         print(f"  ① COMPOSITION on the {axis.upper()} axis — P against O, mass-weighted")
         print(f"    {'stratum':<38} {'objects':>9} {'mass':>14} {'Σ|Δ gDNA|':>14} "
               f"{'mwae':>8} {'net':>14} {'over':>13} {'under':>13}")
         print("    " + "-" * 130)
-        for title, pred in selections:
-            a = _agg_axis([r["axes"][axis] for r in sel_rows(pred)])
+        for title, sub in selections:
+            a = _agg_axis([r["axes"][axis] for r in sub])
             if a is None:
                 continue
             print(f"    {title:<38} {a['n_scored']:>9,} {a['mass']:>14,.0f} {a['abs_err']:>14,.0f} "
                   f"{a['mwae']:>8.4f} {a['net_err']:>+14,.0f} {a['over_call']:>13,.0f} "
                   f"{a['under_call']:>13,.0f}")
 
-    # ── ② the library figure ──
+
+def _print_library_fraction(selections) -> None:
+    """②: the library gDNA fraction per stratum, a ratio of sums over conditions of different depth."""
     print()
     print("  ② THE LIBRARY gDNA FRACTION — the one-number thermometer, per stratum")
     print(f"    {'stratum':<38} {'f_gdna P':>10} {'f_gdna O':>10} {'|Δ|':>10}")
     print("    " + "-" * 72)
-    for title, pred in selections:
-        sub = sel_rows(pred)
+    for title, sub in selections:
         if not sub:
             continue
-        # a ratio of sums, not a mean of ratios: the conditions differ in depth.
         p = sum(r["library_f_gdna_P"] * r["axes"]["region"]["mass"] for r in sub)
         o = sum(r["library_f_gdna_O"] * r["axes"]["region"]["mass"] for r in sub)
         w = sum(r["axes"]["region"]["mass"] for r in sub)
         p, o = (p / w, o / w) if w > 0 else (float("nan"), float("nan"))
         print(f"    {title:<38} {p:>10.4f} {o:>10.4f} {abs(p - o):>10.4f}")
 
-    # ── ③ the full signed distribution ──
+
+def _print_histograms(rows: list[dict], selections) -> None:
+    """③: the full signed per-object error distribution, per axis."""
     for axis in AXES:
         print()
         print(f"  ③ ⭐⭐⭐ THE SIGNED ERROR DISTRIBUTION on the {axis.upper()} axis — zero IS the truth.")
@@ -304,8 +273,7 @@ def report(rows: list[dict]) -> None:
         labels = [b["label"] for b in rows[0]["axes"][axis]["hist"]["buckets"]]
         print(f"    {'stratum':<38} " + " ".join(f"{lab:>13}" for lab in labels))
         print("    " + "-" * (38 + 14 * len(labels)))
-        for title, pred in selections:
-            sub = sel_rows(pred)
+        for title, sub in selections:
             if not sub:
                 continue
             tot = [sum(r["axes"][axis]["hist"]["buckets"][i]["n"] for r in sub)
@@ -315,8 +283,7 @@ def report(rows: list[dict]) -> None:
         print(f"    {'stratum':<38} {'under':>13} {'EXACT':>13} {'over':>13} {'objects':>13} "
               f"{'Σ|Δ| frags':>15}")
         print("    " + "-" * 110)
-        for title, pred in selections:
-            sub = sel_rows(pred)
+        for title, sub in selections:
             if not sub:
                 continue
             h = [r["axes"][axis]["hist"] for r in sub]
@@ -325,7 +292,9 @@ def report(rows: list[dict]) -> None:
                   f"{sum(x['n_objects'] for x in h):>13,} "
                   f"{sum(r['axes'][axis]['abs_err'] for r in sub):>15,.0f}")
 
-    # ── ④ scenarios ranked worst first ──
+
+def _print_ranking(rows: list[dict]) -> None:
+    """④: the conditions ranked by total Σ|Δ|, worst first, with the worst in-scope one named."""
     print()
     print("  ④ ⭐⭐⭐ SCENARIOS RANKED BY TOTAL Σ|Δ| IN FRAGMENTS (region + boundary) — worst first.")
     print("     ⛔ The scope tag is the ranking. The worst row overall is the DEFERRED stratum every")
@@ -338,18 +307,19 @@ def report(rows: list[dict]) -> None:
     )
     for i, r in enumerate(ranked, 1):
         reg, bnd = r["axes"]["region"], r["axes"]["boundary"]
-        scope = _scope(r["stratum"])
-        print(f"    {i:>3} {r['condition']:<44} {scope:<9} {reg['abs_err']:>13,.0f} "
+        print(f"    {i:>3} {r['condition']:<44} {scope(r['stratum']):<9} {reg['abs_err']:>13,.0f} "
               f"{bnd['abs_err']:>13,.0f} {reg['abs_err'] + bnd['abs_err']:>13,.0f} "
               f"{reg['over_call'] + bnd['over_call']:>12,.0f} "
               f"{reg['under_call'] + bnd['under_call']:>12,.0f}")
-    in_scope = [r for r in ranked if _scope(r["stratum"]) == "IN SCOPE"]
+    in_scope = [r for r in ranked if scope(r["stratum"]) == "IN SCOPE"]
     if in_scope:
         w = in_scope[0]
         print(f"    ⭐ WORST IN-SCOPE: {w['condition']}  "
               f"Σ|Δ| = {w['axes']['region']['abs_err'] + w['axes']['boundary']['abs_err']:,.0f} fragments")
 
-    # ── ⑤ per condition ──
+
+def _print_per_condition(rows: list[dict]) -> None:
+    """⑤: one line per condition, ranked within a stratum only."""
     print()
     print("  ⑤ PER CONDITION — rank within a stratum, never across one")
     print(f"    {'condition':<44} {'mwae reg':>9} {'mwae bnd':>9} {'lib P':>8} {'lib O':>8} {'s':>6}")
@@ -360,6 +330,19 @@ def report(rows: list[dict]) -> None:
               f"{r['library_f_gdna_O']:>8.4f} {r['seconds']:>6.1f}")
     print()
     print(f"  total wall clock {sum(r['seconds'] for r in rows):.1f} s over {len(rows)} conditions")
+
+
+def report(rows: list[dict]) -> None:
+    """The whole report, from the per-condition JSON rows; serial and sharded runs share this one path."""
+    # each stratum's title and its rows
+    selections = [(title, [r for r in rows if pred(r["condition"])]) for title, pred in _selections(rows)]
+    _print_gates(rows)
+    _print_pool_ledger(rows, selections)
+    _print_composition(selections)
+    _print_library_fraction(selections)
+    _print_histograms(rows, selections)
+    _print_ranking(rows)
+    _print_per_condition(rows)
 
 
 # ── the self-test: every comparator perturbed, with no I/O ───────────────────────────────────────
@@ -404,16 +387,8 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
     )
 
 
-def self_test() -> int:
-    """Perturb every comparator and require it to fire."""
-    checks: list[tuple[str, bool]] = []
-
-    def check(name: str, ok: bool):
-        checks.append((name, bool(ok)))
-
-    cal = _toy_calibration()
-
-    # ① score_axis against itself is exactly zero, and a one-ULP nudge makes it nonzero.
+def _check_score_axis(cal, check) -> None:
+    """``score_axis`` of an arm against itself is exactly zero, and a one-ULP nudge makes it nonzero."""
     s = OA.score_axis(cal.count_gdna_region, cal.count_rna_region,
                       cal.count_gdna_region, cal.count_rna_region)
     check("score_axis(P, P) is exactly 0", s.abs_err == 0.0 and s.mwae == 0.0)
@@ -425,24 +400,18 @@ def self_test() -> int:
     s1 = OA.score_axis(nudged, rna_n, cal.count_gdna_region, cal.count_rna_region)
     check("score_axis resolves a ONE-ULP nudge", s1.abs_err > 0.0)
 
-    # ② the override field-set gate refuses a dropped field and an extra one.
+
+def _check_override_gate(cal, check) -> None:
+    """The override field-set gate passes the real set and refuses a dropped field and an extra one."""
     full = {f: getattr(cal, f) for f in OVERRIDE_FIELDS}
-    try:
-        check_override_field_set(full)
-        ok_full = True
-    except SystemExit:
-        ok_full = False
-    check("field-set gate passes the real set", ok_full)
+    check("field-set gate passes the real set", not refuses(check_override_fields, full, exc=RuntimeError))
     for label, mutated in (("a DROPPED field", {k: v for k, v in list(full.items())[1:]}),
                            ("an EXTRA field", {**full, "gdna_density_global": 0.0})):
-        try:
-            check_override_field_set(mutated)
-            fired = False
-        except SystemExit:
-            fired = True
-        check(f"field-set gate refuses {label}", fired)
+        check(f"field-set gate refuses {label}", refuses(check_override_fields, mutated, exc=RuntimeError))
 
-    # ③ the aggregate is a ratio of sums, not a mean of ratios; two scores of very different mass tell them apart
+
+def _check_aggregate(check) -> None:
+    """The aggregate is a ratio of sums, not a mean of ratios; two scores of very different mass tell them apart."""
     a = {"n_scored": 1, "mass": 1.0, "net_err": 0.0, "abs_err": 1.0,
          "over_call": 0.0, "under_call": 0.0, "mwae": 1.0}
     b = {"n_scored": 1, "mass": 999.0, "net_err": 0.0, "abs_err": 0.0,
@@ -452,7 +421,9 @@ def self_test() -> int:
     check("aggregate mwae is NOT the mean of the rates", not np.isclose(agg["mwae"], 0.5))
     check("aggregate returns None on an empty selection", _agg_axis([]) is None)
 
-    # ④ the signed histogram places a known vector exactly, keeps the sign, and drops no object
+
+def _check_histogram(check) -> None:
+    """The signed histogram places a known vector exactly, keeps the sign, and drops no object."""
     known = np.array([0.0, 0.0, -5.0, -500.0, +2.0, +2000.0, -0.05, +0.05, +20000.0, -20000.0])
     h = signed_histogram(known)
     check("histogram conserves every object", sum(b["n"] for b in h["buckets"]) == known.size)
@@ -469,26 +440,31 @@ def self_test() -> int:
           [b["n"] for b in signed_histogram(np.array([+7.0]))["buckets"]]
           == [b["n"] for b in signed_histogram(np.array([-7.0]))["buckets"]][::-1])
 
-    # ⑤ the pool ledger reads the file, and a pool it cannot find reads 0.
-    import json as _json
 
+def _check_pool_ledger(check) -> None:
+    """The pool ledger reads the file, and a pool it cannot find reads 0."""
     with tempfile.TemporaryDirectory() as td:
         (Path(td) / "truth_summary.json").write_text(
-            _json.dumps({"origin_counts": {"gdna": 7.0, "mrna": 11.0, "nrna": 13.0}})
+            json.dumps({"origin_counts": {"gdna": 7.0, "mrna": 11.0, "nrna": 13.0}})
         )
         led = pool_ledger(Path(td))
         check("pool ledger reads all three origin pools",
               (led["gdna"], led["mrna"], led["nrna"]) == (7.0, 11.0, 13.0))
-        (Path(td) / "truth_summary.json").write_text(_json.dumps({"origin_counts": {"gdna": 7.0}}))
+        (Path(td) / "truth_summary.json").write_text(json.dumps({"origin_counts": {"gdna": 7.0}}))
         check("pool ledger reports a MISSING pool as 0, not as absent",
               pool_ledger(Path(td)) == {"gdna": 7.0, "mrna": 0.0, "nrna": 0.0})
 
-    # ⑥ every stratum of the panel is covered exactly once by the scope table.
-    check("the scope table covers all four strata", len(_SCOPE) == 4)
-    check("three strata are IN SCOPE and one is DEFERRED",
-          sorted(_SCOPE.values()) == ["DEFERRED", "IN SCOPE", "IN SCOPE", "IN SCOPE"])
 
-    # ⑦ `--set`: the parser types from the field, touches nothing else, and refuses what it cannot spell.
+def _check_scope(check) -> None:
+    """Every stratum of the panel is covered exactly once by the release scope."""
+    scopes = [scope(st) for st in STRATA]
+    check("the scope table covers all four strata", len(STRATA) == 4 and "APART" not in scopes)
+    check("three strata are IN SCOPE and one is DEFERRED",
+          sorted(scopes) == ["DEFERRED", "IN SCOPE", "IN SCOPE", "IN SCOPE"])
+
+
+def _check_set(check) -> None:
+    """``--set``: the parser types from the field, touches nothing else, and refuses what it cannot spell."""
     base = PipelineConfig()
     knob = set_field(base, "calibration.sweep_block_slots=90")
     check("--set types an int field from the field",
@@ -504,23 +480,32 @@ def self_test() -> int:
           and dataclasses.replace(knob2, calibration=base.calibration) == base)
     check("--set fills an `int | None` field as an int",
           set_field(base, "calibration.sweep_block_slots=1000").calibration.sweep_block_slots == 1000)
-
-    def refuses(spec):
-        try:
-            set_field(base, spec)
-        except SystemExit:
-            return True
-        return False
-
-    check("--set refuses an unknown field", refuses("calibration.no_such_field=1"))
-    check("--set refuses an unknown section", refuses("nowhere.sweep_block_slots=1"))
+    check("--set refuses an unknown field", refuses(set_field, base, "calibration.no_such_field=1"))
+    check("--set refuses an unknown section", refuses(set_field, base, "nowhere.sweep_block_slots=1"))
     check("--set refuses a value the field's type cannot take",
-          refuses("calibration.sweep_block_slots=sixty"))
+          refuses(set_field, base, "calibration.sweep_block_slots=sixty"))
     # a ``Literal`` field (the EM's mode and warm start) is filled by membership
     check("--set fills a Literal field by membership",
           set_field(base, "em.mode=map").em.mode == "map"
           and set_field(base, "em.warm_start=uniform").em.warm_start == "uniform")
-    check("--set refuses a value outside a Literal field's set", refuses("em.mode=maximum"))
+    check("--set refuses a value outside a Literal field's set", refuses(set_field, base, "em.mode=maximum"))
+
+
+def self_test() -> int:
+    """Perturb every comparator and require it to fire."""
+    checks: list[tuple[str, bool]] = []
+
+    def check(name: str, ok: bool):
+        checks.append((name, bool(ok)))
+
+    cal = _toy_calibration()
+    _check_score_axis(cal, check)
+    _check_override_gate(cal, check)
+    _check_aggregate(check)
+    _check_histogram(check)
+    _check_pool_ledger(check)
+    _check_scope(check)
+    _check_set(check)
 
     width = max(len(n) for n, _ in checks)
     for name, ok in checks:
@@ -540,47 +525,32 @@ def main() -> int:
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--oracle-cache", type=Path, default=None,
                     help="defaults to <suite>/oracle_cache when that directory exists")
-    ap.add_argument("--work-dir", type=Path,
-                    default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_cal_vs_oracle")
+    ap.add_argument("--work-dir", type=Path, default=SCRATCH / "rigel_cal_vs_oracle")
     ap.add_argument("--json", type=Path, default=None, help="write the per-condition rows and exit")
     ap.add_argument("--jobs", type=int, default=1)
-    ap.add_argument(
-        "--set",
-        dest="settings",
-        action="append",
-        default=[],
-        metavar="SECTION.FIELD=VALUE",
-        help="override one PipelineConfig field on BOTH arms, typed from the field; repeatable "
-        "(e.g. --set calibration.sweep_logodds_step=0.1)",
-    )
+    add_set_option(ap, "override one PipelineConfig field on BOTH arms, typed from the field; repeatable "
+                       "(e.g. --set calibration.sweep_logodds_step=0.1)")
     ap.add_argument("--self-test", action="store_true", help="perturb every comparator; no I/O")
     args = ap.parse_args()
 
     if args.self_test:
         return self_test()
 
-    names = args.conditions or sorted(
-        p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()
-    )
+    names = panel_conditions(args.suite, args.conditions)
     if not names:
         raise SystemExit(f"⛔ no condition with a sim_oracle.bam under {args.suite}")
-    cache = args.oracle_cache
-    if cache is None and (args.suite / "oracle_cache").is_dir():
-        cache = args.suite / "oracle_cache"
+    cache = oracle_cache_dir(args.suite, args.oracle_cache)
     if cache is None:
         raise SystemExit("⛔ --oracle-cache is required; this script refuses to invent a truth")
 
     if args.jobs > 1:
-        # shard by subprocess into a directory of this run's own, merge in ``names`` order, emit as a serial run
-        args.work_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=args.work_dir, prefix="shards_") as td:
-            outs = run_shards(
-                Path(__file__).resolve(), names, args.jobs, Path(td),
-                lambda out, shard: ["--suite", str(args.suite), "--index", str(args.index),
-                                    "--oracle-cache", str(cache), "--json", str(out), "--conditions", *shard,
-                                    *set_args(args.settings)],
-            )
-            merged = [row for out in outs for row in json.loads(out.read_text())]
+        # merged in ``names`` order, so a sharded run reports as a serial one
+        merged = run_json_shards(
+            Path(__file__).resolve(), names, args.jobs, args.work_dir,
+            lambda out, shard: ["--suite", str(args.suite), "--index", str(args.index),
+                                "--oracle-cache", str(cache), "--json", str(out), "--conditions", *shard,
+                                *set_args(args.settings)],
+        )
         order = {name: i for i, name in enumerate(names)}
         merged.sort(key=lambda r: order[r["condition"]])
         return _emit(merged, args.json)
@@ -588,13 +558,11 @@ def main() -> int:
     t0 = time.perf_counter()
     index = TranscriptIndex.load(str(args.index))
     region_arrays = RegionArrays.from_index(index)
-    pipeline_config = PipelineConfig()
-    for spec in args.settings:
-        # applied to both arms: P and O share one payload and differ only in the six deconvolved arrays
-        pipeline_config = set_field(pipeline_config, spec)
-        if args.json is None:
-            print(f"⭐ --set {spec} on BOTH arms")
+    # applied to both arms: P and O share one payload and differ only in the six deconvolved arrays
+    pipeline_config = configured(args.settings)
     if args.json is None:
+        for spec in args.settings:
+            print(f"⭐ --set {spec} on BOTH arms")
         print(f"index + region arrays loaded in {time.perf_counter() - t0:.2f} s", flush=True)
 
     rows = []

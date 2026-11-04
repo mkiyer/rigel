@@ -22,7 +22,7 @@ import logging
 import pytest
 from rigel.sim import Scenario
 
-from .conftest import (
+from _scenarios import (
     SIM_SEED,
     build_and_run,
     assert_alignment,
@@ -49,7 +49,7 @@ N_FRAGMENTS = 2000
 
 
 class TestNrnaDoubleCounting:
-    """Regression test: nRNA counts must not be double-counted."""
+    """nRNA counts must not be double-counted."""
 
     @pytest.fixture
     def scenario(self, tmp_path):

@@ -3,7 +3,7 @@
 Every count channel in calibration is a Poisson rate observed over an opportunity, so under the Jeffreys prior the
 log-rate variance is ``trigamma(a + ½)``: proper and finite at ``a = 0``, and asymptotically ``1/a``. ``count_logvar``
 is that expression and the one home of the counting term; every hop price of the transfer policy reads it
-(`native/transfer_rows.h`, bound as `native.transfer_rows`). The tests check that it is exact and exposure-free (Z1);
+(`native/transfer_rows.h`, bound in `_solve_impl.testing`). The tests check that it is exact and exposure-free (Z1);
 agrees with the ``1/a`` asymptote to better than 0.1 % for ``a ≥ 10``, so it matters only for low counts (Z2); is finite
 and positive at ``a = 0``, where the asymptote diverges and a pure-gDNA object with no counts would emit nothing (Z3);
 is monotone across ``0 → 1``, since a step there would let that population fall off the boundary (Z6); and that the two
@@ -16,20 +16,20 @@ import numpy as np
 import pytest
 from scipy.special import polygamma
 
-from rigel.native import transfer_rows as R
+from rigel._solve_impl import testing as R
 
 
 # ── Z1: the exact expression ───────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("n", [0.0, 1.0, 3.0, 10.0, 250.0, 112_333.0])
-def test_Z1_the_count_term_is_the_exact_Poisson_log_rate_variance(n):
+def test_z1_the_count_term_is_the_exact_poisson_log_rate_variance(n):
     """``Var(log ρ) = trigamma(a + ½)`` for ``ρ ~ Gamma(a + ½, E)``, scored against scipy's own ``polygamma``, a
     different implementation."""
     assert R.count_logvar(n) == pytest.approx(polygamma(1, n + 0.5), rel=1e-12)
 
 
-def test_Z1_it_does_not_depend_on_the_exposure():
+def test_z1_it_does_not_depend_on_the_exposure():
     """``Var(log ρ)`` is exposure-free: ``E`` shifts the location and cannot sharpen the claim; a count term that moved
     with ``E`` would double-count the opportunity."""
     assert R.count_logvar(7.0) == R.count_logvar(7.0) and R.count_logvar(0.0) == R.count_logvar(0.0)
@@ -42,13 +42,13 @@ def test_Z1_it_does_not_depend_on_the_exposure():
 
 
 @pytest.mark.parametrize("n", [10.0, 50.0, 1_000.0, 100_000.0])
-def test_Z2_it_agrees_with_the_retired_one_over_n_to_better_than_a_tenth_of_a_percent(n):
+def test_z2_it_agrees_with_the_one_over_n_asymptote_to_a_tenth_of_a_percent(n):
     """``trigamma(n+½) → 1/n``, so every object with a real count moves by under 0.1 %, and the exact expression differs
     from the asymptote only where the asymptote is broken."""
     assert R.count_logvar(n) == pytest.approx(1.0 / n, rel=1e-3)
 
 
-def test_Z2_and_it_DIVERGES_from_one_over_n_exactly_where_the_defect_was():
+def test_z2_and_it_departs_from_one_over_n_at_small_counts():
     """At small counts the two must disagree, or Z2 would pass on a no-op; that disagreement is why the exact expression
     is used."""
     assert R.count_logvar(1.0) == pytest.approx(0.9348, abs=1e-3)  # vs 1/1
@@ -58,7 +58,7 @@ def test_Z2_and_it_DIVERGES_from_one_over_n_exactly_where_the_defect_was():
 # ── Z3: a zero count, as a number ────────────────────────────────────────────────────────────────
 
 
-def test_Z3_a_zero_count_carries_a_FINITE_variance():
+def test_z3_a_zero_count_carries_a_finite_variance():
     """``trigamma(½) = π²/2``, so a zero-count object's log-density claim has sd 2.22 nats: loose but finite, a claim
     rather than the silence an infinite variance forces."""
     v = R.count_logvar(0.0)
@@ -70,7 +70,7 @@ def test_Z3_a_zero_count_carries_a_FINITE_variance():
 # ── Z6: monotone across the join ───────────────────────────────────────────────────────────────
 
 
-def test_Z6_the_variance_is_MONOTONE_in_the_count_across_zero():
+def test_z6_the_variance_is_monotone_in_the_count_across_zero():
     """No step at ``n = 0 → 1``: a jump from silence to "as precise as the count allows" would let a whole population
     fall off the boundary."""
     v = np.array([R.count_logvar(float(n)) for n in range(40)])
@@ -81,7 +81,7 @@ def test_Z6_the_variance_is_MONOTONE_in_the_count_across_zero():
 # ── Z7: the production paths, not just the arithmetic ─────────────────────────────────────────
 
 
-def test_Z7_a_hop_priced_on_a_zero_count_is_finite_and_counting_alone():
+def test_z7_a_hop_priced_on_a_zero_count_is_finite_and_counting_alone():
     """The transfer policy's hop price with a zero witness count on either side: no density ratio exists, so the price
     is the two counts' counting and nothing more, finite and larger than the same hop priced on a positive count (a zero
     count is the quietest measurement, not silence)."""
@@ -93,7 +93,7 @@ def test_Z7_a_hop_priced_on_a_zero_count_is_finite_and_counting_alone():
     assert np.isfinite(R.hop_price(0.0, 100.0, 0.0, 100.0))
 
 
-def test_Z7_a_gene_edge_with_zero_counts_still_emits_a_level():
+def test_z7_a_gene_edge_with_zero_counts_emits_a_level():
     """A structurally pure-gDNA crossing holding zero counts over a large opportunity: on the gDNA lane its level is a
     profile falling with the density (nothing below zero claimed, everything above priced by the count's own
     likelihood), never an absent claim.

@@ -8,33 +8,15 @@ completeness rule for a cached condition and every refusal, and nothing more.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import pathlib
 import sys
 
+import panel
 import pytest
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PANEL_PY = ROOT / "scripts" / "sim" / "panel.py"
-
-
-def _load():
-    """Import `panel.py` the way running it imports it (its own dir on the path)."""
-    spec = importlib.util.spec_from_file_location("_panel_mod", PANEL_PY)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["_panel_mod"] = mod
-    sys.path.insert(0, str(PANEL_PY.parent))
-    try:
-        spec.loader.exec_module(mod)
-    finally:
-        sys.path.remove(str(PANEL_PY.parent))
-        sys.modules.pop("_panel_mod", None)
-    return mod
-
-
-PANEL = _load()
 
 
 def _config(tmp_path, **over):
@@ -52,12 +34,17 @@ def _config(tmp_path, **over):
     return p
 
 
+def _args(cfg, stage, *flags):
+    """What `panel.py <stage> --config <cfg> <flags>` parses to, from the script's own parser."""
+    return panel.build_parser().parse_args([stage, "--config", str(cfg), *flags])
+
+
 # ── path derivation ──────────────────────────────────────────────────────────────────────────────
 
 
 def test_every_path_derives_from_the_config(tmp_path):
     """One config in, every path out — the property that makes the workflow one command."""
-    p = PANEL.Panel(_config(tmp_path))
+    p = panel.Panel(_config(tmp_path))
     assert p.dir == tmp_path / "suite" / "mypanel"
     assert p.reference == tmp_path / "suite" / "reference"
     assert p.scan_cache == p.dir / "scan_cache"
@@ -71,8 +58,8 @@ def test_the_index_is_the_configs_and_can_be_overridden(tmp_path):
     index other than the one it was simulated from is silently wrong. Without the key the reference's
     sibling is the convention (above), and `--index` overrides either."""
     cfg = _config(tmp_path, index=str(tmp_path / "idx"))
-    assert PANEL.Panel(cfg).index == tmp_path / "idx"
-    assert PANEL.Panel(cfg, index=tmp_path / "elsewhere").index == tmp_path / "elsewhere"
+    assert panel.Panel(cfg).index == tmp_path / "idx"
+    assert panel.Panel(cfg, index=tmp_path / "elsewhere").index == tmp_path / "elsewhere"
 
 
 def test_the_probe_panel_is_the_one_the_capture_config_names(tmp_path):
@@ -81,7 +68,7 @@ def test_the_probe_panel_is_the_one_the_capture_config_names(tmp_path):
     config reads, or a fully built panel reads as unbuilt and `build` is named next."""
     probes = tmp_path / "rendered" / "probes.bed"
     capture = {"configs": [{"label": "on", "probes": str(probes)}]}
-    p = PANEL.Panel(_config(tmp_path, capture=capture))
+    p = panel.Panel(_config(tmp_path, capture=capture))
     assert p.probes == probes
 
 
@@ -98,7 +85,7 @@ def test_every_path_is_expanded_as_the_simulator_expands_it(tmp_path, monkeypatc
         "index": "$RIGEL_TEST_ROOT/idx",
         "capture": {"configs": [{"label": "on", "probes": "$RIGEL_TEST_ROOT/probes.bed"}]},
     }
-    p = PANEL.Panel(_config(tmp_path, **paths))
+    p = panel.Panel(_config(tmp_path, **paths))
     assert (p.genome, p.gtf, p.dir, p.index, p.probes) == (
         root / "ref" / "genome.fa",
         root / "ref" / "genes.gtf",
@@ -109,7 +96,7 @@ def test_every_path_is_expanded_as_the_simulator_expands_it(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("missing", ["genome", "gtf", "outdir"])
-def test_a_config_missing_a_path_key_is_REFUSED(tmp_path, missing):
+def test_a_config_missing_a_path_key_is_refused(tmp_path, missing):
     """Not defaulted, not guessed. A panel that does not say where it lives cannot be driven, and
     inventing a path here is how a run writes tens of gigabytes into the wrong directory."""
     cfg = _config(tmp_path)
@@ -117,21 +104,21 @@ def test_a_config_missing_a_path_key_is_REFUSED(tmp_path, missing):
     del body[missing]
     cfg.write_text(yaml.safe_dump(body))
     with pytest.raises(SystemExit, match=missing):
-        PANEL.Panel(cfg)
+        panel.Panel(cfg)
 
 
-def test_a_config_that_does_not_exist_is_REFUSED(tmp_path):
+def test_a_config_that_does_not_exist_is_refused(tmp_path):
     with pytest.raises(SystemExit, match="no such config"):
-        PANEL.Panel(tmp_path / "nope.yaml")
+        panel.Panel(tmp_path / "nope.yaml")
 
 
 # ── discovery ────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_a_condition_is_one_with_an_ORACLE_BAM(tmp_path):
+def test_a_condition_is_one_with_an_oracle_bam(tmp_path):
     """The marker is `sim_oracle.bam`, not the directory. A condition whose simulation died leaves
     the directory behind, and counting directories would report it as simulated."""
-    p = PANEL.Panel(_config(tmp_path))
+    p = panel.Panel(_config(tmp_path))
     (p.dir / "cond_a").mkdir(parents=True)
     (p.dir / "cond_a" / "sim_oracle.bam").touch()
     (p.dir / "cond_b").mkdir()  # directory only — a died-halfway condition
@@ -139,49 +126,46 @@ def test_a_condition_is_one_with_an_ORACLE_BAM(tmp_path):
 
 
 def test_no_panel_directory_is_zero_conditions_not_a_crash(tmp_path):
-    assert PANEL.Panel(_config(tmp_path)).conditions == []
+    assert panel.Panel(_config(tmp_path)).conditions == []
 
 
 # ── the refusals ─────────────────────────────────────────────────────────────────────────────────
 
 
-def test_need_names_the_fix(tmp_path):
+def test_need_names_what_to_run_next():
     """A refusal that does not say what to run next is a traceback with better manners."""
     with pytest.raises(SystemExit) as e:
-        PANEL.need(False, "the oracle cache", "panel.py cache")
+        panel.need(False, "the oracle cache", "panel.py cache")
     assert "the oracle cache" in str(e.value) and "panel.py cache" in str(e.value)
-    PANEL.need(True, "satisfied", "never printed")  # must not raise
+    panel.need(True, "satisfied", "never printed")  # must not raise
 
 
-def test_score_REFUSES_without_the_oracle_cache(tmp_path):
+def test_score_refuses_without_the_oracle_cache(tmp_path):
     """Every truth-scoring instrument needs the origin-split oracle cache, so `score` refuses without it: a
     recipe that builds it only as a side effect of some other instrument produces a panel every scorer rejects."""
-    p = PANEL.Panel(_config(tmp_path))
-    args = type("A", (), {"jobs": 1, "arms": ["base"], "conditions": None})()
+    cfg = _config(tmp_path)
     with pytest.raises(SystemExit, match="oracle cache"):
-        PANEL.cmd_score(p, args)
+        panel.cmd_score(panel.Panel(cfg), _args(cfg, "score", "--jobs", "1"))
 
 
-def test_cache_REFUSES_without_simulated_conditions(tmp_path):
-    p = PANEL.Panel(_config(tmp_path))
-    args = type("A", (), {"jobs": 1, "conditions": None})()
+def test_cache_refuses_without_simulated_conditions(tmp_path):
+    cfg = _config(tmp_path)
     with pytest.raises(SystemExit, match="simulated conditions"):
-        PANEL.cmd_cache(p, args)
+        panel.cmd_cache(panel.Panel(cfg), _args(cfg, "cache", "--jobs", "1"))
 
 
-def test_report_REFUSES_and_names_the_missing_arm(tmp_path):
-    p = PANEL.Panel(_config(tmp_path))
-    args = type("A", (), {"arms": ["base", "oracle"]})()
+def test_report_refuses_and_names_the_missing_arm(tmp_path):
+    cfg = _config(tmp_path)
     with pytest.raises(SystemExit) as e:
-        PANEL.cmd_report(p, args)
+        panel.cmd_report(panel.Panel(cfg), _args(cfg, "report", "--arms", "base", "oracle"))
     assert "qa_mypanel_base.jsonl" in str(e.value), "the refusal must name the file it looked for"
 
 
-def test_a_failing_stage_STOPS_the_workflow():
+def test_a_failing_stage_stops_the_workflow():
     """A stage that failed must not look like a stage that was skipped — that is how a partial
     panel gets scored as a complete one."""
     with pytest.raises(SystemExit, match="FAILED"):
-        PANEL.run([sys.executable, "-c", "raise SystemExit(3)"], what="a stage that fails")
+        panel.run([sys.executable, "-c", "raise SystemExit(3)"], what="a stage that fails")
 
 
 # ── the completeness rule ────────────────────────────────────────────────────────────────────────
@@ -191,7 +175,7 @@ def test_an_oracle_condition_needs_every_part(tmp_path, capsys):
     """`status` counts a condition cached only when the three origin partitions and the per-strand RNA
     pair the certifier requires are all present. Counting directories would call a half-written
     condition done, and the next stage would fail deep inside an instrument instead of here."""
-    p = PANEL.Panel(_config(tmp_path))
+    p = panel.Panel(_config(tmp_path))
     (p.dir / "c1").mkdir(parents=True)
     (p.dir / "c1" / "sim_oracle.bam").touch()
 
@@ -201,18 +185,18 @@ def test_an_oracle_condition_needs_every_part(tmp_path, capsys):
 
     for part in ("gdna", "mrna", "nrna"):  # no strand pair — deliberately incomplete
         write(part)
-    PANEL.cmd_status(p, None)
+    panel.cmd_status(p, None)
     assert "oracle cache 0/1" in capsys.readouterr().out
 
     for part in ("rna_pos", "rna_neg"):
         write(part)
-    PANEL.cmd_status(p, None)
+    panel.cmd_status(p, None)
     assert "oracle cache 1/1" in capsys.readouterr().out
 
 
 def test_status_names_the_next_stage(tmp_path, capsys):
     """The whole point of `status`: not a dump, an instruction."""
-    PANEL.cmd_status(PANEL.Panel(_config(tmp_path)), None)
+    panel.cmd_status(panel.Panel(_config(tmp_path)), None)
     assert "next: `panel.py build`" in capsys.readouterr().out
 
 
@@ -221,7 +205,7 @@ def test_the_shipped_panel_configs_all_load(tmp_path):
     cfgs = sorted((ROOT / "scripts" / "sim" / "configs").glob("*.yaml"))
     assert cfgs, "no panel configs found — this test would pass vacuously"
     for c in cfgs:
-        p = PANEL.Panel(c)
+        p = panel.Panel(c)
         assert p.dir.name and p.index.name, f"{c.name} produced an empty path"
 
 
@@ -235,13 +219,14 @@ def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one
     `calibration_oracle.py --build`, which builds every row's origin-split cache alike, the zero-gDNA
     rows too, and certifies `slot_truth.npz` in the same run. Its exit code is reported, never fatal:
     a failed field gate still writes the composition table."""
-    p = PANEL.Panel(_config(tmp_path))
+    cfg = _config(tmp_path)
+    p = panel.Panel(cfg)
     for c in ("gdna_g00_ss_0.50_x", "gdna_g50_ss_0.50_x"):
         (p.dir / c).mkdir(parents=True)
         (p.dir / c / "sim_oracle.bam").touch()
     issued = []
     monkeypatch.setattr(
-        PANEL, "run", lambda cmd, *, what: issued.append((what, [str(c) for c in cmd]))
+        panel, "run", lambda cmd, *, what: issued.append((what, [str(c) for c in cmd]))
     )
     launched = []
 
@@ -249,12 +234,12 @@ def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one
         returncode = 1  # a certification gate "failed" — must be reported, not fatal
 
     monkeypatch.setattr(
-        PANEL.subprocess,
+        panel.subprocess,
         "run",
         lambda cmd, **k: (launched.append([str(c) for c in cmd]), _Done())[1],
     )
-    args = type("A", (), {"jobs": 3, "conditions": ["gdna_g00_ss_0.50_x"], "force": False})()
-    assert PANEL.cmd_cache(p, args) == 0
+    args = _args(cfg, "cache", "--jobs", "3", "--conditions", "gdna_g00_ss_0.50_x")
+    assert panel.cmd_cache(p, args) == 0
     assert [w for w, _ in issued] == [f"scan cache -> {p.scan_cache}"]
     assert len(launched) == 1
     cmd = launched[0]
@@ -268,7 +253,7 @@ def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one
     issued.clear()
     launched.clear()
     args.force = True
-    assert PANEL.cmd_cache(p, args) == 0
+    assert panel.cmd_cache(p, args) == 0
     assert "--force" in issued[0][1], "--force did not reach the scan cache"
     assert "--force" in launched[0], "--force did not reach the oracle's partitions"
 
@@ -284,7 +269,7 @@ def test_the_parameter_file_is_read_as_the_aligner_reads_it(tmp_path):
     f.write_text(
         "# a comment\n\noutSAMtype BAM Unsorted\n  # indented comment\nalignSJstitchMismatchNmax 5 -1 5 5\n"
     )
-    assert PANEL.star_options(f) == [
+    assert panel.star_options(f) == [
         "--outSAMtype",
         "BAM",
         "Unsorted",
@@ -296,39 +281,28 @@ def test_the_parameter_file_is_read_as_the_aligner_reads_it(tmp_path):
     ]
 
 
-def test_the_rung_aligns_with_the_MANUALs_recommended_STAR_settings():
+def test_the_rung_aligns_with_the_manuals_recommended_star_settings():
     """The STAR rung is the input the user's manual tells a user to make: its parameter file carries the two
     settings the manual recommends, so the benchmark cannot drift from the advice."""
-    opts = " ".join(PANEL.star_options(PANEL.STAR_PARAMS))
+    opts = " ".join(panel.star_options(panel.STAR_PARAMS))
     manual = (ROOT / "docs" / "MANUAL.md").read_text()
     for setting in ("--sjdbScore 0", "--outFilterMultimapScoreRange 2"):
         assert setting in opts, f"the rung's parameters lack {setting}"
         assert setting in manual, f"the MANUAL no longer recommends {setting}"
 
 
-def test_align_REFUSES_without_the_aligner_or_its_index(tmp_path):
-    p = PANEL.Panel(_config(tmp_path))
+def test_align_refuses_without_the_aligner_or_its_index(tmp_path):
+    cfg = _config(tmp_path)
+    p = panel.Panel(cfg)
     (p.dir / "c1").mkdir(parents=True)
     (p.dir / "c1" / "sim_oracle.bam").write_bytes(b"")
-    args = type(
-        "A",
-        (),
-        {
-            "conditions": None,
-            "aligner": None,
-            "aligner_index": None,
-            "params": PANEL.STAR_PARAMS,
-            "name": "rustar_recommended",
-            "threads": 1,
-            "force": False,
-        },
-    )()
+    args = _args(cfg, "align", "--threads", "1")
     with pytest.raises(SystemExit, match="a STAR or rustar binary"):
-        PANEL.cmd_align(p, args)
+        panel.cmd_align(p, args)
     args.aligner = sys.executable  # a file that exists
     args.aligner_index = tmp_path  # with no STAR index in it
     with pytest.raises(SystemExit, match="genome index"):
-        PANEL.cmd_align(p, args)
+        panel.cmd_align(p, args)
 
 
 def _fake_aligner(tmp_path):
@@ -377,14 +351,15 @@ def _simulator_bam(path, pairs):
                 out.write(rec)
 
 
-def test_align_rebuilds_a_missing_pair_from_the_simulators_BAM(tmp_path):
+def test_align_rebuilds_a_missing_pair_from_the_simulators_bam(tmp_path):
     """The panels keep no FASTQs: the simulator's BAM holds every read as it was written, so `align` rebuilds a
     missing pair with `samtools fastq -N`, byte for byte the FASTQs the simulator wrote, aligns it and deletes it.
     With neither the reads nor the BAM it refuses, naming both.
 
     Perturbation: no rebuild refuses the condition; a rebuild without `-N` drops the `/1`, `/2` the simulator's
     names carry; a rebuilt pair left behind is what the panels shed."""
-    p = PANEL.Panel(_config(tmp_path))
+    cfg = _config(tmp_path)
+    p = panel.Panel(cfg)
     d = p.dir / "c1"
     d.mkdir(parents=True)
     pairs = [
@@ -396,20 +371,19 @@ def test_align_rebuilds_a_missing_pair_from_the_simulators_BAM(tmp_path):
     index = tmp_path / "index"
     index.mkdir()
     (index / "SA").write_bytes(b"")
-    args = type(
-        "A",
-        (),
-        {
-            "conditions": ["c1"],
-            "aligner": str(_fake_aligner(tmp_path)),
-            "aligner_index": str(index),
-            "params": PANEL.STAR_PARAMS,
-            "name": "rustar_recommended",
-            "threads": 1,
-            "force": False,
-        },
-    )()
-    assert PANEL.cmd_align(p, args) == 0
+    args = _args(
+        cfg,
+        "align",
+        "--conditions",
+        "c1",
+        "--aligner",
+        str(_fake_aligner(tmp_path)),
+        "--aligner-index",
+        str(index),
+        "--threads",
+        "1",
+    )
+    assert panel.cmd_align(p, args) == 0
     expected = "".join(f"@{n}/1\n{r1}\n+\n{'I' * len(r1)}\n" for n, r1, _ in pairs) + "".join(
         f"@{n}/2\n{r2}\n+\n{'I' * len(r2)}\n" for n, _, r2 in pairs
     )
@@ -421,13 +395,13 @@ def test_align_rebuilds_a_missing_pair_from_the_simulators_BAM(tmp_path):
     (d / "sim_oracle.bam").unlink()
     args.force = True
     with pytest.raises(SystemExit, match="simulator's BAM"):
-        PANEL.cmd_align(p, args)
+        panel.cmd_align(p, args)
 
 
 def test_an_aligned_input_counts_only_with_its_record(tmp_path):
     """`status` counts a condition aligned only when `align` finished it: the BAM and the record it writes
     last, after the BAM's templates were checked against the simulator's. A BAM alone is an interrupted run."""
-    p = PANEL.Panel(_config(tmp_path))
+    p = panel.Panel(_config(tmp_path))
     for c in ("c1", "c2", "c3"):
         (p.dir / c).mkdir(parents=True)
         (p.dir / c / "sim_oracle.bam").write_bytes(b"")
@@ -435,19 +409,19 @@ def test_an_aligned_input_counts_only_with_its_record(tmp_path):
         (p.dir / c / "rustar_recommended.bam").write_bytes(b"")
     for c in ("c1", "c3"):  # c3's record outlived its BAM
         (p.dir / c / "rustar_recommended.align.json").write_text("{}")
-    assert PANEL.aligned_inputs(p) == {"rustar_recommended": 1}
+    assert panel.aligned_inputs(p) == {"rustar_recommended": 1}
 
 
 def test_an_aligned_input_scores_into_an_arm_file_of_its_own(tmp_path):
     """The simulator's alignments and an aligner's are two inputs to one arm, and each keeps its own
     file, so neither overwrites the other and `report` names the one it lacks."""
-    p = PANEL.Panel(_config(tmp_path))
-    assert PANEL.arm_file(p, "base", None).name == "qa_mypanel_base.jsonl"
+    cfg = _config(tmp_path)
+    p = panel.Panel(cfg)
+    assert panel.arm_file(p, "base", None).name == "qa_mypanel_base.jsonl"
     assert (
-        PANEL.arm_file(p, "base", "rustar_recommended").name
+        panel.arm_file(p, "base", "rustar_recommended").name
         == "qa_mypanel_base__rustar_recommended.jsonl"
     )
-    args = type("A", (), {"arms": ["base"], "bam": "rustar_recommended"})()
     with pytest.raises(SystemExit) as e:
-        PANEL.cmd_report(p, args)
+        panel.cmd_report(p, _args(cfg, "report", "--bam", "rustar_recommended"))
     assert "qa_mypanel_base__rustar_recommended.jsonl" in str(e.value)

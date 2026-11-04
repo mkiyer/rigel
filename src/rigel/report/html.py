@@ -18,7 +18,7 @@ _ASSETS = files("rigel.report") / "assets"
 _VEGA_EXPOSE = "window.vegaEmbed = vegaEmbed; window.vega = vega; window.vegaLite = vegaLite;"
 
 
-def _asset(name: str) -> str:
+def read_asset(name: str) -> str:
     return (_ASSETS / name).read_text(encoding="utf-8")
 
 
@@ -40,7 +40,7 @@ def _json_for_script(obj) -> str:
     return json.dumps(obj, allow_nan=False).replace("</", "<\\/")
 
 
-_SECTIONS = """
+SECTIONS = """
 <div class="topbar"><div class="topbar-in">
   <div class="wm"><span class="dot"></span><span class="star">RIGEL</span><span class="sub">Quality&nbsp;Control</span></div>
   <div class="spacer"></div>
@@ -205,15 +205,15 @@ _SECTIONS = """
 
 def render_html(model: dict, charts: dict, title: str) -> str:
     """Render the full self-contained HTML document string."""
-    css = _asset("report.css")
-    js = _asset("report.js")
+    css = read_asset("report.css")
+    js = read_asset("report.js")
     bundle = vega_bundle()
     meta = model.get("meta", {})
 
     payload = _json_for_script({"model": model, "charts": charts})
     # Token replace (not str.format) so literal { } in the section HTML/CSS/JS are safe.
     schema = f"report/{meta.get('schema_version')}" if meta.get("schema_version") else "report"
-    sections = _SECTIONS.replace("__VERSION__", str(meta.get("version") or "?")).replace(
+    sections = SECTIONS.replace("__VERSION__", str(meta.get("version") or "?")).replace(
         "__SCHEMA__", schema
     )
 

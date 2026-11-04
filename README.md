@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Bayesian RNA-seq quantification with joint mRNA, nascent RNA, and genomic DNA modeling</strong>
+  <strong>Bayesian RNA-seq quantification of annotated transcripts, nascent RNA and genomic DNA in one model</strong>
 </p>
 
 <p align="center">

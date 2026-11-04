@@ -68,7 +68,7 @@ class TranscriptObjects:
 
 
 @dataclass(frozen=True, slots=True)
-class _TranscriptPieces:
+class TranscriptPieces:
     """The pmf-free half of :class:`TranscriptObjects`: every transcript's pieces, each piece's length, and at each
     cut the bases of the transcript left of it (``through``) and right of it (``rest``), counted to the nearest
     masked base. ``run_t`` and ``run_length`` are each transcript's runs — its stretches no masked base interrupts —
@@ -135,75 +135,79 @@ def _observable_parts(
     return t[row], piece[row], k[row], (pb - pa).astype(np.float64), u[row] + (pa - a[row])
 
 
-def _transcript_pieces(
-    index: "TranscriptIndex", region_arrays: "RegionArrays"
-) -> _TranscriptPieces:
+def transcript_pieces(index: "TranscriptIndex", region_arrays: "RegionArrays") -> TranscriptPieces:
     """The observable parts of the regions every transcript's exons (or an unspliced entity's span) cover, in
     transcript then genomic order, and between consecutive parts a cut — a junction where they belong to different
     exons with a region between them. No part holds a base of the index's unobservable mask
     (``region_arrays.unobservable``) and no cut joins two parts a masked base separates: a fragment touching one is
     never observed. With nothing masked the parts are the pieces. Annotation only: no length law enters."""
-    starts = np.asarray(region_arrays.start, dtype=np.int64)
-    ends = np.asarray(region_arrays.end, dtype=np.int64)
-    ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
+    t, rid, a, b = _template_spans(index)
+    tk, piece, k, seg_a, seg_b = _region_overlaps(t, rid, a, b, region_arrays)
+    length = (seg_b - seg_a).astype(np.float64)
+    n_t = int(index.t_df.shape[0])
+    whole = _total_by(tk, length, n_t)
+    tk, piece, k, length, full_start = _observable_parts(
+        tk, piece, k, rid[k], seg_a, seg_b, _start_within(tk, length), region_arrays.unobservable
+    )
+    return _runs(tk, piece, k, length, full_start, n_t, whole - _total_by(tk, length, n_t))
 
+
+def _template_spans(index: "TranscriptIndex"):
+    """``(t, ref_id, start, end)``: every transcript's exons, and an unspliced entity's whole span where it has no
+    exon row, in transcript then genomic order; ``ref_id`` is ``-1`` on a reference the index does not carry."""
     iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
     ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
-    parts = [
-        (
-            ex["t_index"].to_numpy(np.int64),
-            ex["ref"].astype(str).to_numpy(),
-            ex["start"].to_numpy(np.int64),
-            ex["end"].to_numpy(np.int64),
-        )
-    ]
     tdf = index.t_df
     syn = tdf[tdf["is_synthetic"].to_numpy(dtype=bool)]
-    syn = syn[~np.isin(syn["t_index"].to_numpy(np.int64), parts[0][0])]
-    parts.append(
-        (
-            syn["t_index"].to_numpy(np.int64),
-            syn["ref"].astype(str).to_numpy(),
-            syn["start"].to_numpy(np.int64),
-            syn["end"].to_numpy(np.int64),
-        )
-    )
-    t = np.concatenate([p[0] for p in parts])
-    ref = np.concatenate([p[1] for p in parts])
-    a = np.concatenate([p[2] for p in parts])
-    b = np.concatenate([p[3] for p in parts])
+    syn = syn[~np.isin(syn["t_index"].to_numpy(np.int64), ex["t_index"].to_numpy(np.int64))]
+    t = np.concatenate([ex["t_index"].to_numpy(np.int64), syn["t_index"].to_numpy(np.int64)])
+    ref = np.concatenate([ex["ref"].astype(str).to_numpy(), syn["ref"].astype(str).to_numpy()])
+    a = np.concatenate([ex["start"].to_numpy(np.int64), syn["start"].to_numpy(np.int64)])
+    b = np.concatenate([ex["end"].to_numpy(np.int64), syn["end"].to_numpy(np.int64)])
     order = np.lexsort((a, t))
     t, ref, a, b = t[order], ref[order], a[order], b[order]
     rid = pd.Series(ref).astype(str).map(index.ref_name_to_id).fillna(-1).to_numpy(np.int64)
-    lo, hi = overlapping_region_runs(rid, a, b, starts, ends, ref_off)
-    width = np.where((rid >= 0) & (hi > lo), hi - lo, 0)
+    return t, rid, a, b
 
-    # expand each exon into the regions it covers
+
+def _region_overlaps(t, rid, a, b, region_arrays: "RegionArrays"):
+    """Each span expanded into the regions it covers: ``(t, region, span row, start, end)`` per piece, a piece being a
+    span's overlap with one region."""
+    starts = np.asarray(region_arrays.start, dtype=np.int64)
+    ends = np.asarray(region_arrays.end, dtype=np.int64)
+    lo, hi = overlapping_region_runs(
+        rid, a, b, starts, ends, np.asarray(region_arrays.ref_offsets, dtype=np.int64)
+    )
+    width = np.where((rid >= 0) & (hi > lo), hi - lo, 0)
     k = np.repeat(np.arange(t.size), width)
     piece = np.repeat(lo, width) + (
         np.arange(int(width.sum()), dtype=np.int64) - np.repeat(np.cumsum(width) - width, width)
     )
-    tk = t[k]
-    seg_a = np.maximum(starts[piece], a[k])
-    seg_b = np.minimum(ends[piece], b[k])
-    length = (seg_b - seg_a).astype(np.float64)
+    return t[k], piece, k, np.maximum(starts[piece], a[k]), np.minimum(ends[piece], b[k])
 
-    # each piece's start in the transcript's full coordinates, masked bases included
-    n_t = int(tdf.shape[0])
-    whole = np.zeros(n_t)
-    np.add.at(whole, tk, length)
+
+def _start_within(tk: np.ndarray, length: np.ndarray) -> np.ndarray:
+    """Each piece's start in its transcript's full coordinates (the transcript's bases before it), masked bases
+    included."""
     first = np.r_[True, tk[1:] != tk[:-1]] if tk.size else np.zeros(0, dtype=bool)
     csum = np.cumsum(length)
-    full_start = (
+    return (
         csum
         - np.repeat(csum[first] - length[first], np.diff(np.r_[np.flatnonzero(first), tk.size]))
         - length
     )
-    tk, piece, k, length, full_start = _observable_parts(
-        tk, piece, k, rid[k], seg_a, seg_b, full_start, region_arrays.unobservable
-    )
 
-    # the runs: consecutive parts of one transcript with no masked base between them; a cut joins two parts of one run
+
+def _total_by(tk: np.ndarray, length: np.ndarray, n_t: int) -> np.ndarray:
+    """``float64[n_t]`` — each transcript's total over its pieces."""
+    out = np.zeros(n_t)
+    np.add.at(out, tk, length)
+    return out
+
+
+def _runs(tk, piece, k, length, full_start, n_t: int, masked) -> TranscriptPieces:
+    """The pieces' runs — consecutive parts of one transcript with no masked base between them — and the cuts, each
+    joining two parts of one run, with the transcript's bases either side of it."""
     full_end = full_start + length
     joined = (
         np.r_[(tk[1:] == tk[:-1]) & (full_start[1:] == full_end[:-1]), False]
@@ -215,9 +219,7 @@ def _transcript_pieces(
     run_lo = full_start[run_first]
     run_hi = full_end[np.r_[np.flatnonzero(run_first)[1:] - 1, tk.size - 1]] if tk.size else run_lo
     cut = np.flatnonzero(joined)
-    kept = np.zeros(n_t)
-    np.add.at(kept, tk, length)
-    return _TranscriptPieces(
+    return TranscriptPieces(
         t=tk,
         piece=piece,
         length=length,
@@ -228,7 +230,7 @@ def _transcript_pieces(
         n_transcripts=n_t,
         run_t=tk[run_first],
         run_length=run_hi - run_lo,
-        masked=whole - kept,
+        masked=masked,
     )
 
 
@@ -241,7 +243,7 @@ def observable_fl_eff_lengths(
     closed form's floor of one base, as one shorter than every fragment does."""
     lengths = index.t_df["length"].to_numpy(np.int64)
     eff = rna_fl.compute_all_transcript_eff_lens(lengths)
-    pieces = _transcript_pieces(index, region_arrays)
+    pieces = transcript_pieces(index, region_arrays)
     touched = pieces.masked > 0.0
     if not touched.any():
         return eff
@@ -258,7 +260,7 @@ def observable_fl_eff_lengths(
     return eff
 
 
-def _objects(pieces: _TranscriptPieces, pmf: np.ndarray) -> TranscriptObjects:
+def object_shares(pieces: TranscriptPieces, pmf: np.ndarray) -> TranscriptObjects:
     """The pieces' contained shares and the cuts' conserved shares on one pmf. A zero-length fragment places
     nowhere — the accumulator deposits none — so the pmf's mass at ``w = 0`` is dropped, and the shares partition
     the fl-marginal length the pipeline builds, which excludes it too."""
@@ -279,7 +281,7 @@ def _objects(pieces: _TranscriptPieces, pmf: np.ndarray) -> TranscriptObjects:
     )
 
 
-def _cut_efficiencies(
+def cut_efficiencies(
     objects: TranscriptObjects,
     region_arrays: "RegionArrays",
     c_region: np.ndarray,
@@ -437,10 +439,10 @@ def transcript_capture_eff_lengths(
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     gdna_contained = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
-    pieces = _transcript_pieces(index, region_arrays)
-    obj = _objects(pieces, tables.rna)
+    pieces = transcript_pieces(index, region_arrays)
+    obj = object_shares(pieces, tables.rna)
     c_piece = c_region[obj.piece]
-    c_cut = _cut_efficiencies(
+    c_cut = cut_efficiencies(
         obj,
         region_arrays,
         c_region,
@@ -449,8 +451,10 @@ def transcript_capture_eff_lengths(
         calibration.gdna_capture_saturation,
     )
     if not np.array_equal(tables.gdna, tables.anchor):
-        on_anchor = _objects(pieces, tables.anchor)
-        on_table = obj if np.array_equal(tables.gdna, tables.rna) else _objects(pieces, tables.gdna)
+        on_anchor = object_shares(pieces, tables.anchor)
+        on_table = (
+            obj if np.array_equal(tables.gdna, tables.rna) else object_shares(pieces, tables.gdna)
+        )
         c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)
         c_cut = _carried(c_cut, on_anchor.cut_share, on_table.cut_share)
     num = np.zeros(fl.shape[0])

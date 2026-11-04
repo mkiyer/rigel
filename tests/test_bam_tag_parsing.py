@@ -575,7 +575,7 @@ class TestIntegerTags:
         pr = self._build_and_check_nh(tmp_path, 1, nh_type)
         assert pr.stats.total > 0
 
-    def test_nh_zero_still_works(self, tmp_path):
+    def test_nh_zero_is_read(self, tmp_path):
         """NH=0 (rare, boundary case) should not crash."""
         pr = self._build_and_check_nh(tmp_path, 0, "i")
         # Pipeline may handle NH=0 differently, but must not crash

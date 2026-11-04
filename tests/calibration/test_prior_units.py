@@ -28,6 +28,7 @@ from rigel.calibration.priors import assemble_priors
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.result import CalibrationResult
 from rigel.locus import Locus, MultiLocus
+from native._accumulator_reference import Accumulator, Partition
 
 _UNB = np.full(1, UNBOUNDED_REACH)
 
@@ -44,11 +45,6 @@ def _enumerate(region_len, w):
     contained_count, crossing_count, conserved_mass)``, the banks the accumulator would hold for a uniform field of unit
     density and a point-mass length.
     """
-    import sys
-    from pathlib import Path as _P
-
-    sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
-    from native._accumulator_reference import Accumulator, Partition
 
     region_bounds = np.concatenate(
         [[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]
@@ -79,14 +75,6 @@ def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
     the pooled share is ``(rho_g·m_g + rho_r·m_r) / (rho_g·c_g + rho_r·c_r)``, exact where the two components share a
     mean length and an approximation where they do not.
     """
-    import sys
-    from pathlib import Path as _P
-
-    sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
-    from native._accumulator_reference import (
-        Accumulator,
-        Partition,
-    )
 
     region_bounds = np.concatenate(
         [[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]
@@ -180,7 +168,6 @@ def _regions_tiling(region_len) -> RegionArrays:
         end=ends,
         # exon on both strands: the region must survive the locus projection's intergenic drop
         signature=np.full(n, 0b0000_0011, dtype=np.uint8),
-        strand_class=np.zeros(n, dtype=np.int8),
         region_size_bp=region_len.astype(np.float64),
         ref_offsets=np.array([0, n], dtype=np.int32),
         n_refs=1,
@@ -271,7 +258,7 @@ def test_the_gdna_count_is_its_true_fragment_count_where_the_two_shares_agree(na
 @pytest.mark.parametrize(
     ("name", "gdna_bias"), [("fine   (12 x 100)", -0.199), ("ragged (mixed)", -0.026)]
 )
-def test_the_gdna_count_carries_exactly_the_POOLED_SHARE_bias(name, gdna_bias):
+def test_the_gdna_count_carries_exactly_the_pooled_share_bias(name, gdna_bias):
     """Where the two shares disagree the gDNA count is wrong, and this pins the wrong value exactly.
     ``boundary_mass_per_crossing`` is the mixture's share, and gDNA's crossings are rescaled by it. With the library
     unchanged and only the bookkeeping grid moved, the gDNA count goes:
@@ -328,7 +315,7 @@ def test_the_gdna_count_moves_with_the_length_ratio_by_exactly_the_pooled_share(
         assert count > truth_g, "a LONGER gDNA must be over-counted"
 
 
-def test_the_gdna_count_IS_exact_where_the_two_components_share_a_length():
+def test_the_gdna_count_is_exact_where_the_two_components_share_a_length():
     """At equal lengths the bias is exactly zero, so a panel built that way cannot measure it; the ladder gives its two
     components equal lengths by design, so measuring the gapped case needs a length-gap panel. Asserted at two very
     different mixtures: when ``q_g == q_r`` the pooled share equals both regardless of ``phi``.
@@ -375,7 +362,7 @@ def test_stray_rna_mass_on_a_zero_opportunity_object_never_reaches_the_gdna_coun
     np.testing.assert_allclose(p.gdna_count, [0.03 * (np.sum(tiling) - 20 + 1)], rtol=1e-9)
 
 
-def test_gdna_mass_on_a_zero_opportunity_region_STILL_COUNTS_because_a_count_has_no_divisor():
+def test_gdna_mass_on_a_zero_opportunity_region_counts_as_a_count_has_no_divisor():
     """A count is a fragment count, not a density: gDNA mass on a region with zero contained support is still gDNA
     fragments in the locus and may not be dropped for want of a divisor. That the same stray mass never reaches
     ``gdna_eff_len`` is tested in ``test_priors.py``.

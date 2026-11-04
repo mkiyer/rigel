@@ -15,8 +15,8 @@ import numpy as np
 import pytest
 
 from rigel.native import Accumulator as NativeAccumulator
-from rigel.types import Strand, GenomicInterval
-from _resolution_reference import make_fragment, resolve_fragment
+from rigel.types import Strand
+from _resolution_reference import GenomicInterval, make_fragment, resolve_fragment
 from _index_builder import build_test_index
 from native._accumulator_reference import GapHypothesis
 
@@ -387,7 +387,7 @@ class TestIntronicOverhang:
         assert result is not None
         assert _get_fl(result, basic_index, "t_basic") == 3294
 
-    def test_an_overrun_within_K_is_cut(self, basic_index):
+    def test_an_overrun_within_k_is_cut(self, basic_index):
         """The mates run 3 and 2 bases into t_basic's intron, within K = 3: the aligner ran past the donor and
         the acceptor, so the intron lies in the gap and is cut whole, the overrun bases with it.
         (5151 - 1853) - 2999 = 299."""

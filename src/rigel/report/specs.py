@@ -258,8 +258,8 @@ def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
 
 def build_charts(sub) -> dict:
     """All Vega-Lite charts for the report, keyed by container id (``vega-<key>``)."""
-    charts = build_fl_specs(getattr(sub, "fragment_lengths", None))
-    genome = genome_track_spec(getattr(sub, "calibration_track", None))
+    charts = build_fl_specs(sub.fragment_lengths)
+    genome = genome_track_spec(sub.calibration_track)
     if genome is not None:
         charts["genome"] = genome
     return charts

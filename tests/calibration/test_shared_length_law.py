@@ -112,7 +112,7 @@ def test_the_weight_is_the_guaranteed_real_part_of_the_difference():
 # ── capture only lengthens ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_an_rna_census_no_longer_than_gdna_moves_nothing():
+def test_an_rna_census_at_most_as_long_as_gdnas_moves_nothing():
     """The mixture's slope at ``c = 0`` is ``mu_r / mu_g − 1``: an RNA census no longer than gDNA's law gives ``c = 0``
     and ``G_c`` is gDNA's own law, bit for bit."""
     for r_mean in (150.0, 200.0, 224.0):
@@ -200,7 +200,7 @@ def test_the_bound_is_the_worst_case_over_proportional_capture_responses():
             assert chi2(census, G) <= chi2(linear, G) * (1.0 + 1e-9)
 
 
-def test_a_response_that_rewards_length_faster_than_proportionally_can_exceed_the_bound():
+def test_a_response_rewarding_length_faster_than_proportionally_can_exceed_the_bound():
     """The premise is necessary: capture that takes only fragments above a length breaks the bound."""
     step = np.where(L > 300.0, L, 0.0)
     assert hellinger_sq(G, _captured(G, 0.6, step)) > 5.0 * capture_bound(G, 0.6)
@@ -306,14 +306,12 @@ def _built_law(mean: float, sd: float) -> np.ndarray:
 
 
 def _built_tables(monkeypatch, g_law, r_law, n_rna, kappa, seed, *, spliced=True):
-    """``build_fl_models`` on a payload whose gDNA pool is every gDNA fragment, whose spliced pool is RNA's fragments
-    thinned by their junction-crossing chance (none with ``spliced`` False: RNA all unspliced), and whose anchor is
-    every fragment of both; then the decision exactly as the pipeline hands it over (``pipeline.length_tables``), at a
-    captured fraction ``kappa``."""
-    from types import SimpleNamespace
-
+    """The length models' kernel (``fl.fl_models_from_histograms``) on a gDNA histogram of every gDNA fragment, a
+    spliced pool of RNA's fragments thinned by their junction-crossing chance (none with ``spliced`` False: RNA all
+    unspliced), and an anchor of every fragment of both; then the decision exactly as the pipeline hands it over
+    (``pipeline.length_tables``), at a captured fraction ``kappa``."""
     import rigel.calibration.capture_eff_length as cel
-    from rigel.calibration.fl import build_fl_models
+    from rigel.calibration.fl import fl_models_from_histograms
     from rigel.pipeline import length_tables
     from rigel.scan_payload import N_FRAGMENT_POOLS, POOL_DNA_INTERGENIC, POOL_RNA_SPLICED
 
@@ -324,11 +322,16 @@ def _built_tables(monkeypatch, g_law, r_law, n_rna, kappa, seed, *, spliced=True
     pools[POOL_DNA_INTERGENIC] = g_all
     if spliced:
         pools[POOL_RNA_SPLICED] = rng.binomial(r_all.astype(np.int64), _PI).astype(np.float64)
-    payload = SimpleNamespace(
-        pool_lengths=pools, deposited_lengths=g_all + r_all, max_length=_BL.size - 1
+    models = fl_models_from_histograms(
+        global_counts=g_all + r_all,
+        rna_counts=pools[POOL_RNA_SPLICED],
+        rna_selection=_PI,
+        gdna_counts=g_all,
+        max_size=_BL.size - 1,
+        pool_counts=pools,
     )
     monkeypatch.setattr(cel, "rna_captured_fraction", lambda calibration, region_arrays: kappa)
-    return length_tables(build_fl_models(payload, sj_opportunity=_PI), None, None)
+    return length_tables(models, None, None)
 
 
 def test_equal_chemistry_under_capture_is_one_law_at_every_rna_pool_size(monkeypatch):

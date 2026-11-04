@@ -9,7 +9,7 @@ nRNA allocation from spliced mRNA reads.
 import pytest
 from rigel.sim import Scenario
 
-from .conftest import (
+from _scenarios import (
     GDNA_LEVELS,
     SIM_SEED,
     build_and_run,

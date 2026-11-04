@@ -6,7 +6,7 @@ exon intervals, splice junctions, the fragment resolver) and the build/load roun
 `build()` and `load()` refuse: a reordered transcript table or a gapped gene index, an index missing a file `load()`
 reads, a setting `IndexConfig` refuses and a GTF with no transcripts (both refused before an existing index is
 touched), and an index whose rebuild stopped part-way. The third gates the duplicate-exon-structure guard in
-`read_transcripts` and its collapse flag; the fourth `_iter_reference_layout`, which both `intervals.feather` and
+`read_transcripts` and its collapse flag; the fourth `iter_reference_layout`, which both `intervals.feather` and
 `regions.feather` are derived from.
 """
 
@@ -29,9 +29,9 @@ from rigel.index import (
     TRANSCRIPTS_FEATHER,
     IndexLoadError,
     TranscriptIndex,
-    _GenicSpan,
-    _IntergenicSpan,
-    _iter_reference_layout,
+    GenicSpan,
+    IntergenicSpan,
+    iter_reference_layout,
     read_transcripts,
 )
 from rigel.transcript import Transcript
@@ -874,9 +874,7 @@ def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_
         tx(2, "T2", [(1000, 1100), (1200, 1300)]),
         tx(3, "T3", [(1000, 1100), (1250, 1300)]),
     ]
-    synthetics, _t_to_span_key, _span_to_syn_idx, covered_equiv = create_nrna_transcripts(
-        transcripts, tolerance=20
-    )
+    synthetics, _t_to_span_key, covered_equiv = create_nrna_transcripts(transcripts, tolerance=20)
     assert synthetics == [] and len(covered_equiv) == 2
     assert all(entity is covering for entity in covered_equiv.values())
     assert covering.span_n_contributors == 3
@@ -901,7 +899,7 @@ def test_collapse_is_noop_without_duplicates(tmp_path: Path):
     assert {t.t_id for t in txs} == {"T1", "T2"}
 
 
-# ── ``rigel.index._iter_reference_layout`` — the tiling both feathers are derived from ───────────
+# ── ``rigel.index.iter_reference_layout`` — the tiling both feathers are derived from ───────────
 #
 # The layout iterator is the single source of truth for ``intervals.feather`` and
 # ``regions.feather`` alike, so what it yields must be a perfect tiling of every reference:
@@ -940,51 +938,51 @@ def _assert_tiles(spans, ref_length: int):
 
 
 def test_empty_reference_yields_single_intergenic():
-    spans = list(_iter_reference_layout(1000, []))
-    assert spans == [_IntergenicSpan(0, 1000)]
+    spans = list(iter_reference_layout(1000, []))
+    assert spans == [IntergenicSpan(0, 1000)]
 
 
 def test_zero_length_reference_yields_nothing():
-    assert list(_iter_reference_layout(0, [])) == []
+    assert list(iter_reference_layout(0, [])) == []
 
 
 def test_single_transcript_in_middle_three_spans():
     t = _mk_tx(0, "chr1", Strand.POS, [(100, 200), (300, 400)])
-    spans = list(_iter_reference_layout(1000, [t]))
+    spans = list(iter_reference_layout(1000, [t]))
     _assert_tiles(spans, 1000)
     assert len(spans) == 3
-    assert spans[0] == _IntergenicSpan(0, 100)
-    assert isinstance(spans[1], _GenicSpan)
+    assert spans[0] == IntergenicSpan(0, 100)
+    assert isinstance(spans[1], GenicSpan)
     assert (spans[1].start, spans[1].end) == (100, 400)
     assert spans[1].transcripts == (t,)
-    assert spans[2] == _IntergenicSpan(400, 1000)
+    assert spans[2] == IntergenicSpan(400, 1000)
 
 
 def test_transcript_at_left_boundary_no_left_intergenic():
     t = _mk_tx(0, "chr1", Strand.POS, [(0, 200)])
-    spans = list(_iter_reference_layout(500, [t]))
+    spans = list(iter_reference_layout(500, [t]))
     _assert_tiles(spans, 500)
     assert len(spans) == 2
-    assert isinstance(spans[0], _GenicSpan)
-    assert spans[1] == _IntergenicSpan(200, 500)
+    assert isinstance(spans[0], GenicSpan)
+    assert spans[1] == IntergenicSpan(200, 500)
 
 
 def test_transcript_at_right_boundary_no_right_intergenic():
     t = _mk_tx(0, "chr1", Strand.POS, [(800, 1000)])
-    spans = list(_iter_reference_layout(1000, [t]))
+    spans = list(iter_reference_layout(1000, [t]))
     _assert_tiles(spans, 1000)
     assert len(spans) == 2
-    assert spans[0] == _IntergenicSpan(0, 800)
-    assert isinstance(spans[1], _GenicSpan)
+    assert spans[0] == IntergenicSpan(0, 800)
+    assert isinstance(spans[1], GenicSpan)
 
 
 def test_overlapping_transcripts_strand_agnostic_coalesce():
     """Two transcripts on opposite strands that overlap → one genic span."""
     t1 = _mk_tx(0, "chr1", Strand.POS, [(100, 300)])
     t2 = _mk_tx(1, "chr1", Strand.NEG, [(250, 500)])
-    spans = list(_iter_reference_layout(1000, sorted([t1, t2], key=lambda x: (x.start, x.end))))
+    spans = list(iter_reference_layout(1000, sorted([t1, t2], key=lambda x: (x.start, x.end))))
     _assert_tiles(spans, 1000)
-    genic = [s for s in spans if isinstance(s, _GenicSpan)]
+    genic = [s for s in spans if isinstance(s, GenicSpan)]
     assert len(genic) == 1
     assert (genic[0].start, genic[0].end) == (100, 500)
     assert {t.t_index for t in genic[0].transcripts} == {0, 1}
@@ -993,20 +991,20 @@ def test_overlapping_transcripts_strand_agnostic_coalesce():
 def test_disjoint_transcripts_yield_separate_genic_spans():
     t1 = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
     t2 = _mk_tx(1, "chr1", Strand.POS, [(500, 700)])
-    spans = list(_iter_reference_layout(1000, [t1, t2]))
+    spans = list(iter_reference_layout(1000, [t1, t2]))
     _assert_tiles(spans, 1000)
     assert len(spans) == 5  # int, gen, int, gen, int
-    assert sum(isinstance(s, _GenicSpan) for s in spans) == 2
+    assert sum(isinstance(s, GenicSpan) for s in spans) == 2
 
 
 def test_synthetic_excluded_from_layout():
     """Synthetic spans must not coalesce or extend genic spans."""
     real = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
     syn = _mk_tx(1, "chr1", Strand.POS, [(150, 800)], is_synthetic=True)
-    spans = list(_iter_reference_layout(1000, sorted([real, syn], key=lambda x: (x.start, x.end))))
+    spans = list(iter_reference_layout(1000, sorted([real, syn], key=lambda x: (x.start, x.end))))
     _assert_tiles(spans, 1000)
     # The synthetic [150,800) must not extend the real [100,200) genic span.
-    genic = [s for s in spans if isinstance(s, _GenicSpan)]
+    genic = [s for s in spans if isinstance(s, GenicSpan)]
     assert len(genic) == 1
     assert (genic[0].start, genic[0].end) == (100, 200)
     assert genic[0].transcripts == (real,)
@@ -1016,8 +1014,8 @@ def test_touching_transcripts_coalesce():
     """t1.end == t2.start → coalesced into one genic span (touching boundary)."""
     t1 = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
     t2 = _mk_tx(1, "chr1", Strand.POS, [(200, 300)])
-    spans = list(_iter_reference_layout(1000, [t1, t2]))
+    spans = list(iter_reference_layout(1000, [t1, t2]))
     _assert_tiles(spans, 1000)
-    genic = [s for s in spans if isinstance(s, _GenicSpan)]
+    genic = [s for s in spans if isinstance(s, GenicSpan)]
     assert len(genic) == 1
     assert (genic[0].start, genic[0].end) == (100, 300)

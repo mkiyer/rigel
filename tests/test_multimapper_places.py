@@ -35,13 +35,13 @@ from dataclasses import dataclass
 import numpy as np
 import pysam
 import pytest
-from _index_builder import write_fasta
+from _bam_builder import R1_FWD, R2_REV, SECONDARY, record, write_bam
+from _index_builder import build_index
 
 from rigel.buffer import FRAG_MULTIMAPPER, FRAG_UNAMBIG
 from rigel.config import BamScanConfig, EMConfig, FragmentScoringConfig
 from rigel.estimator import AbundanceEstimator
 from rigel.frag_length_model import FragmentLengthModel
-from rigel.index import TranscriptIndex
 from rigel.pipeline import scan_and_buffer
 from rigel.routing import FragmentRouter
 from rigel.scoring import build_scorer, sequence_log_penalties
@@ -58,34 +58,12 @@ from rigel.types import Strand
 # other base intergenic. Its synthetic span covers [1000, 2300).
 
 GENOME = 20_000
-R1_FWD, R2_REV = 0x1 | 0x2 | 0x40 | 0x20, 0x1 | 0x2 | 0x80 | 0x10
-SECONDARY = 0x100
 
 GENIC = (1050, "100M", 1150, "100M")  # [1050, 1250): inside tA's first exon
 GENIC_SPLICED = (1250, "50M700N50M", 2100, "100M")  # across tA's annotated intron
 INTERGENIC = (8050, "100M", 8150, "100M")  # [8050, 8250)
 INTERGENIC_2 = (12050, "100M", 12150, "100M")  # [12050, 12250)
 INTERGENIC_SPLICED = (14050, "50M500N50M", 14700, "100M")  # a junction no transcript holds
-
-
-def _record(qname, flag, ref, pos, cigar, mate_pos, nh, hi, xs=None, nm=0):
-    a = pysam.AlignedSegment()
-    a.query_name = qname
-    a.flag = flag
-    a.reference_id = ref
-    a.reference_start = pos
-    a.mapping_quality = 60 if nh == 1 else 3
-    a.cigarstring = cigar
-    n = sum(int(x) for x in __import__("re").findall(r"(\d+)[MIS=X]", cigar))
-    a.query_sequence = "A" * n
-    a.query_qualities = pysam.qualitystring_to_array("I" * n)
-    a.next_reference_id = ref
-    a.next_reference_start = mate_pos
-    tags = [("NH", nh, "i"), ("HI", hi, "i"), ("NM", nm, "i")]
-    if xs is not None:
-        tags.append(("XS", xs, "A"))
-    a.set_tags(tags)
-    return a
 
 
 def _template(qname, *places, nm=None):
@@ -100,26 +78,22 @@ def _template(qname, *places, nm=None):
         )
         extra = 0 if hi == 1 else SECONDARY
         xs = "+" if "N" in f_cigar or "N" in r_cigar else None
+        tags = dict(ref=ref, mapq=60 if nh == 1 else 3, nh=nh, hi=hi, nm=nm[hi - 1], xs=xs)
         records += [
-            _record(qname, R1_FWD | extra, ref, f_pos, f_cigar, r_pos, nh, hi, xs, nm[hi - 1]),
-            _record(qname, R2_REV | extra, ref, r_pos, r_cigar, f_pos, nh, hi, xs, nm[hi - 1]),
+            record(qname, R1_FWD | extra, f_pos, f_cigar, r_pos, **tags),
+            record(qname, R2_REV | extra, r_pos, r_cigar, f_pos, **tags),
         ]
     return records
 
 
 def _build_index(base, refs):
     """``refs``: every reference's name, each holding tA's exon layout as its own gene."""
-    fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {ref: GENOME for ref in refs})
-    gtf.write_text(
-        "".join(
-            f'{ref}\tt\texon\t{s + 1}\t{e}\t.\t+\t.\tgene_id "g{ref}"; transcript_id "t{ref}";\n'
-            for ref in refs
-            for s, e in [(1000, 1300), (2000, 2300)]
-        )
+    gtf = "".join(
+        f'{ref}\tt\texon\t{s + 1}\t{e}\t.\t+\t.\tgene_id "g{ref}"; transcript_id "t{ref}";\n'
+        for ref in refs
+        for s, e in [(1000, 1300), (2000, 2300)]
     )
-    TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
-    return TranscriptIndex.load(str(base / "idx"))
+    return build_index(base, gtf, {ref: GENOME for ref in refs})
 
 
 @pytest.fixture(scope="module")
@@ -134,15 +108,7 @@ def two_ref_index(tmp_path_factory):
 
 def _write_bam(tmp_path, index, records):
     """``records`` as a name-sorted BAM over the index's references."""
-    bam = str(tmp_path / "t.bam")
-    sq = [{"SN": ref, "LN": GENOME} for ref in index.ref_names]
-    with pysam.AlignmentFile(
-        bam, "wb", header={"HD": {"VN": "1.6", "SO": "queryname"}, "SQ": sq}
-    ) as out:
-        for r in records:
-            out.write(r)
-    pysam.sort("-n", "-o", bam, bam)
-    return bam
+    return write_bam(tmp_path / "t.bam", records, {ref: GENOME for ref in index.ref_names})
 
 
 def _scan_chunks(tmp_path, index, records, **scan):
@@ -172,7 +138,7 @@ def test_case_2_a_unique_intergenic_spliced_fragment_is_withheld(toy_index, tmp_
     assert rows == []
 
 
-def test_case_3_an_all_intergenic_multimapper_is_certified_gdna_and_reaches_no_em_unit(
+def test_an_all_intergenic_multimapper_is_certified_gdna_and_reaches_no_em_unit(
     toy_index, tmp_path
 ):
     stats, rows = _scan(tmp_path, toy_index, _template("c3", INTERGENIC, INTERGENIC_2))
@@ -180,7 +146,7 @@ def test_case_3_an_all_intergenic_multimapper_is_certified_gdna_and_reaches_no_e
     assert rows == []
 
 
-def test_case_4_a_multimappers_intergenic_splice_is_rejected_and_its_unspliced_place_is_gdna(
+def test_a_multimappers_intergenic_splice_is_rejected_its_unspliced_place_is_gdna(
     toy_index, tmp_path
 ):
     stats, rows = _scan(tmp_path, toy_index, _template("c4", INTERGENIC_SPLICED, INTERGENIC))
@@ -464,7 +430,7 @@ def test_a_case5_units_intergenic_place_is_its_intergenic_term_and_not_the_loci(
     assert float(_intergenic(em)[0]) == pytest.approx(_term(300), abs=1e-5)
 
 
-def test_a_case5_unit_with_a_spliced_genic_place_competes_rather_than_being_certified():
+def test_a_case5_unit_with_a_spliced_genic_place_competes_and_is_not_certified():
     """RNA's only reading is the spliced place, gDNA's the intergenic one: no locus gDNA candidate, an intergenic
     term, and the unit is not certified RNA (case 5, spliced or not, competes in the EM)."""
     em = _route([[Hit((0,), SpliceType.SPLICED_ANNOT, footprint=400), Hit((), footprint=300)]])
@@ -524,7 +490,7 @@ def test_a_multimapper_whose_only_surviving_place_is_intergenic_is_intergenic_gd
     stamped as a multimapper none of whose hits resolves is and never gated, whatever the hits' order and wherever a
     chunk boundary falls. It reaches the summary's intergenic gDNA."""
     from rigel.annotate import AF_GDNA_INTERGENIC
-    from rigel.cli import _quantification_pools
+    from rigel.cli import quantification_pools
 
     hits, penalty = GATED_GENIC_PLACE[case]
     em, stats, stamps = _route_all(
@@ -533,7 +499,13 @@ def test_a_multimapper_whose_only_surviving_place_is_intergenic_is_intergenic_gd
     assert em.n_units == 0
     assert stats.n_intergenic == 1 and stats.n_gated_out == 0
     assert stamps == {0: (AF_GDNA_INTERGENIC, -1)}
-    pools = _quantification_pools(stats, count_annotated=0.0, count_nascent=0.0, count_gdna_em=0.0)
+    pools = quantification_pools(
+        stats,
+        count_annotated=0.0,
+        count_nascent=0.0,
+        count_gdna_em=0.0,
+        count_gdna_intergenic_em=0.0,
+    )
     assert pools["count_gdna"] == 1.0 and pools["fraction_intergenic"] == 1.0
 
 
@@ -598,7 +570,7 @@ def test_in_a_library_with_no_mismatch_a_transcript_keeps_its_surviving_alternat
     assert 0 in em.t_indices.tolist() and math.isfinite(_rna(em))
 
 
-def test_gdnas_overlapping_hits_are_one_place_and_the_same_coordinates_on_two_references_two():
+def test_gdnas_overlapping_hits_are_one_place_and_one_span_on_two_references_two():
     """gDNA follows the transcripts' place definition: two of its hits overlapping on one reference are alternatives at
     one place and count once, at the more likely; at the same coordinates on two references they are two places."""
     one_place = _route([[Hit((0,), start=1000), Hit((1,), start=1020, nm=1)]])
@@ -633,7 +605,7 @@ MAX_LENGTH = 1000
 def _accumulators():
     from native._accumulator_reference import Accumulator as Reference, Partition
 
-    from rigel.native import Accumulator as Native
+    from rigel._bam_impl.testing import Accumulator as Native
 
     partition = Partition.from_region_bounds(
         [BOUNDS], region_types=[[0] * (len(BOUNDS) - 1)], sj=SJ
@@ -1110,11 +1082,11 @@ def test_at_rate_zero_the_intergenic_term_is_inert():
 
 
 def test_the_intergenic_terms_mass_joins_the_summarys_intergenic_gdna():
-    from rigel.cli import _quantification_pools
+    from rigel.cli import quantification_pools
 
     stats = PipelineStats()
     stats.n_intergenic = 300
-    pools = _quantification_pools(
+    pools = quantification_pools(
         stats,
         count_annotated=500.0,
         count_nascent=100.0,
@@ -1136,7 +1108,7 @@ def test_a_unit_the_intergenic_term_wins_is_stamped_intergenic_gdna():
 
     from rigel.annotate import AF_ANNOTATED, AF_GDNA_EM, AF_GDNA_INTERGENIC
     from rigel.native import EM_WINNER_INTERGENIC
-    from rigel.pipeline import _populate_em_annotations
+    from rigel.pipeline import populate_em_annotations
 
     class _Part:
         frag_ids = np.asarray([7, 8, 9], dtype=np.int64)
@@ -1152,7 +1124,7 @@ def test_a_unit_the_intergenic_term_wins_is_stamped_intergenic_gdna():
         t_df = pd.DataFrame({"is_synthetic": [False]})
 
     ann = _Ann()
-    _populate_em_annotations(
+    populate_em_annotations(
         [_Part()],
         np.asarray([0, -2, int(EM_WINNER_INTERGENIC)], dtype=np.int32),
         np.ones(3, dtype=np.float32),

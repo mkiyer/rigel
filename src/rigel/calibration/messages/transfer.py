@@ -30,7 +30,7 @@ __all__ = ["TransferPolicy"]
 
 
 @dataclass(frozen=True, slots=True)
-class _Library:
+class Library:
     """What the whole library says, reduced once per sweep and read by every block.
 
     ``rho_gdna``: the structurally pure gDNA density, the gDNA lane's coordinate (``0.0``: no positive density
@@ -55,7 +55,7 @@ class TransferPolicy:
         self.kappa = float(kappa)
 
     # ── the library: the lanes' coordinates and the strand witness's liveness, once ─────────────────
-    def library(self, view: ChainView) -> _Library:
+    def library(self, view: ChainView) -> Library:
         is_exon = np.asarray(view.is_exon_region, bool)
         fp, fn = np.asarray(view.free_pos, bool), np.asarray(view.free_neg, bool)
         n_u = np.asarray(view.n_slot, np.float64)
@@ -102,4 +102,4 @@ class TransferPolicy:
                 den += float((flux[available] / rate[available]).sum())
             if num > 0.0:
                 rho_rna = num / den
-        return _Library(rho, rho_rna, split_live)
+        return Library(rho, rho_rna, split_live)

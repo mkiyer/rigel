@@ -18,7 +18,7 @@ import pytest
 
 from rigel.types import Strand
 
-from rigel.calibration.blocks import SweepCapture
+from rigel.calibration.diagnostics import SweepDiagnostics
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.sweep import solve_chain
 
@@ -123,7 +123,7 @@ def test_precision_state_count_resolution():
     near-zero gDNA density carries little gDNA-density information, so the lattice's linear ``Var(f_g)`` ordering does
     not carry over.) A region with no fragments reports zero variance.
     """
-    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+    from rigel.calibration.simplex_logodds import solve_regions_logodds
 
     kappa = 0.99
     # Same single-strand + composition at two evidence levels: region 1 has 20× the counts of region 0.
@@ -131,7 +131,7 @@ def test_precision_state_count_resolution():
     u_neg = np.array([20.0, 400.0])
     allow_pos = np.array([True, True])
     allow_neg = np.array([False, False])  # both single-strand
-    d = _solve_regions_logodds_all(
+    d = solve_regions_logodds(
         u_pos,
         u_neg,
         allow_pos,
@@ -150,7 +150,7 @@ def test_precision_state_count_resolution():
     # the variance is present, finite and non-negative for active regions.
     assert np.all(np.isfinite(d.gdna_frac_var)) and np.all(d.gdna_frac_var >= 0.0)
     # a no-fragment region is inactive, so its variance is zero.
-    d0 = _solve_regions_logodds_all(
+    d0 = solve_regions_logodds(
         np.array([0.0]),
         np.array([0.0]),
         np.array([True]),
@@ -227,9 +227,11 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
     assert np.allclose(rho_g[[0, 4]], rho, atol=1e-9)  # exact, not merely close
 
 
-def test_gdna_sweep_zero_gdna_pin_and_monotone():
-    # A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−, solved under the silent policy: every slot on its own
-    # evidence, nothing sent between them. The AMBIG region starts at the all-gDNA init f_g=1.
+def test_a_zero_gdna_chain_reads_rna_at_every_strand_decisive_slot():
+    """A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−, solved under the silent policy: every slot on its own
+    evidence, nothing sent between them, and the AMBIG region starting at the all-gDNA init f_g=1. Each slot whose
+    strand tilt is decisive (the two single-strand introns and the AMBIG|intron− boundary) reads RNA from the strand
+    alone. The sweep is one forward-backward pass, so there is no per-pass sequence to be monotone in."""
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     # sense-tilted RNA (κ=0.95): the + intron aligns genome+, the − intron genome−. The two boundaries carry the tilt of
     # the regions they separate. There are no terminal slots, so no adjacent terminal G1 lock emits structural gDNA into
@@ -262,12 +264,13 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         n_rna_obs=10000.0,  # the spliced sample behind κ: the stranded (κ=0.95) channel reads live
         n_grid=40,
     )
-    # Slot 3 is the AMBIG | intron− boundary, whose − tilt reads RNA on its own. The AMBIG region (slot 2) is not
-    # asserted: its strand is balanced, so its strand likelihood is degenerate (a balanced count fits gDNA and balanced
-    # ±RNA equally), and with no prior and nothing sent to it, it stays near its all-gDNA init.
-    assert final.f_g[3] < 0.50
-    # single-strand introns: the decisive strand wins, so they read RNA, well below their all-gDNA init.
-    assert final.f_g[0] < 0.50 and final.f_g[4] < 0.50
+    # Slots 0 and 4 are the single-strand introns, 1 and 3 the boundaries beside the AMBIG region, each tilted 95:5 or
+    # 40:2 toward its RNA strand. A slot whose strand term says nothing reads f_g = 0.5, so the bound sits well below
+    # that: at κ = 0.95 a 95:5 tilt puts f_g under 0.05. The AMBIG region (slot 2) is not asserted: its strand is
+    # balanced, so its strand likelihood is degenerate (a balanced count fits gDNA and balanced ±RNA equally), and with
+    # no prior and nothing sent to it, it stays near its all-gDNA init.
+    decisive = [0, 1, 3, 4]
+    assert np.all(final.f_g[decisive] < 0.1), final.f_g
 
 
 # a delivered row: two-sided pull and emergent deference --------
@@ -278,19 +281,19 @@ def _gdna_share_row(n_grid, mode_share, prec):
     ``log f_g`` at ``log mode_share`` with precision ``prec``."""
     from scipy.special import log_expit
 
-    from rigel.calibration.simplex_logodds import _logodds_grid
+    from rigel.calibration.simplex_logodds import logodds_grid
 
-    lam, _ = _logodds_grid(int(n_grid), 10.0)
+    lam, _ = logodds_grid(int(n_grid), 10.0)
     return (-0.5 * float(prec) * (log_expit(lam) - np.log(float(mode_share))) ** 2)[None, :]
 
 
 def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
     """A row claiming ``f_g = 0.2`` (strong) on a balanced AMBIG region (flat strand) pulls f_g toward 0.2: two-sided by
     construction (a profile on the grid, no boundary wall), not to the f_g=1 vertex."""
-    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+    from _psi_reference import psi_solve
 
     # AMBIG region with balanced counts: the strand is flat (κ=0.5), so only the row shapes f_g.
-    d = _solve_regions_logodds_all(
+    d = psi_solve(
         np.array([50.0]),
         np.array([50.0]),
         np.array([True]),
@@ -307,9 +310,9 @@ def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
 def test_a_weak_row_defers_to_a_decisive_strand():
     """A weak row (precision 3) claiming ``f_g = 0.9`` loses to a decisive single-strand region's ~1000-fragment strand
     likelihood: f_g stays ≈0, since a weak claim cannot override the data."""
-    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+    from _psi_reference import psi_solve
 
-    d = _solve_regions_logodds_all(
+    d = psi_solve(
         np.array([1000.0]),
         np.array([5.0]),
         np.array([True]),
@@ -386,7 +389,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
 
 def _sweep(args, kappa=0.95, n_rna_obs=10000.0):
     chain, st, geom, belief, ra = args
-    cap = SweepCapture()
+    cap = SweepDiagnostics()
     final = region_sweep(
         chain,
         st,
@@ -398,7 +401,7 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0):
         # decision and the channel is dead, so the fixture supplies the spliced sample behind its κ = 0.95.
         n_rna_obs=n_rna_obs,
         n_grid=60,
-        _capture=cap,
+        diagnostics=cap,
     )
     return final, cap
 
@@ -419,7 +422,7 @@ def test_mature_measurement_recovers_exon_rna():
     assert fg_exon < 0.45, fg_exon  # truth ≈0.32; comfortably RNA-dominated, not pinned to gDNA
 
 
-def test_tau_gag_fix_deconvolution_prediction_stays_gated():
+def test_an_exon_with_no_composition_evidence_stays_near_the_reference():
     """On the unstranded chain with no spliced reads the exon has no composition evidence of its own (no strand channel
     and no sj), so nothing may drive it to a confident vertex: its f_g stays near the uninformative reference."""
     ex = MX_EXON
@@ -427,13 +430,6 @@ def test_tau_gag_fix_deconvolution_prediction_stays_gated():
     # No spliced reads + no strand ⇒ the exon has no composition evidence of its own; it stays mid-range,
     # where the reference puts it.
     assert 0.2 < float(fin_no.f_g[ex]) < 0.8, fin_no.f_g[ex]
-
-
-# Slot ids on the `_mature_exon_chain` chain (``N E N E N E N E N``, regions at the even slots, see `MX_EXON`). No test
-# reads these three, and their names do not describe the slots they hold:
-_R1_EXON = 3  # slot 3: the boundary between intron n1 (slot 2) and the exon under test (slot 4)
-_B1 = 2  # slot 2: intron n1, the exon's left flank
-_B2 = 4  # slot 4: the exon under test
 
 
 def test_sweep_finite_over_extreme_configs():
@@ -505,9 +501,9 @@ def _chunk_substrate(m=255, K=120, seed=3):
 
 
 def _solve_in_chunks(args, kw, edges):
-    """`_solve_regions_logodds_all` on each ``[a, b)`` of ``edges`` in turn, scattered back: the block solve's
+    """`psi_solve` on each ``[a, b)`` of ``edges`` in turn, scattered back: the block solve's
     arithmetic with only the row tiling changed."""
-    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+    from _psi_reference import psi_solve
 
     fields = ("gdna_frac", "rna_pos_frac", "rna_neg_frac", "gdna_frac_var")
     m = args[0].shape[0]
@@ -518,7 +514,7 @@ def _solve_in_chunks(args, kw, edges):
         for key in ("row_logprior", "fg_ref", "fpos_ref", "fneg_ref"):
             sub_kw[key] = kw[key][a:b]
         sub_kw["gdna_support"] = tuple(x[a:b] for x in kw["gdna_support"])
-        dc = _solve_regions_logodds_all(*sub_args, **sub_kw)
+        dc = psi_solve(*sub_args, **sub_kw)
         for f in fields:
             out[f][a:b] = getattr(dc, f)
     return out
@@ -530,10 +526,10 @@ def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
     solve and the AMBIG cube). The read-out reduces every row in a fixed order (a contiguous ψ and per-row moment sums
     that avoid BLAS), because a layout- or row-count-dependent reduction would move the last ulp.
     """
-    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+    from _psi_reference import psi_solve
 
     m, args, kw = _chunk_substrate()
-    whole = _solve_regions_logodds_all(*args, **kw)
+    whole = psi_solve(*args, **kw)
     partitions = {
         "halves": [(0, m // 2), (m // 2, m)],
         "thirds": [(0, m // 3), (m // 3, 2 * m // 3), (2 * m // 3, m)],
@@ -558,12 +554,12 @@ def test_the_psi_solve_is_thread_exact_so_the_thread_count_moves_no_number():
     every field of both paths; the thread budget is a resource, not a tunable. Threads sharing scratch, or a slot
     skipped or doubled, would fail here.
     """
-    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+    from _psi_reference import psi_solve
 
     m, args, kw = _chunk_substrate()
-    serial = _solve_regions_logodds_all(*args, **kw, n_threads=1)
+    serial = psi_solve(*args, **kw, n_threads=1)
     for n_threads in (2, 3, 0):
-        got = _solve_regions_logodds_all(*args, **kw, n_threads=n_threads)
+        got = psi_solve(*args, **kw, n_threads=n_threads)
         for f in ("gdna_frac", "rna_pos_frac", "rna_neg_frac", "gdna_frac_var"):
             a, b = np.asarray(getattr(got, f)), np.asarray(getattr(serial, f))
             assert np.array_equal(a, b), (

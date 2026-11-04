@@ -228,7 +228,7 @@ def test_randomised_at_realistic_scale():
 # --- Coverage and length share one set ----------------------------------------------------------------
 
 
-def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
+def test_the_length_is_the_covered_base_count_and_crossings_use_that_same_set():
     """Whatever counts toward ``L`` must also count as coverage for crossing, or the density estimator is biased. A mate
     gap counts toward ``L`` and crosses boundaries; an intron does neither. Both are asserted from one set.
     """
@@ -284,7 +284,7 @@ def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
     np.testing.assert_array_equal(t.deposited_lengths, expected)
 
 
-def test_a_REJECTED_fragment_is_not_binned():
+def test_a_rejected_fragment_is_not_binned():
     """The histogram is unconditional given deposit. A fragment over the length limit, or one whose path is
     undetermined, deposits nothing and bins nothing; each is counted in ``qc`` instead. So the histogram describes
     exactly the population the pure pools are drawn from; an anchor over a wider population would mismatch the pools'
@@ -309,7 +309,7 @@ def test_a_REJECTED_fragment_is_not_binned():
     assert int(acc3.tally.deposited_lengths.sum()) == 0
 
 
-def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
+def test_the_unconditional_histogram_is_a_superset_of_the_pure_pools():
     """Every pooled fragment is also binned here, at the same length: the pools are conditioned subsets of this
     population. The superset is strict (an exonic contained fragment or a multi-boundary crossing enters no pool, since
     an impure pool is worse than a missing one), which is why the pools cannot anchor themselves.

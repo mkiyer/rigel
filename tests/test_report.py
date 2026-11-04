@@ -13,8 +13,6 @@ One gate therefore reads a real output directory written by ``rigel quant``'s wr
 column and fragment-length category must be one that writer writes.
 """
 
-import argparse
-import importlib.util
 import json
 import re
 from pathlib import Path
@@ -25,14 +23,15 @@ import pytest
 
 import numpy as np
 
+from _constants import replaced
 from rigel import cli
 from rigel.config import CONSTANTS, BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
 from rigel.report import model as report_model
 from rigel.report import specs as report_specs
 from rigel.report.build import build_report
-from rigel.report.html import _SECTIONS, _asset
-from rigel.report.model import GENE_COLUMNS, _reference_table, build_view_model
+from rigel.report.html import SECTIONS, read_asset
+from rigel.report.model import GENE_COLUMNS, reference_table, build_view_model
 from rigel.report.specs import (
     FL_CATEGORY_LABELS,
     build_charts,
@@ -41,9 +40,7 @@ from rigel.report.specs import (
     genome_track_spec,
 )
 from rigel.report.substrate import SUMMARY_KEYS, SubstrateError, SummaryReader, load_substrate
-from rigel.sim import ReadSimConfig, Scenario
-
-_HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
+from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 #: The ``summary.json`` schema the synthesized substrate mirrors, and the one the real writer must write.
 _SCHEMA = 8
@@ -92,6 +89,8 @@ def _write_substrate(d: Path) -> Path:
                 "spliced_implicit": 25,
                 "splice_artifact": 5,
                 "sj_blacklisted": 3,
+                "sj_blacklist_size": 1200,
+                "sj_blacklist_loaded": True,
             },
         },
         "strand_model": {
@@ -232,7 +231,7 @@ def test_load_substrate_missing(tmp_path):
 def test_view_model_shape(tmp_path):
     d = _write_substrate(tmp_path / "run")
     sub = load_substrate(d)
-    assert sub.schema_version == _SCHEMA
+    assert SummaryReader(sub.summary)[""]["schema_version"] == _SCHEMA
     assert sub.sample_name == "SampleX"
     vm = build_view_model(sub)
 
@@ -248,6 +247,9 @@ def test_view_model_shape(tmp_path):
     # the splice bar: the four splice types, one spliced (every junction annotated)
     labels = [s["label"] for s in vm["fragments"]["splice"]]
     assert labels == ["Unspliced", "Annotated", "Implicit", "Artifact"]
+    # the blacklist's provenance, so a zero-artifact bar reads as detection on or off
+    assert vm["fragments"]["blacklisted"] == 3
+    assert vm["fragments"]["blacklist"] == {"size": 1200, "loaded": True}
     # strand contamination gap surfaced
     assert vm["strand"]["contamination_gap"] == 0.05
     # the fragment-length table keeps the categories in the order summary.json lists them
@@ -289,7 +291,7 @@ def test_genome_track_spec_bins_per_ref(monkeypatch):
     assert {row["ref"] for row in top1["data"]["values"]} == {"chr2"}
     monkeypatch.undo()
     # reference table: every reference, sorted by gDNA count desc
-    rt = _reference_table(track)
+    rt = reference_table(track)
     assert [r[0] for r in rt] == ["chr2", "chr1"]
     assert rt[0][1] == 2  # chr2 n_regions
     # build_charts merges genome in when a track is present
@@ -329,7 +331,7 @@ def _view(d: Path, monkeypatch, **qc) -> dict:
     """The view model with these ``CONSTANTS.qc`` fields changed, the way an experiment varies a constant."""
     constants = CONSTANTS
     for name, value in qc.items():
-        constants = constants.replaced(f"qc.{name}", value)
+        constants = replaced(constants, f"qc.{name}", value)
     monkeypatch.setattr(report_model, "CONSTANTS", constants)
     return build_view_model(load_substrate(d))
 
@@ -339,20 +341,20 @@ def _charts_with(monkeypatch, **qc) -> None:
     constant."""
     constants = CONSTANTS
     for name, value in qc.items():
-        constants = constants.replaced(f"qc.{name}", value)
+        constants = replaced(constants, f"qc.{name}", value)
     monkeypatch.setattr(report_specs, "CONSTANTS", constants)
 
 
 def _js_function(name: str) -> str:
     """The body of one top-level function of the report's front end."""
-    js = _asset("report.js")
+    js = read_asset("report.js")
     m = re.search(rf"\n  function {name}\(.*?\) \{{\n(.*?)\n  \}}\n", js, re.S)
     assert m, f"report.js has no function {name}"
     return m.group(1)
 
 
 def test_the_escape_helper_escapes_every_html_special_character():
-    m = re.search(r"\n  const esc = (.*?);\n", _asset("report.js"))
+    m = re.search(r"\n  const esc = (.*?);\n", read_asset("report.js"))
     assert m, "report.js has no esc helper"
     replaced = re.search(r"\.replace\(/\[([^\]]*)\]/g", m.group(1))
     assert replaced and set(replaced.group(1)) == set("&<>\"'"), "esc does not replace all five"
@@ -477,7 +479,7 @@ def test_each_table_reads_every_cell_the_view_model_writes_and_no_other(tmp_path
 
 
 @pytest.mark.parametrize("bulk_density", [1.2e-4, None])
-def test_the_report_shows_calibrations_rna_sense_fraction_whatever_the_capture_answer(
+def test_the_report_shows_calibrations_rna_sense_fraction_whatever_capture_answers(
     tmp_path, bulk_density
 ):
     """The sense fraction is a library scalar, not a capture number, so it is shown whatever calibration says
@@ -539,7 +541,7 @@ def test_each_pool_is_named_once_and_shows_the_summarys_own_count_and_fraction(t
     assert kpis["Annotated transcripts"] == q["count_annotated"]
     assert kpis["Nascent RNA"] == q["count_nascent"]
     assert kpis["Transcripts"] == q["n_transcripts"]  # annotated transcripts only
-    shown = json.dumps(quant) + _SECTIONS + _asset("report.js")
+    shown = json.dumps(quant) + SECTIONS + read_asset("report.js")
     assert not re.findall(r"\b(?:[Mm]ature|mRNA|nRNA)\b", shown)
 
 
@@ -779,7 +781,7 @@ def test_the_summary_reader_hands_out_only_the_keys_it_lists():
 @pytest.fixture(scope="module")
 def quant_output(tmp_path_factory) -> Path:
     """A real ``rigel quant`` output directory: a small stranded library with gDNA and nascent RNA, simulated,
-    run through the pipeline and written by the writer ``rigel quant`` runs (``cli._write_quant_outputs``)."""
+    run through the pipeline and written by the writer ``rigel quant`` runs (``cli.write_quant_outputs``)."""
     work = tmp_path_factory.mktemp("quant")
     sc = Scenario("report", genome_length=12000, seed=42, work_dir=work / "sim")
     sc.add_gene(
@@ -801,7 +803,11 @@ def quant_output(tmp_path_factory) -> Path:
         seed=42,
     )
     oracle = sc.build_oracle(
-        n_fragments=2000, sim_config=sim, gdna_fraction=0.2, nrna_abundance=15.0
+        n_rna_fragments=2000,
+        sim_config=sim,
+        gdna_fraction=0.2,
+        gdna_config=GDNAConfig(),
+        nrna_abundance=15.0,
     )
     config = PipelineConfig(
         em=EMConfig(seed=42, assignment_mode="fractional", n_threads=1),
@@ -810,14 +816,11 @@ def quant_output(tmp_path_factory) -> Path:
     result = run_pipeline(oracle.bam_path, oracle.index, config=config)
     out = work / "out"
     out.mkdir()
-    args = argparse.Namespace(
-        bam_file=str(oracle.bam_path),
-        index_dir=str(oracle.index_dir),
-        config=None,
-        tsv=False,
-        emit_locus_stats=False,
+    args = cli.build_parser().parse_args(
+        ["quant", "--bam", str(oracle.bam_path), "--index", str(oracle.index_dir), "-o", str(out)]
     )
-    cli._write_quant_outputs(result, oracle.index, out, args)
+    cli.resolve_quant_args(args, cli.build_quant_defaults())
+    cli.write_quant_outputs(result, oracle.index, out, args)
     return out
 
 
@@ -879,14 +882,12 @@ def test_build_report_self_contained(tmp_path):
     assert set(payload["charts"]) == {"overlay", "small_multiples"}  # no track in this substrate
 
 
-@pytest.mark.skipif(not _HAS_VEGA, reason="vl-convert-python not installed")
 def test_build_report_inlines_vega_runtime(tmp_path):
     out = build_report(_write_substrate(tmp_path / "run"))
     html = out.read_text()
     assert "window.vegaEmbed" in html  # runtime bundled inline, offline-ready
 
 
-@pytest.mark.skipif(not _HAS_VEGA, reason="vl-convert-python not installed")
 def test_every_chart_the_report_builds_compiles_and_reads_every_mark_property(tmp_path):
     """Vega-Lite refuses a mark type it does not know but silently drops a mark property it does not
     know, so compiling is half the gate: removing any property of any mark definition must also change

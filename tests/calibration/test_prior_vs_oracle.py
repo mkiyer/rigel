@@ -12,7 +12,6 @@ plumbing (arithmetic over two per-locus arrays plus the override lever) but not 
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 from pathlib import Path
 
 import numpy as np
@@ -20,32 +19,11 @@ import pytest
 
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 from rigel.config import PipelineConfig
+import prior_vs_oracle
 from _prior_toy import build_toy, build_toy_zero_gdna
 
 #: a region carrying none of these strand/type bits is intergenic, and the locus projection drops it
 _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
-
-_MODULES: dict = {}
-
-
-def _load_sibling(name: str):
-    """Import a ``scripts/design/`` instrument by path. ``scripts/`` is not a package. The module is registered in
-    ``sys.modules`` before execution, because ``@dataclass`` resolves its class's ``__module__`` through that table.
-    """
-    import sys
-
-    key = name[:-3]
-    if key not in _MODULES:
-        path = Path(__file__).resolve().parents[2] / "scripts" / "design" / name
-        spec = importlib.util.spec_from_file_location(key, path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        _MODULES[key] = module
-        spec.loader.exec_module(module)
-    return _MODULES[key]
-
-
-PV = _load_sibling("prior_vs_oracle.py")
 
 
 # ── the toys ─────────────────────────────────────────────────────────────────────────────────────
@@ -62,7 +40,7 @@ def toy_zero_gdna(tmp_path_factory):
 
 
 def _measure(result, tmp_path, tag):
-    return PV.measure_condition(
+    return prior_vs_oracle.measure_condition(
         str(result.bam_path),
         result.index,
         PipelineConfig(),
@@ -90,20 +68,22 @@ def _nudged_prior(measured, field, index, delta):
     cal = _rebuild_calibration(measured)
     arr = np.array(getattr(cal, field), dtype=np.float64, copy=True)
     arr[index] += delta
-    return PV.PRIORS.assemble_priors(
+    return prior_vs_oracle.PRIORS.assemble_priors(
         dataclasses.replace(cal, **{field: arr}), measured.region_arrays, measured.multi_loci
     )
 
 
 def _moved(a, b) -> bool:
-    return any(not np.array_equal(getattr(a, f), getattr(b, f)) for f in PV.PRIOR_FIELDS)
+    return any(
+        not np.array_equal(getattr(a, f), getattr(b, f)) for f in prior_vs_oracle.PRIOR_FIELDS
+    )
 
 
-def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(measured):
+def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_picofragment(measured):
     """The instrument rests on ``dataclasses.replace`` being an inert way to swap the six mass arrays; a dropped field
     would make O differ from P for a reason that is not deconvolution error.
 
-    The perturbation site matters. On any genome the largest gDNA region is intergenic, and ``_project_regions_to_loci``
+    The perturbation site matters. On any genome the largest gDNA region is intergenic, and ``region_locus_shares``
     drops every region overlapping no locus, so nudging ``argmax(count_gdna_region)`` would show no effect. So both
     directions are asserted: an in-locus nudge moves the prior, an intergenic one does not. 1e-12 fragments at an
     in-locus region moves the prior by 1e-12, while one ULP of a mass of a few hundred does not (the projection is a
@@ -137,7 +117,7 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     )
 
 
-def test_the_prior_reads_exactly_the_two_gDNA_mass_fields_and_provably_NONE_of_the_RNA_ones(
+def test_the_prior_reads_exactly_the_two_gdna_mass_fields_and_none_of_the_rna_ones(
     measured,
 ):
     """The two gDNA arrays ``override_masses`` writes must reach the prior; an override landing on a field nothing reads
@@ -148,7 +128,7 @@ def test_the_prior_reads_exactly_the_two_gDNA_mass_fields_and_provably_NONE_of_t
     """
     base = measured.priors["P"]
     reads = {}
-    for field in PV.OVERRIDE_FIELDS:
+    for field in prior_vs_oracle.OVERRIDE_FIELDS:
         site = _biggest_in_locus_site(measured, field)
         reads[field] = _moved(_nudged_prior(measured, field, site, 1.0), base)
     assert {f for f, m in reads.items() if m} == {"count_gdna_region", "count_gdna_boundary"}, (
@@ -158,25 +138,27 @@ def test_the_prior_reads_exactly_the_two_gDNA_mass_fields_and_provably_NONE_of_t
     )
 
 
-def test_an_override_that_stops_writing_a_field_ABORTS_rather_than_scoring(measured, monkeypatch):
+def test_an_override_that_stops_writing_a_field_aborts_rather_than_scoring(measured, monkeypatch):
     """If ``override_masses`` stopped writing one of the six arrays, O would keep the shipped value there and be a
     hybrid of truth and estimate, which would flatter calibration.
     """
     cal = _rebuild_calibration(measured)
     full = measured.oracle.override_masses(measured.region_arrays)
-    for dropped in PV.OVERRIDE_FIELDS:
+    for dropped in prior_vs_oracle.OVERRIDE_FIELDS:
         partial = {k: v for k, v in full.items() if k != dropped}
         monkeypatch.setattr(
             type(measured.oracle), "override_masses", lambda self, ra, _p=partial: dict(_p)
         )
         with pytest.raises(RuntimeError, match="OVERRIDE_FIELDS"):
-            PV.oracle_priors(measured.oracle, cal, measured.region_arrays, measured.multi_loci)
+            prior_vs_oracle.oracle_priors(
+                measured.oracle, cal, measured.region_arrays, measured.multi_loci
+            )
 
 
 # ── Gate 2: the lever could have fired ───────────────────────────────────────────────────────────
 
 
-def test_the_oracle_lever_actually_MOVES_the_prior(measured):
+def test_the_oracle_lever_actually_moves_the_prior(measured):
     """ "P equals O" must not come from a lever that did nothing. On a toy with real gDNA the two priors must differ at
     many loci and by a substantial total; both the count of differing loci and the total are bounded, since one huge
     locus difference does not show the lever reaches the whole array.
@@ -190,16 +172,16 @@ def test_the_oracle_lever_actually_MOVES_the_prior(measured):
 # ── Gate 3: the two arms cannot be scored against a different locus partition ────────────────────
 
 
-def test_scoring_against_a_DIFFERENT_locus_partition_raises(measured):
+def test_scoring_against_a_different_locus_partition_raises(measured):
     """The locus partition is a function of the scoring stage, not the index (``build_multi_loci`` unions transcripts
     linked by scored fragments), so two pipeline runs can produce different numbers of loci, and index-aligning them
     would compare locus 7 of one run with locus 7 of another.
     """
     p = measured.priors["P"].gdna_count
     o = measured.priors["O"].gdna_count
-    PV.score_arm(p, o)  # the honest call
+    prior_vs_oracle.score_arm(p, o)  # the honest call
     with pytest.raises(ValueError, match="different locus partitions"):
-        PV.score_arm(p, o[:-1])
+        prior_vs_oracle.score_arm(p, o[:-1])
 
 
 # ── Gate 4: every sharded run writes its shards to a directory of its own ───────────────────────
@@ -246,7 +228,7 @@ def test_two_sharded_runs_never_share_a_shard_directory_and_every_shard_gets_the
     for _run in range(2):
         seen.clear()
         monkeypatch.setattr(sys, "argv", argv)
-        assert PV.main() == 0
+        assert prior_vs_oracle.main() == 0
         assert len(seen) == 2 and all("scan.total_threads=1" in cmd for cmd in seen)
         dirs.append({Path(cmd[cmd.index("--json") + 1]).parent for cmd in seen})
     assert len(dirs[0]) == len(dirs[1]) == 1 and dirs[0] != dirs[1]
@@ -255,7 +237,7 @@ def test_two_sharded_runs_never_share_a_shard_directory_and_every_shard_gets_the
 # ── Gate 5: the zero-gDNA control ────────────────────────────────────────────────────────────────
 
 
-def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_is_scored_against_it(
+def test_at_zero_gdna_the_oracle_prior_is_zero_and_the_shipped_one_is_scored_on_it(
     measured_zero,
 ):
     """With no gDNA in the library the oracle's gDNA mass is exactly 0 at every object, so ``O.gdna_count`` must be
@@ -277,7 +259,7 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
     # one gDNA fragment, seeded at the largest RNA region
     i = int(np.argmax(np.asarray(truth["count_rna_region"])))
     seeded[i] = 1.0
-    with_one = PV.PRIORS.assemble_priors(
+    with_one = prior_vs_oracle.PRIORS.assemble_priors(
         dataclasses.replace(cal, **{**truth, "count_gdna_region": seeded}),
         measured_zero.region_arrays,
         measured_zero.multi_loci,
@@ -291,24 +273,24 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
 # ── Gate 6: a capture that never happened is an error, not a zero ────────────────────────────────
 
 
-def test_a_run_that_never_reaches_assemble_priors_RAISES(measured, monkeypatch):
+def test_a_run_that_never_reaches_assemble_priors_raises(measured, monkeypatch):
     """``quant_from_buffer`` returns early when there are no EM units, and a silently absent capture would read as "a
     condition with no loci and therefore no error".
     """
-    monkeypatch.setattr(PV, "quant_from_buffer", lambda *a, **k: None)
+    monkeypatch.setattr(prior_vs_oracle, "quant_from_buffer", lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="never called"):
-        PV.capture_priors(None, None, None, None, None, None, None, PipelineConfig())
+        prior_vs_oracle.capture_priors(None, None, None, None, None, None, None, PipelineConfig())
 
 
 # ── Gate 7: the aggregate re-derives its rates, never averages them ──────────────────────────────
 
 
-def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
+def test_the_stratum_aggregate_is_a_ratio_of_sums_not_a_mean_of_ratios():
     """A condition at 10 M fragments and one at 10 k are not equally informative about a rate, and averaging their
     ``rel`` values would give the shallow one equal say, so the aggregate recomputes from summed totals. The two rows
     differ 1,000x in depth with opposite-signed errors, so the mean of ratios and the ratio of sums are far apart.
     """
-    deep = PV.ArmScore(
+    deep = prior_vs_oracle.ArmScore(
         n_loci=1,
         n_claiming=1,
         total_arm=1_100_000.0,
@@ -318,7 +300,7 @@ def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
         over_call=100_000.0,
         under_call=0.0,
     )
-    shallow = PV.ArmScore(
+    shallow = prior_vs_oracle.ArmScore(
         n_loci=1,
         n_claiming=1,
         total_arm=100.0,
@@ -328,7 +310,7 @@ def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
         over_call=0.0,
         under_call=900.0,
     )
-    agg = PV._agg([deep, shallow])
+    agg = prior_vs_oracle._agg([deep, shallow])
     assert agg.rel == pytest.approx(100_900.0 / 1_001_000.0)
     assert agg.rel != pytest.approx((deep.rel + shallow.rel) / 2.0, rel=1e-3)
     assert agg.net_err == pytest.approx(99_100.0)
@@ -345,7 +327,7 @@ def test_over_and_under_call_are_reported_separately_and_reconcile(measured):
 
         over − under == net        over + under == abs
     """
-    s = PV.score_arm(measured.priors["P"].gdna_count, measured.priors["O"].gdna_count)
+    s = prior_vs_oracle.score_arm(measured.priors["P"].gdna_count, measured.priors["O"].gdna_count)
     assert s.over_call - s.under_call == pytest.approx(s.net_err, rel=1e-9, abs=1e-6)
     assert s.over_call + s.under_call == pytest.approx(s.abs_err, rel=1e-9, abs=1e-6)
     assert s.over_call >= 0.0 and s.under_call >= 0.0
@@ -363,17 +345,17 @@ def _in_locus_regions(measured) -> np.ndarray:
 
 def _biggest_in_locus_site(measured, field):
     """The largest element of ``field`` the locus projection reaches. Boundary-indexed arrays are selected through the
-    shipped ``_boundary_locus_shares``, since a locus's boundaries are those touching its regions and that function
+    shipped ``boundary_locus_shares``, since a locus's boundaries are those touching its regions and that function
     makes the decision.
     """
-    from rigel.calibration.priors import _boundary_locus_shares
+    from rigel.calibration.priors import boundary_locus_shares, region_locus_shares
 
     arr = np.asarray(getattr(measured.calibration, field), np.float64)
     keep = _in_locus_regions(measured)
     if "boundary" in field:
-        e_idx, _lid, _w = _boundary_locus_shares(
-            measured.region_arrays, measured.multi_loci, len(measured.multi_loci)
-        )
+        n_loci = len(measured.multi_loci)
+        region_shares = region_locus_shares(measured.region_arrays, measured.multi_loci, n_loci)
+        e_idx, _lid, _w = boundary_locus_shares(measured.region_arrays, region_shares, n_loci)
         keep = np.zeros(int(measured.calibration.n_boundaries), dtype=bool)
         keep[e_idx] = True
     if arr.shape[0] == keep.shape[0]:

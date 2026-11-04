@@ -3,7 +3,7 @@ the `transfer_prepare` binding into `_transfer_harness.LevelLane`) and the cube 
 both-stranded locus needs.
 
 The hops are single hops of the native pass (`_transfer_harness._hop`) and the row constructors the native ones
-(`native.transfer_rows`). The tests cover the faces derived from the flag bits per strand, the level coordinate and its
+(`_solve_impl.testing`). The tests cover the faces derived from the flag bits per strand, the level coordinate and its
 round trip, the hop priced on the strand's own counts, the flux level, which nodes are sources, the no-echo law, the
 two-sided hop at the pair's price, the split witness that reads a node's estimate of one strand's RNA from its column
 asymmetry, a one-sided profile surviving the map onto the cube, the bracket theorem (three lower bounds plus the strand
@@ -15,7 +15,8 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import polygamma
 
-from rigel.native import transfer_rows as R
+from rigel._solve_impl import testing as R
+from rigel.native import transfer_rows
 from _transfer_harness import (
     BlockContext,
     Faces,
@@ -169,7 +170,7 @@ def test_the_flux_level_is_a_lower_bound_priced_by_the_node_pair():
     def read_column(
         col, kappa
     ):  # the kernel's: the strand's own column under a sense protocol, else the other
-        return int(R.read_column(col, kappa))
+        return int(transfer_rows.read_column(col, kappa))
 
     u = np.linspace(-10.0, 10.0, 60)
     rho = 0.02
@@ -229,7 +230,7 @@ def test_the_rna_sources_are_single_strand_claims_and_the_flux_at_the_exon_only(
     )
 
 
-def test_PERTURBATION_an_rna_level_never_returns_to_its_source(sweep_inputs):
+def test_perturbation_an_rna_level_never_returns_to_its_source(sweep_inputs):
     """The no-echo law on the RNA lanes: sharpen one node's own RNA level to a hard false floor; what that node holds
     from either side must not move, while some neighbouring slot's held level must."""
     ctx, prepared = _rna_lanes_of(sweep_inputs)
@@ -320,45 +321,63 @@ def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     assert np.all(np.diff(one) >= -1e-9)
 
 
-def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
-    """The RNA lane's hop with the other column given (the library's strand channel live): the price's disagreement term
-    reads each node's estimate of this strand's RNA from its column split's asymmetry, not from the column count.
+# The RNA lane's hop with the other column given (the library's strand channel live): the price's disagreement term reads
+# each node's estimate of this strand's RNA from its column split's asymmetry, not from the column count.
 
-    (i) Two dark nodes (no asymmetry) agree whatever their column densities do, so the whole profile crosses a two-sided
-        face at counting alone, where a column witness would blur it by a 100-fold cliff; (ii) two lit nodes at a cliff
-        disagree by the ratio of their asymmetries per opportunity, beyond the asymmetries' own Poisson counting; (iii)
-        the witness travels with the level across an empty node, so the next full recipient prices against the last full
-        node; (iv) with no other column the column count is the witness (`hop_price` on the column counts).
-    """
-    u = np.linspace(-10.0, 10.0, 60)
-    prof = -0.5 * ((u - 0.0) / 0.4) ** 2
-    K = u.shape[0]
-    one_face = _bits(2, [(0, 1)])
+_HOP_U = np.linspace(-10.0, 10.0, 60)
+_HOP_PROF = -0.5 * (_HOP_U / 0.4) ** 2
 
-    def priced(lane, *witness):
-        """Row 1 after the hop 0 → 1 from an empty sender holding ``prof`` with ``witness``."""
-        held = Received.empty(2, K)
-        held.level_rna_pos.write(0, prof, *witness)
-        _hop(_lane_prepared(lane, [-1, 0], [1, -1]), 0, 1, held)
-        assert held.level_rna_pos.present[1]
-        return held.level_rna_pos
 
-    # (i) dark → dark across a 100-fold column-density cliff: counting alone, the whole profile
-    count = np.array([5.0, 367.0])  # this strand's read column
-    other = np.array([8.0, 400.0])  # the other column: no asymmetry on either node
-    a = np.array([277.0, 223.0])
-    empty, none = np.array([True, False]), RowTable(2, K)
-    lane = LevelLane(
-        "pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face, other=other
+def _two_node_lane(count, a, other=None) -> LevelLane:
+    """A + lane over two nodes, the sender empty, joined by one two-sided face; *other* the other strand's column."""
+    face = _bits(2, [(0, 1)])
+    extra = {} if other is None else {"other": np.asarray(other)}
+    return LevelLane(
+        "pos",
+        _HOP_U,
+        _HOP_U,
+        0.5,
+        np.asarray(count),
+        np.asarray(a),
+        np.array([True, False]),
+        RowTable(2, _HOP_U.shape[0]),
+        face,
+        two_sided=face,
+        **extra,
     )
-    held = priced(lane, 5.0, 277.0, 5.0 - 8.0, 13.0)
+
+
+def _priced(lane, *witness):
+    """Row 1 after the hop 0 → 1 from the empty sender holding the profile with ``witness``."""
+    held = Received.empty(2, _HOP_U.shape[0])
+    held.level_rna_pos.write(0, _HOP_PROF, *witness)
+    _hop(_lane_prepared(lane, [-1, 0], [1, -1]), 0, 1, held)
+    assert held.level_rna_pos.present[1]
+    return held.level_rna_pos
+
+
+def _lit_price() -> float:
+    """The price between the lit pair: their counting plus the squared log ratio of their asymmetries per
+    opportunity, beyond the asymmetries' own counting."""
+    n_s, v_s, n_x, v_x = 69.0, 69.0, 188.0, 208.0
+    r = (n_x / 227.0) / (n_s / 14054.0)
+    counting = float(polygamma(1, 69.5) + polygamma(1, 198.5))
+    return counting + max(0.0, np.log(r) ** 2 - (v_s / n_s**2 + v_x / n_x**2))
+
+
+def test_two_dark_nodes_cross_a_column_cliff_at_counting_alone():
+    """Two dark nodes (no asymmetry) agree whatever their column densities do, so the whole profile crosses a two-sided
+    face at counting alone, where a column witness would blur it by a 100-fold cliff."""
+    # this strand's read column, and the other column: no asymmetry on either node
+    lane = _two_node_lane([5.0, 367.0], [277.0, 223.0], other=[8.0, 400.0])
+    held = _priced(lane, 5.0, 277.0, 5.0 - 8.0, 13.0)
     got = held.profile[1]
     v_counting = float(polygamma(1, 5.5) + polygamma(1, 367.5))
-    np.testing.assert_allclose(got, R.blur_row(prof, u, v_counting), atol=1e-9)
+    np.testing.assert_allclose(got, R.blur_row(_HOP_PROF, _HOP_U, v_counting), atol=1e-9)
     assert got.max() - got[-1] > 1.0, "the dark claim's upper side must survive"
     v_column = R.hop_price(5.0, 277.0, 367.0, 223.0)
     assert v_column > v_counting + 5.0
-    assert not np.allclose(got, R.blur_row(prof, u, v_column), atol=1e-3), (
+    assert not np.allclose(got, R.blur_row(_HOP_PROF, _HOP_U, v_column), atol=1e-3), (
         "the column count is the witness again: two dark nodes were charged a cliff"
     )
     assert (
@@ -366,71 +385,58 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
         and held.rna_count[1] == 367.0 - 400.0
         and held.rna_count_var[1] == 767.0
     )
-    # (ii) lit → lit at a cliff: the asymmetries' ratio per opportunity, beyond their counting
-    count = np.array([69.0, 198.0])
-    other = np.array([0.0, 10.0])
-    a = np.array([14054.0, 227.0])
-    lit = LevelLane(
-        "pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face, other=other
-    )
-    got = priced(lit, 69.0, 14054.0, 69.0, 69.0).profile[1]
-    n_s, v_s, n_x, v_x = 69.0, 69.0, 188.0, 208.0
-    r = (n_x / 227.0) / (n_s / 14054.0)
-    v_lit = float(polygamma(1, 69.5) + polygamma(1, 198.5)) + max(
-        0.0, np.log(r) ** 2 - (v_s / n_s**2 + v_x / n_x**2)
-    )
+
+
+def test_two_lit_nodes_at_a_cliff_disagree_by_their_asymmetries_ratio():
+    """Two lit nodes at a cliff disagree by the ratio of their asymmetries per opportunity, beyond the asymmetries' own
+    Poisson counting."""
+    lit = _two_node_lane([69.0, 198.0], [14054.0, 227.0], other=[0.0, 10.0])
+    got = _priced(lit, 69.0, 14054.0, 69.0, 69.0).profile[1]
+    v_lit = _lit_price()
     assert v_lit > 20.0  # log(170)^2 ~ 26 nats^2
-    np.testing.assert_allclose(got, R.blur_row(prof, u, v_lit), atol=1e-9)
-    assert not np.allclose(
-        got, R.blur_row(prof, u, float(polygamma(1, 69.5) + polygamma(1, 198.5))), atol=1e-3
-    ), "the exemption is back: a lit claim crossed a cliff at counting alone"
-    # (iii) the witness rides across an empty node: the full source emits, the empty node forwards it with the source's
-    # witness, and the next full node prices against the source
-    count = np.array([69.0, 0.0, 198.0])
-    other = np.array([0.0, 0.0, 10.0])
-    a = np.array([14054.0, 50.0, 227.0])
-    source = RowTable(3, K)
-    source[0] = prof
+    np.testing.assert_allclose(got, R.blur_row(_HOP_PROF, _HOP_U, v_lit), atol=1e-9)
+    counting = float(polygamma(1, 69.5) + polygamma(1, 198.5))
+    assert not np.allclose(got, R.blur_row(_HOP_PROF, _HOP_U, counting), atol=1e-3), (
+        "the exemption is back: a lit claim crossed a cliff at counting alone"
+    )
+
+
+def test_the_witness_rides_across_an_empty_node_to_the_next_full_one():
+    """The full source emits, the empty node forwards the level with the source's witness, and the next full node
+    prices against the source."""
+    source = RowTable(3, _HOP_U.shape[0])
+    source[0] = _HOP_PROF
     chain = _lane_prepared(
         LevelLane(
             "pos",
-            u,
-            u,
+            _HOP_U,
+            _HOP_U,
             0.5,
-            count,
-            a,
+            np.array([69.0, 0.0, 198.0]),
+            np.array([14054.0, 50.0, 227.0]),
             np.array([False, True, False]),
             source,
             _bits(3, [(0, 1), (1, 2)]),
-            other=other,
+            other=np.array([0.0, 0.0, 10.0]),
         ),
         [-1, 0, 1],
         [1, 2, -1],
     )
-    held = Received.empty(3, K)
+    held = Received.empty(3, _HOP_U.shape[0])
     _hop(chain, 0, 1, held)
     lv = held.level_rna_pos
     assert lv.present[1] and lv.rna_count[1] == 69.0 and lv.rna_count_var[1] == 69.0
     assert (lv.count[1], lv.opportunity[1]) == (69.0, 14054.0)
     _hop(chain, 1, 2, held)
-    np.testing.assert_allclose(lv.profile[2], R.blur_row(R.lower_side(prof), u, v_lit), atol=1e-9)
-    # (iv) no other column: the column count is the witness
-    dead = LevelLane(
-        "pos",
-        u,
-        u,
-        0.5,
-        np.array([69.0, 198.0]),
-        np.array([14054.0, 227.0]),
-        empty,
-        RowTable(2, K),
-        one_face,
-        two_sided=one_face,
-    )
-    held = priced(dead, 69.0, 14054.0)
-    np.testing.assert_allclose(
-        held.profile[1], R.blur_row(prof, u, R.hop_price(69.0, 14054.0, 198.0, 227.0)), atol=1e-9
-    )
+    want = R.blur_row(R.lower_side(_HOP_PROF), _HOP_U, _lit_price())
+    np.testing.assert_allclose(lv.profile[2], want, atol=1e-9)
+
+
+def test_with_no_other_column_the_column_count_is_the_witness():
+    """`hop_price` on the two column counts."""
+    held = _priced(_two_node_lane([69.0, 198.0], [14054.0, 227.0]), 69.0, 14054.0)
+    want = R.blur_row(_HOP_PROF, _HOP_U, R.hop_price(69.0, 14054.0, 198.0, 227.0))
+    np.testing.assert_allclose(held.profile[1], want, atol=1e-9)
     assert not held.has_witness[1]
 
 
@@ -452,7 +458,7 @@ def test_a_lower_only_profile_stays_one_sided_on_the_cube():
     assert not (np.all(np.diff(two, axis=1) >= -1e-9) and np.all(np.diff(two, axis=0) <= 1e-9))
 
 
-def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_the_gdna_share():
+def test_the_bracket_theorem_three_lower_bounds_and_the_strand_equation_bracket_fg():
     """On a hand-built AMBIG node (truth ``f_g`` 0.5, ``f_+`` 0.3, ``f_−`` 0.2, n = 400), three lower bounds (the gDNA
     level and both RNA levels, each a floor at its truth) plus the node's own strand counts give a two-sided gDNA share:
     a 90 % interval narrower than 0.15 that contains the truth, on stranded (κ = 0.99) and unstranded (κ = 0.5) data
@@ -709,20 +715,20 @@ def _neg_only_ctx():
 def test_the_rna_lanes_are_built_without_a_gdna_lane():
     """A gDNA-free library has no gDNA level coordinate and so no gDNA lane; its RNA lanes have their own coordinates
     and must exist. With a positive gDNA density the gDNA lane joins them."""
-    from rigel.calibration.messages.transfer import TransferPolicy, _Library
+    from rigel.calibration.messages.transfer import TransferPolicy, Library
 
     pol = TransferPolicy(kappa=0.99)
     ctx = _neg_only_ctx()
     lib = pol.library(ctx)
     assert lib.rho_rna > 0.0, "the gate's premise: the RNA coordinate exists"
-    gdna_free = _Library(0.0, lib.rho_rna, lib.split_live)
+    gdna_free = Library(0.0, lib.rho_rna, lib.split_live)
     prepared = _prepared(pol, ctx, gdna_free)
     assert "gdna" not in prepared.lanes
     assert "neg" in prepared.lanes, "the − lane died with the gDNA lane"
     assert "gdna" in _prepared(pol, ctx, lib).lanes
 
 
-def test_a_strands_level_is_delivered_to_the_cube_when_the_other_strand_has_no_coordinate():
+def test_a_strands_level_reaches_the_cube_when_the_other_strand_has_no_coordinate():
     """TB−'s level must reach the both-stranded exon (slot 6) although the + strand has no single-strand exon anywhere,
     so no coordinate and no source: the delivery reads whichever RNA lane holds something."""
     from rigel.calibration.messages.transfer import TransferPolicy
@@ -817,7 +823,7 @@ def _flux_pair_ctx(kappa: float):
     )
 
 
-def test_the_flux_price_carries_no_disagreement_when_the_pair_agrees_in_whole_strand_units():
+def test_the_flux_price_has_no_disagreement_when_the_pair_agrees_in_strand_units():
     """A junction's flux is whole-strand RNA of a known strand, and its route rate a whole-strand density; the exon's
     reads land on the two genome-strand columns by the protocol's kappa. When the exon's strand-s RNA density equals the
     junction's rate the pair agrees, so the hop's price is the two witnesses' counting and nothing more, at every kappa.

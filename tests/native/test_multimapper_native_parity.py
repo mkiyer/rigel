@@ -13,7 +13,7 @@ import dataclasses
 
 import numpy as np
 
-from rigel._bam_impl import AccumulatorSet as NativeSet
+from rigel._bam_impl.testing import AccumulatorSet as NativeSet
 from rigel.types import Strand
 
 from ._accumulator_reference import (
@@ -191,7 +191,7 @@ def test_every_multi_placement_case_is_byte_identical():
     )
 
 
-def test_a_GENERATOR_of_placements_is_the_same_fragment_as_the_tuple():
+def test_a_generator_of_placements_is_the_same_fragment_as_the_tuple():
     """``offer`` reads ``placements`` in one pass, so a one-shot iterable offers what its tuple does. The specification
     receives each case's tuple and the native set a generator over it, and the two must stay byte-identical; a binding
     that iterated twice would see an empty generator and raise.

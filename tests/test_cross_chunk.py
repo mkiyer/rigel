@@ -63,7 +63,7 @@ def _run_with_fragments_per_chunk(result, index, fragments_per_chunk):
     return run_pipeline(result.bam_path, index, config=config)
 
 
-class TestCrossChunkRegression:
+class TestChunkSizeHasNoEffect:
     """Ensure chunk-size has no effect on quantification output."""
 
     @pytest.fixture(autouse=True)

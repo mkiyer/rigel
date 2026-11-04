@@ -9,8 +9,8 @@
 //     + the delivered composition row + the delivered RNA level row + the θ quadrature's log-weights.
 // The read-out: `f_g` is the continuous ½-quantile of the θ-marginal on λ (through σ), `Var(log f_g)` its grid
 // moment, `w_+` the RNA-mass-weighted share of the + strand over every column, and the composition their image on
-// the admissible strands. `solve_kernel.cpp` calls `solve_slot` for every slot of a block; the bindings
-// (`psi_cube`, `posterior_median`, `compose`, `gdna_arm`) run the same code.
+// the admissible strands. `solve_kernel.cpp` calls `solve_slot` for every slot of a block; the gates' bindings
+// (`testing/solve.cpp`: `psi_cube`, `posterior_median`, `compose`, `gdna_arm`) run the same code.
 // Gate: tests/calibration/test_vertex_reference.py.
 #pragma once
 
@@ -31,8 +31,7 @@ using transfer_rows::sigmoid;
 using transfer_rows::strand_term;
 using transfer_rows::strand_variance;
 
-// The reference exponent of both arms (Jeffreys' ½), exported as `rows.JEFFREYS_REF` and read there by
-// `simplex_logodds`.
+// The reference exponent of both arms (Jeffreys' ½), bound for the gates in `_solve_impl.testing`.
 constexpr double JEFFREYS_REF = 0.5;
 constexpr double PI = 3.14159265358979323846;
 const double LOG_PI = std::log(PI), LOG_2 = std::log(2.0);
@@ -40,7 +39,7 @@ const double NEG_INF = -std::numeric_limits<double>::infinity();
 
 // The θ quadrature's truncation: the strand term's mass outside the window is below double precision,
 // erfc(√T) < ε₆₄ at T = −log ε₆₄ with ε₆₄ = 2⁻⁵² (numpy's finfo(float64).eps). The dispatcher derives the node
-// count that resolves the peak inside that window from it (simplex_logodds._TILT_NODES).
+// count that resolves the peak inside that window from it (simplex_logodds.TILT_NODES).
 const double T_NATS = -std::log(std::numeric_limits<double>::epsilon());
 
 // a delivered RNA level row (one row of simplex_logodds.CubeRows): the held profile per strand over
@@ -130,9 +129,71 @@ struct Grid {
     int columns(bool ambig) const { return ambig ? n_tilt + 2 : 1; }
 };
 
+// The tilt grid of one slot's cube, (K, C): a single-strand slot's one column is its live strand (τ = ±1); an AMBIG
+// slot's are, per λ cell, the windowed θ nodes with their trapezoid log-weights − log π, then the two atoms τ = ±1 at
+// log-weight 0. `log_w` arrives zeroed.
+inline void tilt_grid(const Grid& g, const SlotInputs& s, bool ambig, double n, double var, double* tau, double* log_w) {
+    const int K = g.K, C = g.columns(ambig);
+    if (!ambig) {
+        const double t = s.ap && !s.an ? 1.0 : -1.0;
+        for (int k = 0; k < K; ++k) tau[k] = t;
+        return;
+    }
+    const int Kt = g.n_tilt;
+    for (int k = 0; k < K; ++k) {
+        double th_lo, th_hi;
+        tilt_window(s.u_pos, n, var, g.fg[k], g.kappa, th_lo, th_hi);
+        const double h = (th_hi - th_lo) / (Kt - 1);
+        const double log_h = std::log(h);
+        double* tk = tau + static_cast<size_t>(k) * C;
+        double* wk = log_w + static_cast<size_t>(k) * C;
+        // τ = sin θ at the nodes by the rotation recurrence from (sin, cos) of θ_lo and of h: two transcendentals per
+        // (slot, λ) instead of one per node, within a few ulps. Clamped to [−1, 1] because rounding can leave it by an
+        // ulp at a domain end, where (1 ∓ τ)/2 has no logarithm.
+        double sn = std::sin(th_lo), cs = std::cos(th_lo);
+        const double sh = std::sin(h), ch = std::cos(h);
+        for (int t = 0; t < Kt; ++t) {
+            tk[t] = std::clamp(sn, -1.0, 1.0);
+            wk[t] = ((t == 0 || t == Kt - 1) ? log_h - LOG_2 : log_h) - LOG_PI;
+            const double sn2 = sn * ch + cs * sh;
+            cs = cs * ch - sn * sh;
+            sn = sn2;
+        }
+        tk[Kt] = 1.0; tk[Kt + 1] = -1.0;  // the tilt atom: pure +, pure −, at log-weight 0
+        wk[Kt] = 0.0; wk[Kt + 1] = 0.0;
+    }
+}
+
+// The delivered RNA level row's map onto the cube, added to ψ: each held profile read at the density every cell
+// implies, f_s·n/a_r relative to ρ_ref, summed over the strands and max-normalised over the whole cube.
+inline void add_delivered_row(const Grid& g, const Delivered& row, int C, const double* tau, double* psi) {
+    const int K = g.K;
+    std::vector<double> rv(static_cast<size_t>(K) * C, 0.0);
+    const double scale = row.total / row.opportunity, log_rho = std::log(row.rho_ref);
+    double rmax = NEG_INF;
+    for (int k = 0; k < K; ++k) {
+        const double f_act = 1.0 - g.fg[k];
+        for (int t = 0; t < C; ++t) {
+            const size_t at = static_cast<size_t>(k) * C + t;
+            double v = 0.0;
+            for (int strand = 0; strand < 2; ++strand) {
+                const double* prof = strand == 0 ? row.pos : row.neg;
+                if (prof == nullptr) continue;
+                const double sign = strand == 0 ? 1.0 : -1.0;
+                const double u_s = std::log(f_act * (1.0 + sign * tau[at]) / 2.0 * scale) - log_rho;
+                double r;
+                interp(&u_s, 1, row.u, prof, K, prof[0], prof[K - 1], &r);
+                v += r;
+            }
+            rv[at] = v;
+            if (v > rmax) rmax = v;
+        }
+    }
+    for (size_t at = 0; at < rv.size(); ++at) psi[at] += rv[at] - rmax;
+}
+
 // ψ over one slot's (K, C) cube, with the tilt and the two strand-fraction grids beside it; C = 1 for a
-// single-strand slot (its live strand's τ = ±1), n_tilt + 2 at an AMBIG one (the windowed θ nodes with their
-// trapezoid log-weights − log π, then the two atoms at log-weight 0). Every buffer is K·C long.
+// single-strand slot, n_tilt + 2 at an AMBIG one. Every buffer is K·C long.
 inline void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* psi, double* f_pos, double* f_neg,
                       double* tau, std::vector<double>& scratch) {
     const int K = g.K, C = g.columns(ambig);
@@ -141,35 +202,7 @@ inline void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* ps
     const double half_log_var = 0.5 * std::log(var);
     scratch.assign(static_cast<size_t>(K) * C, 0.0);
     double* log_w = scratch.data();
-    // the tilt grid and its weights
-    if (!ambig) {
-        const double t = s.ap && !s.an ? 1.0 : -1.0;
-        for (int k = 0; k < K; ++k) tau[k] = t;
-    } else {
-        const int Kt = g.n_tilt;
-        for (int k = 0; k < K; ++k) {
-            double th_lo, th_hi;
-            tilt_window(s.u_pos, n, var, g.fg[k], g.kappa, th_lo, th_hi);
-            const double h = (th_hi - th_lo) / (Kt - 1);
-            const double log_h = std::log(h);
-            double* tk = tau + static_cast<size_t>(k) * C;
-            double* wk = log_w + static_cast<size_t>(k) * C;
-            // τ = sin θ at the nodes by the rotation recurrence from (sin, cos) of θ_lo and of h: two
-            // transcendentals per (slot, λ) instead of one per node, within a few ulps. Clamped to [−1, 1]
-            // because rounding can leave it by an ulp at a domain end, where (1 ∓ τ)/2 has no logarithm.
-            double sn = std::sin(th_lo), cs = std::cos(th_lo);
-            const double sh = std::sin(h), ch = std::cos(h);
-            for (int t = 0; t < Kt; ++t) {
-                tk[t] = std::clamp(sn, -1.0, 1.0);
-                wk[t] = ((t == 0 || t == Kt - 1) ? log_h - LOG_2 : log_h) - LOG_PI;
-                const double sn2 = sn * ch + cs * sh;
-                cs = cs * ch - sn * sh;
-                sn = sn2;
-            }
-            tk[Kt] = 1.0; tk[Kt + 1] = -1.0;  // the tilt atom: pure +, pure −, at log-weight 0
-            wk[Kt] = 0.0; wk[Kt + 1] = 0.0;
-        }
-    }
+    tilt_grid(g, s, ambig, n, var, tau, log_w);
     // ψ before the delivered level row and the weights: strand + the Jeffreys arms + the fitted arm at the cell's
     // density + the delivered composition row
     for (int k = 0; k < K; ++k) {
@@ -185,43 +218,16 @@ inline void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* ps
             psi[at] = strand_term(s.u_pos, n, p, var, half_log_var) + base;
         }
     }
-    // the delivered row's map: each held profile read at the density every cell implies,
-    // f_s·n/a_r relative to ρ_ref, summed over the strands and max-normalised over the whole row
-    if (s.row != nullptr && (s.row->pos != nullptr || s.row->neg != nullptr)) {
-        std::vector<double> rv(static_cast<size_t>(K) * C, 0.0);
-        const double scale = s.row->total / s.row->opportunity, log_rho = std::log(s.row->rho_ref);
-        double rmax = NEG_INF;
-        for (int k = 0; k < K; ++k) {
-            const double f_act = 1.0 - g.fg[k];
-            for (int t = 0; t < C; ++t) {
-                const size_t at = static_cast<size_t>(k) * C + t;
-                double v = 0.0;
-                for (int strand = 0; strand < 2; ++strand) {
-                    const double* prof = strand == 0 ? s.row->pos : s.row->neg;
-                    if (prof == nullptr) continue;
-                    const double sign = strand == 0 ? 1.0 : -1.0;
-                    const double u_s = std::log(f_act * (1.0 + sign * tau[at]) / 2.0 * scale) - log_rho;
-                    double r;
-                    interp(&u_s, 1, s.row->u, prof, K, prof[0], prof[K - 1], &r);
-                    v += r;
-                }
-                rv[at] = v;
-                if (v > rmax) rmax = v;
-            }
-        }
-        for (size_t at = 0; at < rv.size(); ++at) psi[at] += rv[at] - rmax;
-    }
-    // the weights, and the witness: a held level on a strand certifies that the strand carries RNA, so the atom
-    // that puts all the RNA on the other strand is excluded
-    if (ambig) {
-        const int Kt = g.n_tilt;
-        for (size_t at = 0; at < static_cast<size_t>(K) * C; ++at) psi[at] += log_w[at];
-        if (s.row != nullptr) {
-            for (int k = 0; k < K; ++k) {
-                if (s.row->neg != nullptr) psi[static_cast<size_t>(k) * C + Kt] = NEG_INF;
-                if (s.row->pos != nullptr) psi[static_cast<size_t>(k) * C + Kt + 1] = NEG_INF;
-            }
-        }
+    if (s.row != nullptr && (s.row->pos != nullptr || s.row->neg != nullptr)) add_delivered_row(g, *s.row, C, tau, psi);
+    if (!ambig) return;
+    // the weights, and the witness: a held level on a strand certifies that the strand carries RNA, so the atom that
+    // puts all the RNA on the other strand is excluded
+    const int Kt = g.n_tilt;
+    for (size_t at = 0; at < static_cast<size_t>(K) * C; ++at) psi[at] += log_w[at];
+    if (s.row == nullptr) return;
+    for (int k = 0; k < K; ++k) {
+        if (s.row->neg != nullptr) psi[static_cast<size_t>(k) * C + Kt] = NEG_INF;
+        if (s.row->pos != nullptr) psi[static_cast<size_t>(k) * C + Kt + 1] = NEG_INF;
     }
 }
 

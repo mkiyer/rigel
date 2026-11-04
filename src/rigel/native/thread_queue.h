@@ -1,10 +1,5 @@
-/**
- * thread_queue.h — Bounded work queue for parallel BAM scanning.
- *
- * Provides BoundedQueue<T>: a mutex-guarded queue with backpressure.
- * The BAM scanner work-unit types are defined in bam_scanner.cpp
- * alongside the other BAM-specific structures.
- */
+// thread_queue.h — BoundedQueue<T>: a mutex-guarded queue with backpressure and abort, the scan's hand-off between its
+// reader, its workers and the main thread.
 
 #pragma once
 

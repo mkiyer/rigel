@@ -48,7 +48,7 @@ def test_dropping_the_floor_breaks_the_identity():
     assert wrong != pytest.approx(poisson_lower_mean(np.array([lam]))[0], rel=1e-6)
 
 
-def test_the_log_gamma_table_is_the_direct_form_TO_THE_BIT():
+def test_the_log_gamma_table_is_the_direct_form_to_the_bit():
     """The log-gamma inside the Poisson identity is evaluated at integers, so it is tabulated, and a table of the same
     function at the same points is exact: over a dense grid the two forms must be equal, not close. Both branches are
     covered (the table is used only when it is smaller than the data, so short arrays fall back to the direct call and
@@ -56,18 +56,18 @@ def test_the_log_gamma_table_is_the_direct_form_TO_THE_BIT():
     """
     from scipy.special import gammaln
 
-    from rigel.calibration.gdna_density import _log_factorial
+    from rigel.calibration.gdna_density import log_factorial
 
     for size in (1, 5, 1000, 200000):
         rng = np.random.default_rng(size)
         for hi in (0.5, 3.0, 40.0, 5000.0):
             k = np.floor(rng.uniform(0.0, hi, size=size))
-            assert np.array_equal(_log_factorial(k), gammaln(k + 1.0)), f"size={size} hi={hi}"
+            assert np.array_equal(log_factorial(k), gammaln(k + 1.0)), f"size={size} hi={hi}"
     # the degenerate ends: an empty array, every k zero, and one huge k that must take the fallback
-    assert np.array_equal(_log_factorial(np.zeros(0)), gammaln(np.zeros(0) + 1.0))
-    assert np.array_equal(_log_factorial(np.zeros(7)), gammaln(np.zeros(7) + 1.0))
+    assert np.array_equal(log_factorial(np.zeros(0)), gammaln(np.zeros(0) + 1.0))
+    assert np.array_equal(log_factorial(np.zeros(7)), gammaln(np.zeros(7) + 1.0))
     big = np.array([1e9, 2.0, 3.0])
-    assert np.array_equal(_log_factorial(big), gammaln(big + 1.0))
+    assert np.array_equal(log_factorial(big), gammaln(big + 1.0))
 
 
 # ── the one-sided rate ───────────────────────────────────────────────────────────────────────────
@@ -80,17 +80,17 @@ def test_uncontaminated_poisson_recovers_its_own_rate():
     fit = one_sided_rate(rng.poisson(rho * e).astype(float), e)
     assert fit.bracket_ok and fit.informative
     assert fit.rate == pytest.approx(rho, rel=0.05)
-    assert fit.rate_over_pooled == pytest.approx(1.0, rel=0.05)
+    assert fit.rate / fit.pooled_rate == pytest.approx(1.0, rel=0.05)
 
 
-def test_the_bisection_on_its_closed_bracket_is_the_fixed_200_step_loop_TO_THE_BIT():
+def test_the_bisection_on_its_closed_bracket_is_a_200_step_loop_to_the_bit():
     """The bisection stops when its float64 bracket closes, about sixty halvings, and must equal a fixed 200-step loop
     to the bit, since a closed bracket can no longer change the value. Stopping one halving early (``mid <= lo`` relaxed
     to a relative width) would move the rate.
     """
     from rigel.calibration.gdna_density import poisson_lower_mean as _plm
 
-    def fixed_200(n, e):
+    def bisect_200_steps(n, e):
         total_e, total_n = float(e.sum()), float(n.sum())
         pooled = total_n / total_e
 
@@ -116,7 +116,9 @@ def test_the_bisection_on_its_closed_bracket_is_the_fixed_200_step_loop_TO_THE_B
             continue
         got = one_sided_rate(n, e)
         assert got.bracket_ok
-        assert got.rate == fixed_200(n, e), f"the closed bracket moved the rate at rho={scale}"
+        assert got.rate == bisect_200_steps(n, e), (
+            f"the closed bracket moved the rate at rho={scale}"
+        )
 
 
 def test_contamination_moves_the_pooled_rate_but_not_the_one_sided_one():
@@ -134,7 +136,7 @@ def test_contamination_moves_the_pooled_rate_but_not_the_one_sided_one():
     assert pooled_shift > 2.0, "the fixture must actually contaminate, or this test proves nothing"
     fit = one_sided_rate(dirty, e)
     assert fit.rate == pytest.approx(rho, rel=0.10)
-    assert fit.rate_over_pooled < 0.5  # it found the contamination
+    assert fit.rate / fit.pooled_rate < 0.5  # it found the contamination
 
 
 def test_the_bias_is_one_sided_never_low():
@@ -176,8 +178,8 @@ def test_no_exposure_declines():
 
 
 def test_the_returned_rate_is_actually_a_root():
-    """``F(rate) = 0``, re-derived here rather than trusting the bisection. A check of ``rate > 0`` alone could not
-    fail, because a bracket starting at exactly 0.0 already walks off the boundary (``F(0+) < 0``), so the root is
+    """``excess(rate) = 0``, re-derived here rather than trusting the bisection. A check of ``rate > 0`` alone could not
+    fail, because a bracket starting at exactly 0.0 already walks off the boundary (``excess(0+) < 0``), so the root is
     checked directly.
     """
     rng = np.random.default_rng(2)
@@ -186,14 +188,14 @@ def test_the_returned_rate_is_actually_a_root():
     fit = one_sided_rate(n, e)
     assert fit.rate > 0.0
 
-    def F(rho):
+    def excess(rho):
         lam = rho * e
         return float(np.clip(lam - n, 0.0, None).sum() - poisson_lower_mean(lam).sum())
 
-    scale = max(abs(F(0.0)), abs(F(2.0 * fit.rate)), 1.0)
-    assert abs(F(fit.rate)) / scale < 1e-9
+    scale = max(abs(excess(0.0)), abs(excess(2.0 * fit.rate)), 1.0)
+    assert abs(excess(fit.rate)) / scale < 1e-9
     assert (
-        F(fit.rate * 0.5) < 0.0 < F(fit.rate * 2.0)
+        excess(fit.rate * 0.5) < 0.0 < excess(fit.rate * 2.0)
     )  # and it is the crossing, not a stationary point
 
 

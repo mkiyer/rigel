@@ -37,7 +37,7 @@ TEXT = sorted(
 )
 
 #: the sandbox gate's reach. The allowlist is excluded here and held to its job by
-#: :func:`test_every_ALLOWLISTED_file_actually_names_the_sandbox`, so it cannot quietly become a blanket.
+#: :func:`test_every_allowlisted_file_actually_names_the_sandbox`, so it cannot quietly become a blanket.
 SEARCHED = [
     p for p in TEXT if DEV not in p.parents and str(p.relative_to(ROOT)) not in _MAY_NAME_IT
 ]
@@ -59,7 +59,7 @@ def test_nothing_outside_the_sandbox_cites_into_it():
     )
 
 
-def test_every_ALLOWLISTED_file_actually_names_the_sandbox():
+def test_every_allowlisted_file_actually_names_the_sandbox():
     """Each allowlisted file is exempt because its job is to describe the sandbox, so each one must
     actually name it; a file that does not belongs back under the gate above. Unlike a skip, this fails
     on an entry for a deleted or repurposed file.
@@ -85,7 +85,7 @@ def test_the_sandbox_exists_and_says_what_it_is_for():
     assert "MOVE it out" in txt and "may cite" in txt
 
 
-def test_the_permanent_set_is_still_nine_files():
+def test_the_permanent_set_is_nine_files():
     """The permanent docs are exactly the nine written out here, so the sandbox cannot add a tenth by
     accretion: a working note everyone reads is promoted, not blessed."""
     top = sorted(p.name for p in (ROOT / "docs").glob("*.md"))

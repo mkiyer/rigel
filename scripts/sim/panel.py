@@ -9,10 +9,9 @@
     panel.py score     run rigel end to end, score against per-fragment truth (`--bam NAME`: an aligned input)
     panel.py report    the tables
 
-This script adds no measurement code. Every stage shells out to the instrument that owns it (the simulator engine
-in `rigel.sim`, `build_scan_cache.py`, `calibration_oracle.py --build`, `quant_accuracy.py`), so a baseline and a
-ceiling cannot drift apart; its value is sequencing and prerequisites, and any number it prints an instrument
-printed first. `cache` builds both caches: the scan cache, and the oracle cache that holds the origin-split truth
+This script adds no measurement code. Every stage shells out to the instrument that owns it (`simulate_reads.py`,
+`build_scan_cache.py`, `calibration_oracle.py --build`, `quant_accuracy.py`), so a baseline and a ceiling cannot
+drift apart; its value is sequencing and prerequisites, and any number it prints an instrument printed first. `cache` builds both caches: the scan cache, and the oracle cache that holds the origin-split truth
 every scoring instrument reads.
 
 Every path derives from the config: `genome`, `gtf`, `outdir`, and `index`, the index the simulator reads. A
@@ -43,16 +42,16 @@ SIM = REPO / "scripts" / "sim"
 # the configs name their paths under `$RIGEL_RUNS`: unset, it is the data root every instrument defaults to,
 # exported before any config is read so every stage's subprocess reads the same one
 sys.path.insert(0, str(DESIGN))
-from _shared import RUNS  # noqa: E402
+from _shared import ORACLE_BAM, RUNS, panel_conditions  # noqa: E402
 
 os.environ.setdefault("RIGEL_RUNS", str(RUNS))
 
-from rigel.sim.whole_genome import expand_config_path  # noqa: E402
+from _sim_config import expand_config_path  # noqa: E402
 
 #: the three origin partitions the oracle cache holds and the per-strand RNA pair the certifier requires.
 ORACLE_PARTS = ("gdna", "mrna", "nrna", "rna_pos", "rna_neg")
 
-#: the STAR options the ladder's STAR rung is aligned with: the MANUAL's recommended settings
+#: the STAR options the ladder's STAR rung is aligned with: the recommended settings
 STAR_PARAMS = SIM / "configs" / "star_recommended.params.txt"
 
 
@@ -104,9 +103,7 @@ class Panel:
     @property
     def conditions(self) -> list[str]:
         """The conditions on disk: a simulated condition is one with an oracle BAM."""
-        if not self.dir.is_dir():
-            return []
-        return sorted(p.name for p in self.dir.iterdir() if (p / "sim_oracle.bam").is_file())
+        return panel_conditions(self.dir) if self.dir.is_dir() else []
 
 
 def aligned_inputs(p: Panel) -> dict[str, int]:
@@ -308,7 +305,7 @@ def cmd_cache(p: Panel, args) -> int:
 
 def cmd_score(p: Panel, args) -> int:
     need(p.oracle_cache.is_dir(), f"the oracle cache ({p.oracle_cache})", "panel.py cache")
-    bam = getattr(args, "bam", None)
+    bam = args.bam
     if bam:
         n = aligned_inputs(p).get(bam, 0)
         need(n == len(p.conditions), f"{bam}.bam in every condition ({n}/{len(p.conditions)})",
@@ -345,6 +342,26 @@ def cmd_score(p: Panel, args) -> int:
     return 0
 
 
+def rebuild_reads(c: str, d: Path, r1: Path, r2: Path) -> None:
+    """A condition's FASTQ pair from the simulator's BAM: `samtools fastq -N` gives back its FASTQs byte for
+    byte."""
+    oracle = d / ORACLE_BAM
+    need(oracle.is_file(), f"{c}'s simulated reads ({r1.name}, {r2.name}) or the simulator's BAM",
+         "panel.py simulate")
+    need(shutil.which("samtools") is not None, "samtools, to rebuild the reads from the simulator's BAM",
+         "conda install -c bioconda samtools")
+    run(["samtools", "fastq", "-N", "-0", "/dev/null", "-s", "/dev/null", "-1", r1, "-2", r2, oracle],
+        what=f"rebuild {c}'s reads from {oracle.name}")
+
+
+def count_templates(bam: Path) -> int:
+    """The templates an aligned BAM holds: its primary read-1 records."""
+    import pysam
+
+    with pysam.AlignmentFile(str(bam), "rb", check_sq=False) as fh:
+        return sum(r.is_read1 and not r.is_secondary and not r.is_supplementary for r in fh.fetch(until_eof=True))
+
+
 def cmd_align(p: Panel, args) -> int:
     """Every condition's simulated reads aligned by STAR or rustar (its Rust port, which reads STAR's index and
     options) into `<condition>/<name>.bam`: the input a real library gives Rigel, beside the simulator's own
@@ -367,8 +384,6 @@ def cmd_align(p: Panel, args) -> int:
     opts = star_options(params)
     version = subprocess.run([str(aligner), "--version"], capture_output=True, text=True).stdout.strip()
     gunzip = shutil.which("gzcat") or "zcat"  # one word, as rustar takes it; macOS's zcat is not gzip's
-    import pysam
-
     for c in conds:
         d = p.dir / c
         bam, record = d / f"{args.name}.bam", d / f"{args.name}.align.json"
@@ -378,13 +393,7 @@ def cmd_align(p: Panel, args) -> int:
         r1, r2 = d / "sim_R1.fq.gz", d / "sim_R2.fq.gz"
         rebuilt = not (r1.is_file() and r2.is_file())
         if rebuilt:
-            oracle = d / "sim_oracle.bam"
-            need(oracle.is_file(), f"{c}'s simulated reads ({r1.name}, {r2.name}) or the simulator's BAM",
-                 "panel.py simulate")
-            need(shutil.which("samtools") is not None, "samtools, to rebuild the reads from the simulator's BAM",
-                 "conda install -c bioconda samtools")
-            run(["samtools", "fastq", "-N", "-0", "/dev/null", "-s", "/dev/null", "-1", r1, "-2", r2, oracle],
-                what=f"rebuild {c}'s reads from {oracle.name}")
+            rebuild_reads(c, d, r1, r2)
         record.unlink(missing_ok=True)
         prefix = d / args.name
         start = time.time()
@@ -396,8 +405,7 @@ def cmd_align(p: Panel, args) -> int:
                 r1.unlink(missing_ok=True)
                 r2.unlink(missing_ok=True)
         os.replace(f"{prefix}.Aligned.out.bam", bam)
-        with pysam.AlignmentFile(str(bam), "rb", check_sq=False) as fh:
-            n = sum(r.is_read1 and not r.is_secondary and not r.is_supplementary for r in fh.fetch(until_eof=True))
+        n = count_templates(bam)
         drawn = sum(json.loads((d / "truth_summary.json").read_text())["origin_counts"].values())
         if n != drawn:
             raise SystemExit(f"⛔ align {c}: {bam.name} holds {n} templates, the simulator drew {drawn}")
@@ -411,7 +419,7 @@ def cmd_align(p: Panel, args) -> int:
 
 
 def cmd_report(p: Panel, args) -> int:
-    bam = getattr(args, "bam", None)
+    bam = args.bam
     files = [arm_file(p, a, bam) for a in args.arms]
     missing = [f for f in files if not f.is_file()]
     need(
@@ -423,7 +431,7 @@ def cmd_report(p: Panel, args) -> int:
     return 0
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -447,7 +455,11 @@ def main() -> int:
     ap.add_argument("--name", default="rustar_recommended", help="align: the aligned input's name")
     ap.add_argument("--threads", type=int, default=os.cpu_count(), help="align: the aligner's threads")
     ap.add_argument("--bam", default=None, help="score, report: an aligned input by name (panel.py align)")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> int:
+    args = build_parser().parse_args()
     p = Panel(args.config, args.index)
     return {
         "status": cmd_status,

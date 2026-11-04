@@ -20,11 +20,12 @@ import numpy as np
 import pandas as pd
 import pytest
 from _index_builder import build_test_index
+from _synthetic import contained_support, normal_pmf
 
 from rigel.calibration.capture_eff_length import (
-    _cut_efficiencies,
-    _objects,
-    _transcript_pieces,
+    cut_efficiencies,
+    object_shares,
+    transcript_pieces,
     rna_captured_fraction,
     transcript_capture_eff_lengths,
 )
@@ -37,30 +38,16 @@ from rigel.calibration.signature import RegionType, coarse_type_array
 
 def transcript_objects(index, region_arrays, pmf):
     """Every transcript's pieces and cuts with its conserved share of each, on one pmf."""
-    return _objects(_transcript_pieces(index, region_arrays), pmf)
+    return object_shares(transcript_pieces(index, region_arrays), pmf)
 
 
-def _pmf(mean=200.0, sd=50.0, lo=100, hi=300) -> np.ndarray:
-    w = np.arange(hi + 1, dtype=np.float64)
-    p = np.exp(-0.5 * ((w - mean) / sd) ** 2)
-    p[(w < lo) | (w > hi)] = 0.0
-    return p / p.sum()
-
-
-PMF = _pmf()
+PMF = normal_pmf()
 MU = float(np.dot(np.arange(PMF.shape[0]), PMF))
 
 
 def _one_law(pmf) -> LengthTables:
     """The EM's tables when both origins and the uncaptured law are one pmf: the efficiencies read as given."""
     return LengthTables(rna=pmf, gdna=pmf, anchor=pmf, decision=None)
-
-
-def _fl(lengths, pmf=PMF) -> np.ndarray:
-    """The fl-marginal length ``Σ_w f(w)(L − w + 1)⁺`` per transcript."""
-    w = np.arange(pmf.shape[0], dtype=np.float64)
-    L = np.asarray(lengths, dtype=np.float64)[:, None]
-    return (pmf[None, :] * np.maximum(L - w[None, :] + 1.0, 0.0)).sum(1)
 
 
 def _flank_mean(ra: RegionArrays, c) -> np.ndarray:
@@ -283,7 +270,9 @@ def test_a_transcripts_shares_sum_to_its_fl_marginal_length(misaligned_index, pa
     total = np.zeros(len(idx.t_df))
     np.add.at(total, obj.t, obj.contained)
     np.add.at(total, obj.t[obj.cut_row], obj.cut_share)
-    np.testing.assert_allclose(total, _fl(idx.t_df["length"].to_numpy()), rtol=1e-9)
+    np.testing.assert_allclose(
+        total, contained_support(idx.t_df["length"].to_numpy(), PMF), rtol=1e-9
+    )
 
 
 def test_the_pieces_are_on_the_transcripts_own_reference(two_ref_index):
@@ -376,7 +365,7 @@ def test_efficiencies_of_one_everywhere_contract_nothing_bit_identically(multiex
     lengths are ``fl`` bit for bit."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(
         _cal(ra, np.ones(ra.n_regions), 1.0), ra, idx, fl, _one_law(PMF)
     )
@@ -391,7 +380,7 @@ def test_a_field_contracts_and_never_expands(multiexon_index):
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
     c[_exon_mask(ra, 1000, 1500)] = 1.0  # the first exon captured, everything else depleted
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, _one_law(PMF))
     assert np.all(eff <= fl + 1e-9)
     assert np.any(eff < fl - 1e-6)
@@ -408,7 +397,7 @@ def test_the_length_is_the_share_weighted_mean_of_the_objects_efficiencies(multi
     for k, s in enumerate(range(1000, 6500, 1000)):
         c[_exon_mask(ra, s, s + 500)] = level[k]
     m = _tidx(idx, "mrna")
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, _one_law(PMF))
     contained, cut = 501.0 - MU, MU - 1.0
     junctions = [0.5 * (a + b) for a, b in zip(level[:-1], level[1:])]
@@ -430,7 +419,7 @@ def test_a_junction_adds_its_two_sides_it_does_not_average_them(multiexon_index)
     for s in range(1000, 6500, 1000):
         c[_exon_mask(ra, s, s + 500)] = 1.0
     m = _tidx(idx, "mrna")
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, _one_law(PMF))
     assert eff[m] == pytest.approx(fl[m], rel=1e-12)
 
@@ -451,7 +440,7 @@ def test_a_junction_is_captured_no_more_than_a_fully_captured_piece(multiexon_in
         c[_exon_mask(ra, s, s + 500)] = 1.0
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
     m = _tidx(idx, "mrna")
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(
         _cal(ra, c, 1.0, boundary=np.full(ne, 0.835)), ra, idx, fl, _one_law(PMF)
     )
@@ -483,7 +472,7 @@ def test_a_junction_may_out_capture_every_object_it_touches_up_to_saturation(mul
         c[_exon_mask(ra, s, s + 500)] = 40.0
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
     m = _tidx(idx, "mrna")
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(
         _cal(ra, c, 1e-3, boundary=np.full(ne, 40.0), saturation=100.0), ra, idx, fl, _one_law(PMF)
     )
@@ -505,7 +494,7 @@ def test_a_junction_beside_an_object_above_saturation_may_reach_that_objects_lev
         c[_exon_mask(ra, s, s + 500)] = 300.0
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
     m = _tidx(idx, "mrna")
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(
         _cal(ra, c, 1e-3, boundary=np.full(ne, 300.0), saturation=100.0), ra, idx, fl, _one_law(PMF)
     )
@@ -522,7 +511,7 @@ def test_one_factor_on_every_efficiency_is_one_factor_on_every_length(multiexon_
     c = rng.uniform(0.5, 400.0, ra.n_regions)
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
     b = rng.uniform(0.5, 400.0, ne)
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     one = transcript_capture_eff_lengths(
         _cal(ra, c, 1e-3, boundary=b, saturation=120.0), ra, idx, fl, _one_law(PMF)
     )
@@ -549,7 +538,7 @@ def test_an_intron_piece_too_short_to_contain_a_fragment_reads_its_far_boundary(
     c = np.full(ra.n_regions, 0.001)
     c[_exon_mask(ra, 1000, 1500) | _exon_mask(ra, 1550, 2050)] = 1.0
     cb = _flank_mean(ra, c)
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0, boundary=cb), ra, idx, fl, _one_law(PMF))
     c2 = c.copy()
     c2[intron] = 0.9
@@ -588,7 +577,7 @@ def test_a_junction_reads_the_objects_beside_it_on_a_multi_region_intron(multi_r
     def region_to(pos):
         return int(np.flatnonzero(ends == pos)[0])
 
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0, boundary=cb), ra, idx, fl, _one_law(PMF))
     contained, cut = 501.0 - MU, MU - 1.0
     for tid, (e1, e2), (intron_lo, intron_hi) in (
@@ -611,7 +600,7 @@ def test_a_zero_length_fragment_places_nowhere(multiexon_index):
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
     c[_exon_mask(ra, 1000, 1500)] = 1.0
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     with_zero = PMF.copy()
     with_zero[0] = 0.05
     np.testing.assert_allclose(
@@ -630,7 +619,7 @@ def test_a_transcript_of_exons_shorter_than_a_fragment_is_read_through_its_cuts(
     idx = tiny_index
     ra = RegionArrays.from_index(idx)
     t = _tidx(idx, "tiny")
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     exons = np.zeros(ra.n_regions, dtype=bool)
     for i in range(10):
         exons |= _exon_mask(ra, 1000 + i * 1040, 1040 + i * 1040)
@@ -655,7 +644,7 @@ def test_the_ruler_reads_the_efficiencies_and_nothing_from_the_counts(multiexon_
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.3)
     c[_exon_mask(ra, 1000, 1500)] = 1.0
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     cal = _cal(ra, c, 1.0)
     loud = dataclasses.replace(
         cal,
@@ -676,7 +665,7 @@ def test_no_nascent_mature_inversion_under_capture(multiexon_index):
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
     c[_exon_mask(ra, 1000, 1500)] = 1.0
-    fl = _fl(idx.t_df["length"].to_numpy())
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, _one_law(PMF))
     mrna, nasc = _tidx(idx, "mrna"), _tidx(idx, "nasc")
     assert eff[nasc] >= eff[mrna] - 1e-9
@@ -696,8 +685,8 @@ def test_at_one_table_rna_reads_its_capture_weighted_length_on_the_uncaptured_la
     the null model's normaliser, whatever the RNA law the shares are weighted by."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
-    g = _pmf(mean=160.0, sd=40.0, lo=60, hi=300)
-    fl = _fl(idx.t_df["length"].to_numpy())
+    g = normal_pmf(mean=160.0, sd=40.0, lo=60, hi=300)
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = transcript_capture_eff_lengths(
         _cal(ra, np.full(ra.n_regions, 0.5), 1.0), ra, idx, fl, LengthTables(PMF, PMF, g, None)
     )
@@ -708,13 +697,13 @@ def test_at_one_table_rna_reads_its_capture_weighted_length_on_the_uncaptured_la
     np.testing.assert_allclose(eff, expected, rtol=1e-12)
 
 
-def test_where_the_gdna_table_is_its_uncaptured_law_the_efficiencies_are_read_as_given(
+def test_where_gdnas_table_is_its_uncaptured_law_the_efficiencies_are_read_as_given(
     multiexon_index,
 ):
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
-    g = _pmf(mean=160.0, sd=40.0, lo=60, hi=300)
-    fl = _fl(idx.t_df["length"].to_numpy())
+    g = normal_pmf(mean=160.0, sd=40.0, lo=60, hi=300)
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     cal = _cal(ra, _random_field(ra, 1), 1.0)
     np.testing.assert_array_equal(
         transcript_capture_eff_lengths(cal, ra, idx, fl, LengthTables(PMF, g, g, None)),
@@ -727,15 +716,15 @@ def test_each_efficiency_is_carried_by_the_anchors_share_over_the_tables(multiex
     500 bp piece, against a law that only places longer fragments) keeps ``c_o``."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
-    g = _pmf(mean=160.0, sd=40.0, lo=60, hi=300)
-    t_g = _pmf(mean=560.0, sd=30.0, lo=510, hi=620)
-    fl = _fl(idx.t_df["length"].to_numpy())
+    g = normal_pmf(mean=160.0, sd=40.0, lo=60, hi=300)
+    t_g = normal_pmf(mean=560.0, sd=30.0, lo=510, hi=620)
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     cal = _cal(ra, _random_field(ra, 2), 1.0)
     eff = transcript_capture_eff_lengths(cal, ra, idx, fl, LengthTables(PMF, t_g, g, None))
     on_r, on_t, on_g = (transcript_objects(idx, ra, p) for p in (PMF, t_g, g))
     assert np.any(on_t.contained == 0.0) and np.any(on_t.cut_share > 0.0)
     c = np.asarray(cal.gdna_capture_efficiency_region)
-    c_cut = _cut_efficiencies(
+    c_cut = cut_efficiencies(
         on_r,
         ra,
         c,
@@ -864,12 +853,12 @@ def test_a_templates_length_counts_only_the_starts_the_mask_leaves(masked_index)
     """
     from rigel.config import EMConfig
     from rigel.frag_length_model import FragmentLengthModel
-    from rigel.pipeline import _setup_geometry_and_estimator
+    from rigel.pipeline import setup_geometry_and_estimator
 
     idx = masked_index
     ra = RegionArrays.from_index(idx)
     fl = FragmentLengthModel.from_pmf(PMF)
-    est = _setup_geometry_and_estimator(
+    est = setup_geometry_and_estimator(
         idx, fl, EMConfig(), _cal(ra, np.ones(ra.n_regions), None), ra, _one_law(PMF)
     )
     for t in range(len(idx.t_df)):
@@ -903,13 +892,13 @@ def test_with_nothing_masked_the_lengths_and_shares_are_todays_bit_for_bit(multi
     pieces and cuts, to the bit."""
     from rigel.config import EMConfig
     from rigel.frag_length_model import FragmentLengthModel
-    from rigel.pipeline import _setup_geometry_and_estimator
+    from rigel.pipeline import setup_geometry_and_estimator
 
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     assert len(idx.unobservable_df) == 0
     fl = FragmentLengthModel.from_pmf(PMF)
-    est = _setup_geometry_and_estimator(
+    est = setup_geometry_and_estimator(
         idx, fl, EMConfig(), _cal(ra, np.ones(ra.n_regions), None), ra, _one_law(PMF)
     )
     lengths = idx.t_df["length"].to_numpy(np.int64)
@@ -920,7 +909,7 @@ def test_with_nothing_masked_the_lengths_and_shares_are_todays_bit_for_bit(multi
     total = np.zeros(len(idx.t_df))
     np.add.at(total, obj.t, obj.contained)
     np.add.at(total, obj.t[obj.cut_row], obj.cut_share)
-    np.testing.assert_allclose(total, _fl(lengths), rtol=1e-12)
+    np.testing.assert_allclose(total, contained_support(lengths, PMF), rtol=1e-12)
 
 
 # --- the place weight: a multimapper's place weighs its candidates by the deposit masses this length is built from --
@@ -955,7 +944,7 @@ def test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law(fixtu
     )
     from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
     from rigel.frag_length_model import FragmentLengthModel
-    from rigel.native import Accumulator
+    from rigel._bam_impl.testing import Accumulator
     from rigel.types import Strand
 
     idx = request.getfixturevalue(fixture)

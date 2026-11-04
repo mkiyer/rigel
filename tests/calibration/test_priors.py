@@ -16,8 +16,8 @@ import numpy as np
 import pytest
 
 from rigel.calibration.priors import (
-    _boundary_locus_shares,
-    _region_locus_shares,
+    boundary_locus_shares,
+    region_locus_shares,
     assemble_priors,
 )
 from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
@@ -26,9 +26,16 @@ from rigel.calibration.signature import BIT_EXON_POS
 from rigel.locus import Locus, MultiLocus
 
 
+def _boundary_shares(region_arrays, multi_loci, n_loci):
+    """`boundary_locus_shares` on the region shares it is handed in production."""
+    return boundary_locus_shares(
+        region_arrays, region_locus_shares(region_arrays, multi_loci, n_loci), n_loci
+    )
+
+
 def contended_boundaries(region_arrays, multi_loci, n_loci) -> np.ndarray:
     """``int64[]``: boundaries whose locus shares sum above 1, i.e. reached by two multi-loci at once."""
-    e, _lid, w = _boundary_locus_shares(region_arrays, multi_loci, n_loci)
+    e, _lid, w = _boundary_shares(region_arrays, multi_loci, n_loci)
     if e.size == 0:
         return np.zeros(0, np.int64)
     total = np.zeros(int(e.max()) + 1, dtype=np.float64)
@@ -151,7 +158,6 @@ def _regions(starts, ends, signature=None) -> RegionArrays:
         signature=(
             np.zeros(n, dtype=np.uint8) if signature is None else np.asarray(signature, np.uint8)
         ),
-        strand_class=np.zeros(n, dtype=np.int8),
         region_size_bp=(ends - starts).astype(np.float64),
         ref_offsets=np.array([0, n], dtype=np.int32),
         n_refs=1,
@@ -256,7 +262,7 @@ def test_a_boundary_enters_the_length_at_gdnas_conserved_share_never_the_counts_
     [(60,), (50, 60, 70)],
     ids=["one-length", "three-lengths"],
 )
-def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fragment_once(lengths):
+def test_the_length_counts_each_crossing_start_once_as_the_count_each_fragment(lengths):
     """The two ledgers count consistently, checked by brute-force enumeration against the deposit rule
     (``tests/native/_accumulator_reference.py``: a crossing fragment deposits a count of +1 at every boundary it crosses
     and a mass summing to 1 across them).
@@ -334,7 +340,7 @@ def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fra
     assert not np.isclose(priors.gdna_eff_len[0], incidences)
 
 
-def test_every_OBJECT_has_the_same_density_under_a_uniform_field():
+def test_every_object_has_the_same_density_under_a_uniform_field():
     """Each object has the field's density under a uniform field, the precondition for ``G / gdna_eff_len`` recovering
     ρ. Regions and boundaries are peers, so each axis is checked on its own rather than through a folded total.
     """
@@ -430,7 +436,7 @@ def test_the_rna_mass_spliced_or_not_never_enters_the_gdna_count():
     np.testing.assert_allclose(priors.gdna_count, [4.5])
 
 
-def test_the_sj_flux_does_NOT_enter_the_gdna_count():
+def test_the_sj_flux_does_not_enter_the_gdna_count():
     """A sj fragment is certified RNA with no gDNA candidate in the EM, so it has no place in calibration's count of the
     locus's gDNA fragments. The result carries the flux for QC; ``assemble_priors`` ignores it on purpose.
     """
@@ -471,7 +477,7 @@ def test_intergenic_region_dropped():
     assert priors.gdna_eff_len[0] > 0.0
 
 
-def test_a_locus_keeps_the_outer_boundary_against_its_INTERGENIC_flank():
+def test_a_locus_keeps_the_outer_boundary_against_its_intergenic_flank():
     """A locus's far-left outer boundary has an intergenic left flank, a region the projection drops. A fragment
     crossing that boundary overlaps the locus, so it is one of its EM candidates and its mass must load the locus's
     count; the boundary is its own object touching region 1, so it is kept without any re-keying. Dropping it would give
@@ -650,7 +656,7 @@ def test_an_enriched_locus_reads_above_its_plain_support_and_nothing_clips_it():
     np.testing.assert_allclose(eff, 850.0 * plain, rtol=1e-12)
 
 
-def test_a_common_factor_on_every_efficiency_scales_the_length_by_it_and_leaves_the_count():
+def test_a_common_factor_on_every_efficiency_scales_the_length_and_not_the_count():
     """The unit is free: the EM reads every component's length in the efficiencies' unit, so one factor on every
     efficiency scales the gDNA length by exactly that factor, and the count, which has no divisor, not at all."""
     ra = _six_region_ra()
@@ -694,7 +700,6 @@ def _regions_from_bounds(bounds, signature=None, ref_id=None) -> RegionArrays:
             if signature is None
             else np.asarray(signature, np.uint8)
         ),
-        strand_class=np.zeros(n, dtype=np.int8),
         region_size_bp=(ends - starts).astype(np.float64),
         ref_offsets=offsets,
         n_refs=n_refs,
@@ -711,7 +716,7 @@ def test_a_locus_of_k_regions_carries_k_plus_1_boundaries():
     """
     ra = _regions_from_bounds([0, 100, 200, 300, 400, 500])
     ml = [_ml(0, [(0, 100, 400)])]  # regions 1,2,3
-    e, lid, w = _boundary_locus_shares(ra, ml, 1)
+    e, lid, w = _boundary_shares(ra, ml, 1)
     assert sorted(e.tolist()) == [0, 1, 2, 3], "expected the 4 boundaries touching regions 1-3"
     np.testing.assert_allclose(w, 1.0)
     assert set(lid.tolist()) == {0}
@@ -722,25 +727,25 @@ def test_an_boundary_between_two_intergenic_regions_belongs_to_no_locus():
     nowhere and loads no prior."""
     ra = _regions_from_bounds([0, 100, 200, 300, 400])
     ml = [_ml(0, [(0, 300, 400)])]  # region 3 only
-    e, lid, _w = _boundary_locus_shares(ra, ml, 1)
+    e, lid, _w = _boundary_shares(ra, ml, 1)
     assert sorted(e.tolist()) == [2], "only the boundary touching region 3 may be kept"
     assert set(lid.tolist()) == {0}
 
 
-def test_a_region_touching_ONE_locus_gives_it_everything():
-    """The share is an allocation, not an overlap fraction. ``_region_locus_shares`` normalises across the loci a region
+def test_a_region_touching_one_locus_gives_it_everything():
+    """The share is an allocation, not an overlap fraction. ``region_locus_shares`` normalises across the loci a region
     touches, so a region overlapping one locus gives it all its mass however small the overlap; a region's mass is only
     distributed, never partly discarded.
     """
     ra = _regions_from_bounds([0, 100, 200])
     ml = [_ml(0, [(0, 0, 160)])]  # region 1 = [100,200) overlaps by only 60 bp
-    r_idx, _lid, r_w = _region_locus_shares(ra, ml, 1)
+    r_idx, _lid, r_w = region_locus_shares(ra, ml, 1)
     got = dict(zip(r_idx.tolist(), r_w.tolist()))
     assert got[0] == pytest.approx(1.0)
     assert got[1] == pytest.approx(1.0), "a 60 % overlap with the ONLY locus still allocates 100 %"
 
 
-def test_an_boundary_takes_the_MAX_share_of_its_two_flanks():
+def test_a_boundary_takes_the_max_share_of_its_two_flanks():
     """A region split between two loci has fractional shares, and each of its boundaries takes the larger share of its
     two flanks: if a region is part of a locus, so are its boundaries. Region 0 = [0,100) lies wholly in locus 0; region
     1 = [100,200) is split 50/50 between loci 0 and 1. The boundary between them is ``max(1.0, 0.5) = 1.0`` in locus 0
@@ -748,29 +753,29 @@ def test_an_boundary_takes_the_MAX_share_of_its_two_flanks():
     """
     ra = _regions_from_bounds([0, 100, 200])
     ml = [_ml(0, [(0, 0, 150)]), _ml(1, [(0, 150, 200)])]
-    r_idx, r_lid, r_w = _region_locus_shares(ra, ml, 2)
+    r_idx, r_lid, r_w = region_locus_shares(ra, ml, 2)
     got = dict(zip(zip(r_idx.tolist(), r_lid.tolist()), r_w.tolist()))
     assert got[(0, 0)] == pytest.approx(1.0)
     assert got[(1, 0)] == pytest.approx(0.5) and got[(1, 1)] == pytest.approx(0.5)
-    e, lid, w = _boundary_locus_shares(ra, ml, 2)
+    e, lid, w = _boundary_shares(ra, ml, 2)
     assert e.tolist() == [0, 0]
     assert dict(zip(lid.tolist(), w.tolist())) == {0: pytest.approx(1.0), 1: pytest.approx(0.5)}
 
 
-def test_the_region_locus_overlap_is_traversed_ONCE_per_assembly(monkeypatch):
+def test_the_region_locus_overlap_is_traversed_once_per_assembly(monkeypatch):
     """The assembler needs the region projection itself, so it hands the same triples to the boundary projection instead
     of traversing again. Counted through a spy, since a second traversal gives the same output and only costs time.
     """
     import rigel.calibration.priors as P
 
     calls = {"n": 0}
-    real = P._region_locus_shares
+    real = P.region_locus_shares
 
     def counting(*a, **k):
         calls["n"] += 1
         return real(*a, **k)
 
-    monkeypatch.setattr(P, "_region_locus_shares", counting)
+    monkeypatch.setattr(P, "region_locus_shares", counting)
     cal = _result(
         region_g=[1.0, 2.0, 1.5],
         region_r=[3.0, 4.0, 5.0],
@@ -782,17 +787,6 @@ def test_the_region_locus_overlap_is_traversed_ONCE_per_assembly(monkeypatch):
     assert calls["n"] == 1, f"the region-to-locus overlap was traversed {calls['n']} times"
 
 
-def test_the_boundary_shares_are_the_same_whether_the_triples_are_handed_in_or_not():
-    """The ``region_shares`` argument is a hand-down, not a second rule: the same triples give the same projection, to
-    the bit, as computing them inside."""
-    ra = _regions_from_bounds([0, 100, 200])
-    ml = [_ml(0, [(0, 0, 150)]), _ml(1, [(0, 150, 200)])]
-    inside = _boundary_locus_shares(ra, ml, 2)
-    handed = _boundary_locus_shares(ra, ml, 2, region_shares=_region_locus_shares(ra, ml, 2))
-    for a, b in zip(inside, handed):
-        assert np.array_equal(a, b)
-
-
 def test_a_contended_boundary_carries_no_mass():
     """Two adjacent regions in different multi-loci would give their shared boundary to both, so its shares sum to 2.
     That cannot happen to a boundary that carries mass: a fragment crossing it overlaps transcripts in both loci, and
@@ -801,7 +795,7 @@ def test_a_contended_boundary_carries_no_mass():
     """
     ra = _regions_from_bounds([0, 100, 200])
     ml = [_ml(0, [(0, 0, 100)]), _ml(1, [(0, 100, 200)])]  # adjacent, no intergenic between
-    e, lid, w = _boundary_locus_shares(ra, ml, 2)
+    e, lid, w = _boundary_shares(ra, ml, 2)
     assert e.tolist() == [0, 0], "the contended boundary reaches both loci"
     assert sorted(lid.tolist()) == [0, 1]
     assert float(w.sum()) == pytest.approx(2.0), "shares sum above 1 — the reportable configuration"
@@ -817,17 +811,14 @@ def test_two_references_do_not_share_an_boundary():
 
 def test_empty_loci_returns_empty():
     ra = _regions_from_bounds([0, 100, 200])
-    e, lid, w = _boundary_locus_shares(ra, [], 0)
+    e, lid, w = _boundary_shares(ra, [], 0)
     assert e.size == lid.size == w.size == 0
 
 
-def test_the_region_projection_is_unchanged_by_the_refactor():
-    """``_project_regions_to_loci`` is expressed through ``_region_locus_shares``: shares normalise
-    across the loci a region touches, and a region touching none is dropped.
-    """
-    from rigel.calibration.priors import _project_regions_to_loci
-
+def test_a_region_split_between_loci_is_shared_and_one_outside_every_locus_dropped():
+    """Shares normalise across the loci a region touches, and a region touching none emits nothing."""
     ra = _regions_from_bounds([0, 100, 200, 300])
     ml = [_ml(0, [(0, 0, 50)]), _ml(1, [(0, 50, 100)])]  # region 0 split 50/50, regions 1-2 outside
-    out = _project_regions_to_loci(ra, ml, 2, {"m": np.array([10.0, 99.0, 99.0])})
-    np.testing.assert_allclose(out["m"], [5.0, 5.0])
+    r_idx, lid, w = region_locus_shares(ra, ml, 2)
+    assert r_idx.tolist() == [0, 0] and sorted(lid.tolist()) == [0, 1]
+    np.testing.assert_allclose(w, [0.5, 0.5])

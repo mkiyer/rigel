@@ -21,7 +21,7 @@ common to every efficiency cancels in the EM.
 
 Each object reads the fragments the deposit rule gives it: a region its contained gDNA count on its contained support,
 a boundary its crossing count on its crossing support, never apportioned onto the regions beside it. An object with
-no gDNA support (``S = 0``) reads 1. Objects are read in row tiles (``simplex_logodds._block_rows``) with every sum
+no gDNA support (``S = 0``) reads 1. Objects are read in row tiles (``simplex_logodds.block_rows``) with every sum
 along one object's row, so the tile height changes no bit. Layer 5; ``calibrate`` publishes the reading on the result.
 
 Gate: ``tests/calibration/test_capture_efficiency.py``.
@@ -35,7 +35,7 @@ import numpy as np
 
 from ..config import CONSTANTS
 from .landscape import DensityLandscape, census, split_basins
-from .simplex_logodds import _block_rows
+from .simplex_logodds import block_rows
 
 __all__ = ["CaptureReading", "capture_efficiencies"]
 
@@ -73,6 +73,8 @@ class _TwoGroups:
 
 
 def _two_groups(landscape: DensityLandscape) -> _TwoGroups:
+    """The two-group prior on the landscape's grid (module docstring): the bulk basin's mass at its peak, the
+    population's own density elsewhere, and each cell's level saturated at its enriched basin's peak."""
     x = np.asarray(landscape.log_rho, dtype=np.float64)
     free = np.asarray(landscape.logP_free, dtype=np.float64)
     if x.ndim != 1 or x.size < 2 or not np.all(np.isfinite(x)) or free.shape != x.shape:
@@ -116,7 +118,7 @@ def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray) -> np.ndarray:
     rate = np.exp(x)
     n = k.shape[0]
     out = np.ones(n)
-    rows = _block_rows(x.size, CONSTANTS.resources.capture_tile_cell_bytes)
+    rows = block_rows(x.size, CONSTANTS.resources.capture_tile_cell_bytes)
     for r0 in range(0, n, rows):
         sl = slice(r0, min(r0 + rows, n))
         lam = rate[None, :] * S[sl, None]

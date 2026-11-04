@@ -32,8 +32,8 @@ import pytest
 from scipy.special import expit, log_expit
 from scipy.stats import beta as _Beta, poisson as _Poisson
 
-from rigel.calibration.simplex_logodds import _logodds_grid
-from rigel.native import transfer_rows as R
+from rigel.calibration.simplex_logodds import logodds_grid
+from rigel._solve_impl import testing as R
 
 #: Every test scores against ``scipy.stats``' own Poisson / Beta rather than a log-pmf written here, since the claim
 #: under test is an algebraic decomposition of exactly this pmf.
@@ -50,7 +50,7 @@ def _residual(S, c, M, lam):
 
 
 @pytest.mark.parametrize("S", [1.0, 7.0, 500.0])
-def test_C1_the_retained_coefficient_is_the_RAW_count_whatever_the_two_banks_DIVISORS_are(S):
+def test_c1_the_retained_coefficient_is_the_raw_count_whatever_the_banks_divisors(S):
     """``E[S] = c·(1−f_g)·M`` for some positive ``c``, and every opportunity ratio between the certified bank's divisor
     and the unspliced bank's lives inside ``c``. A multiplicative factor on the mean is an additive constant in log
     space, so it cannot touch the coefficient of ``log(1−f_g)``; neither ``eff_rna`` nor the sj divisor appears in the
@@ -71,7 +71,7 @@ def test_C1_the_retained_coefficient_is_the_RAW_count_whatever_the_two_banks_DIV
             )
 
 
-def test_C1_perturbation_an_OPPORTUNITY_SCALED_coefficient_FIRES():
+def test_c1_perturbation_an_opportunity_scaled_coefficient_fires():
     """``c·S``, an opportunity-scaled count, leaves a λ-dependent remainder, so the test above is not a truism about
     subtraction."""
     lam = np.linspace(-6.0, 6.0, 4001)
@@ -86,7 +86,7 @@ def test_C1_perturbation_an_OPPORTUNITY_SCALED_coefficient_FIRES():
 
 @pytest.mark.parametrize("S", [1.0, 3.0, 40.0, 1000.0])
 @pytest.mark.parametrize("M", [4.0, 350.0, 20000.0])
-def test_C2_with_q_UNKNOWN_the_profile_likelihood_in_f_g_is_EXACTLY_FLAT(S, M):
+def test_c2_with_q_unknown_the_profile_likelihood_in_f_g_is_exactly_flat(S, M):
     """``q``, the chance a crossing RNA fragment shows a visible splice, is a free parameter on (0,1), so ``q/(1−q)``
     spans (0, ∞). For any ``f_g < 1`` some ``q`` makes ``E[S]`` exactly ``S``, so the profile likelihood ``sup_q log P(S
     | f_g, q)`` is the same at every ``f_g`` in [0,1). The certified count carries one bit about the unspliced split
@@ -118,7 +118,7 @@ def test_C2_with_q_UNKNOWN_the_profile_likelihood_in_f_g_is_EXACTLY_FLAT(S, M):
     assert float(_Poisson.logpmf(S, 0.0)) == -np.inf
 
 
-def test_C2_perturbation_FIXING_q_restores_an_interior_maximum_and_FIRES():
+def test_c2_perturbation_fixing_q_restores_an_interior_maximum_and_fires():
     """The flatness comes from ``q`` being unknown, not from the observation being worthless: with ``q`` pinned the same
     likelihood has a sharp interior maximum at the true split, so the channel is blocked on an opportunity model, not on
     physics."""
@@ -132,7 +132,7 @@ def test_C2_perturbation_FIXING_q_restores_an_interior_maximum_and_FIRES():
 
 
 @pytest.mark.parametrize("M", [4.0, 350.0, 20000.0])
-def test_C2b_a_ZERO_certified_count_is_flat_on_the_CLOSED_interval_so_it_is_NOT_vertex_evidence(M):
+def test_c2b_a_zero_certified_count_is_flat_on_the_closed_interval(M):
     """A zero certified count is not evidence for the gDNA vertex. With ``q`` free, ``S = 0`` is perfectly explained at
     every ``f_g``, ``f_g = 1`` included (take ``q → 0``). The channel's information lives entirely in ``S > 0`` and
     points away from the ``f_g → 1`` vertex, never toward it.
@@ -150,7 +150,7 @@ def test_C2b_a_ZERO_certified_count_is_flat_on_the_CLOSED_interval_so_it_is_NOT_
 
 
 @pytest.mark.parametrize("S,ceiling", [(10.0, 0.07), (100.0, 8e-3), (1000.0, 8e-4)])
-def test_C3_the_raw_count_term_is_ONE_SIDED_and_UNBOUNDED_in_S(S, ceiling):
+def test_c3_the_raw_count_term_is_one_sided_and_unbounded_in_s(S, ceiling):
     """The term can only lower ``f_g``, never raise it, and does so without limit: the answer is ``Beta(½, ½+S)``'s
     median whatever gDNA the slot holds, and ``M`` never enters. At a gDNA-rich boundary with a large certified count it
     answers near zero against a truth near one.
@@ -167,13 +167,13 @@ def test_C3_the_raw_count_term_is_ONE_SIDED_and_UNBOUNDED_in_S(S, ceiling):
 
 
 @pytest.mark.parametrize("S", [0.0, 1.0, 10.0, 100.0])
-def test_C4_psi_reference_plus_the_term_is_EXACTLY_Beta_half_half_plus_S(S):
+def test_c4_psi_reference_plus_the_term_is_exactly_beta_half_half_plus_s(S):
     """ψ's two arms on the λ axis, ``½·log f_g + (½+S)·log(1−f_g)``, are the log-density of ``f_g ~ Beta(½, ½+S)``: the
     Jacobian ``df_g/dλ = σ(λ)σ(−λ)`` supplies the missing ``−1`` on each exponent exactly. So the certified count is the
     Bayes update of the reference, and ``S = 0`` returns the reference Beta(½,½) identically, with no new normalisation
     and no ``S = 0`` branch. The coefficient is unlicensed (C2), not the algebra.
     """
-    lam, fg = _logodds_grid(1 << 16, 20.0)
+    lam, fg = logodds_grid(1 << 16, 20.0)
     lp = R.JEFFREYS_REF * log_expit(lam) + (R.JEFFREYS_REF + S) * log_expit(-lam)
     w = np.exp(lp - lp.max())
     w /= w.sum()

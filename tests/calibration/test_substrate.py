@@ -36,7 +36,7 @@ def substrate():
 # ---------------------------------------------------------------------------
 
 
-def test_every_population_is_present_on_the_RIGHT_axis(substrate):
+def test_every_population_is_present_on_the_right_axis(substrate):
     """Regions, contiguous boundaries and sj are three axes off by one per reference; a population read against the
     wrong axis would drop nearly every fragment with every golden test green, so the shapes are asserted.
     """
@@ -63,7 +63,7 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
     assert payload.n_regions != payload.n_boundaries, "the fixture must not let an axis mix-up pass"
 
 
-def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
+def test_the_columns_are_genome_strand_and_nothing_is_re_oriented(substrate):
     """One convention. Sense/antisense is transcript-relative, derived by the consumer from a sj's own strand, and never
     stored, so no field here may be named for it."""
     sub, payload, _ = substrate
@@ -74,7 +74,7 @@ def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
         )
 
 
-def test_no_population_is_a_VIEW_OF_ANOTHER(substrate):
+def test_no_population_is_a_view_of_another(substrate):
     """Two populations holding the same numbers under two names cannot be told apart downstream, so nothing here may
     alias another population's array."""
     sub, _, _ = substrate
@@ -88,7 +88,7 @@ def test_no_population_is_a_VIEW_OF_ANOTHER(substrate):
 # ---------------------------------------------------------------------------
 
 
-def test_the_SJ_mass_arrives_per_strand_and_is_FOLDED_here(substrate):
+def test_the_sj_mass_arrives_per_strand_and_is_folded_here(substrate):
     """``sj_mass`` arrives per strand for artifact detection, and the strand axis stops here:
     :attr:`PopulationView.mass` is strand-agnostic (the mass turns an object-incidence total into a fragment count, a
     question with no strand in it). The fixture's two columns are unequal (0.9 / 0.4), so a fold that took one column,
@@ -104,7 +104,7 @@ def test_the_SJ_mass_arrives_per_strand_and_is_FOLDED_here(substrate):
     np.testing.assert_allclose(sub.sj.mass, payload.sj_mass.sum(axis=1))
 
 
-def test_mass_per_crossing_at_ZERO_count_is_the_IDENTITY_not_zero():
+def test_mass_per_crossing_at_zero_count_is_the_identity_not_zero():
     """An object the accumulator never saw must emit nothing, never a floored value: a "no data" default of 100 % gDNA
     would seed false gDNA into neighbouring exons. For a mass the null answer is 1.0 rather than NaN, because this
     factor rescales whatever mass the deconvolution placed at the boundary: 0 would delete it, 1.0 leaves it alone.
@@ -129,7 +129,7 @@ def test_total_count_sums_the_two_strands(substrate):
 # ---------------------------------------------------------------------------
 
 
-def test_a_geometry_with_the_WRONG_OBJECT_COUNT_is_refused():
+def test_a_geometry_with_the_wrong_object_count_is_refused():
     """A geometry/payload mismatch otherwise surfaces as a shape error deep in the solver, pointing
     nowhere near its cause."""
     payload, region_arrays = make_synthetic_payload()
@@ -141,14 +141,13 @@ def test_a_geometry_with_the_WRONG_OBJECT_COUNT_is_refused():
         end=region_arrays.end[:2],
         ref_id=region_arrays.ref_id[:2],
         signature=region_arrays.signature[:2],
-        strand_class=region_arrays.strand_class[:2],
         region_size_bp=region_arrays.region_size_bp[:2],
     )
     with pytest.raises(CalibrationSubstrateError, match="2 objects but the payload has 3"):
         CalibrationSubstrate.from_payload(payload, trimmed)
 
 
-def test_a_geometry_with_DRIFTED_PER_REFERENCE_OFFSETS_is_refused():
+def test_a_geometry_with_drifted_per_reference_offsets_is_refused():
     """The count can match while the per-reference slicing does not, which would drop nearly every real fragment inside
     ``deposit()``, so matching totals are not sufficient."""
     import dataclasses
@@ -190,13 +189,13 @@ def _payload(n_regions, ref_region_offsets):
 def test_alignment_guard_accepts_matching_payload(mini_index):
     ra = _region_arrays(mini_index)
     # Should not raise.
-    CalibrationSubstrate._check_alignment(_payload(ra.n_regions, ra.ref_offsets), ra)
+    CalibrationSubstrate.check_alignment(_payload(ra.n_regions, ra.ref_offsets), ra)
 
 
 def test_alignment_guard_rejects_count_mismatch(mini_index):
     ra = _region_arrays(mini_index)
     with pytest.raises(CalibrationSubstrateError):
-        CalibrationSubstrate._check_alignment(_payload(ra.n_regions + 1, ra.ref_offsets), ra)
+        CalibrationSubstrate.check_alignment(_payload(ra.n_regions + 1, ra.ref_offsets), ra)
 
 
 def test_alignment_guard_rejects_offset_mismatch(mini_index):
@@ -204,7 +203,7 @@ def test_alignment_guard_rejects_offset_mismatch(mini_index):
     bad = ra.ref_offsets.astype(np.int64).copy()
     bad[1] += 1  # perturb an offset so it no longer matches the geometry
     with pytest.raises(CalibrationSubstrateError):
-        CalibrationSubstrate._check_alignment(_payload(ra.n_regions, bad), ra)
+        CalibrationSubstrate.check_alignment(_payload(ra.n_regions, bad), ra)
 
 
 # ── conservation on a real scanned payload: the three axes, end to end ────────────────────────
@@ -236,7 +235,7 @@ def scanned(tmp_path_factory):
     sc.cleanup()
 
 
-def test_one_region_start_per_ACCEPTED_fragment(scanned):
+def test_one_region_start_per_accepted_fragment(scanned):
     """``region_start_count`` is incremented once, at the region holding the fragment's first base, for every fragment
     the accumulator accepts, so its total is the accepted count. It is checked against the payload's QC tally, a
     separate counter written at the same point in the deposit.
@@ -246,7 +245,7 @@ def test_one_region_start_per_ACCEPTED_fragment(scanned):
     assert int(payload.qc.deposited) > 0, "a scan that deposited nothing proves nothing"
 
 
-def test_every_buffered_fragment_is_ACCEPTED_or_DROPPED_FOR_A_NAMED_REASON(scanned):
+def test_every_buffered_fragment_is_accepted_or_dropped_for_a_named_reason(scanned):
     """The accepted count plus every drop reason must account for the whole buffer, an independent source filled by the
     scanner's own fragment grouping."""
     payload, _ra, buffer, _index = scanned
@@ -260,7 +259,7 @@ def test_every_buffered_fragment_is_ACCEPTED_or_DROPPED_FOR_A_NAMED_REASON(scann
     assert qc.deposited + dropped == buffer.total_fragments
 
 
-def test_the_boundary_axis_is_N_minus_the_NONEMPTY_references(scanned):
+def test_the_boundary_axis_is_n_minus_the_nonempty_references(scanned):
     """``E = N − (references that own at least one region)``, re-derived from the index rather than the payload's own
     offsets. A reference with one region owns no boundary; a reference with none owns nothing; neither is a special
     case."""
@@ -281,7 +280,7 @@ def test_contained_deposits_never_exceed_the_accepted_fragments(scanned):
     assert 0 < contained <= int(np.asarray(payload.region_start_count).sum())
 
 
-def test_no_boundary_STRADDLES_a_reference(scanned):
+def test_no_boundary_straddles_a_reference(scanned):
     """Every contiguous boundary joins two regions of the same reference, an invariant a ``k + 1`` axis could not state."""
     _payload, ra, _buffer, _index = scanned
     lo, hi = boundary_region_indices(np.asarray(ra.ref_id))
@@ -290,7 +289,7 @@ def test_no_boundary_STRADDLES_a_reference(scanned):
     np.testing.assert_array_equal(hi, lo + 1)
 
 
-def test_the_two_boundary_banks_are_DISJOINT_populations(scanned):
+def test_the_two_boundary_banks_are_disjoint_populations(scanned):
     """``boundary_unspliced`` and ``boundary_spliced`` are different molecules at the same boundary (crossed
     contiguously having spliced nowhere, versus having spliced elsewhere), so a fragment lands in exactly one. Checked
     on real data as a non-degeneracy check: the two banks cannot be the same array."""

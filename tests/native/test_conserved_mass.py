@@ -100,7 +100,7 @@ def _exact_fragment_mass(partition, region_bounds, start, end) -> tuple[Fraction
     return total, contained
 
 
-def test_the_RULE_conserves_exactly_before_any_quantisation():
+def test_the_rule_conserves_exactly_before_any_quantisation():
     """The law in exact rational arithmetic: ``Σ share == 1`` per crossing fragment.
 
     Every unspliced path is one segment. If it stays inside a region it is ``contained``; otherwise it has ``n >= 2``
@@ -119,7 +119,7 @@ def test_the_RULE_conserves_exactly_before_any_quantisation():
             )
 
 
-def test_the_BANK_conserves_to_within_the_REPRESENTATION_and_no_more():
+def test_the_bank_conserves_to_within_the_representation_and_no_more():
     """The same law as stored, within the price of float64. A fragment crossing ``K`` boundaries makes ``2K`` deposits
     (``K + 1`` slices: the ends deposit once, each interior one twice), each rounded to nearest, so the bank can differ
     from 1 by at most ``2K`` half-ulp. The worst drift is also asserted as a range: zero would mean the representation
@@ -145,7 +145,7 @@ def test_the_BANK_conserves_to_within_the_REPRESENTATION_and_no_more():
     )
 
 
-def test_a_CONTAINED_fragment_deposits_NO_mass_at_all():
+def test_a_contained_fragment_deposits_no_mass_at_all():
     """Its whole fragment is already ``region_contained_count``; mass at a boundary too would count it twice."""
     partition = _partition()
     total, contained = _exact_fragment_mass(
@@ -155,7 +155,7 @@ def test_a_CONTAINED_fragment_deposits_NO_mass_at_all():
     assert total == 0
 
 
-def test_the_two_populations_together_are_EXHAUSTIVE_for_an_unspliced_fragment():
+def test_the_two_populations_together_are_exhaustive_for_an_unspliced_fragment():
     """A contiguous interval either stays inside one region or crosses at least one boundary, so over the enumeration
     ``Σ contained + Σ mass`` is the fragment count. The budget is one rounding per crossing, as in the per-fragment
     test.
@@ -176,7 +176,7 @@ def test_the_two_populations_together_are_EXHAUSTIVE_for_an_unspliced_fragment()
 # ---------------------------------------------------------------------------
 
 
-def test_the_mass_is_the_PER_BASE_attribution():
+def test_the_mass_is_the_per_base_attribution():
     """The mass is coverage-weighted, not ``1/K``. Both rules conserve, so no conservation test can tell them apart, and
     at ``K == 1`` they coincide; the per-base walk splits each base between its own region's bounds, which no ``1/K``
     rule can match because a base does not know how many boundaries the fragment crossed. The tolerance is the
@@ -204,7 +204,7 @@ def test_the_mass_is_the_PER_BASE_attribution():
         )
 
 
-def test_the_mass_EQUALS_the_count_where_both_flanks_exceed_every_fragment():
+def test_the_mass_equals_the_count_where_both_flanks_exceed_every_fragment():
     """Where both flanking regions are longer than every fragment, a crossing fragment crosses only that boundary, so
     its whole 1.0 lands there and ``mass == count`` exactly. Where regions are shorter, one fragment spreads over
     several boundaries and ``mass`` falls below ``count``; that gap is the K-inflation that keeps a per-object sum from
@@ -242,7 +242,7 @@ def test_the_mass_EQUALS_the_count_where_both_flanks_exceed_every_fragment():
 # ---------------------------------------------------------------------------
 
 
-def test_a_SPLICED_fragment_s_mass_reaches_the_SPLICED_bank_ALONE():
+def test_a_spliced_fragments_mass_reaches_the_spliced_bank_alone():
     """A spliced fragment is certified RNA at that boundary (gDNA cannot splice), so its mass must never enter the
     unspliced competition the prior arbitrates. The geometry is the staggered case the second bank exists for: the
     fragment splices over one exon boundary, then runs contiguously across another isoform's boundary inside its second
@@ -288,7 +288,7 @@ def test_a_SPLICED_fragment_s_mass_reaches_the_SPLICED_bank_ALONE():
     assert abs(spliced + sj - 1) <= budget(4)
 
 
-def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
+def test_the_spliced_mass_is_a_partial_and_never_a_conservation_ledger():
     """Read as "the number of spliced fragments here", this bank would be wrong, and a consumer could read it that way,
     so the partial is pinned."""
     region_bounds = [0, 1000, 2000, 9000, 9050, 10000]
@@ -335,7 +335,7 @@ def _total_deposited_mass(tally) -> Fraction:
     return total
 
 
-def test_a_spliced_fragment_crossing_NO_BOUNDARY_still_deposits_a_WHOLE_FRAGMENT_of_mass():
+def test_a_spliced_fragment_crossing_no_boundary_deposits_a_whole_fragment_of_mass():
     """Both blocks lie inside one region each: the fragment is not ``contained`` (its path spans a sj) and crosses no
     boundary. Without a sj mass it would deposit nothing anywhere while ``sj_count`` credits it. It is all RNA, since
     gDNA cannot splice, which is why the gDNA side's conserved count is complete without this bank and the RNA side's is
@@ -376,7 +376,7 @@ def _two_sj_partition() -> Partition:
 TWO_SJ_FRAGMENT = (1950, 8050, [(2000, 5000), (5100, 8000)])
 
 
-def test_a_block_bounded_by_TWO_sj_SPLITS_its_mass_between_them():
+def test_a_block_bounded_by_two_sj_splits_its_mass_between_them():
     """The test that pins the sj rule, as claim 2 pins the boundary rule. Conservation cannot tell sharing a
     doubly-bounded block from giving it whole to each bound, so this states where the mass went, per sj, in exact
     rational arithmetic::
@@ -412,7 +412,7 @@ def test_a_block_bounded_by_TWO_sj_SPLITS_its_mass_between_them():
     assert sum(got) == 1, f"the three blocks sum to {float(sum(got))}, not one fragment"
 
 
-def test_a_fragment_crossing_BOTH_sj_AND_boundaries_gives_EVERY_crossed_object_a_share():
+def test_a_fragment_crossing_sj_and_boundaries_gives_every_crossed_object_a_share():
     """A spliced fragment may cross several sj and several boundaries, and all of them share the one fragment.
 
     Conservation alone does not imply sharing: a rule giving a boundary-crossing block's bases entirely to boundaries
@@ -464,7 +464,7 @@ def test_a_fragment_crossing_BOTH_sj_AND_boundaries_gives_EVERY_crossed_object_a
     assert abs(total - 1) <= budget(deposits), f"the fragment deposited {float(total)}, not one"
 
 
-def test_a_sj_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_crossing():
+def test_a_sj_claims_at_both_its_positions_and_never_also_as_a_contiguous_crossing():
     """Two isoforms sharing a donor and differing by 50 bp at the acceptor::
 
         TA+  exons (1000,2000) (5000,10000)
@@ -524,7 +524,7 @@ def test_a_sj_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_crossi
     assert abs(sj + boundary_at_5050 - 1) <= budget(4)
 
 
-def test_EVERY_deposited_fragment_places_exactly_ONE_fragment_of_mass_spliced_or_not():
+def test_every_deposited_fragment_places_exactly_one_fragment_of_mass_spliced_or_not():
     """The law over a mixed population: ``Σ mass + Σ contained == n``.
 
     Claim 1 is scoped to unspliced fragments because the boundary rule alone does not hold across a sj; this is the same
@@ -565,7 +565,7 @@ def test_EVERY_deposited_fragment_places_exactly_ONE_fragment_of_mass_spliced_or
 # ---------------------------------------------------------------------------
 
 
-def test_the_mass_has_ONE_column_while_every_other_boundary_bank_has_TWO():
+def test_the_mass_has_one_column_while_every_other_boundary_bank_has_two():
     """The mass has no strand axis: it converts an object-incidence total into a fragment count, a question with no
     strand in it, and a strand column would claim the two genome strands are separable for this channel."""
     tally = Accumulator(_partition()).tally

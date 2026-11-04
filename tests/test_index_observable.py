@@ -94,7 +94,7 @@ def _manifest(index_dir) -> dict:
 # ── the rule for a base ───────────────────────────────────────────────────────────────────────────
 
 
-def test_a_base_is_unknown_iff_it_is_N_or_n():
+def test_a_base_is_unknown_iff_it_is_an_upper_or_lower_n():
     seq = "ACGTNnRrYyKkMmSsWwBbDdHhVv-.Xx"
     got = unknown_bases(seq)
     assert got.tolist() == [c in "Nn" for c in seq]
@@ -240,7 +240,7 @@ def test_the_window_moves_no_run(window, tmp_path, monkeypatch):
         ({"status": "partial"}, "not 'complete'"),
     ],
 )
-def test_a_store_for_another_assembly_or_unfinished_is_refused_before_anything_is_written(
+def test_a_store_for_another_assembly_or_unfinished_is_refused_before_any_write(
     store_kw, refusal, tmp_path, store_build
 ):
     out = tmp_path / "idx"
@@ -326,7 +326,7 @@ def test_a_run_reports_the_mask_without_a_store(tmp_path):
     fasta, gtf = _write_genome(tmp_path)
     TranscriptIndex.build(fasta, gtf, tmp_path / "idx", write_tsv=False)
     index = TranscriptIndex.load(tmp_path / "idx")
-    block = cli._observable_genome_summary(index)
+    block = cli.observable_genome_summary(index)
     record = _manifest(tmp_path / "idx")["observable"]
     assert block["rule"] == record["rule"] and block["read_length"] is None
     assert block["store"] is None
@@ -345,7 +345,7 @@ def test_a_run_reports_the_mask_and_its_store(tmp_path, store_build):
     from rigel import cli
 
     index = store_build(_store(), tmp_path / "idx")
-    block = cli._observable_genome_summary(index)
+    block = cli.observable_genome_summary(index)
     record = _manifest(tmp_path / "idx")["observable"]
     assert block["rule"] == record["rule"] and block["read_length"] == 100
     assert block["store"] == {

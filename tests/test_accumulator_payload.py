@@ -159,7 +159,7 @@ def _payload(**overrides) -> AccumulatorPayload:
 # ---------------------------------------------------------------------------
 
 
-def test_the_payload_carries_every_field_of_the_specifications_Tally():
+def test_the_payload_carries_every_field_of_the_specifications_tally():
     """Read off ``Tally``, never written out here.
 
     The payload, the reference and the parity gate share one vocabulary precisely so that no mapping
@@ -226,7 +226,7 @@ def test_the_dtypes_are_the_specifications_dtypes():
     assert checked >= 12, f"only {checked} arrays compared; the gate has narrowed"
 
 
-def test_the_DEFERRED_bank_is_int64_throughout_and_carries_the_specifications_arrays():
+def test_the_deferred_bank_is_int64_throughout_and_carries_the_specifications_arrays():
     """The side buffer's own schema check, since it is not one array and cannot join the loop above.
 
     One dtype for the whole bank, and it is ``int64`` even for the two strand columns — which are
@@ -248,7 +248,7 @@ def test_the_DEFERRED_bank_is_int64_throughout_and_carries_the_specifications_ar
     assert payload.deferred.n_hypotheses == 8, "two hypotheses per deferred fragment"
 
 
-def test_a_WRONG_dtype_is_REJECTED_rather_than_coerced():
+def test_a_wrong_dtype_is_rejected_rather_than_coerced():
     """Checking the output dtype is not enough: ``ascontiguousarray(x, dtype=uint32)`` narrows an int64
     array, so a payload that *coerces* still reports the right dtype and passes a check on its own output,
     hiding a C++ side that has stopped agreeing with the schema. So the wrong dtype has to arrive and be
@@ -260,7 +260,7 @@ def test_a_WRONG_dtype_is_REJECTED_rather_than_coerced():
         _payload(sj_inv_length_sum=np.arange(6, dtype=np.uint32))
 
 
-def test_a_length_HISTOGRAM_of_the_WRONG_dtype_is_REJECTED_rather_than_coerced():
+def test_a_length_histogram_of_the_wrong_dtype_is_rejected_rather_than_coerced():
     """The two length histograms are under the banks' contract: ``pool_lengths`` arrives int64 and
     ``deposited_lengths`` uint32, as the C++ emits them. A cast to those dtypes passes every check on the
     payload's own output whatever the C++ sent, so a narrowed or widened histogram must be refused."""
@@ -271,7 +271,7 @@ def test_a_length_HISTOGRAM_of_the_WRONG_dtype_is_REJECTED_rather_than_coerced()
         _payload(deposited_lengths=_deposited_lengths(41).astype(np.int64))
 
 
-def test_a_MISSING_qc_denominator_is_REJECTED():
+def test_a_missing_qc_denominator_is_rejected():
     """Every denominator has to be emitted, because every conservation statement downstream has to be able
     to name what it excluded. A denominator that silently arrives absent is a statement that cannot.
     """
@@ -324,7 +324,7 @@ def test_the_gap_census_fields_are_exactly_the_specifications_keys():
     assert "gap_resolved_unspliced" not in reference_keys
 
 
-def test_a_MISSING_gap_census_subclass_is_REJECTED():
+def test_a_missing_gap_census_subclass_is_rejected():
     """The subclasses are exhaustive by construction, so a missing one is a partition that does not close."""
     census = _gap_census()
     del census["gap_deferred_both"]
@@ -332,7 +332,7 @@ def test_a_MISSING_gap_census_subclass_is_REJECTED():
         _payload(gap_resolution=census)
 
 
-def test_a_DEFERRED_BANK_THAT_DISAGREES_WITH_ITS_OWN_COUNTER_IS_REJECTED():
+def test_a_deferred_bank_that_disagrees_with_its_own_counter_is_rejected():
     """The conservation half, refused at the door.
 
     ``deposited + deferred + dropped_* == offered`` is worth nothing if the deferred term is a number
@@ -349,7 +349,7 @@ def test_a_DEFERRED_BANK_THAT_DISAGREES_WITH_ITS_OWN_COUNTER_IS_REJECTED():
     assert _payload().deferred.n_fragments == 4  # the self-consistent one is accepted
 
 
-def test_a_TRUNCATED_deferred_CSR_is_REJECTED_rather_than_indexed_off_the_end():
+def test_a_truncated_deferred_csr_is_rejected_rather_than_indexed_off_the_end():
     """The second pass indexes every one of these arrays.
 
     A bank whose offsets outrun its values does not fail loudly when it is read — it scores one fragment
@@ -374,7 +374,7 @@ def test_a_TRUNCATED_deferred_CSR_is_REJECTED_rather_than_indexed_off_the_end():
         _payload(deferred=widened)
 
 
-def test_a_DEFERRED_RECORD_WITH_FEWER_THAN_TWO_HYPOTHESES_IS_REJECTED():
+def test_a_deferred_record_with_fewer_than_two_hypotheses_is_rejected():
     """A fragment is deferred because two or more hypotheses survived.
 
     A record carrying one is a bank that lost the others, and the second pass would then "choose" from a
@@ -393,7 +393,7 @@ def test_a_DEFERRED_RECORD_WITH_FEWER_THAN_TWO_HYPOTHESES_IS_REJECTED():
         _payload(deferred=lone)
 
 
-def test_a_LEDGER_bank_that_does_not_book_every_deposited_fragment_is_REJECTED():
+def test_a_ledger_bank_that_does_not_book_every_deposited_fragment_is_rejected():
     """``Σ region_start_count == qc.deposited``, refused at the door.
 
     The start bank's sum is the accumulator's one non-tautological invariant: it is checkable against a
@@ -447,7 +447,7 @@ def test_the_offsets_must_agree_with_the_region_bound_axis_they_describe():
 # ---------------------------------------------------------------------------
 
 
-def test_the_payload_holds_VIEWS_and_does_not_copy():
+def test_the_payload_holds_views_and_does_not_copy():
     """``np.ascontiguousarray(x, dtype=D)`` is a no-op when the array already has dtype ``D``, so the
     payload holds views over the capsule-owned C++ heap and the payload object is the keep-alive. No
     defensive cast may be added: it would silently double peak memory on a whole-genome partition.
@@ -460,7 +460,7 @@ def test_the_payload_holds_VIEWS_and_does_not_copy():
     )
 
 
-def test_a_deposited_lengths_HISTOGRAM_THAT_DOES_NOT_BIN_EVERY_FRAGMENT_IS_REJECTED():
+def test_a_deposited_lengths_histogram_that_does_not_bin_every_fragment_is_rejected():
     """Refused at the door: ``sum(deposited_lengths)`` must equal ``qc.deposited``.
 
     This histogram is the empirical-Bayes anchor for every fragment-length model in the tool, so an

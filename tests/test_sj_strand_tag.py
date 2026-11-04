@@ -100,17 +100,17 @@ def test_spliced_reads_with_no_tag_are_not_quantified_unstranded_in_silence(
 def test_config_yaml_records_the_tag_spec(spliced_library, tmp_path):
     """The config.yaml a run writes names the tag spec the scan read with, so a rerun from it reads the same."""
     from rigel.cli import (
-        _build_quant_defaults,
-        _resolve_quant_args,
-        _write_config_yaml,
+        build_quant_defaults,
+        resolve_quant_args,
+        write_config_yaml,
         build_parser,
     )
 
     pr = _run(spliced_library, "auto")
     args = build_parser().parse_args(["quant", "--bam", "x.bam", "--index", "idx", "-o", "out"])
-    _resolve_quant_args(args, _build_quant_defaults())
+    resolve_quant_args(args, build_quant_defaults())
     written = tmp_path / "config.yaml"
-    _write_config_yaml(written, args, pr.pipeline_config)
+    write_config_yaml(written, args)
     recorded = yaml.safe_load(written.read_text())["quant"]["sj_strand_tag"]
     assert ",".join(recorded) == pr.pipeline_config.scan.sj_strand_tag
 

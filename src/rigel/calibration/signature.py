@@ -2,14 +2,14 @@
 
 Every genome position carries a 4-bit signature ``{intron_pos, intron_neg, exon_pos, exon_neg}`` recording which
 transcript features cover it; a calibration region (:mod:`rigel.calibration.region_arrays`) is a maximal interval of
-constant signature. This module holds the bit constants, the ``RegionType`` / ``RegionStrand`` enums and the coarse
-classes derived from a signature: the type (exon wins over intron), the transcript-strand class and the per-strand RNA
-masks. The bit values are a wire encoding, and the module imports nothing else in the package.
+constant signature. This module holds the bit constants, the ``RegionType`` enum and the coarse classes derived from
+a signature: the type (exon wins over intron) and the per-strand RNA masks. The bit values are a wire encoding, and the
+module imports nothing else in the package.
 """
 
 from __future__ import annotations
 
-from enum import IntEnum, IntFlag
+from enum import IntEnum
 
 import numpy as np
 
@@ -33,28 +33,6 @@ class RegionType(IntEnum):
     EXON = 2
 
 
-class RegionStrand(IntFlag):
-    """Coarse strand flags for a region.
-
-    ``AMBIG`` is the bitwise OR ``POS | NEG``: both transcript strands are
-    represented over the region.
-    """
-
-    NONE = 0
-    POS = 1
-    NEG = 2
-    AMBIG = 3  # POS | NEG
-
-
-# The int8 transcript-strand class :class:`~rigel.calibration.region_arrays.RegionArrays` carries: aliases of
-# :class:`RegionStrand`, which mirrors :class:`rigel.types.Strand`, so a value in the Strand convention (such as a
-# splice junction's strand) compares against TS_POS / TS_NEG with no conversion.
-TS_NONE: int = int(RegionStrand.NONE)  # 0
-TS_POS: int = int(RegionStrand.POS)  # 1
-TS_NEG: int = int(RegionStrand.NEG)  # 2
-TS_AMBIG: int = int(RegionStrand.AMBIG)  # 3
-
-
 # ---------------------------------------------------------------------------
 # Coarse derivations
 # ---------------------------------------------------------------------------
@@ -72,23 +50,6 @@ def coarse_type_array(signature: np.ndarray) -> np.ndarray:
     out = np.full(sig.shape, int(RegionType.INTERGENIC), dtype=np.uint8)
     out[has_intron] = int(RegionType.INTRON)
     out[has_exon] = int(RegionType.EXON)  # exon wins over intron
-    return out
-
-
-def transcript_strand_class(signature: np.ndarray) -> np.ndarray:
-    """Map a uint8 signature array to its int8 transcript-strand class.
-
-    Returns one of ``{TS_NONE=0, TS_POS=1, TS_NEG=2, TS_AMBIG=3}`` per region.
-    ``TS_NONE`` covers intergenic regions; ``TS_AMBIG`` covers regions with
-    transcripts on both strands.
-    """
-    sig = np.asarray(signature)
-    has_pos = (sig & (BIT_INTRON_POS | BIT_EXON_POS)) != 0
-    has_neg = (sig & (BIT_INTRON_NEG | BIT_EXON_NEG)) != 0
-    out = np.zeros(sig.shape, dtype=np.int8)
-    out[has_pos & ~has_neg] = TS_POS
-    out[~has_pos & has_neg] = TS_NEG
-    out[has_pos & has_neg] = TS_AMBIG
     return out
 
 
@@ -113,12 +74,6 @@ __all__ = [
     "BIT_EXON_NEG",
     "N_SIGNATURES",
     "RegionType",
-    "RegionStrand",
-    "TS_NONE",
-    "TS_POS",
-    "TS_NEG",
-    "TS_AMBIG",
     "coarse_type_array",
-    "transcript_strand_class",
     "rna_active_strands",
 ]

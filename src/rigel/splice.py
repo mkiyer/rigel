@@ -8,7 +8,7 @@ A fragment's splice type depends on its junctions alone:
 - SPLICED_IMPLICIT: the mate gap spans an annotated intron of a candidate;
 - SPLICE_ARTIFACT: a CIGAR junction the splice blacklist rejected.
 
-Exonic and intronic overlap are recorded per candidate (the resolver's ``exon_bp`` / ``intron_bp``), not here. Count
+Exonic overlap is recorded per candidate (the resolver's ``exon_bp``), not here. Count
 arrays have 8 columns, 4 splice types × 2 strands (sense, antisense); the output sums the two strands.
 """
 
@@ -30,7 +30,7 @@ def census_field(stype: SpliceType) -> str:
 
     The scanner classifies, so the scanner counts; the breakdown is QC for the report. The name is derived, not
     tabled, so there is no second correspondence to keep in step: the C++ keys these counters off
-    ``splice_type_label`` (``bam_scanner.cpp``), whose strings are these member names lower-cased.
+    ``splice_type_label`` (``scan/labels.h``), whose strings are these member names lower-cased.
     """
     return f"n_census_{stype.name.lower()}"
 

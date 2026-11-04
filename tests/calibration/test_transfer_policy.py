@@ -18,9 +18,9 @@ import numpy as np
 import pytest
 
 import rigel.calibration.sweep as SW
-from rigel.calibration.blocks import SweepCapture
+from rigel.calibration.diagnostics import SweepDiagnostics
 from rigel.calibration.messages.silent import SilentPolicy
-from rigel.native import transfer_rows as R
+from rigel._solve_impl import testing as R
 from _transfer_harness import (
     EDGE,
     FORWARD,
@@ -186,7 +186,7 @@ def test_the_backbone_rows_equal_an_independent_recursive_reference_of_the_passe
         np.testing.assert_allclose(rows, _reference_rows(prepared, ctx), rtol=0, atol=1e-10)
 
 
-def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
+def test_perturbation_no_node_ever_hears_its_own_claim_back(sweep_inputs):
     """The no-echo law: replace one node's own claim by a distinctive profile and re-run the passes; what that node
     holds from either side must not move (its claim never returns to it), while some other node's rows must (the claim
     did travel). Checked at an intron with two live faces and at a strand-live exon."""
@@ -541,7 +541,8 @@ def test_the_hop_price_is_both_countings_and_the_discrepancy_beyond_them():
     assert abs(R.hop_price(50, 100.0, 200, 50.0) - (counting + d)) < 1e-12, (
         "the excess over counting"
     )
-    assert R.hop_price(50, 100.0, 200, 50.0) == R.hop_price(50, 100.0, 200, 50.0)
+    # both terms are symmetric in the two ends, so the price does not depend on which way the hop is read
+    assert R.hop_price(50, 100.0, 200, 50.0) == R.hop_price(200, 50.0, 50, 100.0)
 
 
 def test_a_composition_arrives_only_through_a_face_with_a_composition_rule(sweep_inputs):
@@ -680,12 +681,12 @@ def test_the_backbone_runs_the_sweep_in_one_native_call(sweep_inputs, monkeypatc
 
     monkeypatch.setattr(SW, "solve_blocks", spy)
     pol = _full_policy(sweep_inputs)[0]
-    cap = SweepCapture()
-    SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=pol, _capture=cap)
+    cap = SweepDiagnostics()
+    SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=pol, diagnostics=cap)
     assert calls == [1] and cap.from_left is not None
     assert Received.from_kernel(cap.from_left).heard.any() and cap.policy_name == "transfer"
-    quiet = SweepCapture()
+    quiet = SweepDiagnostics()
     SW.solve_chain(
-        *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=quiet
+        *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), diagnostics=quiet
     )
     assert calls == [1, 0] and quiet.from_left is None and quiet.policy_name == "silent"

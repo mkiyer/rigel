@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
-from rigel.pipeline import _drain_side_buffer, scan_and_buffer
+from rigel.pipeline import drain_side_buffer, scan_and_buffer
 from rigel.scan_payload import (
     POOL_DNA_INTERGENIC,
     POOL_DNA_INTERGENIC_EXON,
@@ -39,7 +39,7 @@ GDNA_POOLS = (
 @pytest.fixture(scope="module")
 def scenario():
     """A scenario with gDNA and multi-isoform genes, so fragments are genuinely held."""
-    from rigel.sim import ReadSimConfig, Scenario
+    from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
     sc = Scenario("p4", genome_length=20_000, seed=SEED)
     # Two isoforms differing in one internal intron is what makes a mate gap ambiguous, and it is the
@@ -71,7 +71,9 @@ def scenario():
     )
     # Deep enough that many held fragments have hypotheses that both carry weight, so a seed has
     # something to decide; a shallower library holds too few, and two seeds can draw alike.
-    result = sc.build_oracle(n_fragments=20_000, sim_config=sim, gdna_fraction=0.25)
+    result = sc.build_oracle(
+        n_rna_fragments=20_000, sim_config=sim, gdna_fraction=0.25, gdna_config=GDNAConfig()
+    )
     yield result
     sc.cleanup()
 
@@ -95,7 +97,7 @@ def scanned(scenario):
     return scenario.index, strand_models, payload, config
 
 
-def test_the_fixture_actually_HOLDS_fragments(scanned):
+def test_the_fixture_actually_holds_fragments(scanned):
     """Non-vacuity, first. With an empty side buffer the drain is a documented no-op and every gate
     below would compare a payload with itself."""
     _index, _strand, payload, _cfg = scanned
@@ -106,7 +108,7 @@ def test_the_fixture_actually_HOLDS_fragments(scanned):
     assert payload.drain is None, "a freshly scanned payload has not been drained"
 
 
-def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
+def test_the_gdna_length_pools_do_not_move(scanned):
     """The control, and it is exact: the four pure-gDNA pools are byte-identical after the drain.
 
     Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are region
@@ -119,7 +121,7 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
     partly from RNA, and nothing downstream would look wrong.
     """
     index, strand_models, payload, cfg = scanned
-    drained = _drain_side_buffer(payload, index, strand_models, seed=cfg.second_pass_seed)
+    drained = drain_side_buffer(payload, index, strand_models, seed=cfg.second_pass_seed)
     before = np.asarray(payload.pool_lengths, dtype=np.int64)
     after = np.asarray(drained.pool_lengths, dtype=np.int64)
 
@@ -136,7 +138,7 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
     )
 
 
-def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
+def test_calibration_sees_the_drained_tally(scenario):
     """The structural claim: the drain runs before calibration, so calibration runs once on the whole
     tally. Gated through ``run_pipeline`` rather than by reading the wiring.
 
@@ -144,9 +146,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     changes: the held fragments are the long ones, so the anchor an undrained calibration sees is
     biased short.
     """
-    from rigel.calibration.fl import build_fl_models
-    from rigel.calibration.sj_opportunity import crossing_probability_from_index
-    from rigel.pipeline import run_pipeline
+    from rigel.pipeline import library_fl_models, run_pipeline
 
     config = _config()
     result = run_pipeline(scenario.bam_path, scenario.index, config=config)
@@ -154,7 +154,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     _stats, strand_models, _buffer, pass_one = scan_and_buffer(
         str(scenario.bam_path), scenario.index, config.scan
     )
-    drained = _drain_side_buffer(
+    drained = drain_side_buffer(
         pass_one, scenario.index, strand_models, seed=config.second_pass_seed
     )
     assert drained.drain is not None and drained.drain.offered > 0
@@ -165,13 +165,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
     shipped = np.asarray(result.estimator.effective_lengths, dtype=np.float64)
     for label, payload in (("drained", drained), ("pass one", pass_one)):
-        # The de-tilt is part of production's route to the RNA pmf, so it is part of this
-        # reproduction. It is the same array for both arms, so it cannot decide
-        # which one matches.
-        fl = build_fl_models(
-            payload,
-            sj_opportunity=crossing_probability_from_index(scenario.index, int(payload.max_length)),
-        )
+        fl = library_fl_models(payload, scenario.index)
         expected = FragmentLengthModel.from_pmf(
             fl.rna_pmf, fl.max_size
         ).compute_all_transcript_eff_lens(exonic)
@@ -188,7 +182,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
             )
 
 
-def test_the_DRAIN_SEED_is_its_own_and_is_NOT_the_EM_seed(scanned):
+def test_the_drain_seed_is_its_own_and_is_not_the_em_seed(scanned):
     """Two independent RNG consumers must not share one field. If the drain read ``em.seed``, an EM
     A/B would silently re-draw every held fragment, so the arms would differ in the tally as well as
     in the estimator and the comparison would mean nothing. And reproducibility at the config level:
@@ -197,7 +191,7 @@ def test_the_DRAIN_SEED_is_its_own_and_is_NOT_the_EM_seed(scanned):
     index, strand_models, payload, _cfg = scanned
 
     def drained(second_pass_seed: int):
-        return _drain_side_buffer(payload, index, strand_models, seed=second_pass_seed)
+        return drain_side_buffer(payload, index, strand_models, seed=second_pass_seed)
 
     first, again, other = drained(1), drained(1), drained(2)
     assert np.array_equal(first.deposited_lengths, again.deposited_lengths), (
@@ -207,13 +201,13 @@ def test_the_DRAIN_SEED_is_its_own_and_is_NOT_the_EM_seed(scanned):
         "a different drain seed must actually change the draw, or the seed is not reaching it"
     )
     # The EM's seed is a different field and cannot reach the drain: PipelineConfig carries both, and
-    # only `second_pass_seed` is passed to `_drain_side_buffer` in `run_pipeline`.
+    # only `second_pass_seed` is passed to `drain_side_buffer` in `run_pipeline`.
     assert _config(em=EMConfig(seed=999)).second_pass_seed == PipelineConfig().second_pass_seed, (
         "changing the EM seed must not change the drain's seed"
     )
 
 
-def test_an_EMPTY_side_buffer_is_a_documented_no_op(scanned):
+def test_an_empty_side_buffer_is_a_documented_no_op(scanned):
     """A library with no annotated intron in any mate gap is a real state, not an error. The payload
     must come back untouched and still report ``drain is None``, so "pass one only" has one spelling."""
     import dataclasses
@@ -227,6 +221,6 @@ def test_an_EMPTY_side_buffer_is_a_documented_no_op(scanned):
         gap_resolution=GapCensus.zeros(),
         qc=dataclasses.replace(payload.qc, deferred_undetermined_gap=0),
     )
-    out = _drain_side_buffer(empty, index, strand_models, seed=0)
+    out = drain_side_buffer(empty, index, strand_models, seed=0)
     assert out is empty, "with nothing held the drain must return the payload it was given"
     assert out.drain is None

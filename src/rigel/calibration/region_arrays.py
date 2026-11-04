@@ -1,7 +1,7 @@
 """Sorted region geometry, the region-to-boundary index mapping, and the observable genome over both (layer 1).
 
 :class:`RegionArrays` is a per-reference CSR view of the region table, sorted by ``(ref_id, start)``, carrying each
-region's transcript-strand class and the index's unobservable mask. :func:`region_right_boundary` and
+region's signature and the index's unobservable mask. :func:`region_right_boundary` and
 :func:`boundary_region_indices` map regions to contiguous boundaries. The observable-genome readers cut each region at
 the mask (:func:`observable_pieces`) and give each boundary's bases to the nearest masked base
 (:func:`boundary_reaches`) and each reference's maximal observable runs (:func:`observable_stretches`); with nothing
@@ -21,9 +21,6 @@ from typing import Mapping
 
 import numpy as np
 import pandas as pd
-
-from .signature import transcript_strand_class
-
 
 __all__ = [
     "RegionArrays",
@@ -49,7 +46,6 @@ class RegionArrays:
     start: np.ndarray  # int64, (R,)
     end: np.ndarray  # int64, (R,)
     signature: np.ndarray  # uint8, (R,)
-    strand_class: np.ndarray  # int8,  (R,) — TS_NONE/TS_POS/TS_NEG/TS_AMBIG
     region_size_bp: np.ndarray  # float64, (R,) — end - start
     ref_offsets: np.ndarray  # int32, (n_refs + 1,)
     n_refs: int
@@ -98,63 +94,62 @@ class RegionArrays:
                 "column. Rebuild the index against the current schema."
             )
         n_refs = len(ref_name_to_id)
-        n_regions = len(region_df)
-
-        ref_id = region_df["ref_name"].map(ref_name_to_id).to_numpy()
-        if np.any(pd.isna(ref_id)):
-            unknown = region_df.loc[pd.isna(ref_id), "ref_name"].unique().tolist()
-            raise ValueError(
-                f"RegionArrays.from_frame: region_df references {sorted(unknown)} "
-                f"which are not in ref_name_to_id. Rebuild the index."
-            )
-        ref_id = ref_id.astype(np.int32, copy=False)
-
+        ref_id = _ref_ids(region_df, ref_name_to_id)
         order = np.lexsort((region_df["start"].to_numpy(), ref_id))
         ref_id = ref_id[order]
         start = region_df["start"].to_numpy().astype(np.int64, copy=False)[order]
         end = region_df["end"].to_numpy().astype(np.int64, copy=False)[order]
-        signature = region_df["signature"].to_numpy().astype(np.uint8, copy=False)[order]
-        strand_class = transcript_strand_class(signature)
-
         counts = np.bincount(ref_id, minlength=n_refs).astype(np.int32, copy=False)
         ref_offsets = np.empty(n_refs + 1, dtype=np.int32)
         ref_offsets[0] = 0
         np.cumsum(counts, out=ref_offsets[1:])
-        if int(ref_offsets[-1]) != n_regions:
-            raise RuntimeError(  # pragma: no cover — invariant guard
-                "RegionArrays.from_frame: ref_offsets sum mismatch."
-            )
-
-        mask = np.zeros((0, 3), dtype=np.int64)
-        if unobservable is not None and len(unobservable):
-            mask_ref = unobservable["ref"].astype(str).map(ref_name_to_id)
-            if mask_ref.isna().any():
-                unknown = sorted(unobservable.loc[mask_ref.isna(), "ref"].astype(str).unique())
-                raise ValueError(
-                    f"RegionArrays.from_frame: the unobservable mask names {unknown}, which are not in "
-                    "ref_name_to_id. Rebuild the index."
-                )
-            mask = np.stack(
-                [
-                    mask_ref.to_numpy(np.int64),
-                    unobservable["start"].to_numpy(np.int64),
-                    unobservable["end"].to_numpy(np.int64),
-                ],
-                axis=1,
-            )
-            mask = mask[np.lexsort((mask[:, 1], mask[:, 0]))]
-
         return cls(
             ref_id=ref_id,
             start=start,
             end=end,
-            signature=signature,
-            strand_class=strand_class,
+            signature=region_df["signature"].to_numpy().astype(np.uint8, copy=False)[order],
             region_size_bp=(end - start).astype(np.float64, copy=False),
             ref_offsets=ref_offsets,
             n_refs=n_refs,
-            unobservable=mask,
+            unobservable=_mask_from_frame(unobservable, ref_name_to_id),
         )
+
+
+def _ref_ids(region_df: pd.DataFrame, ref_name_to_id: Mapping[str, int]) -> np.ndarray:
+    """``int32[R]`` — each region row's reference id; a reference the map does not carry is refused."""
+    ref_id = region_df["ref_name"].map(ref_name_to_id).to_numpy()
+    if np.any(pd.isna(ref_id)):
+        unknown = region_df.loc[pd.isna(ref_id), "ref_name"].unique().tolist()
+        raise ValueError(
+            f"RegionArrays.from_frame: region_df references {sorted(unknown)} "
+            f"which are not in ref_name_to_id. Rebuild the index."
+        )
+    return ref_id.astype(np.int32, copy=False)
+
+
+def _mask_from_frame(
+    unobservable: pd.DataFrame | None, ref_name_to_id: Mapping[str, int]
+) -> np.ndarray:
+    """``int64[M, 3]`` — the mask's ``(ref_id, start, end)`` runs, ascending by reference then start; empty when nothing
+    is masked."""
+    if unobservable is None or not len(unobservable):
+        return np.zeros((0, 3), dtype=np.int64)
+    mask_ref = unobservable["ref"].astype(str).map(ref_name_to_id)
+    if mask_ref.isna().any():
+        unknown = sorted(unobservable.loc[mask_ref.isna(), "ref"].astype(str).unique())
+        raise ValueError(
+            f"RegionArrays.from_frame: the unobservable mask names {unknown}, which are not in "
+            "ref_name_to_id. Rebuild the index."
+        )
+    mask = np.stack(
+        [
+            mask_ref.to_numpy(np.int64),
+            unobservable["start"].to_numpy(np.int64),
+            unobservable["end"].to_numpy(np.int64),
+        ],
+        axis=1,
+    )
+    return mask[np.lexsort((mask[:, 1], mask[:, 0]))]
 
 
 # ---------------------------------------------------------------------------

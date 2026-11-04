@@ -3,7 +3,7 @@
 The sister tool ``alignable`` tiles the genome with gDNA-like fragments, re-aligns them, and records every spliced
 alignment the aligner produces: junctions where it emits an ``N`` operation from plain genomic DNA. Each artifact is
 keyed by ``(ref, intron_start, intron_end)``, with the largest left and right anchors (reference-advancing CIGAR bases)
-seen at each read length. The C++ scanner (``bam_scanner.cpp``) rejects a junction as an artifact when either of its
+seen at each read length. The C++ scanner (``scan/bam_record.cpp``) rejects a junction as an artifact when either of its
 anchors is at most the blacklist's.
 
 This module reads the store (a directory or a packaged ``.zarr.zip``), filters rows by count, and collapses the

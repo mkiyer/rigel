@@ -48,78 +48,55 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE nanobind_ROOT)
 find_package(nanobind CONFIG REQUIRED)
 
-# --- Build the _cgranges_impl extension ---------------------------------------
+# --- Build options ------------------------------------------------------------
 
-# Compile the nanobind extension with optimizations for speed (NOMINSIZE)
-# since cgranges overlap queries are a hot path.
-nanobind_add_module(
-  _cgranges_impl
-  NOMINSIZE
-  STABLE_ABI
-  src/rigel/cgranges/cgranges_bind.cpp
-  src/rigel/cgranges/cgranges.c
-)
+# RIGEL_PORTABLE (default ON): omit -march=native, so a build runs on every machine of its architecture. A native
+# build, tuned to the build host's CPU, dies with an illegal instruction on an older one; build one only for the
+# machine it runs on, with -DRIGEL_PORTABLE=OFF (e.g. CMAKE_ARGS="-DRIGEL_PORTABLE=OFF" pip install ...).
+option(RIGEL_PORTABLE "Build for every machine of the architecture (no -march=native)" ON)
+option(RIGEL_PROFILE_NATIVE "Build with debug symbols and frame pointers, and without LTO, for a profiler" OFF)
 
-# The C wrapper needs to find cgranges.h and khash.h
-target_include_directories(_cgranges_impl PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges
-)
+# The flags are GCC's and Clang's; another compiler builds with its defaults.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  set(RIGEL_OPT_FLAGS -O3 -DNDEBUG)
+  if(NOT RIGEL_PORTABLE)
+    list(APPEND RIGEL_OPT_FLAGS -march=native)
+  endif()
+  if(RIGEL_PROFILE_NATIVE)
+    list(APPEND RIGEL_OPT_FLAGS -g -fno-omit-frame-pointer)
+  endif()
+  set(RIGEL_FAST_MATH -ffast-math -fno-finite-math-only)
+  set(RIGEL_FMA_ONLY -ffp-contract=fast)
+endif()
 
-# Install into the rigel package directory so it's importable as
-# rigel._cgranges_impl
-install(TARGETS _cgranges_impl LIBRARY DESTINATION rigel)
+include(CheckIPOSupported)
+check_ipo_supported(RESULT RIGEL_IPO_SUPPORTED)
 
-# --- Build the _scoring_impl extension ----------------------------------------
+# One native module, built and installed like every other: optimised, link-time optimised unless profiling, and
+# importable as rigel.<name>. The headers in native/ and the vendored cgranges are visible to every module.
+function(rigel_extension name)
+  nanobind_add_module(${name} NOMINSIZE STABLE_ABI ${ARGN})
+  target_include_directories(${name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges)
+  target_compile_options(${name} PRIVATE ${RIGEL_OPT_FLAGS})
+  if(RIGEL_IPO_SUPPORTED AND NOT RIGEL_PROFILE_NATIVE)
+    set_property(TARGET ${name} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+  install(TARGETS ${name} LIBRARY DESTINATION rigel)
+endfunction()
 
-# C++ scoring hot-path kernels (compute_fragment_weight, etc.)
-nanobind_add_module(
-  _scoring_impl
-  NOMINSIZE
-  STABLE_ABI
-  src/rigel/native/scoring.cpp
-)
+# --- htslib, which the BAM scanner links ----------------------------------------
 
-# Install into the rigel package directory so it's importable as
-# rigel._scoring_impl
-install(TARGETS _scoring_impl LIBRARY DESTINATION rigel)
-
-# --- Build the _resolve_impl extension ----------------------------------------
-
-# C++ fragment resolution kernel (resolve_fragment + cgranges queries)
-nanobind_add_module(
-  _resolve_impl
-  NOMINSIZE
-  STABLE_ABI
-  src/rigel/native/resolve.cpp
-  src/rigel/cgranges/cgranges.c
-)
-
-# Needs cgranges.h, khash.h, and shared native headers
-target_include_directories(_resolve_impl PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
-)
-
-# Install into the rigel package directory so it's importable as
-# rigel._resolve_impl
-install(TARGETS _resolve_impl LIBRARY DESTINATION rigel)
-
-# --- Build the _bam_impl extension --------------------------------------------
-
-# C++ BAM scanner using htslib.
-# Reads BAM → resolves fragments → buffers results in one C++ call.
-
-# Find htslib (pkg-config or cmake find)
-# Note: IMPORTED_TARGET is intentionally omitted — it forces transitive dep
-# resolution via pkg-config (e.g. bzip2.pc), which is not always available in
-# conda cross-compilation builds.  We link against the shared libhts directly,
-# so no -lbz2 etc. are needed at link time.
+# pkg-config first, without IMPORTED_TARGET: that resolves htslib's own dependencies through their .pc files (bzip2.pc),
+# which a conda cross-compilation build may lack. The shared libhts is linked directly, so its dependencies need no
+# link flags.
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
   pkg_check_modules(HTSLIB htslib)
 endif()
 
-# Helper macro to detect htslib in a given directory prefix
+# Otherwise an htslib installed under a prefix
 macro(_find_htslib_in_prefix _prefix _label)
   if(NOT HTSLIB_FOUND AND EXISTS "${_prefix}/include/htslib/hts.h")
     foreach(_lib libhts.dylib libhts.so libhts.a)
@@ -135,7 +112,7 @@ macro(_find_htslib_in_prefix _prefix _label)
   endif()
 endmacro()
 
-# Fallback: conda-build host env ($PREFIX), then activated env ($CONDA_PREFIX)
+# conda-build's host environment ($PREFIX), then the active environment ($CONDA_PREFIX)
 if(DEFINED ENV{PREFIX})
   _find_htslib_in_prefix("$ENV{PREFIX}" "conda PREFIX")
 endif()
@@ -143,124 +120,47 @@ if(DEFINED ENV{CONDA_PREFIX})
   _find_htslib_in_prefix("$ENV{CONDA_PREFIX}" "CONDA_PREFIX")
 endif()
 
-if(HTSLIB_FOUND)
-  message(STATUS "htslib found — building _bam_impl C++ BAM scanner")
-else()
+if(NOT HTSLIB_FOUND)
   message(FATAL_ERROR
-    "htslib NOT found.  _bam_impl is required.\n"
-    "Install htslib (conda install -c conda-forge htslib) and re-run cmake.")
+    "htslib NOT found. The BAM scanner needs it: install htslib (conda install -c conda-forge htslib) and re-run.")
 endif()
 
-nanobind_add_module(
-  _bam_impl
-  NOMINSIZE
-  STABLE_ABI
-  src/rigel/native/bam_scanner.cpp
+# --- The native modules ---------------------------------------------------------
+
+# _bam_impl: the BAM scan, the annotated-BAM pass, and the calibration accumulator the scan fills
+rigel_extension(_bam_impl
+  src/rigel/native/scan/bam_module.cpp
+  src/rigel/native/scan/bam_record.cpp
+  src/rigel/native/scan/template_hits.cpp
+  src/rigel/native/scan/bam_scanner.cpp
+  src/rigel/native/scan/scan_result.cpp
+  src/rigel/native/scan/annotation_writer.cpp
   src/rigel/native/calibration/accumulator.cpp
-  src/rigel/cgranges/cgranges.c
-)
-
-target_include_directories(_bam_impl PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
-)
-
-# Link htslib via variables set by pkg_check_modules or the manual fallback
+  src/rigel/native/calibration/accumulator_set.cpp
+  src/rigel/native/calibration/deferred_fragments.cpp
+  src/rigel/native/resolve/fragment_resolver.cpp
+  src/rigel/native/testing/bam.cpp
+  src/rigel/cgranges/cgranges.c)
 target_include_directories(_bam_impl PRIVATE ${HTSLIB_INCLUDE_DIRS})
 target_link_directories(_bam_impl PRIVATE ${HTSLIB_LIBRARY_DIRS})
 target_link_libraries(_bam_impl PRIVATE ${HTSLIB_LIBRARIES})
 
-install(TARGETS _bam_impl LIBRARY DESTINATION rigel)
+# _resolve_impl: a fragment's overlap resolution against the index
+rigel_extension(_resolve_impl
+  src/rigel/native/resolve/resolve_module.cpp
+  src/rigel/native/resolve/fragment_resolver.cpp
+  src/rigel/native/testing/resolve.cpp
+  src/rigel/cgranges/cgranges.c)
 
-# --- Build the _em_impl extension ---------------------------------------------
+# _scoring_impl: per-fragment likelihoods. Full fast-math, since nothing there is compensated, but with infinities,
+# since the scorer's sentinels are -inf.
+rigel_extension(_scoring_impl src/rigel/native/scoring.cpp src/rigel/native/testing/scoring.cpp)
+target_compile_options(_scoring_impl PRIVATE ${RIGEL_FAST_MATH})
 
-# C++ EM solver. Pure C++17 + nanobind + numpy, no external dependencies.
-nanobind_add_module(
-  _em_impl
-  NOMINSIZE
-  STABLE_ABI
-  src/rigel/native/em_solver.cpp
-)
-# Keep debug symbols for profiling (dsym/DWARF) even in Release builds
-target_compile_options(_em_impl PRIVATE -g)
+# _em_impl: the locus EM. FMA contraction only: fast-math would let the compiler reassociate the E-step's Kahan
+# compensated sums away.
+rigel_extension(_em_impl src/rigel/native/em_solver.cpp src/rigel/native/testing/em.cpp)
+target_compile_options(_em_impl PRIVATE ${RIGEL_FMA_ONLY})
 
-install(TARGETS _em_impl LIBRARY DESTINATION rigel)
-
-# --- Build the _solve_impl extension ------------------------------------------
-
-# The calibration solve's kernels, one module: the block pipeline of the sweep in one call per sweep with a pool of
-# threads over the locus blocks (native/solve_kernel.cpp), on ψ's kernel (psi_kernel.h) and the composition transfer's
-# builders, pass and solve (transfer_kernel.h), the row constructors (transfer_rows.h) and the thread pool
-# (thread_pool.h); the same code bound for the gates. Pure C++17 + nanobind + numpy.
-nanobind_add_module(
-  _solve_impl
-  NOMINSIZE
-  STABLE_ABI
-  src/rigel/native/solve_kernel.cpp
-)
-target_compile_options(_solve_impl PRIVATE -g)
-
-install(TARGETS _solve_impl LIBRARY DESTINATION rigel)
-
-# --- Compiler optimizations ---------------------------------------------------
-#
-# Performance flags: -O3, FMA contraction and LTO, and -march=native when RIGEL_PORTABLE is OFF.
-# Applied per-target to control fast-math scope.
-#
-# _em_impl gets -ffp-contract=fast (enables FMA) but NOT full -ffast-math,
-# because -ffast-math allows the compiler to reassociate floating-point
-# additions, which would break the Kahan compensated summation used in
-# the E-step kernel for numerical stability.
-#
-# _scoring_impl gets full -ffast-math (no compensated summation there) with
-# -fno-finite-math-only, because scoring.cpp uses -inf sentinels.
-# All other targets get -O3 (and -march=native when not portable) without fast-math.
-
-# RIGEL_PORTABLE (default ON): omit -march=native, so a build runs on every machine of its architecture. A
-# native build, tuned to the build host's CPU, dies with an illegal instruction on an older one (a conda package
-# built on an AVX-512 host would carry the AVX-512 E-step to every user); build one only for the machine it runs
-# on, with -DRIGEL_PORTABLE=OFF (e.g. CMAKE_ARGS="-DRIGEL_PORTABLE=OFF" pip install ...).
-option(RIGEL_PORTABLE "Build for every machine of the architecture (no -march=native)" ON)
-option(
-  RIGEL_PROFILE_NATIVE
-  "Build native extensions with profiler-friendly symbols/frame pointers and disable LTO"
-  OFF
-)
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    if(RIGEL_PORTABLE)
-        set(RIGEL_OPT_FLAGS -O3 -DNDEBUG)
-    else()
-        set(RIGEL_OPT_FLAGS -O3 -march=native -DNDEBUG)
-    endif()
-
-    target_compile_options(_em_impl      PRIVATE ${RIGEL_OPT_FLAGS} -ffp-contract=fast)
-    target_compile_options(_scoring_impl PRIVATE ${RIGEL_OPT_FLAGS} -ffast-math -fno-finite-math-only)
-    target_compile_options(_resolve_impl PRIVATE ${RIGEL_OPT_FLAGS})
-    target_compile_options(_cgranges_impl PRIVATE ${RIGEL_OPT_FLAGS})
-    target_compile_options(_bam_impl PRIVATE ${RIGEL_OPT_FLAGS})
-
-    if(RIGEL_PROFILE_NATIVE)
-      foreach(_rigel_native_target
-          _em_impl _scoring_impl _resolve_impl _cgranges_impl _bam_impl _solve_impl)
-        target_compile_options(
-          ${_rigel_native_target}
-          PRIVATE -g -fno-omit-frame-pointer
-        )
-      endforeach()
-    endif()
-endif()
-
-# Link-Time Optimization (LTO): enables cross-TU inlining and dead code
-# elimination across compilation units.
-include(CheckIPOSupported)
-check_ipo_supported(RESULT ipo_supported)
-if(ipo_supported AND NOT RIGEL_PROFILE_NATIVE)
-    set_property(TARGET _em_impl      PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    set_property(TARGET _scoring_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    set_property(TARGET _resolve_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    set_property(TARGET _cgranges_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    set_property(TARGET _bam_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-elseif(RIGEL_PROFILE_NATIVE)
-  message(STATUS "Native profiling build: debug symbols/frame pointers enabled; LTO disabled")
-endif()
+# _solve_impl: the calibration solve, the sweep's block pipeline in one call per sweep
+rigel_extension(_solve_impl src/rigel/native/solve_kernel.cpp src/rigel/native/testing/solve.cpp)

@@ -9,25 +9,30 @@ combining gDNA, nascent RNA and low strand specificity.
 """
 
 import shutil
+from functools import partial
 
 import pytest
 
 from rigel.config import EMConfig
 from rigel.sim import Scenario
 
-from .conftest import (
+import _scenarios
+from _scenarios import (
     GDNA_LEVELS,
+    PIPELINE_SEED,
+    SIM_SEED,
     STRAND_LEVELS,
     STRESS_COMBOS,
     STRESS_IDS,
-    PIPELINE_SEED,
-    SIM_SEED,
-    build_and_run,
-    assert_alignment,
     assert_accountability,
-    assert_negative_control,
-    assert_gdna_accuracy,
 )
+
+#: Built through FASTQ and a real alignment. An aligner loses reads and leaves orientation ambiguity an oracle BAM does
+#: not, so the alignment rate, the negative control's strand reference and the gDNA error bound are looser here.
+build_and_run = partial(_scenarios.build_and_run, aligned=True)
+assert_alignment = partial(_scenarios.assert_alignment, min_rate=0.70)
+assert_negative_control = partial(_scenarios.assert_negative_control, reference_ss=0.9)
+assert_gdna_accuracy = partial(_scenarios.assert_gdna_accuracy, max_rel_err=0.55)
 
 pytestmark = pytest.mark.skipif(
     shutil.which("minimap2") is None or shutil.which("samtools") is None,

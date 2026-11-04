@@ -56,32 +56,23 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pysam  # noqa: E402
+from scipy.special import ndtr  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
-# the checkout's source only when no rigel is installed: a source tree carries no native extension, so
-# it must never shadow a build (a worktree's own, or the editable install)
-if importlib.util.find_spec("rigel") is None:
-    sys.path.insert(0, str(_REPO / "src"))
-sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
-from _shared import PANELS, set_field  # noqa: E402
+from _shared import ORACLE_BAM, PANELS, add_set_option, capture_config, configured, refuses, sibling  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
 from rigel.calibration.capture_efficiency import capture_efficiencies  # noqa: E402
+from rigel.calibration.diagnostics import CalibrationDiagnostics  # noqa: E402
 from rigel.calibration.landscape import fit_landscape  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
-from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.signature import RegionType, coarse_type_array  # noqa: E402
-from rigel.calibration.splice_graph import (  # noqa: E402
-    build_boundary_flags_array,
-    build_sj_geometry_arrays,
-)
-from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import length_tables, library_fl_models  # noqa: E402
-from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
+from _scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 from rigel.sim.capture import CaptureConfig, CaptureSampler  # noqa: E402
-from rigel.sim.whole_genome import fl_pmf, load_transcripts_from_index  # noqa: E402
+from rigel.sim.transcriptome import load_transcripts_from_index  # noqa: E402
 from rigel.sim.wgs_config import GDNASimConfig  # noqa: E402
 
 
@@ -106,6 +97,19 @@ _CAPTURE_KEYS = (
 
 
 # ── the truth ────────────────────────────────────────────────────────────────────────────────────
+
+
+def fl_pmf(sim) -> tuple[np.ndarray, np.ndarray]:
+    """The exact fragment-length pmf the simulator draws from, for *sim*'s ``frag_mean``, ``frag_std``, ``frag_min``
+    and ``frag_max``: `rigel.sim.sampling.truncated_normal_frag_lengths` rounds a Normal draw and keeps it in
+    ``[frag_min, frag_max]``, so length ``k`` has the Normal's mass on ``[k − ½, k + ½)``, renormalised over the
+    window. Each mass is taken on the side of the mean where it is a difference of two small tails, never of two
+    numbers near 1."""
+    widths = np.arange(int(sim.frag_min), int(sim.frag_max) + 1, dtype=np.int64)
+    lo = (widths - 0.5 - float(sim.frag_mean)) / float(sim.frag_std)
+    hi = lo + 1.0 / float(sim.frag_std)
+    p = np.where(lo > 0.0, ndtr(-lo) - ndtr(-hi), ndtr(hi) - ndtr(lo))
+    return widths, p / p.sum()
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -165,9 +169,10 @@ class Sim:
 
 
 def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition: str) -> Sim:
+    """The condition's simulator, read from the panel manifest: its capture config on the panel's probes, masked where
+    the panel's genome is unknown, and its RNA and gDNA fragment-length laws."""
     manifest = json.load(open(panel_dir / "manifest.json"))
-    label = "on" if condition.endswith("_capture_on") else "off"
-    cap_cfg = next(c["config"] for c in manifest["capture_configs"] if c["label"] == label)
+    cap_cfg = capture_config(manifest, condition)
     sim = manifest["simulation"]
     transcripts = load_transcripts_from_index(index_dir)
     if len(transcripts) != len(index.t_df) or any(
@@ -210,23 +215,30 @@ def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition
     )
 
 
-def load_truth(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition: str) -> Truth:
-    sim = load_sim(index, index_dir, panel_dir, condition)
-    sampler, widths, pmf, transcripts = sim.sampler, sim.widths, sim.pmf, sim.transcripts
-    L = np.array([int(t.length) for t in transcripts], dtype=np.int64)
-    L_plain, factor, probed = sampler_truth(sampler, L, widths, pmf, sim.off)
-    t = index.t_df
-    kind = np.where(
-        t.is_synthetic.to_numpy(bool),
+def transcript_kinds(t_df: pd.DataFrame) -> np.ndarray:
+    """Per transcript, one of :data:`KINDS`: a synthetic span (``entity``), an annotated single-exon transcript, or
+    an mRNA."""
+    return np.where(
+        t_df.is_synthetic.to_numpy(bool),
         "entity",
-        np.where(t.is_single_exon.to_numpy(bool), "single-exon", "mRNA"),
+        np.where(t_df.is_single_exon.to_numpy(bool), "single-exon", "mRNA"),
     )
+
+
+def load_truth(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition: str, sim: Sim | None = None) -> Truth:
+    """The condition's per-transcript truth, from its simulator (``sim``, loaded here unless given) and its truth
+    table."""
+    if sim is None:
+        sim = load_sim(index, index_dir, panel_dir, condition)
+    L = np.array([int(t.length) for t in sim.transcripts], dtype=np.int64)
+    L_plain, factor, probed = sampler_truth(sim.sampler, L, sim.widths, sim.pmf, sim.off)
+    t = index.t_df
     truth = pd.read_csv(panel_dir / condition / "truth_abundances.tsv", sep="\t").set_index(
         "transcript_id"
     )
     frags = truth["observed_total_rna_fragments"].reindex(t.t_id).fillna(0).to_numpy(float)
     abund = truth["pre_capture_total_rna"].reindex(t.t_id).fillna(0).to_numpy(float)
-    return Truth(L_plain, factor, probed, kind, frags, abund)
+    return Truth(L_plain, factor, probed, transcript_kinds(t), frags, abund)
 
 
 # ── the arms ─────────────────────────────────────────────────────────────────────────────────────
@@ -234,24 +246,13 @@ def load_truth(index: TranscriptIndex, index_dir: Path, panel_dir: Path, conditi
 
 def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, config):
     """The shipped calibration on the condition's cached payload. Returns the result and the solve's debug bundle:
-    the last refit's landscape under ``gdna_hyperprior`` (``None`` without a refit), the chain, the belief, the two
-    fragment-length pmfs and the EM's length tables."""
-    sj = build_sj_geometry_arrays(index)
-    bflags = build_boundary_flags_array(index)
+    the fields of ``CalibrationDiagnostics`` (the last refit's landscape under ``landscape``, ``None`` without a
+    refit; the chain; the belief), the two fragment-length pmfs and the EM's length tables."""
     cache = read_scan_cache(panel_dir / "scan_cache" / condition, index)
     kw = calibration_inputs(cache, index)
-    debug: dict = {}
-    cal = calibrate(
-        payload=kw["payload"],
-        config=config.calibration,
-        region_arrays=region_arrays,
-        strand_model=kw["strand_model"],
-        gdna_fl_pmf=kw["gdna_fl_pmf"],
-        rna_fl_pmf=kw["rna_fl_pmf"],
-        sj=sj,
-        boundary_flags=bflags,
-        _debug=debug,
-    )
+    diagnostics = CalibrationDiagnostics()
+    cal = calibrate(config=config.calibration, diagnostics=diagnostics, **kw)
+    debug = {f.name: getattr(diagnostics, f.name) for f in dataclasses.fields(diagnostics)}
     debug["gdna_fl_pmf"] = kw["gdna_fl_pmf"]
     debug["rna_fl_pmf"] = kw["rna_fl_pmf"]
     # the EM's two length tables as production builds them on this payload: the shipped ruler reads them
@@ -259,17 +260,11 @@ def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, c
     return cal, debug
 
 
-def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, gdna_fl_pmf):
+def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str):
     """The same result with the ruler's gDNA masses replaced by the certified truth per object, read by the
     shipped reader under a landscape fitted on the truth: the ideal witness, with no estimator noise."""
-    z = np.load(panel_dir / "oracle_cache" / condition / "slot_truth.npz", allow_pickle=True)
-    kind, obj, n_g = z["kind"], z["obj"], z["n_gdna"]
-    m_reg = np.zeros_like(np.asarray(cal.count_gdna_region, float))
-    m_bnd = np.zeros_like(np.asarray(cal.count_gdna_boundary, float))
-    r = kind == int(REGION)
-    b = kind == int(BOUNDARY)
-    m_reg[obj[r]] = n_g[r]
-    m_bnd[obj[b]] = n_g[b]
+    truth = sibling("_oracle_arms.py").certified_gdna(panel_dir / "oracle_cache" / condition)
+    m_reg, m_bnd = truth["region"], truth["boundary"]
     S = np.maximum(np.asarray(cal.gdna_region_eff_len, float), 1e-9)
     rtype = coarse_type_array(np.asarray(region_arrays.signature))
     live = S > 1e-9
@@ -407,7 +402,7 @@ def run_condition(index, region_arrays, index_dir, panel_dir, condition, config,
         cal,
     )
     if (panel_dir / "oracle_cache" / condition / "slot_truth.npz").is_file():
-        o = oracle_gdna_result(cal, region_arrays, panel_dir, condition, inputs["gdna_fl_pmf"])
+        o = oracle_gdna_result(cal, region_arrays, panel_dir, condition)
         out["oracle_gdna"] = (
             transcript_capture_eff_lengths(o, region_arrays, index, truth.L_plain, tables),
             o,
@@ -450,7 +445,7 @@ def print_condition(condition, truth, factors, min_frags, elapsed):
             )
 
 
-def main() -> int:
+def _parse_args():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--panel", choices=sorted(PANELS), default="test")
     ap.add_argument(
@@ -462,65 +457,52 @@ def main() -> int:
     ap.add_argument("--condition", default=None, help="one condition, the full per-class table")
     ap.add_argument("--module", type=Path, default=None, help="a .py defining ARMS = {name: ruler}")
     ap.add_argument("--min-frags", type=int, default=20, help="observed RNA fragments a scored transcript needs")
-    ap.add_argument(
-        "--set",
-        dest="settings",
-        action="append",
-        default=[],
-        metavar="SECTION.FIELD=VALUE",
-        help="override one PipelineConfig field on every arm; repeatable",
-    )
+    add_set_option(ap, "override one PipelineConfig field on every arm; repeatable")
     ap.add_argument("--out", type=Path, default=None, help="the per-transcript table (one condition)")
     ap.add_argument("--scale", action="store_true", help="THE ONE-SCALE READ-OUT: L / Y per hypothesis class (one condition)")
     ap.add_argument("--width-step", type=int, default=1, help="--scale: thin the gDNA-space yield's width grid by this step")
     ap.add_argument("--self-test", action="store_true", help="perturb every comparator; no panel")
-    args = ap.parse_args()
-    if args.self_test:
-        return self_test()
+    return ap.parse_args()
 
-    index_dir, panel_dir = PANELS[args.panel]
-    if args.panel_dir is not None:
-        panel_dir = args.panel_dir
-    config = PipelineConfig()
-    for spec in args.settings:
-        config = set_field(config, spec)
-    arms = load_arms(args.module)
-    index = TranscriptIndex.load(str(index_dir))
-    region_arrays = RegionArrays.from_index(index)
 
-    if args.scale:
-        if not args.condition:
-            raise SystemExit("⛔ --scale reads one condition: pass --condition")
-        r = scale_readout(index, region_arrays, index_dir, panel_dir, args.condition, config, args.min_frags, args.width_step)
-        print_scale(r)
-        if args.out:
-            pd.DataFrame(r["per_transcript"]).to_csv(args.out, sep="\t", index=False)
-            pd.DataFrame(r["per_locus"]).to_csv(args.out.with_name(args.out.stem + "_loci" + args.out.suffix), sep="\t", index=False)
-            print(f"   per-transcript and per-locus tables → {args.out} and its _loci twin")
-        return 0
-    if args.condition:
-        t0 = time.time()
-        truth, factors = run_condition(
-            index, region_arrays, index_dir, panel_dir, args.condition, config, arms, args.min_frags
-        )
-        print_condition(args.condition, truth, factors, args.min_frags, time.time() - t0)
-        if args.out:
-            table = pd.DataFrame(
-                dict(
-                    t_id=index.t_df.t_id,
-                    kind=truth.kind,
-                    probed_frac=truth.probed_frac,
-                    frags=truth.frags,
-                    abundance=truth.abundance,
-                    L_plain=truth.L_plain,
-                    factor_true=truth.factor,
-                    **{f"factor_{k}": v[0] for k, v in factors.items()},
-                )
+def run_scale(args, index, index_dir, panel_dir, config) -> None:
+    """``--scale``: the one-scale read-out for one condition, and its per-transcript and per-locus tables."""
+    if not args.condition:
+        raise SystemExit("⛔ --scale reads one condition: pass --condition")
+    r = scale_readout(index, index_dir, panel_dir, args.condition, config, args.min_frags, args.width_step)
+    print_scale(r)
+    if args.out:
+        pd.DataFrame(r["per_transcript"]).to_csv(args.out, sep="\t", index=False)
+        pd.DataFrame(r["per_locus"]).to_csv(args.out.with_name(args.out.stem + "_loci" + args.out.suffix), sep="\t", index=False)
+        print(f"   per-transcript and per-locus tables → {args.out} and its _loci twin")
+
+
+def run_one(args, index, region_arrays, index_dir, panel_dir, config, arms) -> None:
+    """``--condition``: every arm's per-class table on one condition, and its per-transcript table."""
+    t0 = time.time()
+    truth, factors = run_condition(
+        index, region_arrays, index_dir, panel_dir, args.condition, config, arms, args.min_frags
+    )
+    print_condition(args.condition, truth, factors, args.min_frags, time.time() - t0)
+    if args.out:
+        table = pd.DataFrame(
+            dict(
+                t_id=index.t_df.t_id,
+                kind=truth.kind,
+                probed_frac=truth.probed_frac,
+                frags=truth.frags,
+                abundance=truth.abundance,
+                L_plain=truth.L_plain,
+                factor_true=truth.factor,
+                **{f"factor_{k}": v[0] for k, v in factors.items()},
             )
-            table.to_csv(args.out, sep="\t", index=False)
-            print(f"   per-transcript table → {args.out}")
-        return 0
+        )
+        table.to_csv(args.out, sep="\t", index=False)
+        print(f"   per-transcript table → {args.out}")
 
+
+def run_sweep(args, index, region_arrays, index_dir, panel_dir, config, arms) -> None:
+    """Every cached capture-ON condition of the panel, one headline line per condition and arm."""
     conds = sorted(
         p.name
         for p in (panel_dir / "scan_cache").iterdir()
@@ -558,6 +540,26 @@ def main() -> int:
             )
         print(f"{c[-44:]:<44}{ref:>12} " + " ".join(f"{x:>30}" for x in cells) + f"   ({time.time() - t0:.0f} s)")
     print("   columns per arm: probed within ±0.1 / n · unprobed median / n · partial median / n")
+
+
+def main() -> int:
+    args = _parse_args()
+    if args.self_test:
+        return self_test()
+
+    index_dir, panel_dir = PANELS[args.panel]
+    if args.panel_dir is not None:
+        panel_dir = args.panel_dir
+    config = configured(args.settings)
+    arms = load_arms(args.module)
+    index = TranscriptIndex.load(str(index_dir))
+    region_arrays = RegionArrays.from_index(index)
+    if args.scale:
+        run_scale(args, index, index_dir, panel_dir, config)
+    elif args.condition:
+        run_one(args, index, region_arrays, index_dir, panel_dir, config, arms)
+    else:
+        run_sweep(args, index, region_arrays, index_dir, panel_dir, config, arms)
     return 0
 
 
@@ -603,7 +605,7 @@ def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
     PRIORS.assemble_priors = priors_hook
     FL.build_fl_models = fl_hook
     try:
-        run_pipeline(str(panel_dir / condition / "sim_oracle.bam"), index, config)
+        run_pipeline(str(panel_dir / condition / ORACLE_BAM), index, config)
     except SystemExit:
         pass
     finally:
@@ -638,12 +640,12 @@ def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, w
             hi = np.minimum(bb[:, 3] - 1, RL - w)
             n_starts = np.maximum(hi - lo + 1, 0).astype(np.float64)
             # less the starts the simulator never drew, whose fragment covers an unknown base
-            blocked = sim.sampler._blocked("gdna", name, RL - w + 1, w)
+            blocked = sim.sampler.blocked_starts("gdna", name, RL - w + 1, w)
             if blocked is not None:
                 n_starts -= np.maximum(_blocked_below(blocked, hi + 1) - _blocked_below(blocked, lo), 0)
             sw = np.zeros(bb.shape[0])
             if live:
-                pos, wt = sim.sampler._extra_landscape("gdna", name, RL, w)
+                pos, wt = sim.sampler.binding_landscape("gdna", name, RL, w)
                 if pos.size:
                     cs = np.concatenate(([0.0], np.cumsum(wt)))
                     a = np.searchsorted(pos, lo, side="left")
@@ -668,9 +670,8 @@ def _blocked_below(blocked: np.ndarray, x: np.ndarray) -> np.ndarray:
 def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
     """The shipped gDNA component's length at efficiency 1 over one footprint ``(ref_id, start, end)``:
     ``priors.assemble_priors`` itself, on a result carrying calibration's own geometry for this partition
-    (the contained supports and ``calibrate._gdna_boundary_conserved_len``) and no landscape."""
-    from rigel.calibration.calibrate import _gdna_boundary_conserved_len
-    from rigel.calibration.effective_length import contained_eff_length
+    (the contained supports and ``effective_length.observable_cut_shares``) and no landscape."""
+    from rigel.calibration.effective_length import contained_eff_length, observable_cut_shares
     from rigel.calibration.priors import assemble_priors
     from rigel.calibration.region_arrays import boundary_region_indices
     from rigel.calibration.result import CalibrationResult
@@ -686,7 +687,7 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
         count_rna_spliced_boundary=ez, boundary_mass_per_crossing=np.ones(ne), count_rna_sj=np.zeros(0),
         boundary_spliced_mass_per_crossing=np.ones(ne), sj_mass_per_crossing=np.zeros(0),
         gdna_region_eff_len=contained_eff_length(length, gdna_fl_pmf), gdna_boundary_eff_len=ez,
-        gdna_boundary_conserved_len=_gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
+        gdna_boundary_conserved_len=observable_cut_shares(region_arrays, gdna_fl_pmf),
         gdna_frac_region=z, rna_pos_frac_region=z,
         rna_neg_frac_region=z, gdna_frac_boundary=ez, rna_pos_frac_boundary=ez, rna_neg_frac_boundary=ez,
         gdna_density_global=0.0, gdna_bulk_density=None, gdna_capture_saturation=1.0,
@@ -706,7 +707,7 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
 
 def footprint_probed_fraction(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict) -> np.ndarray:
     """Per locus: the fraction of the footprint's bases under a probe part, read off the sampler's gDNA-space probe
-    map (``_get_intervals("gdna", ref)``, the union of its parts). It is the locus gDNA component's analogue of a
+    map (``probe_intervals("gdna", ref)``, the union of its parts). It is the locus gDNA component's analogue of a
     transcript's probed fraction, so locus rows can be read by probed class beside transcript rows."""
     covered = np.zeros(n_loci, dtype=np.float64)
     length = np.zeros(n_loci, dtype=np.float64)
@@ -714,7 +715,7 @@ def footprint_probed_fraction(sim: Sim, blocks: np.ndarray, n_loci: int, id2name
         return np.zeros(n_loci)
     for rid in np.unique(blocks[:, 1]):
         name = id2name[int(rid)]
-        parts = sim.sampler._get_intervals("gdna", name) if sim.sampler.enabled else []
+        parts = sim.sampler.probe_intervals("gdna", name) if sim.sampler.enabled else []
         merged: list[list[int]] = []
         for iv in sorted(parts, key=lambda x: (int(x.start), int(x.end))):
             a, b = int(iv.start), int(iv.end)
@@ -738,7 +739,7 @@ def footprint_probed_fraction(sim: Sim, blocks: np.ndarray, n_loci: int, id2name
 def junction_probed_flags(sim: Sim, index: TranscriptIndex) -> np.ndarray:
     """Per transcript: does a probe part in the transcript's own space strictly span one of its junctions?
 
-    Read off the sampler's probe map (``_get_intervals("mrna", row)``) against the junction positions in transcript
+    Read off the sampler's probe map (``probe_intervals("mrna", row)``) against the junction positions in transcript
     coordinates, 5′ to 3′. These are the junction-probed transcripts, whose junction placements bind a probe no
     gDNA witness can see."""
     from rigel.types import Strand
@@ -763,7 +764,7 @@ def junction_probed_flags(sim: Sim, index: TranscriptIndex) -> np.ndarray:
         if int(strand[i]) != int(Strand.POS):
             lengths = lengths[::-1]
         junctions = np.cumsum(lengths)[:-1]
-        intervals = sim.sampler._get_intervals("mrna", i)
+        intervals = sim.sampler.probe_intervals("mrna", i)
         if not intervals:
             continue
         for iv in intervals:
@@ -807,73 +808,84 @@ def scale_verdict(means: dict) -> tuple[float, str]:
     return float(np.expm1(worst)), pair
 
 
-def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config, min_frags: int, width_step: int):
-    """The one-scale read-out for one condition: every hypothesis class's L / Y on the shipped lengths, the pairwise
-    class-mean ratios and their verdict, the same by probed class, and the within-gene spread of the annotated
-    transcripts."""
-    t0 = time.time()
-    truth = load_truth(index, index_dir, panel_dir, condition)
-    sim = load_sim(index, index_dir, panel_dir, condition)
-    Y_t = np.where(np.isfinite(truth.factor), truth.L_plain * truth.factor, np.nan)
-    cap = em_loci(index, panel_dir, condition, config)
-    loci, pri = cap["multi_loci"], cap["priors"]
-    t = index.t_df
-    syn = t["is_synthetic"].to_numpy(dtype=bool)
-    single = (~syn) & t["is_single_exon"].to_numpy(dtype=bool)
-    multi = (~syn) & ~single
-    frags = truth.frags
-    # the locus gDNA component against the gDNA-space yield
-    id2name = {v: k for k, v in index.ref_name_to_id.items()}
+def locus_blocks(loci) -> tuple[int, np.ndarray]:
+    """``(n_loci, blocks)``: the EM's loci as ``int64[n, 4]`` rows ``(locus, ref_id, start, end)``, one per
+    non-empty footprint block."""
     n_loci = max((int(ml.multi_locus_id) for ml in loci), default=-1) + 1
     blocks = np.array(
         [(int(ml.multi_locus_id), int(b.ref_id), int(b.start), int(b.end)) for ml in loci for b in ml.loci if b.end > b.start],
         dtype=np.int64,
     ).reshape(-1, 4)
+    return n_loci, blocks
+
+
+def within_gene_sd(t_df: pd.DataFrame, live: np.ndarray, L: np.ndarray, Y: np.ndarray, weight: np.ndarray) -> float:
+    """The weighted sd of ``log(L / Y)`` about each gene's own mean, over the ``live`` transcripts; NaN when none
+    is."""
+    if not live.any():
+        return float("nan")
+    g = t_df["g_index"].to_numpy()
+    d = pd.DataFrame(dict(g=g[live], x=np.log(L[live] / Y[live]), w=weight[live]))
+    d["x"] -= d.groupby("g")["x"].transform("mean")
+    return float(np.sqrt(np.average(d["x"] ** 2, weights=d["w"])))
+
+
+def scale_readout(index, index_dir, panel_dir, condition, config, min_frags: int, width_step: int):
+    """The one-scale read-out for one condition: every hypothesis class's L / Y on the shipped lengths, the pairwise
+    class-mean ratios and their verdict, the same by probed class, and the within-gene spread of the annotated
+    transcripts."""
+    t0 = time.time()
+    sim = load_sim(index, index_dir, panel_dir, condition)
+    truth = load_truth(index, index_dir, panel_dir, condition, sim)
+    Y_t = np.where(np.isfinite(truth.factor), truth.L_plain * truth.factor, np.nan)
+    cap = em_loci(index, panel_dir, condition, config)
+    t = index.t_df
+    syn = t["is_synthetic"].to_numpy(dtype=bool)
+    single = (~syn) & t["is_single_exon"].to_numpy(dtype=bool)
+    multi = (~syn) & ~single
+    ruler, frags, pf = cap["ruler"], truth.frags, truth.probed_frac
+    # the locus gDNA component against the gDNA-space yield, weighted by calibration's gDNA fragments
+    id2name = {v: k for k, v in index.ref_name_to_id.items()}
+    n_loci, blocks = locus_blocks(cap["multi_loci"])
     Y_g = gdna_space_yield(sim, blocks, n_loci, id2name, width_step)
-    L_g = np.asarray(pri.gdna_eff_len, dtype=np.float64)
-    gdna_count = np.asarray(pri.gdna_count, dtype=np.float64)  # calibration's gDNA fragments: the component's weight
-    ruler = cap["ruler"]
+    L_g = np.asarray(cap["priors"].gdna_eff_len, dtype=np.float64)
+    gdna_count = np.asarray(cap["priors"].gdna_count, dtype=np.float64)
     jp = junction_probed_flags(sim, index)
-    pf = truth.probed_frac
     pf_loc = footprint_probed_fraction(sim, blocks, n_loci, id2name)
+
+    def transcripts(m):
+        return scale_stats(ruler[m], Y_t[m], frags[m])
+
     rows: list[tuple[str, dict]] = [
         ("locus gDNA component", scale_stats(L_g, Y_g, gdna_count)),
-        ("synthetic span", scale_stats(ruler[syn], Y_t[syn], frags[syn])),
-        ("annotated single-exon", scale_stats(ruler[single], Y_t[single], frags[single])),
-        ("annotated multi-exon", scale_stats(ruler[multi], Y_t[multi], frags[multi])),
+        ("synthetic span", transcripts(syn)),
+        ("annotated single-exon", transcripts(single)),
+        ("annotated multi-exon", transcripts(multi)),
     ]
     by_class: dict[str, dict] = {}
     for cname, lo, hi in CLASSES:
         m = multi & (pf >= lo) & (pf < hi)
-        ms = syn & (pf >= lo) & (pf < hi)
         ml = (pf_loc >= lo) & (pf_loc < hi)
-        rows.append((f"  multi-exon {cname}, no junction probe", scale_stats(ruler[m & ~jp], Y_t[m & ~jp], frags[m & ~jp])))
-        rows.append((f"  multi-exon {cname}, JUNCTION-PROBED", scale_stats(ruler[m & jp], Y_t[m & jp], frags[m & jp])))
-        rows.append((f"  synthetic span {cname}", scale_stats(ruler[ms], Y_t[ms], frags[ms])))
-        rows.append((f"  locus gDNA footprint {cname}", scale_stats(L_g[ml], Y_g[ml], gdna_count[ml])))
-        by_class[cname] = {
-            "isoforms": scale_stats(ruler[m], Y_t[m], frags[m]),
-            "spans": rows[-2][1],
-            "gDNA": rows[-1][1],
-        }
+        spans = transcripts(syn & (pf >= lo) & (pf < hi))
+        gdna = scale_stats(L_g[ml], Y_g[ml], gdna_count[ml])
+        rows += [
+            (f"  multi-exon {cname}, no junction probe", transcripts(m & ~jp)),
+            (f"  multi-exon {cname}, JUNCTION-PROBED", transcripts(m & jp)),
+            (f"  synthetic span {cname}", spans),
+            (f"  locus gDNA footprint {cname}", gdna),
+        ]
+        by_class[cname] = {"isoforms": transcripts(m), "spans": spans, "gDNA": gdna}
     stats = dict(rows)
     means = {
         "gDNA": stats["locus gDNA component"]["geomean"],
         "spans": stats["synthetic span"]["geomean"],
         "isoforms": stats["annotated multi-exon"]["geomean"],
     }
-    # within-gene spread of the annotated multi-exon transcripts: the sd of log(L / Y) about the gene mean
     live = multi & np.isfinite(Y_t) & (Y_t > 0) & (ruler > 0) & (frags >= min_frags)
-    g = t["g_index"].to_numpy()
-    within = float("nan")
-    if live.any():
-        d = pd.DataFrame(dict(g=g[live], x=np.log(ruler[live] / Y_t[live]), w=frags[live]))
-        d["x"] -= d.groupby("g")["x"].transform("mean")
-        within = float(np.sqrt(np.average(d["x"] ** 2, weights=d["w"])))
-    elapsed = time.time() - t0
-    return dict(condition=condition, stats=stats, means=means, by_class=by_class, within_gene_sd=within,
+    return dict(condition=condition, stats=stats, means=means, by_class=by_class,
+                within_gene_sd=within_gene_sd(t, live, ruler, Y_t, frags),
                 n_junction_probed=int(jp[multi].sum()),
-                n_multi=int(multi.sum()), n_loci=int(n_loci), elapsed=elapsed,
+                n_multi=int(multi.sum()), n_loci=int(n_loci), elapsed=time.time() - t0,
                 per_transcript=dict(t_id=t["t_id"].to_numpy(), kind=truth.kind, probed_frac=pf, junction_probed=jp, frags=frags,
                                     Y=Y_t, L=ruler),
                 per_locus=dict(locus=np.arange(n_loci), Y=Y_g, L=L_g, gdna_count=gdna_count, probed_frac=pf_loc))
@@ -922,20 +934,35 @@ def print_scale(r: dict) -> None:
 # ── the self-test ────────────────────────────────────────────────────────────────────────────────
 
 
-def self_test() -> int:
-    """Perturb every comparator on a synthetic panel with a known partition, and require each to fire.
+@dataclasses.dataclass
+class _Panel:
+    """The self-test's synthetic panel: a tiny index with a fully probed (``p``), a half-probed (``h``) and an
+    unprobed (``u``) gene, the probe file its sampler reads, and the fragment-length law."""
 
-    The panel is a tiny index with a fully probed, a half-probed and an unprobed gene and a probe file the sampler
-    reads. The truth is the sampler's own; the arms are rulers written here."""
-    import tempfile
+    tmp: Path
+    index: TranscriptIndex
+    transcripts: list
+    sampler: CaptureSampler
+    widths: np.ndarray
+    pmf: np.ndarray
+    off: float
+    binding: float
+    L: np.ndarray
+    p: int
+    h: int
+    u: int
 
+    def sim(self) -> Sim:
+        """The panel as the yield reads it: RNA and gDNA under the same law."""
+        widths = np.asarray(self.widths, dtype=np.int64)
+        pmf = np.asarray(self.pmf, dtype=np.float64)
+        return Sim(self.sampler, widths, pmf, self.off, self.binding, {"chr1": 16000}, self.transcripts, widths, pmf)
+
+
+def _self_test_panel(tmp: Path) -> _Panel:
+    # the self-test is test code, so it builds its index with the suite's one synthetic-index builder
     sys.path.insert(0, str(_REPO / "tests"))
-    from _index_builder import build_test_index
-
-    checks: list[tuple[str, bool]] = []
-
-    def check(name: str, ok: bool):
-        checks.append((name, bool(ok)))
+    from _index_builder import build_index
 
     gtf = "".join(
         f'chr1\ttest\texon\t{s + 1}\t{s + 600}\t.\t+\t.\tgene_id "{g}"; transcript_id "{t}";\n'
@@ -946,240 +973,262 @@ def self_test() -> int:
         )
         for s in starts
     )
+
+    (tmp / "ruler_self_test").mkdir()
+    index = build_index(tmp / "ruler_self_test", gtf, {"chr1": 16000})
+    bed = tmp / "probes.bed"
+    # the probed gene's one probe spans both exons as a two-block BED12 line, contiguous in cDNA, so every
+    # start of every fragment lies under it at full scale; the half-probed gene's probe covers its first exon
+    bed.write_text(
+        "chr1\t1000\t3600\tp\t0\t.\t1000\t3600\t0\t2\t600,600\t0,2000\n"
+        "chr1\t6000\t6600\th\t0\t.\t6000\t6600\t0\t1\t600\t0\n"
+    )
+    transcripts = load_transcripts_from_index(index.index_dir)
+    off, binding = 1.0, 10.0
+    sampler = CaptureSampler.from_config(
+        CaptureConfig(
+            probes=str(bed),
+            probe_format="bed12",
+            off_target_weight=off,
+            binding_per_base=binding,
+            min_overlap=1,
+        ),
+        transcripts,
+        {"chr1": 16000},
+    )
+    widths, pmf = fl_pmf(type("Sim", (), dict(frag_mean=200, frag_std=50, frag_min=100, frag_max=300)))
+    row = {tid: int(i) for i, tid in enumerate(index.t_df.t_id)}
+    L = np.array([int(t.length) for t in transcripts], dtype=np.int64)
+    return _Panel(tmp, index, transcripts, sampler, widths, pmf, off, binding, L,
+                  row["probed"], row["half"], row["unprobed"])
+
+
+def _check_manifest_loader(panel: _Panel, check) -> None:
+    """The manifest loader keeps the RNA and gDNA laws apart and masks what the simulator never drew."""
+    # its genome is known sequence but for two assembly gaps, one in the unprobed gene's intron and one in its
+    # second exon
+    bases = np.random.default_rng(0).choice(np.frombuffer(b"ACGT", dtype=np.uint8), 16000)
+    bases[12200:12300] = ord("N")
+    bases[13100:13120] = ord("N")
+    genome = panel.tmp / "known.fa"
+    genome.write_text(">chr1\n" + bases.tobytes().decode() + "\n")
+    pysam.faidx(str(genome))
+    rna_law = dict(frag_mean=200, frag_std=50, frag_min=100, frag_max=300)
+    manifest = {
+        "genome": str(genome),
+        "simulation": rna_law,
+        "gdna": dict(frag_mean=80, frag_std=10, frag_min=60, frag_max=100, genomic_refs=["chr1"]),
+        "capture_configs": [{"label": "off", "config": {"off_target_weight": 1.0}}],
+    }
+    manifest_path = panel.tmp / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+
+    def load():
+        return load_sim(panel.index, Path(panel.index.index_dir), panel.tmp, "example_capture_off")
+
+    loaded = load()
+    gw, gp = fl_pmf(type("GDNA", (), {k: v for k, v in manifest["gdna"].items() if k != "genomic_refs"}))
+    check("the manifest loader keeps distinct RNA and gDNA laws",
+          np.array_equal(loaded.widths, panel.widths) and np.array_equal(loaded.pmf, panel.pmf)
+          and np.array_equal(loaded.gdna_widths, gw) and np.array_equal(loaded.gdna_pmf, gp))
+    # the loader masks the gDNA reference at its gaps, and the unprobed transcript at the exon gap in its own
+    # coordinates (600 bases of first exon, then 100 into the second)
+    u = panel.u
+    check("the loader masks the gDNA reference at the genome's unknown runs",
+          loaded.sampler.unknown("gdna", "chr1").tolist() == [[12200, 12300], [13100, 13120]])
+    check("...and each transcript at its own", loaded.sampler.unknown("mrna", u).tolist() == [[700, 720]])
+    plain, factor, _ = sampler_truth(loaded.sampler, panel.L, panel.widths, panel.pmf, 1.0)
+    enumerated = sum(
+        pw * sum(1 for st in range(int(panel.L[u]) - int(wv) + 1) if st + int(wv) <= 700 or st >= 720)
+        for wv, pw in zip(panel.widths, panel.pmf, strict=True)
+    )
+    check("a masked transcript's plain length counts only the starts the simulator could draw",
+          abs(plain[u] / enumerated - 1.0) < 1e-12)
+    check("...so masking leaves an uncaptured transcript's factor exactly 1", factor[u] == 1.0)
+    manifest_path.write_text(json.dumps({k: v for k, v in manifest.items() if k != "genome"}))
+    fired = refuses(load)
+    manifest_path.write_text(json.dumps(manifest))
+    check("a manifest naming no genome is refused", fired)
+    manifest["gdna"] = {"frag_mean": 100}
+    manifest_path.write_text(json.dumps(manifest))
+    loaded = load()
+    gw, gp = fl_pmf(dataclasses.replace(GDNASimConfig(), frag_mean=100))
+    check("missing gDNA fields use simulator defaults independently of RNA",
+          np.array_equal(loaded.gdna_widths, gw) and np.array_equal(loaded.gdna_pmf, gp))
+
+
+def _check_truth(panel: _Panel, check) -> Truth:
+    """The truth factor and the probed fraction, read off the sampler; returns the panel's truth."""
+    L_plain, factor, probed = sampler_truth(panel.sampler, panel.L, panel.widths, panel.pmf, panel.off)
+    p, h, u = panel.p, panel.h, panel.u
+    # an unprobed transcript's factor is exactly 1, a fully probed one's is 1 + binding·E[w]/off, a half-probed
+    # one's lies strictly between
+    check("an unprobed transcript's truth factor is exactly 1", factor[u] == 1.0)
+    mean_w = float(np.dot(panel.widths, panel.pmf))
+    check(
+        "a fully probed transcript's truth factor is 1 + binding·E[w]/off",
+        abs(factor[p] / (1.0 + panel.binding * mean_w / panel.off) - 1.0) < 0.02,
+    )
+    check("a half-probed transcript's factor lies between", 1.0 < factor[h] < factor[p])
+    # the class is read off the sampler: probed 1, unprobed 0, half-probed ½
+    check("probed fraction: fully probed reads 1", abs(probed[p] - 1.0) < 1e-9)
+    check("probed fraction: unprobed reads 0", probed[u] == 0.0)
+    check("probed fraction: half-probed reads ½", abs(probed[h] - 0.5) < 1e-9)
+    n = panel.L.size
+    return Truth(L_plain, factor, probed, transcript_kinds(panel.index.t_df), np.full(n, 100.0), np.full(n, 10.0))
+
+
+def _check_score(panel: _Panel, truth: Truth, check) -> None:
+    """The anchored log error: zero on the truth, blind to a global scale, anchored on the probed class."""
+    p, u = panel.p, panel.u
+    factor = truth.factor
+    d, measured, n_zero = score(factor, truth, min_frags=20)
+    rows = class_rows(d, measured, truth)
+    check("the truth scores exactly 0 on every class", all(abs(r["med"]) < 1e-12 for r in rows))
+    check("every class is 100 % within the tolerance", all(r["within"] == 1.0 for r in rows))
+    check("no zero factor on the truth", n_zero == 0)
+    d3, _, _ = score(factor * 3.0, truth, min_frags=20)
+    check("a global scale is anchored away", np.allclose(d3[measured], d[measured]))
+    # the unprobed class moves by log 2 when its factor is doubled, the probed class not at all
+    f2 = factor.copy()
+    f2[u] *= 2.0
+    d2, m2, _ = score(f2, truth, min_frags=20)
+    check("a doubled unprobed factor reads +log 2 on the unprobed class", abs(d2[u] - np.log(2.0)) < 1e-9)
+    check("...and leaves the probed class at 0", abs(d2[p]) < 1e-12)
+    check("the headline carries the unprobed median", abs(headline(d2, m2, truth)["unprobed_med"] - np.log(2.0)) < 1e-9)
+    # a factor of exactly 0 is counted and dropped, never a −inf in the quantiles
+    f0 = factor.copy()
+    f0[u] = 0.0
+    d0, m0, z0 = score(f0, truth, min_frags=20)
+    check("a zero factor is counted", z0 == 1)
+    check("...and dropped from the measured set", not m0[u] and np.isfinite(d0[m0]).all())
+    # the fragment floor: a transcript under it is not scored
+    few = dataclasses.replace(truth, frags=np.where(np.arange(factor.size) == u, 5.0, 100.0))
+    _, m5, _ = score(factor, few, min_frags=20)
+    check("a transcript under the fragment floor is not measured", not m5[u] and m5[p])
+    # the anchor is the probed class: with the probed class biased, everything shifts by its bias
+    fb = factor.copy()
+    fb[p] *= 5.0
+    db, _, _ = score(fb, truth, min_frags=20)
+    check("the anchor is the probed class's median", abs(db[p]) < 1e-12 and abs(db[u] + np.log(5.0)) < 1e-9)
+
+
+def _check_module_loader(tmp: Path, check) -> None:
+    """The prototype loader refuses a file without ``ARMS`` and a reserved arm name."""
+    bad = tmp / "bad.py"
+    bad.write_text("X = 1\n")
+    check("a module without ARMS is refused", refuses(load_arms, bad))
+    reserved = tmp / "reserved.py"
+    reserved.write_text("ARMS = {'shipped': lambda *a: None}\n")
+    check("a prototype arm named `shipped` is refused", refuses(load_arms, reserved))
+    good = tmp / "good.py"
+    good.write_text("def r(cal, ra, index, fl, **inputs):\n    return fl\nARMS = {'plain': r}\n")
+    check("a well-formed prototype loads", list(load_arms(good)) == ["plain"])
+
+
+def _check_one_scale(panel: _Panel, truth: Truth, check) -> None:
+    """A class priced at its own yield reads 1; a class scaled by 1.185 is named as the pair, and a per-mille
+    difference is inside the tolerance."""
+    Y = truth.L_plain * truth.factor
+    s_true = scale_stats(Y, Y, np.full(panel.L.size, 100.0))
+    check("a class priced at its own yield reads L / Y = 1 with no spread", abs(s_true["geomean"] - 1.0) < 1e-12 and s_true["sd_log"] < 1e-12)
+    worst, pair = scale_verdict({"gDNA": 1.0, "spans": 1.185, "isoforms": 1.0})
+    check("a 1.185 scale on one class is named as its pair", abs(worst - 0.185) < 1e-9 and "spans" in pair)
+    check("...and is outside the tolerance, while a per-mille difference is inside", worst > ONE_SCALE_TOL and scale_verdict({"a": 1.0, "b": 1.001})[0] < ONE_SCALE_TOL)
+
+
+def _enumerated_yield(sampler: CaptureSampler, sim: Sim, blocks: np.ndarray) -> np.ndarray:
+    """The gDNA-space yield by direct enumeration of every start whose fragment overlaps each block."""
+    direct = np.zeros(2)
+    for lid, _rid, lo, hi in blocks:
+        for wv, pw in zip(sim.gdna_widths, sim.gdna_pmf, strict=True):
+            direct[lid] += pw * sum(
+                sampler.fragment_weight("gdna", "chr1", 16000, start, int(wv))
+                for start in range(max(0, int(lo-wv+1)), min(int(hi), 16000-int(wv)+1))
+            )
+    return direct
+
+
+def _check_gdna_space(panel: _Panel, check) -> None:
+    """The junction-probed flag, the gDNA-space yield (under unequal laws and under a mask), and the footprint's
+    length and probed fraction, each read off the sampler's own probe map."""
+    sim, p, h, u, off = panel.sim(), panel.p, panel.h, panel.u, panel.off
+    # the probed gene's two-block probe spans its junction, the half-probed gene's single-exon probe does not, the
+    # unprobed gene has none
+    jp = junction_probed_flags(sim, panel.index)
+    check("a probe spanning a transcript's junction flags it, and only it", bool(jp[p]) and not jp[h] and not jp[u])
+    # the yield counts every start whose fragment overlaps the footprint, so a block over the unprobed gene reads
+    # exactly off · Σ_w f(w)(L + w − 1); a block over the probed gene reads more
+    blocks = np.array([(0, 0, 11000, 13600), (1, 0, 1000, 3600)], dtype=np.int64)
+    Yg = gdna_space_yield(sim, blocks, 2, {0: "chr1"}, width_step=1)
+    plain = float(sum(pw * off * (2600 + int(wv) - 1) for wv, pw in zip(panel.widths, panel.pmf, strict=True)))
+    check("an unprobed footprint's gDNA-space yield is its off-target plain length", abs(Yg[0] / plain - 1.0) < 1e-9)
+    check("...and a probed footprint's yield exceeds it", Yg[1] > Yg[0] * 2.0)
+    # unequal generating laws: the gDNA truth follows its own pmf, independent of RNA
+    gap = dataclasses.replace(sim, gdna_widths=np.array([60, 80, 100]), gdna_pmf=np.array([0.25, 0.5, 0.25]))
+    Ygap = gdna_space_yield(gap, blocks, 2, {0: "chr1"}, width_step=1)
+    check("a gDNA length gap changes its footprint truth", not np.array_equal(Ygap, Yg))
+    check("the unprobed gap footprint uses E_g[w]", abs(Ygap[0] - off * (2600 + 80 - 1)) < 1e-9)
+    changed_rna = dataclasses.replace(gap, widths=np.array([400]), pmf=np.array([1.0]))
+    check("changing only RNA widths leaves gDNA truth identical",
+          np.array_equal(Ygap, gdna_space_yield(changed_rna, blocks, 2, {0: "chr1"}, width_step=1)))
+    check("gap gDNA truth agrees with direct captured-start enumeration",
+          np.allclose(Ygap, _enumerated_yield(panel.sampler, gap, blocks), rtol=1e-12, atol=1e-9))
+    _check_footprints(panel, sim, plain, check)
+    # under a mask: the yield drops every start whose fragment covers an unknown base, as the simulator's own
+    # weights do, and a probed transcript's probed fraction is over its known bases
+    sampler = panel.sampler
+    sampler.mask_unknown("gdna", "chr1", [(12000, 12100), (2000, 2050)])
+    Ym = gdna_space_yield(gap, blocks, 2, {0: "chr1"}, width_step=1)
+    check("a masked gDNA footprint's yield agrees with direct enumeration of the drawable starts",
+          np.allclose(Ym, _enumerated_yield(sampler, gap, blocks), rtol=1e-12, atol=1e-9) and (Ym < Ygap).all())
+    sampler.mask_unknown("gdna", "chr1", [])
+    sampler.mask_unknown("mrna", p, [(100, 140)])
+    _, _, probed_m = sampler_truth(sampler, panel.L, panel.widths, panel.pmf, off)
+    check("a fully probed transcript with unknown bases still reads probed fraction 1", abs(probed_m[p] - 1.0) < 1e-9)
+    sampler.mask_unknown("mrna", p, [])
+
+
+def _check_footprints(panel: _Panel, sim: Sim, plain: float, check) -> None:
+    """The shipped gDNA component's length at efficiency 1 counts the yield's overlapping starts, and the
+    footprint's probed fraction is read off the sampler's gDNA-space probe map."""
+    # the footprint's outside neighbours hold every outside base, so each crossing fragment starts in a neighbour
+    # and its whole unit lands on the footprint's objects: Σ_w f(w)(L + w − 1), as the yield counts
+    ra_t = RegionArrays.from_index(panel.index)
+    # the geometry indexes a pmf by width (calibration's convention); the simulator's pair is positional
+    by_width = np.zeros(int(max(panel.widths)) + 1)
+    by_width[np.asarray(panel.widths, dtype=np.int64)] = np.asarray(panel.pmf, dtype=np.float64)
+    Lfp = footprint_gdna_length(ra_t, (0, 11000, 13600), by_width)
+    check("the gDNA component's length at efficiency 1 is the yield's overlapping-start count", abs(Lfp / (plain / panel.off) - 1.0) < 1e-9)
+    # the unprobed gene's block reads 0, a block exactly on one probe part reads 1, a block half on it reads ½
+    parts = sim.sampler.probe_intervals("gdna", "chr1")
+    a, b = int(parts[0].start), int(parts[0].end)
+    pf_loc = footprint_probed_fraction(sim, np.array([(0, 0, 11000, 13600), (1, 0, a, b), (2, 0, a - (b - a), b)], dtype=np.int64), 3, {0: "chr1"})
+    check("an unprobed footprint's probed fraction is 0", pf_loc[0] == 0.0)
+    check("a footprint exactly on a probe part reads 1", abs(pf_loc[1] - 1.0) < 1e-12)
+    check("...and one half on it reads ½", abs(pf_loc[2] - 0.5) < 1e-12)
+
+
+def self_test() -> int:
+    """Perturb every comparator on a synthetic panel with a known partition, and require each to fire.
+
+    The panel is a tiny index with a fully probed, a half-probed and an unprobed gene and a probe file the sampler
+    reads. The truth is the sampler's own; the arms are rulers written here."""
+    import tempfile
+
+    checks: list[tuple[str, bool]] = []
+
+    def check(name: str, ok: bool):
+        checks.append((name, bool(ok)))
+
     with tempfile.TemporaryDirectory() as tmp:
-
-        class _Factory:
-            def mktemp(self, name):
-                p = Path(tmp) / name
-                p.mkdir()
-                return p
-
-        index = build_test_index(_Factory(), gtf, genome_size=16000, name="ruler_self_test")
-        bed = Path(tmp) / "probes.bed"
-        # the probed gene's one probe spans both exons as a two-block BED12 line, contiguous in cDNA, so every
-        # start of every fragment lies under it at full scale; the half-probed gene's probe covers its first exon
-        bed.write_text(
-            "chr1\t1000\t3600\tp\t0\t.\t1000\t3600\t0\t2\t600,600\t0,2000\n"
-            "chr1\t6000\t6600\th\t0\t.\t6000\t6600\t0\t1\t600\t0\n"
-        )
-        transcripts = load_transcripts_from_index(index.index_dir)
-        off, binding = 1.0, 10.0
-        sampler = CaptureSampler.from_config(
-            CaptureConfig(
-                probes=str(bed),
-                probe_format="bed12",
-                off_target_weight=off,
-                binding_per_base=binding,
-                min_overlap=1,
-            ),
-            transcripts,
-            {"chr1": 16000},
-        )
-        params = type("Sim", (), dict(frag_mean=200, frag_std=50, frag_min=100, frag_max=300))
-        widths, pmf = fl_pmf(params)
-        # the manifest loader must keep the RNA and gDNA laws distinct; its genome is known sequence but for two
-        # assembly gaps, one in the unprobed gene's intron and one in its second exon
-        bases = np.random.default_rng(0).choice(np.frombuffer(b"ACGT", dtype=np.uint8), 16000)
-        bases[12200:12300] = ord("N")
-        bases[13100:13120] = ord("N")
-        genome = Path(tmp) / "known.fa"
-        genome.write_text(">chr1\n" + bases.tobytes().decode() + "\n")
-        pysam.faidx(str(genome))
-        manifest = {
-            "genome": str(genome),
-            "simulation": {k: getattr(params, k) for k in ("frag_mean", "frag_std", "frag_min", "frag_max")},
-            "gdna": dict(frag_mean=80, frag_std=10, frag_min=60, frag_max=100, genomic_refs=["chr1"]),
-            "capture_configs": [{"label": "off", "config": {"off_target_weight": 1.0}}],
-        }
-        manifest_path = Path(tmp) / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest))
-        loaded = load_sim(index, Path(index.index_dir), Path(tmp), "example_capture_off")
-        gw, gp = fl_pmf(type("GDNA", (), {k: v for k, v in manifest["gdna"].items() if k != "genomic_refs"}))
-        check("the manifest loader keeps distinct RNA and gDNA laws",
-              np.array_equal(loaded.widths, widths) and np.array_equal(loaded.pmf, pmf)
-              and np.array_equal(loaded.gdna_widths, gw) and np.array_equal(loaded.gdna_pmf, gp))
-        # ⓪ the loader masks what the simulator never drew: the gDNA reference at its gaps, and the unprobed
-        #    transcript at the exon gap in its own coordinates (600 bases of first exon, then 100 into the second)
-        u_row = int(np.flatnonzero(index.t_df.t_id.to_numpy() == "unprobed")[0])
-        check("the loader masks the gDNA reference at the genome's unknown runs",
-              loaded.sampler.unknown("gdna", "chr1").tolist() == [[12200, 12300], [13100, 13120]])
-        check("...and each transcript at its own", loaded.sampler.unknown("mrna", u_row).tolist() == [[700, 720]])
-        L_all = np.array([int(t.length) for t in transcripts], dtype=np.int64)
-        Lm_plain, fm, _ = sampler_truth(loaded.sampler, L_all, widths, pmf, 1.0)
-        enumerated = sum(
-            pw * sum(1 for st in range(int(L_all[u_row]) - int(wv) + 1) if st + int(wv) <= 700 or st >= 720)
-            for wv, pw in zip(widths, pmf, strict=True)
-        )
-        check("a masked transcript's plain length counts only the starts the simulator could draw",
-              abs(Lm_plain[u_row] / enumerated - 1.0) < 1e-12)
-        check("...so masking leaves an uncaptured transcript's factor exactly 1", fm[u_row] == 1.0)
-        manifest_path.write_text(json.dumps({k: v for k, v in manifest.items() if k != "genome"}))
-        try:
-            load_sim(index, Path(index.index_dir), Path(tmp), "example_capture_off")
-            fired = False
-        except SystemExit:
-            fired = True
-        manifest_path.write_text(json.dumps(manifest))
-        check("a manifest naming no genome is refused", fired)
-        manifest["gdna"] = {"frag_mean": 100}
-        manifest_path.write_text(json.dumps(manifest))
-        loaded = load_sim(index, Path(index.index_dir), Path(tmp), "example_capture_off")
-        gw, gp = fl_pmf(dataclasses.replace(GDNASimConfig(), frag_mean=100))
-        check("missing gDNA fields use simulator defaults independently of RNA",
-              np.array_equal(loaded.gdna_widths, gw) and np.array_equal(loaded.gdna_pmf, gp))
-        L = np.array([int(t.length) for t in transcripts], dtype=np.int64)
-        L_plain, factor, probed = sampler_truth(sampler, L, widths, pmf, off)
-        t = index.t_df
-        row = {tid: int(i) for i, tid in enumerate(t.t_id)}
-        p, h, u = row["probed"], row["half"], row["unprobed"]
-
-        # ① the truth: an unprobed transcript's factor is exactly 1, a fully probed one's is
-        #    1 + binding·E[w]/off, a half-probed one's lies strictly between
-        check("an unprobed transcript's truth factor is exactly 1", factor[u] == 1.0)
-        mean_w = float(np.dot(widths, pmf))
-        check(
-            "a fully probed transcript's truth factor is 1 + binding·E[w]/off",
-            abs(factor[p] / (1.0 + binding * mean_w / off) - 1.0) < 0.02,
-        )
-        check("a half-probed transcript's factor lies between", 1.0 < factor[h] < factor[p])
-        # ② the class is read off the sampler: probed 1, unprobed 0, half-probed ½
-        check("probed fraction: fully probed reads 1", abs(probed[p] - 1.0) < 1e-9)
-        check("probed fraction: unprobed reads 0", probed[u] == 0.0)
-        check("probed fraction: half-probed reads ½", abs(probed[h] - 0.5) < 1e-9)
-
-        kind = np.where(
-            t.is_synthetic.to_numpy(bool),
-            "entity",
-            np.where(t.is_single_exon.to_numpy(bool), "single-exon", "mRNA"),
-        )
-        truth = Truth(L_plain, factor, probed, kind, np.full(L.size, 100.0), np.full(L.size, 10.0))
-
-        # ③ a ruler equal to the truth scores 0 on every class, and a global scale on it is free
-        d, measured, n_zero = score(factor, truth, min_frags=20)
-        rows = class_rows(d, measured, truth)
-        check("the truth scores exactly 0 on every class", all(abs(r["med"]) < 1e-12 for r in rows))
-        check("every class is 100 % within the tolerance", all(r["within"] == 1.0 for r in rows))
-        check("no zero factor on the truth", n_zero == 0)
-        d3, _, _ = score(factor * 3.0, truth, min_frags=20)
-        check("a global scale is anchored away", np.allclose(d3[measured], d[measured]))
-        # ④ the unprobed class moves by log 2 when its factor is doubled, the probed class not at all
-        f2 = factor.copy()
-        f2[u] *= 2.0
-        d2, m2, _ = score(f2, truth, min_frags=20)
-        check("a doubled unprobed factor reads +log 2 on the unprobed class", abs(d2[u] - np.log(2.0)) < 1e-9)
-        check("...and leaves the probed class at 0", abs(d2[p]) < 1e-12)
-        h2 = headline(d2, m2, truth)
-        check("the headline carries the unprobed median", abs(h2["unprobed_med"] - np.log(2.0)) < 1e-9)
-        # ⑤ a factor of exactly 0 is counted and dropped, never a −inf in the quantiles
-        f0 = factor.copy()
-        f0[u] = 0.0
-        d0, m0, z0 = score(f0, truth, min_frags=20)
-        check("a zero factor is counted", z0 == 1)
-        check("...and dropped from the measured set", not m0[u] and np.isfinite(d0[m0]).all())
-        # ⑥ the fragment floor: a transcript under it is not scored
-        few = dataclasses.replace(truth, frags=np.where(np.arange(L.size) == u, 5.0, 100.0))
-        _, m5, _ = score(factor, few, min_frags=20)
-        check("a transcript under the fragment floor is not measured", not m5[u] and m5[p])
-        # ⑦ the anchor is the probed class: with the probed class biased, everything shifts by its bias
-        fb = factor.copy()
-        fb[p] *= 5.0
-        db, _, _ = score(fb, truth, min_frags=20)
-        check("the anchor is the probed class's median", abs(db[p]) < 1e-12 and abs(db[u] + np.log(5.0)) < 1e-9)
-        # ⑧ the module loader refuses a file without ARMS, and a reserved arm name
-        bad = Path(tmp) / "bad.py"
-        bad.write_text("X = 1\n")
-        try:
-            load_arms(bad)
-            fired = False
-        except SystemExit:
-            fired = True
-        check("a module without ARMS is refused", fired)
-        reserved = Path(tmp) / "reserved.py"
-        reserved.write_text("ARMS = {'shipped': lambda *a: None}\n")
-        try:
-            load_arms(reserved)
-            fired = False
-        except SystemExit:
-            fired = True
-        check("a prototype arm named `shipped` is refused", fired)
-        good = Path(tmp) / "good.py"
-        good.write_text("def r(cal, ra, index, fl, **inputs):\n    return fl\nARMS = {'plain': r}\n")
-        check("a well-formed prototype loads", list(load_arms(good)) == ["plain"])
-        # ⑨ the one-scale read-out: a class priced at its own yield reads 1; a class scaled by 1.185 is named as
-        #    the pair, and a per-mille difference is inside the tolerance
-        Y = L_plain * factor
-        w = np.full(L.size, 100.0)
-        s_true = scale_stats(Y, Y, w)
-        check("a class priced at its own yield reads L / Y = 1 with no spread", abs(s_true["geomean"] - 1.0) < 1e-12 and s_true["sd_log"] < 1e-12)
-        means = {"gDNA": 1.0, "spans": 1.185, "isoforms": 1.0}
-        worst, pair = scale_verdict(means)
-        check("a 1.185 scale on one class is named as its pair", abs(worst - 0.185) < 1e-9 and "spans" in pair)
-        check("...and is outside the tolerance, while a per-mille difference is inside", worst > ONE_SCALE_TOL and scale_verdict({"a": 1.0, "b": 1.001})[0] < ONE_SCALE_TOL)
-        # ⑩ the junction-probed flag is read off the sampler's own probe map: the probed gene's two-block probe
-        #    spans its junction, the half-probed gene's single-exon probe does not, the unprobed gene has none
-        sim = Sim(sampler, np.asarray(widths, dtype=np.int64), np.asarray(pmf, dtype=np.float64), off, binding, {"chr1": 16000}, transcripts,
-                  np.asarray(widths, dtype=np.int64), np.asarray(pmf, dtype=np.float64))
-        jp = junction_probed_flags(sim, index)
-        check("a probe spanning a transcript's junction flags it, and only it", bool(jp[p]) and not jp[h] and not jp[u])
-        # ⑪ the gDNA-space yield counts every start whose fragment overlaps the footprint, so a block over the
-        #    unprobed gene reads exactly off · Σ_w f(w)(L + w − 1); a block over the probed gene reads more
-        blocks = np.array([(0, 0, 11000, 13600), (1, 0, 1000, 3600)], dtype=np.int64)
-        Yg = gdna_space_yield(sim, blocks, 2, {0: "chr1"}, width_step=1)
-        plain = float(sum(pw * off * (2600 + int(wv) - 1) for wv, pw in zip(widths, pmf, strict=True)))
-        check("an unprobed footprint's gDNA-space yield is its off-target plain length", abs(Yg[0] / plain - 1.0) < 1e-9)
-        check("...and a probed footprint's yield exceeds it", Yg[1] > Yg[0] * 2.0)
-        # unequal generating laws: the gDNA truth follows its own pmf, independent of RNA
-        gap = dataclasses.replace(sim, gdna_widths=np.array([60, 80, 100]), gdna_pmf=np.array([0.25, 0.5, 0.25]))
-        Ygap = gdna_space_yield(gap, blocks, 2, {0: "chr1"}, width_step=1)
-        check("a gDNA length gap changes its footprint truth", not np.array_equal(Ygap, Yg))
-        check("the unprobed gap footprint uses E_g[w]", abs(Ygap[0] - off * (2600 + 80 - 1)) < 1e-9)
-        changed_rna = dataclasses.replace(gap, widths=np.array([400]), pmf=np.array([1.0]))
-        check("changing only RNA widths leaves gDNA truth identical",
-              np.array_equal(Ygap, gdna_space_yield(changed_rna, blocks, 2, {0: "chr1"}, width_step=1)))
-        direct = np.zeros(2)
-        for lid, rid, lo, hi in blocks:
-            for wv, pw in zip(gap.gdna_widths, gap.gdna_pmf, strict=True):
-                direct[lid] += pw * sum(
-                    sampler.fragment_weight("gdna", "chr1", 16000, start, int(wv))
-                    for start in range(max(0, int(lo-wv+1)), min(int(hi), 16000-int(wv)+1))
-                )
-        check("gap gDNA truth agrees with direct captured-start enumeration", np.allclose(Ygap, direct, rtol=1e-12, atol=1e-9))
-        # ⑫ the shipped gDNA component's length (`assemble_priors`) at efficiency 1 counts the same overlapping
-        #    starts as the yield, Σ_w f(w)(L + w − 1): the footprint's outside neighbours hold every outside base,
-        #    so each crossing fragment starts in a neighbour and its whole unit lands on the footprint's objects
-        from rigel.calibration.region_arrays import RegionArrays
-        ra_t = RegionArrays.from_index(index)
-        # the geometry indexes a pmf by width (calibration's convention); the simulator's pair is positional
-        by_width = np.zeros(int(max(widths)) + 1)
-        by_width[np.asarray(widths, dtype=np.int64)] = np.asarray(pmf, dtype=np.float64)
-        Lfp = footprint_gdna_length(ra_t, (0, 11000, 13600), by_width)
-        check("the gDNA component's length at efficiency 1 is the yield's overlapping-start count", abs(Lfp / (plain / off) - 1.0) < 1e-9)
-        # ⑬ the footprint's probed fraction is read off the sampler's own gDNA-space probe map: the unprobed gene's
-        #    block reads 0, a block exactly on one probe part reads 1, a block half on it reads ½
-        parts = sim.sampler._get_intervals("gdna", "chr1")
-        a, b = int(parts[0].start), int(parts[0].end)
-        pf_loc = footprint_probed_fraction(sim, np.array([(0, 0, 11000, 13600), (1, 0, a, b), (2, 0, a - (b - a), b)], dtype=np.int64), 3, {0: "chr1"})
-        check("an unprobed footprint's probed fraction is 0", pf_loc[0] == 0.0)
-        check("a footprint exactly on a probe part reads 1", abs(pf_loc[1] - 1.0) < 1e-12)
-        check("...and one half on it reads ½", abs(pf_loc[2] - 0.5) < 1e-12)
-        # ⑭ under a mask: the gDNA-space yield drops every start whose fragment covers an unknown base, as the
-        #    simulator's own weights do, and a probed transcript's probed fraction is over its known bases
-        sampler.mask_unknown("gdna", "chr1", [(12000, 12100), (2000, 2050)])
-        Ym = gdna_space_yield(gap, blocks, 2, {0: "chr1"}, width_step=1)
-        direct = np.zeros(2)
-        for lid, rid, lo, hi in blocks:
-            for wv, pw in zip(gap.gdna_widths, gap.gdna_pmf, strict=True):
-                direct[lid] += pw * sum(
-                    sampler.fragment_weight("gdna", "chr1", 16000, start, int(wv))
-                    for start in range(max(0, int(lo-wv+1)), min(int(hi), 16000-int(wv)+1))
-                )
-        check("a masked gDNA footprint's yield agrees with direct enumeration of the drawable starts",
-              np.allclose(Ym, direct, rtol=1e-12, atol=1e-9) and (Ym < Ygap).all())
-        sampler.mask_unknown("gdna", "chr1", [])
-        sampler.mask_unknown("mrna", p, [(100, 140)])
-        _, _, probed_m = sampler_truth(sampler, L, widths, pmf, off)
-        check("a fully probed transcript with unknown bases still reads probed fraction 1", abs(probed_m[p] - 1.0) < 1e-9)
-        sampler.mask_unknown("mrna", p, [])
+        panel = _self_test_panel(Path(tmp))
+        _check_manifest_loader(panel, check)
+        truth = _check_truth(panel, check)
+        _check_score(panel, truth, check)
+        _check_module_loader(panel.tmp, check)
+        _check_one_scale(panel, truth, check)
+        _check_gdna_space(panel, check)
 
     n = len(checks)
     failed = [name for name, ok in checks if not ok]

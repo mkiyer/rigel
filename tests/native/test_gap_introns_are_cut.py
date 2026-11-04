@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _index_builder import write_fasta
+from _bam_builder import R1_FWD, R2_REV, record, write_bam
+from _index_builder import build_index
 
 from rigel.config import BamScanConfig
 from rigel.pipeline import scan_and_buffer
@@ -104,68 +105,32 @@ def _hypotheses_of(payload, i: int) -> list[tuple[list[tuple[int, int]], int]]:
 @pytest.fixture(scope="module")
 def gap_intron_index(tmp_path_factory):
 
-    from rigel.index import TranscriptIndex
-
     base = tmp_path_factory.mktemp("gap_introns")
-    fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {"chr1": GENOME, "chr2": GENOME})
-    gtf.write_text(GTF)
-    index_dir = base / "idx"
-    TranscriptIndex.build(str(fasta), str(gtf), str(index_dir), write_tsv=False)
-    return base, TranscriptIndex.load(str(index_dir))
+    return base, build_index(base, GTF, {"chr1": GENOME, "chr2": GENOME})
 
 
 @pytest.fixture(scope="module")
 def gap_intron_bam(gap_intron_index):
-    """One BAM holding the four fragments above, name-sorted and NH-tagged."""
-    import pysam
-
+    """One BAM holding the four fragments above, name-sorted and NH-tagged. Each is a proper FR pair, R1 forward with
+    a reverse mate: `build_fragment` flips R2's strand, so both mates land in one (ref, strand) group and merge into a
+    single extent."""
     base, _ = gap_intron_index
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": "chr1", "LN": GENOME}, {"SN": "chr2", "LN": GENOME}],
-    }
-
-    def _read(qname, pos, cigar, mate_pos, is_r1, ref_id=REF_CHR1):
-        a = pysam.AlignedSegment()
-        a.query_name = qname
-        a.reference_id = ref_id
-        a.reference_start = pos
-        a.mapping_quality = 60
-        # Proper FR pair: R1 forward with a reverse mate, R2 reverse. `build_fragment` flips R2's strand, so both mates
-        # land in one (ref, strand) group and merge into a single extent.
-        a.flag = 0x1 | 0x2 | (0x40 | 0x20 if is_r1 else 0x80 | 0x10)
-        a.cigar = cigar
-        n_query = sum(length for op, length in cigar if op == 0)
-        a.query_sequence = "A" * n_query
-        a.query_qualities = pysam.qualitystring_to_array("I" * n_query)
-        a.next_reference_id = ref_id
-        a.next_reference_start = mate_pos
-        a.set_tags([("NH", 1, "i")])
-        return a
-
-    M, N = 0, 3
     reads = [
         # pure: observed splice, mates abut so there is no mate gap to search
-        _read("pure", 62100, [(M, 100), (N, 200), (M, 100)], 62500, True),
-        _read("pure", 62500, [(M, 100)], 62100, False),
+        record("pure", R1_FWD, 62100, "100M200N100M", 62500),
+        record("pure", R2_REV, 62500, "100M", 62100),
         # mixed: observed splice and an annotated intron inside the [62500,62900) mate gap
-        _read("mixed", 62100, [(M, 100), (N, 200), (M, 100)], 62900, True),
-        _read("mixed", 62900, [(M, 100)], 62100, False),
+        record("mixed", R1_FWD, 62100, "100M200N100M", 62900),
+        record("mixed", R2_REV, 62900, "100M", 62100),
         # implicit: no splice sequenced; the [62200,62400) mate gap is exactly t_mixed's first intron
-        _read("implicit", 62100, [(M, 100)], 62400, True),
-        _read("implicit", 62400, [(M, 100)], 62100, False),
+        record("implicit", R1_FWD, 62100, "100M", 62400),
+        record("implicit", R2_REV, 62400, "100M", 62100),
         # ambig: two isoforms imply different introns in the [66500,66900) gap. On chr2, so the held record must be
         # stamped ref = 1.
-        _read("ambig", 66100, [(M, 100), (N, 200), (M, 100)], 66900, True, ref_id=REF_CHR2),
-        _read("ambig", 66900, [(M, 100)], 66100, False, ref_id=REF_CHR2),
+        record("ambig", R1_FWD, 66100, "100M200N100M", 66900, ref=REF_CHR2),
+        record("ambig", R2_REV, 66900, "100M", 66100, ref=REF_CHR2),
     ]
-    bam_path = str(base / "gap_introns.bam")
-    with pysam.AlignmentFile(bam_path, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam_path, bam_path)
-    return bam_path
+    return write_bam(base / "gap_introns.bam", reads, {"chr1": GENOME, "chr2": GENOME})
 
 
 @pytest.fixture(scope="module")
@@ -184,7 +149,7 @@ def _lengths(payload) -> dict[int, int]:
 # ── U1 · the headline ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_U1_L_excludes_BOTH_the_observed_intron_and_the_one_in_the_mate_gap(payload):
+def test_u1_the_length_excludes_the_observed_intron_and_the_one_in_the_mate_gap(payload):
     """``mixed`` spans [62100,63000), 900 bp of genome, and is a 500 bp molecule: 200 bp was spliced out and sequenced
     as CIGAR-N, another 200 bp spliced out and never sequenced. Cutting only the sequenced intron would give 700 bp. Its
     sj is annotated, so it is certified RNA, the unspliced hypothesis is ruled out, and its single surviving hypothesis
@@ -192,7 +157,7 @@ def test_U1_L_excludes_BOTH_the_observed_intron_and_the_one_in_the_mate_gap(payl
     """
     assert _lengths(payload) == {L_PURE: 1, L_MIXED: 1}, (
         "the deposited fragment lengths are not the molecules this BAM determines. 700 bp for `mixed` "
-        "means the mate-gap intron was never cut (the old SPLICE_UNSPLICED gate) — "
+        "means the mate-gap intron was never cut — "
     )
     assert payload.qc.deposited == 2
     # Conservation: nothing is discarded. Four fragments in, two deposited and two held.
@@ -200,7 +165,7 @@ def test_U1_L_excludes_BOTH_the_observed_intron_and_the_one_in_the_mate_gap(payl
     assert payload.qc.dropped_too_long == payload.qc.dropped_empty == 0
 
 
-def test_U1b_the_unspliced_control_is_untouched(payload):
+def test_u1b_the_unspliced_control_is_untouched(payload):
     """``pure`` has an observed splice and no mate gap: nothing about it may move."""
     assert _lengths(payload)[L_PURE] == 1
 
@@ -208,7 +173,7 @@ def test_U1b_the_unspliced_control_is_untouched(payload):
 # ── U3 · an unspliced pair keeps both readings of its gap ─────────────────────────────────────────
 
 
-def test_U3_an_unspliced_pair_keeps_both_readings_of_its_gap(payload):
+def test_u3_an_unspliced_pair_keeps_both_readings_of_its_gap(payload):
     """``implicit`` sequenced no splice; its mate gap [62200,62400) is exactly ``t_mixed``'s first intron. The gap
     search finds the annotated intron (the spliced reading, L=200); nothing certifies the molecule as RNA, so the
     genomic reading (L=400, no intron) stays beside it and the record is held for the second pass.
@@ -226,7 +191,7 @@ def test_U3_an_unspliced_pair_keeps_both_readings_of_its_gap(payload):
 # ── U5 · the deposit is refused when the candidates disagree ───────────────────────────────────────
 
 
-def test_U5_a_mixed_fragment_with_disagreeing_candidates_is_DEFERRED_and_HELD(payload):
+def test_u5_a_mixed_fragment_with_disagreeing_candidates_is_deferred_and_held(payload):
     """``ambig`` carries an observed splice and a disputed mate gap: ``t_two_a`` puts [66600,66800) in it and
     ``t_two_b`` puts [66600,66700), a 100 bp difference in ``L`` for one molecule. Picking either would pick a fragment
     length at random, so the fragment is held in full with both paths for the second pass to score against a
@@ -251,7 +216,7 @@ def test_U5_a_mixed_fragment_with_disagreeing_candidates_is_DEFERRED_and_HELD(pa
     assert payload.gap_resolution.deferred == payload.qc.deferred_undetermined_gap == _DEFERRED
 
 
-def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
+def test_every_held_record_is_stamped_with_its_own_reference(payload):
     """Each held record carries its source reference, because the second pass re-enters ``deposit`` on that reference's
     accumulator and a coordinate means something only on its own axis. A constant stamp is indistinguishable from a
     correct one until two references both hold records, which is why ``g7`` lives on chr2. The extent check matters
@@ -283,7 +248,7 @@ def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
 # ── the RNA pool is keyed on determinacy, not on provenance ────────────────────────────────────────
 
 
-def test_the_RNA_pool_holds_every_fragment_whose_PATH_IS_DETERMINED(payload):
+def test_the_rna_pool_holds_every_fragment_whose_path_is_determined(payload):
     """Pool membership is determinacy, not provenance, checked from both sides.
 
     Barring fragments whose splice was inferred rather than sequenced would preferentially bar those whose mates sit far
@@ -306,7 +271,7 @@ def test_the_RNA_pool_holds_every_fragment_whose_PATH_IS_DETERMINED(payload):
 # ── U4 · the classification does not move ──────────────────────────────────────────────────────────
 
 
-def test_U4_the_splice_census_is_unchanged_by_gap_intron_detection(
+def test_u4_the_splice_census_is_unchanged_by_gap_intron_detection(
     gap_intron_index, gap_intron_bam
 ):
     """Detection is unconditional; the ``SPLICE_IMPLICIT`` label stays unspliced-only.

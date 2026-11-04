@@ -5,8 +5,8 @@ The backbone (``sweep.solve_chain``) owns traversal and the solve. A policy supp
 geometry. A message builder may read counts and geometry at either end of a hop but never a posterior belief: own
 strand claims are conditional-binomial likelihoods of the observed columns, and counting noise or observed
 disagreement may widen a received claim but never move its mode toward a belief. :class:`ChainView` holds the whole
-chain for the library; the native ``transfer_kernel::Chain`` holds one block for the builders. Neither has a belief
-field.
+chain for the library (built from :func:`view_fields`); the native ``transfer_kernel::Chain`` holds one block for the
+builders. Neither has a belief field.
 
 Gate: ``tests/calibration/test_sweep_backbone.py``.
 """
@@ -17,10 +17,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..region_chain import REGION
 from ..region_geometry import g1_locked
 
 __all__ = [
     "ChainView",
+    "view_fields",
 ]
 
 
@@ -68,7 +70,7 @@ class ChainView:
     boundary_flags: np.ndarray
 
     # ── the library's strand verdict (neither observation nor belief) ─────────────────────────────────────────────
-    #: the library's strand protocol decision (``region_init.strand_discriminability`` > 0). When it is False every
+    #: the library's strand protocol decision (``strand_balance.strand_discriminability`` > 0). When it is False every
     #: single-strand exon's strand precision is exactly zero, which a policy reading the split as an RNA witness must
     #: know before it prices a hop
     strand_live: bool = False
@@ -89,3 +91,30 @@ class ChainView:
     def n_slot(self) -> np.ndarray:
         """The per-slot unspliced count over both strands: the density numerator and the Poisson n."""
         return self.unspliced_count.sum(axis=1)
+
+
+def view_fields(chain, statics, geometry, structure) -> dict:
+    """Every per-slot array a policy may read, under the two belief-free headings of :class:`ChainView`, for the whole
+    chain; the kernel reads it a block at a time. ``structure`` is the sweep's per-slot structural classes."""
+    return dict(
+        # observations
+        eff_gdna=np.asarray(geometry.eff_gdna, np.float64),
+        eff_rna=np.asarray(geometry.eff_rna, np.float64),
+        sj_count=np.asarray(geometry.sj_count, np.float64),  # [n, 2] by transcript strand
+        sj_count_lo=np.asarray(geometry.sj_count_lo, np.float64),
+        sj_count_hi=np.asarray(geometry.sj_count_hi, np.float64),
+        route_rate_lo=np.asarray(geometry.route_rate_lo, np.float64),
+        route_rate_hi=np.asarray(geometry.route_rate_hi, np.float64),
+        unspliced_count=np.asarray(geometry.unspliced_count, np.float64),  # [n, 2] by genome strand
+        spliced_count=np.asarray(geometry.spliced_count, np.float64),
+        # geometry / structure
+        left=np.asarray(chain.left, np.int64),
+        right=np.asarray(chain.right, np.int64),
+        is_boundary=np.asarray(chain.kind) != REGION,
+        is_exon_region=np.asarray(structure.is_exon_region, bool),
+        free_pos=np.asarray(statics.free_pos, bool),
+        free_neg=np.asarray(statics.free_neg, bool),
+        exon_pos=np.asarray(structure.exon_pos, bool),
+        exon_neg=np.asarray(structure.exon_neg, bool),
+        boundary_flags=statics.boundary_flags,
+    )

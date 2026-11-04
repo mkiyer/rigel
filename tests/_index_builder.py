@@ -1,7 +1,8 @@
 """The synthetic index builder every structural test starts from.
 
-`build_test_index` turns a GTF string into a loaded `TranscriptIndex`, writing a FASTA of known sequence for the
-requested references beside it (`write_fasta`, which every test that builds an index writes its genome with);
+`build_index` turns a GTF string into a loaded `TranscriptIndex` under a directory, writing a FASTA of known sequence
+for the requested references beside it (`write_fasta`, which every test that builds an index writes its genome with),
+and `build_test_index` does it in a fresh temporary directory;
 `rebuild_with_splice_blacklist` gives an existing index a splice blacklist the way a real build does. It lives in its
 own module rather than in `conftest.py` because it is a plain builder, not a fixture: a test that needs a bespoke
 index imports and calls it, and importing a conftest by module name is ambiguous once a sub-directory has its own.
@@ -72,43 +73,27 @@ def write_fasta(
     return path
 
 
-def build_test_index(
-    tmp_path_factory, gtf_text, genome_size=2000, name="idx", refs=None, unknown=None
-):
-    """Build a TranscriptIndex from a GTF string (session/module-scoped helper).
-
-    Parameters
-    ----------
-    tmp_path_factory : pytest.TempPathFactory
-        Pytest factory for session/module-scoped temp dirs.
-    gtf_text : str
-        GTF content string (GENCODE-style, 1-based inclusive).
-    genome_size : int
-        Length of chr1 in the synthetic FASTA (default: 2000).
-    name : str
-        Sub-directory name for this index (keeps separate indexes apart).
-    refs : dict[str, int] | None
-        Optional ``{reference_name: length}`` for a multi-reference index. ``None`` (the default) builds
-        the single ``chr1`` of ``genome_size`` bp. The splice-graph matrix needs several references:
-        region and boundary ids must stay contiguous per reference, and no boundary may cross references.
-    unknown : dict[str, list[tuple[int, int]]] | None
-        ``N`` written over these ``[start, end)`` runs (:func:`write_fasta`), which the index then masks as
-        unobservable. ``None`` writes known sequence everywhere.
-
-    Returns
-    -------
-    TranscriptIndex
-        Loaded index with C++ FragmentResolver ready.
-    """
-    base = tmp_path_factory.mktemp(name)
+def build_index(base, gtf_text: str, refs: Mapping[str, int], unknown=None) -> TranscriptIndex:
+    """Build the index of *gtf_text* under *base* (``index/``) over a FASTA of known sequence for *refs*
+    (:func:`write_fasta`, ``N`` over *unknown*'s runs), and load it with its lookup maps kept."""
+    base = Path(base)
     gtf_path = base / "test.gtf"
     gtf_path.write_text(gtf_text)
-
-    fasta_path = write_fasta(base / "genome.fa", refs or {"chr1": genome_size}, unknown)
-
+    fasta_path = write_fasta(base / "genome.fa", refs, unknown)
     idx_dir = base / "index"
     TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
     return TranscriptIndex.load(idx_dir, retain_lookup_maps=True)
+
+
+def build_test_index(
+    tmp_path_factory, gtf_text, genome_size=2000, name="idx", refs=None, unknown=None
+):
+    """:func:`build_index` in a fresh temporary directory *name*, over the single ``chr1`` of *genome_size* bp unless
+    *refs* (``{reference_name: length}``) names several. The splice-graph matrix needs several: region and boundary ids
+    must stay contiguous per reference, and no boundary may cross references."""
+    return build_index(
+        tmp_path_factory.mktemp(name), gtf_text, refs or {"chr1": genome_size}, unknown
+    )
 
 
 class StandInStore:

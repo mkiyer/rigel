@@ -18,8 +18,8 @@ import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline, scan_and_buffer
-from rigel.scan_payload import AccumulatorPayload
-from rigel.sim import ReadSimConfig, Scenario
+from rigel.scan_payload import POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC, AccumulatorPayload
+from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 
 # ── The fragment buffer: the pipeline's answer at every scan thread count ───────────────────────
@@ -59,8 +59,9 @@ def oracle(tmp_path_factory):
     )
     scenario.add_gene("g2", "-", [{"t_id": "t3", "exons": [(4000, 4600)], "abundance": 40}])
     result = scenario.build_oracle(
-        n_fragments=3000,
+        n_rna_fragments=3000,
         gdna_fraction=0.2,
+        gdna_config=GDNAConfig(),
         sim_config=ReadSimConfig(
             frag_mean=220,
             frag_std=50,
@@ -91,7 +92,7 @@ REPEATS = 2
 
 
 @pytest.mark.parametrize("mode", ["sample", "fractional"])
-def test_the_answer_IS_THE_SAME_AT_EVERY_SCAN_THREAD_COUNT(oracle, mode):
+def test_the_answer_is_the_same_at_every_scan_thread_count(oracle, mode):
     """The contract, for both assignment modes: one BAM and one seed give one answer.
 
     Byte-identical across thread counts and across repeats, which is strictly stronger than
@@ -113,7 +114,7 @@ def test_the_answer_IS_THE_SAME_AT_EVERY_SCAN_THREAD_COUNT(oracle, mode):
         )
 
 
-def test_the_SHIPPED_DEFAULTS_give_one_answer_run_after_run(oracle):
+def test_the_shipped_defaults_give_one_answer_run_after_run(oracle):
     """No seed given and the shipped sampled assignment: three runs of one BAM, one answer.
 
     The gate above pins its own seed, so it cannot see the default; an entropy-seeded default would make
@@ -158,8 +159,9 @@ def many_loci(tmp_path_factory):
             [{"t_id": f"t{i}", "exons": exons, "abundance": 20 + 7 * i}],
         )
     result = scenario.build_oracle(
-        n_fragments=6000,
+        n_rna_fragments=6000,
         gdna_fraction=0.4,
+        gdna_config=GDNAConfig(),
         sim_config=ReadSimConfig(
             frag_mean=220,
             frag_std=50,
@@ -175,7 +177,7 @@ def many_loci(tmp_path_factory):
 
 
 @pytest.mark.parametrize("em_threads", [1, 8])
-def test_the_reported_gdna_total_is_the_loci_summed_in_LOCUS_ORDER(many_loci, em_threads):
+def test_the_reported_gdna_total_is_the_loci_summed_in_locus_order(many_loci, em_threads):
     """The summary's gDNA count is the per-locus totals added in locus order once the solve is done, at
     every thread count; an atomic sum taken as the EM's workers finish would re-associate from run to
     run."""
@@ -238,7 +240,7 @@ def test_a_known_buffer_permutation_preserves_the_pipeline_answer(oracle, monkey
     np.testing.assert_array_equal(actual, baseline)
 
 
-def test_frag_id_IS_AN_IDENTITY_which_is_what_makes_it_a_legal_sort_key(oracle):
+def test_frag_id_is_an_identity_which_is_what_makes_it_a_legal_sort_key(oracle):
     """The assumption the ordering rests on, pinned where the ordering is gated.
 
     Ordering by ``frag_id`` canonicalises the units only if no two units share one. If ids could repeat,
@@ -277,7 +279,7 @@ def test_frag_id_IS_AN_IDENTITY_which_is_what_makes_it_a_legal_sort_key(oracle):
 # ── The split: how the budget is divided between decompression and workers ──────────────────────
 
 
-def test_the_thread_split_is_derived_from_the_budget_and_an_explicit_one_still_wins():
+def test_the_thread_split_is_derived_from_the_budget_and_an_explicit_one_wins():
     """The split is a ratio, not a count: one decompression thread keeps about eight scan workers fed,
     so the budget is divided by that ratio rather than by a fixed reservation.
 
@@ -370,8 +372,9 @@ def every_bank_oracle(tmp_path):
     # long tail is genuinely suppressed. A shorter mean or a smaller budget empties that case entirely,
     # and the assertion below then holds over nothing.
     result = scenario.build_oracle(
-        n_fragments=12000,
+        n_rna_fragments=12000,
         gdna_fraction=0.3,
+        gdna_config=GDNAConfig(),
         sim_config=ReadSimConfig(
             frag_mean=300,
             frag_std=60,
@@ -387,11 +390,11 @@ def every_bank_oracle(tmp_path):
 
 
 def _tally(result, n_workers: int) -> AccumulatorPayload:
-    """Scan at ``n_workers`` and return the accumulator payload."""
+    """Scan at ``n_workers`` (every thread a worker) and return the accumulator payload."""
     _, _, _, payload = scan_and_buffer(
         str(result.bam_path),
         result.index,
-        BamScanConfig(sj_strand_tag="auto", total_threads=n_workers),
+        BamScanConfig(sj_strand_tag="auto", total_threads=n_workers, bgzf_threads=0),
     )
     assert payload is not None, "the scan produced no accumulator payload"
     return payload
@@ -414,6 +417,10 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(every_bank_oracle):
         ("pool_lengths", "no fragment entered a length pool"),
     ]:
         assert int(getattr(baseline, key).sum()) > 0, f"{key}: {why}"
+    for pool in (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC):
+        assert int(np.asarray(baseline.pool_lengths)[pool].sum()) > 0, (
+            f"contained gDNA pool {pool} is empty: the fixture simulated no gDNA"
+        )
 
     # Read off the payload's own fields, so a bank added later joins this gate automatically.
     array_keys = [
@@ -481,7 +488,7 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(every_bank_oracle):
         )
 
 
-def test_the_deferred_bank_holds_the_fragments_ITS_COUNTER_CLAIMS(every_bank_oracle):
+def test_the_deferred_bank_holds_the_fragments_its_counter_claims(every_bank_oracle):
     """The fragment census on a real scan. ``deposited + deferred + dropped_* == offered`` is worth
     nothing if the deferred term is a number with no fragments behind it.
 

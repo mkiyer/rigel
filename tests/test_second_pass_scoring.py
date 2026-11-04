@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _index_builder import write_fasta
+from _bam_builder import R1_FWD, R2_REV, record, write_bam
+from _index_builder import build_index
+from _length_models import payload_fl_models
 
 from rigel.config import BamScanConfig
 from rigel.pipeline import scan_and_buffer
@@ -29,7 +31,7 @@ L1, L2, L3, L4, L5, L6, L7 = 1000, 4000, 7000, 10_000, 13_000, 16_000, 19_000
 #: and both are non-zero, so the gates test discrimination rather than elimination by zero.
 DEEP, SHALLOW, CONTIGUOUS = 40, 4, 8
 
-#: Ballast sets the length pmf and touches no locus. `build_fl_models` does not smooth the global anchor
+#: Ballast sets the length pmf and touches no locus. The models do not smooth the global anchor
 #: (`_normalized`, not `_smooth_eb`), so ``global_pmf[L]`` is exactly 0 unless some deposited fragment had
 #: that length, and every ∅ hypothesis here is 600 bp. Keeping the pmf's source apart from the loci stops a
 #: length coincidence from doing the density term's work.
@@ -83,25 +85,6 @@ def _gtf() -> str:
     return "".join(rows)
 
 
-def _read(qname, pos, cigar, mate_pos, is_r1):
-    import pysam
-
-    a = pysam.AlignedSegment()
-    a.query_name = qname
-    a.reference_id = 0
-    a.reference_start = pos
-    a.mapping_quality = 60
-    a.flag = 0x1 | 0x2 | (0x40 | 0x20 if is_r1 else 0x80 | 0x10)
-    a.cigar = cigar
-    n = sum(length for op, length in cigar if op == M)
-    a.query_sequence = "A" * n
-    a.query_qualities = pysam.qualitystring_to_array("I" * n)
-    a.next_reference_id = 0
-    a.next_reference_start = mate_pos
-    a.set_tags([("NH", 1, "i")])
-    return a
-
-
 #: Three block layouts, so the depth fragments span the same lengths the ballast does and no hypothesis
 #: length is reachable only through one kind of evidence.
 _SHAPES = ((100, 50, 50), (200, 100, 100), (300, 150, 150))
@@ -111,45 +94,37 @@ def _spliced(qname, donor, acceptor, k):
     """A fully-sequenced fragment observing ``(donor, acceptor)``. No mate gap, so it deposits."""
     a, b, c = _SHAPES[k % len(_SHAPES)]
     return [
-        _read(qname, donor - a, [(M, a), (N, acceptor - donor), (M, b)], acceptor + b, True),
-        _read(qname, acceptor + b, [(M, c)], donor - a, False),
+        record(qname, R1_FWD, donor - a, [(M, a), (N, acceptor - donor), (M, b)], acceptor + b),
+        record(qname, R2_REV, acceptor + b, [(M, c)], donor - a),
     ]
 
 
 def _contiguous(qname, start, half):
     """A fully-sequenced unspliced fragment: it crosses every boundary strictly inside its span."""
     return [
-        _read(qname, start, [(M, half)], start + half, True),
-        _read(qname, start + half, [(M, half)], start, False),
+        record(qname, R1_FWD, start, [(M, half)], start + half),
+        record(qname, R2_REV, start + half, [(M, half)], start),
     ]
 
 
 def _ambiguous(qname, base):
     """The held fragment: ``[base+500, base+600)`` and ``[base+1000, base+1100)``, gap unsequenced."""
     return [
-        _read(qname, base + 500, [(M, 100)], base + 1000, True),
-        _read(qname, base + 1000, [(M, 100)], base + 500, False),
+        record(qname, R1_FWD, base + 500, [(M, 100)], base + 1000),
+        record(qname, R2_REV, base + 1000, [(M, 100)], base + 500),
     ]
 
 
 @pytest.fixture(scope="module")
 def scored(tmp_path_factory):
     """Scan the fixture once and score its held fragments. Returns everything the gates read."""
-    import pysam
 
-    from rigel.calibration.fl import build_fl_models
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.splice_graph import build_sj_arrays
-    from rigel.index import TranscriptIndex
     from rigel.second_pass import score_held_fragments
 
     base = tmp_path_factory.mktemp("second_pass_scoring")
-    fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {"chr1": GENOME})
-    gtf.write_text(_gtf())
-    index_dir = base / "idx"
-    TranscriptIndex.build(str(fasta), str(gtf), str(index_dir), write_tsv=False)
-    index = TranscriptIndex.load(str(index_dir))
+    index = build_index(base, _gtf(), {"chr1": GENOME})
 
     reads = []
     for i, (half, count) in enumerate(BALLAST):
@@ -209,19 +184,15 @@ def scored(tmp_path_factory):
         reads += _spliced(f"minus_{L7}_{k}", L7 + 700, L7 + 900, k)
     reads += _ambiguous(f"ambig_{L7}", L7)
 
-    bam = str(base / "fixture.bam")
-    header = {"HD": {"VN": "1.6", "SO": "queryname"}, "SQ": [{"SN": "chr1", "LN": GENOME}]}
-    with pysam.AlignmentFile(bam, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam, bam)
+    bam = write_bam(base / "fixture.bam", reads, {"chr1": GENOME})
 
     _stats, strand_model, _buffer, payload = scan_and_buffer(
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
     regions = RegionArrays.from_index(index)
     sj = build_sj_arrays(index)
-    fl_models = build_fl_models(payload)
+    # the laws over the payload's own pools, so the ballast alone sets the length ratios the gates read
+    fl_models = payload_fl_models(payload)
 
     def rescore(rna_sense_frac: float):
         """Re-score the same payload at a different library sense fraction. Isolates the strand term
@@ -267,7 +238,7 @@ def _terms(payload, result, base: int) -> dict[tuple, tuple]:
 # ── arms 1 and 2: the deep sj wins, and the answer flips when the depth moves ────────────────
 
 
-def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
+def test_the_sj_ids_the_scorer_reads_are_the_payload_axis_on_every_reference():
     """The scorer asks the kernel for sj ids, and the kernel answers in its own reference-local slots.
     The payload's axis is their concatenation, so every reference but the first needs its base added, and
     a fixture with one reference cannot tell a correct base from a missing one.
@@ -283,7 +254,7 @@ def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
     from types import SimpleNamespace
 
     from rigel.native import Accumulator as NativeAccumulator
-    from rigel.second_pass import _resolve_intron_lookups
+    from rigel.second_pass import resolve_intron_lookups
     from rigel.types import Strand
 
     def accumulator(ref, bounds, offsets, right, strand):
@@ -326,7 +297,7 @@ def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
         ref_sj_offsets=np.array([0, 1, 3], np.int64),
     )
 
-    sj_of, first_of, last_of = _resolve_intron_lookups(payload, accumulators)
+    sj_of, first_of, last_of = resolve_intron_lookups(payload, accumulators)
     assert sj_of.tolist() == [0, 1, -1], (
         "reference 1's junction is payload slot 1, not its ref-local 0, and the third fragment's "
         "observed + motif must not match a − junction"
@@ -338,14 +309,14 @@ def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
     assert int(payload.ref_sj_offsets[1]) > 0
     heard_none = dict(deferred.__dict__)
     heard_none["sj_strand"] = np.array([int(Strand.NONE)] * 3, np.int64)
-    with_none = _resolve_intron_lookups(
+    with_none = resolve_intron_lookups(
         SimpleNamespace(**{**payload.__dict__, "deferred": SimpleNamespace(**heard_none)}),
         accumulators,
     )[0]
     assert with_none.tolist() == [0, 1, 2], "with no observed motif the implied strand must find it"
 
 
-def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
+def test_the_strand_term_decides_when_rho_and_length_both_tie(scored):
     """Arm 7. Dropping the strand term entirely passes arms 1–6, because every locus there offers
     hypotheses of one strand and the term cancels. This locus offers two.
 
@@ -386,7 +357,7 @@ def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
             )
 
 
-def test_the_DEEP_sj_takes_the_larger_share(scored):
+def test_the_deep_sj_takes_the_larger_share(scored):
     """Arm 1. Locus 1's wide intron carries ``DEEP`` observed sj fragments and its narrow rival
     ``SHALLOW``; the held fragment is compatible with both. The wide hypothesis must win.
 
@@ -403,7 +374,7 @@ def test_the_DEEP_sj_takes_the_larger_share(scored):
     assert shares[wide] == max(shares.values()), f"the deep sj must be the winner; got {shares}"
 
 
-def test_MOVING_the_depth_FLIPS_the_answer(scored):
+def test_moving_the_depth_flips_the_answer(scored):
     """Arm 2, the mirror, and the reason no threshold is needed in this module.
 
     Locus 2 is locus 1's geometry with the deep sj moved to the narrow intron. Every implied length is
@@ -420,7 +391,7 @@ def test_MOVING_the_depth_FLIPS_the_answer(scored):
     )
 
 
-def test_the_two_arms_differ_ONLY_in_rho(scored):
+def test_the_two_arms_differ_only_in_rho(scored):
     """The mirror argument is a claim about the fixture, so it is checked: if ``f`` or the strand term
     differed between the two loci, a flipped winner would no longer isolate ``rho``."""
     first, second = _terms(scored[0], scored[1], L1), _terms(scored[0], scored[1], L2)
@@ -435,7 +406,7 @@ def test_the_two_arms_differ_ONLY_in_rho(scored):
 # ── arm 3: the genomic path, when the gap is genuinely crossed ─────────────────────────────────────
 
 
-def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
+def test_a_deeply_crossed_gap_is_won_by_the_genomic_hypothesis(scored):
     """Arm 3. Locus 3's gap is crossed contiguously by ``DEEP`` fully-sequenced fragments and spliced by only
     ``SHALLOW``, so the evidence says the molecule is genomic. Its intron spans exactly one region (one
     isoform, so the intron's endpoints are adjacent region_bounds), where an evidence set of the boundaries
@@ -455,7 +426,7 @@ def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
 
 
 @pytest.mark.parametrize("base,crossed_end", [(L4, "donor"), (L6, "acceptor")])
-def test_the_GENOMIC_hypothesis_needs_evidence_at_BOTH_ENDS_of_the_gap(scored, base, crossed_end):
+def test_the_genomic_hypothesis_needs_evidence_at_both_ends_of_the_gap(scored, base, crossed_end):
     """Arms 4 and 6: the genomic hypothesis needs evidence at both ends of the gap.
 
     Keeping only the donor boundary of the distinguishing set passes every other gate in this module,
@@ -479,7 +450,7 @@ def test_the_GENOMIC_hypothesis_needs_evidence_at_BOTH_ENDS_of_the_gap(scored, b
     )
 
 
-def test_when_rho_TIES_the_LENGTH_term_decides(scored):
+def test_when_rho_ties_the_length_term_decides(scored):
     """Arm 5. Dropping the length term from the score entirely passes arms 1–4, because the density is
     decisive there. This locus removes the density from the contest.
 
@@ -512,7 +483,7 @@ def test_when_rho_TIES_the_LENGTH_term_decides(scored):
 # ── non-vacuity ────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_the_fixture_actually_DECIDES_something(scored):
+def test_the_fixture_actually_decides_something(scored):
     """The trap this module exists to avoid: a shallow fixture scores every hypothesis uniformly, which
     is a green gate over a scorer that decided nothing. Uniformity is therefore a failure condition
     here, checked directly rather than argued for in the fixture's design."""
@@ -538,8 +509,8 @@ def test_the_fixture_actually_DECIDES_something(scored):
     assert payload.qc.dropped_too_long == 0 and payload.qc.dropped_empty == 0
 
 
-def test_the_length_term_has_support_at_EVERY_hypothesis_length(scored):
-    """``build_fl_models`` does not smooth the global anchor, so ``global_pmf[L]`` is exactly zero
+def test_the_length_term_has_support_at_every_hypothesis_length(scored):
+    """The length models do not smooth the global anchor, so ``global_pmf[L]`` is exactly zero
     unless a deposited fragment had that length — and a zero there would kill ∅ for a reason that has
     nothing to do with the density. That is what the ballast is for, and this checks it worked."""
     payload, result = scored[0], scored[1]

@@ -38,12 +38,9 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
+from _oracle import RNA_STRAND_ORIGINS, OracleTruth, lift_drain_parts  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, ORACLE_BAM, SCRATCH, capture_label, sibling  # noqa: E402
 
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, sibling  # noqa: E402
-
-
-
-from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
 from rigel.calibration.region_geometry import (  # noqa: E402
     build_region_geometry,
@@ -56,14 +53,10 @@ from rigel.calibration.signature import (  # noqa: E402
     RegionType,
     coarse_type_array,
 )
-from rigel.calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "calibration"))
-from _oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth, lift_drain_parts  # noqa: E402
+from _scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
 _EPS = 1.0e-12
 #: |z| above which gdna-field-uniformity flags a slot (~6e-5 false flags per slot); the gate reads the flag rate.
@@ -229,38 +222,35 @@ def slot_counts(payload, region_arrays, chain) -> np.ndarray:
 # ── the derivation ────────────────────────────────────────────────────────────────────────────────
 
 
-def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, list[dict]]:
-    """One condition's certified per-slot truth table plus its gate verdicts."""
-    sj = build_sj_geometry_arrays(index)
-    bflags = build_boundary_flags_array(index)
-    cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    lift: dict = {}
-    kw = calibration_inputs(cache, index, lift_out=lift)
-    # the drained frame: the whole and every partition below are drained consistently, as production calibrates
-    payload = kw["payload"]
-    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
-    statics = build_region_statics(chain, region_arrays, bflags)
-    geom = build_region_geometry(
-        chain, CalibrationSubstrate.from_payload(payload, region_arrays),
-        region_arrays, sj, kw["gdna_fl_pmf"], kw["rna_fl_pmf"],
-    )
-    label = stratum_labels(chain, statics, region_arrays)
+def slot_refs(chain, region_arrays) -> np.ndarray:
+    """Per slot, its reference: a region's own; a boundary takes its left flank's (both flanks share one
+    reference)."""
+    is_region = np.asarray(chain.kind) == REGION
+    obj = np.asarray(chain.obj_idx, np.int64)
+    left = np.clip(np.asarray(chain.left, np.int64), 0, int(chain.n_slots) - 1)
+    ref = np.where(is_region, region_arrays.ref_id[np.clip(obj, 0, len(region_arrays.ref_id) - 1)], -1)
+    return np.where(is_region, ref, ref[left])
 
+
+def origin_slot_counts(index, oracle_cache: Path, condition: str, payload, lift: dict, region_arrays, chain):
+    """``(truth, counts, n_ambiguous_strands)``: the drained whole's per-slot count and each origin-split partition's,
+    by origin (``n_gdna`` / ``n_nrna`` / ``n_mrna``) and by transcript strand (``n_rna_pos`` / ``n_rna_neg``), every
+    partition drained by replaying the whole's choices."""
+    OA = sibling("_oracle_arms.py")
     # sum-to-full is a hard gate inside from_cached_parts on the drained frame; an exception is the verdict
-    root = Path(suite) / "oracle_cache" / condition
-    parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
+    parts = OA.oracle_parts(oracle_cache, condition, index)
     truth = OracleTruth.from_cached_parts(payload, parts, lift)
 
-    count = slot_counts(payload, region_arrays, chain)
-    n_g = slot_counts(truth.parts["gdna"], region_arrays, chain)
-    n_n = slot_counts(truth.parts["nrna"], region_arrays, chain)
-    n_m = slot_counts(truth.parts["mrna"], region_arrays, chain)
+    def count(p):
+        return slot_counts(p, region_arrays, chain)
+
+    counts = {"count": count(payload), **{f"n_{k}": count(truth.parts[k]) for k in ("gdna", "nrna", "mrna")}}
     # the same RNA reads keyed by transcript strand, the per-component truth; refused if absent
     try:
-        strand_parts = {k: read_scan_cache(root / k, index).payload for k in RNA_STRAND_ORIGINS}
+        strand_parts = OA.oracle_parts(oracle_cache, condition, index, RNA_STRAND_ORIGINS)
     except Exception as exc:  # noqa: BLE001
         raise FileNotFoundError(
-            f"{root} has no {list(RNA_STRAND_ORIGINS)} partitions ({type(exc).__name__}). They are "
+            f"{Path(oracle_cache) / condition} has no {list(RNA_STRAND_ORIGINS)} partitions ({type(exc).__name__}). They are "
             "built by `calibration_oracle.py --build` (via `panel.py cache`) alongside the three ORIGINS ones; "
             "without them there is no per-strand RNA truth and the three-arm map cannot be scored."
         ) from exc
@@ -269,51 +259,69 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     strand_drained, n_amb_strand = lift_drain_parts(
         lift, [parts["gdna"], strand_parts["rna_pos"], strand_parts["rna_neg"]]
     )
-    n_rp = slot_counts(strand_drained[1], region_arrays, chain)
-    n_rn = slot_counts(strand_drained[2], region_arrays, chain)
+    counts["n_rna_pos"] = count(strand_drained[1])
+    counts["n_rna_neg"] = count(strand_drained[2])
+    return truth, counts, int(n_amb_strand)
 
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, np.int64)
-    is_region = kind == REGION
-    left = np.clip(np.asarray(chain.left, np.int64), 0, int(chain.n_slots) - 1)
-    # a slot's reference: a region's own; a boundary takes its left flank's (both flanks share one reference)
-    ref = np.where(is_region, region_arrays.ref_id[np.clip(obj, 0, len(region_arrays.ref_id) - 1)], -1)
-    ref = np.where(is_region, ref, ref[left])
+
+def uniformity_verdicts(capture_on: bool, n_g, eff_g, label, ref, gdna_refs) -> list[dict]:
+    """gdna-field-uniformity on every reference that carries gDNA; not applicable under capture, vacuous where there
+    is no gDNA."""
+    if capture_on:
+        return [{"gate": "gate gdna-field-uniformity", "ok": True, "vacuous": True,
+                 "note": "capture-ON: the field is deliberately non-uniform; gate not applicable"}]
+    out = []
+    for r in gdna_refs:
+        v = gate_uniformity(n_g, eff_g, label, ref == r)
+        v["ref"] = int(r)
+        out.append(v)
+    if gdna_refs.size == 0:
+        out.append({"gate": "gate gdna-field-uniformity", "ok": True, "vacuous": True,
+                    "note": "no gDNA anywhere (a zero condition)"})
+    return out
+
+
+def derive(index, suite: Path, condition: str) -> tuple[dict, list[dict]]:
+    """One condition's certified per-slot truth table plus its gate verdicts."""
+    cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
+    lift: dict = {}
+    kw = calibration_inputs(cache, index, lift_out=lift)
+    # the drained frame: the whole and every partition below are drained consistently, as production calibrates
+    payload, region_arrays = kw["payload"], kw["region_arrays"]
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
+    statics = build_region_statics(chain, region_arrays, kw["boundary_flags"])
+    geom = build_region_geometry(
+        chain, CalibrationSubstrate.from_payload(payload, region_arrays),
+        region_arrays, kw["sj"], kw["gdna_fl_pmf"], kw["rna_fl_pmf"],
+    )
+    label = stratum_labels(chain, statics, region_arrays)
+    truth, c, n_amb_strand = origin_slot_counts(
+        index, Path(suite) / "oracle_cache", condition, payload, lift, region_arrays, chain
+    )
+    n_g, n_n, n_m = c["n_gdna"], c["n_nrna"], c["n_mrna"]
+    ref = slot_refs(chain, region_arrays)
     eff_g = np.asarray(geom.eff_gdna, np.float64)
-    rna_ok = np.asarray(statics.free_pos, bool) | np.asarray(statics.free_neg, bool)
-
-    capture_on = condition.endswith("_capture_on")
     gdna_refs = np.array(sorted({int(r) for r in ref[n_g > 0]}), np.int64)
 
-    verdicts = [gate_partition(count, n_g, n_n, n_m), gate_rna_strands_close(n_rp, n_rn, n_m, n_n)]
-    # informational, never pass/fail: the leak is production's drain behaviour and the ambiguity bounds the lift
-    verdicts.append({
-        "gate": "drained-frame report", "ok": True, "vacuous": False,
-        "gdna_spliced_leak": truth.gdna_spliced_leak,
-        "n_ambiguous_origins": int(truth.n_ambiguous),
-        "n_ambiguous_strands": int(n_amb_strand),
-    })
-    if capture_on:
-        verdicts.append({"gate": "gate gdna-field-uniformity", "ok": True, "vacuous": True,
-                         "note": "capture-ON: the field is deliberately non-uniform; gate not applicable"})
-    else:
-        for r in gdna_refs:
-            v = gate_uniformity(n_g, eff_g, label, ref == r)
-            v["ref"] = int(r)
-            verdicts.append(v)
-        if gdna_refs.size == 0:
-            verdicts.append({"gate": "gate gdna-field-uniformity", "ok": True, "vacuous": True,
-                             "note": "no gDNA anywhere (a zero condition)"})
-    # refs that carry no gDNA at all must be exactly zero (the ERCC backbone, and every ref in a zero-gDNA condition)
-    verdicts.append(gate_zero(n_g, ~np.isin(ref, gdna_refs), "gdna outside genomic refs"))
-    verdicts.append(gate_nascent_scope(n_n, rna_ok))
-
+    verdicts = [
+        gate_partition(c["count"], n_g, n_n, n_m),
+        gate_rna_strands_close(c["n_rna_pos"], c["n_rna_neg"], n_m, n_n),
+        # informational, never pass/fail: the leak is production's drain behaviour and the ambiguity bounds the lift
+        {"gate": "drained-frame report", "ok": True, "vacuous": False,
+         "gdna_spliced_leak": truth.gdna_spliced_leak,
+         "n_ambiguous_origins": int(truth.n_ambiguous),
+         "n_ambiguous_strands": n_amb_strand},
+        *uniformity_verdicts(capture_label(condition) == "on", n_g, eff_g, label, ref, gdna_refs),
+        # refs that carry no gDNA at all must be exactly zero (the ERCC backbone, and every ref in a zero-gDNA
+        # condition)
+        gate_zero(n_g, ~np.isin(ref, gdna_refs), "gdna outside genomic refs"),
+        gate_nascent_scope(n_n, np.asarray(statics.free_pos, bool) | np.asarray(statics.free_neg, bool)),
+    ]
     mass = n_g + n_n + n_m
     table = {
-        "condition": condition, "kind": kind, "obj": obj, "stratum": label.astype(str),
-        "ref": ref, "eff_g": eff_g, "eff_r": np.asarray(geom.eff_rna, np.float64),
-        "count": count, "n_gdna": n_g, "n_nrna": n_n, "n_mrna": n_m,
-        "n_rna_pos": n_rp, "n_rna_neg": n_rn,
+        "condition": condition, "kind": np.asarray(chain.kind), "obj": np.asarray(chain.obj_idx, np.int64),
+        "stratum": label.astype(str), "ref": ref, "eff_g": eff_g, "eff_r": np.asarray(geom.eff_rna, np.float64),
+        **c,
         "true_f_g": np.where(mass > 0, n_g / np.maximum(mass, _EPS), 0.0),
         "live": mass > 0,
     }
@@ -423,7 +431,7 @@ def build_one(index, suite: Path, condition: str, work_dir: Path, force: bool = 
     cache = read_scan_cache(scan_dir, index)
     lift: dict = {}
     kw = calibration_inputs(cache, index, lift_out=lift)
-    bam = str(Path(suite) / condition / "sim_oracle.bam")
+    bam = str(Path(suite) / condition / ORACLE_BAM)
     OA.load_or_build_oracle(
         bam, index, PipelineConfig(), Path(work_dir) / f"w_{condition}", condition, kw["payload"],
         Path(suite) / "oracle_cache", lift, force=force,
@@ -467,7 +475,7 @@ def main() -> int:
                     help="write the certified per-slot table as .npz (default: <suite>/oracle_cache/<condition>/slot_truth.npz)")
     ap.add_argument("--build", action="store_true", help="build the origin-split caches before certifying")
     ap.add_argument("--jobs", type=int, default=1, help="--build's worker processes, one condition each")
-    ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_oracle_build",
+    ap.add_argument("--work-dir", type=Path, default=SCRATCH / "rigel_oracle_build",
                     help="--build's scratch for the split BAMs")
     ap.add_argument("--skip-certify", action="store_true", help="--build only (the worker half of --jobs)")
     ap.add_argument("--force", action="store_true",
@@ -478,7 +486,6 @@ def main() -> int:
         return self_test()
 
     index = TranscriptIndex.load(args.index)
-    region_arrays = RegionArrays.from_index(index)
     conds = args.condition or sorted(
         p.name for p in (args.suite / "scan_cache").iterdir()
     )
@@ -489,7 +496,7 @@ def main() -> int:
     bad = 0
     for c in conds:
         try:
-            table, verdicts = derive(index, region_arrays, args.suite, c)
+            table, verdicts = derive(index, args.suite, c)
         except Exception as exc:  # noqa: BLE001 — sum-to-full failures surface here and must be a verdict
             print(f"\n== {c}\n   ⛔ gate sum-to-full / cache validation FAILED: {type(exc).__name__}: {exc}")
             bad += 1

@@ -171,10 +171,6 @@ class ReportSubstrate:
         return self._feather("calibration_track.feather")
 
     @property
-    def schema_version(self) -> int | None:
-        return SummaryReader(self.summary)[""]["schema_version"]
-
-    @property
     def sample_name(self) -> str:
         """A human label for the sample, derived from the input BAM stem."""
         bam = SummaryReader(self.summary)["input"]["bam_file"]

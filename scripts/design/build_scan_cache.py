@@ -1,9 +1,9 @@
 """Scan once, calibrate many times: cache what calibration reads from a BAM scan, one cache per condition.
 
 Re-running calibration should cost seconds, not a re-scan, so this script runs the single-pass scan on each
-condition's oracle BAM (or on one BAM) and writes the payload and strand model to a `rigel.scan_cache`
-directory. Each cache is keyed against its index (`graph_hash`, a reach digest that no other hash covers, the
-scan config and the splice blacklist) and its BAM's identity, and is refused at load if either has moved, so
+condition's oracle BAM (or on one BAM) and writes the payload and strand model to a scan-cache directory
+(`_scan_cache.py`). Each cache is keyed against its index (`graph_hash`, a reach digest that no other hash covers,
+the scan config and the splice blacklist) and its BAM's identity, and is refused at load if either has moved, so
 one condition can be rebuilt without touching the others. An existing cache is skipped only when it still
 matches; a stale one is re-scanned. Every cache is read straight back after it is written, so an unloadable
 cache fails here. The key hashes the accumulator's deposit rule, not the fragment construction, so a change to
@@ -29,15 +29,13 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 from rigel.config import BamScanConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import scan_and_buffer  # noqa: E402
-from rigel.scan_cache import (  # noqa: E402
+from _scan_cache import (  # noqa: E402
     ScanCacheKeyError,
     check_scan_cache,
     read_scan_cache,
     write_scan_cache,
 )
-
-#: Where a simulated condition keeps its oracle BAM, relative to the condition directory.
-ORACLE_BAM = "sim_oracle.bam"
+from _shared import ORACLE_BAM, panel_conditions  # noqa: E402
 
 #: The settings every cache is scanned under, and the ones the instruments read caches with, so an existing cache
 #: is skipped only when it was scanned under them.
@@ -90,9 +88,7 @@ def main() -> None:
     if args.bam is not None:
         jobs = [(args.bam.stem, args.bam, args.out)]
     else:
-        names = args.conditions or sorted(
-            p.name for p in args.suite.iterdir() if (p / ORACLE_BAM).exists()
-        )
+        names = panel_conditions(args.suite, args.conditions)
         jobs = [(name, args.suite / name / ORACLE_BAM, args.suite / "scan_cache" / name)
                 for name in names]
         if not jobs:

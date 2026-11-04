@@ -5,9 +5,6 @@ built on them. A category added in one language and forgotten in the other reads
 than as an error, so the enum and its derived names are pinned here.
 """
 
-from pathlib import Path
-
-
 from rigel.splice import (
     SpliceType,
     SpliceStrandCol,
@@ -33,7 +30,7 @@ class TestSpliceType:
         ]
 
     def test_native_constants_match_python_enum(self):
-        import rigel._resolve_impl as native_resolve
+        from rigel._resolve_impl import testing as native_resolve
 
         assert native_resolve.SPLICE_UNSPLICED == int(SpliceType.UNSPLICED)
         assert not hasattr(native_resolve, "SPLICE_SPLICED_UNANNOT")
@@ -41,17 +38,15 @@ class TestSpliceType:
         assert native_resolve.SPLICE_IMPLICIT == int(SpliceType.SPLICED_IMPLICIT)
         assert native_resolve.SPLICE_ARTIFACT == int(SpliceType.SPLICE_ARTIFACT)
 
-    def test_native_bam_splice_labels_cover_extended_codes(self):
-        """The native BAM writer's private ZS label helper must not fall through.
+    def test_native_splice_labels_are_the_member_names(self):
+        """The scanner's label for every splice class, which keys the census and stamps the annotated BAM's ZS, is the
+        member name lower-cased, so ``census_field`` derives the census key in Python without a second table."""
+        from rigel._bam_impl.testing import splice_type_label
 
-        ``splice_type_label`` is a static C++ helper, so this source-level test is
-        the lightest direct guard that extended splice classes stay labelled in
-        annotated BAM output.
-        """
-        source = Path(__file__).parents[1] / "src/rigel/native/bam_scanner.cpp"
-        text = source.read_text()
-        assert 'case SPLICE_IMPLICIT:        return "spliced_implicit";' in text
-        assert 'case SPLICE_ARTIFACT:        return "splice_artifact";' in text
+        assert [splice_type_label(int(t)) for t in SpliceType] == [
+            t.name.lower() for t in SpliceType
+        ]
+        assert splice_type_label(len(SpliceType)) == "unknown"
 
 
 # =====================================================================

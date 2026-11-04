@@ -63,7 +63,8 @@ def _valid_kwargs() -> dict:
 
 
 def test_valid_result_constructs():
-    CalibrationResult(**_valid_kwargs())
+    result = CalibrationResult(**_valid_kwargs())
+    assert (result.n_regions, result.n_boundaries, result.n_sj) == (N_REGIONS, N_BOUNDARIES, N_SJ)
 
 
 def test_zero_gdna_library_constructs():
@@ -72,7 +73,8 @@ def test_zero_gdna_library_constructs():
     kw["gdna_density_global"] = 0.0
     kw["count_gdna_region"] = np.zeros(N_REGIONS)
     kw["count_gdna_boundary"] = np.zeros(N_BOUNDARIES)
-    CalibrationResult(**kw)
+    result = CalibrationResult(**kw)
+    assert result.gdna_density_global == 0.0 and not result.count_gdna_region.any()
 
 
 def test_a_library_with_no_sj_constructs():
@@ -162,7 +164,7 @@ def test_accepts_an_integer_count_array():
         assert CalibrationResult(**kw).count_rna_sj.dtype == dtype
 
 
-def test_still_rejects_a_narrower_float():
+def test_a_narrower_float_is_rejected():
     """Integers are exact; float32 is not, and admitting it would mix precisions into arithmetic that is float64
     everywhere else."""
     kw = _valid_kwargs()
@@ -171,7 +173,7 @@ def test_still_rejects_a_narrower_float():
         CalibrationResult(**kw)
 
 
-def test_still_rejects_a_negative_integer_count():
+def test_a_negative_integer_count_is_rejected():
     kw = _valid_kwargs()
     kw["count_rna_region"] = np.array([1, -1, 1, 1], dtype=np.int64)
     with pytest.raises(ValueError, match="non-negative"):
@@ -224,7 +226,7 @@ def test_count_rna_spliced_has_no_region_twin():
         "rna_neg_frac_boundary",
     ],
 )
-def test_a_composition_component_above_one_is_REFUSED(name):
+def test_a_composition_component_above_one_is_refused(name):
     """Each of the three is a fraction of its object's unspliced population, so it is bounded by 1. Non-negativity and
     finiteness come from the shared axis check; this is the upper bound."""
     kw = _valid_kwargs()
@@ -235,7 +237,7 @@ def test_a_composition_component_above_one_is_REFUSED(name):
         CalibrationResult(**kw)
 
 
-def test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate():
+def test_a_composition_that_does_not_close_is_accepted_and_that_is_deliberate():
     """``f_g + f_pos + f_neg`` falls short of 1 on a substantial minority of both axes on real data, because ``sweep``'s
     write-back clips the three posterior means independently and an unsolvable slot keeps an init. The schema does not
     assert closure and must not renormalise the arrays at publication, which would make a short-closing object
@@ -255,13 +257,13 @@ def test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate():
 # ---------------------------------------------------------------------------
 
 
-def test_the_conserved_sj_mass_is_the_incidence_TIMES_its_own_conversion():
+def test_the_conserved_sj_mass_is_the_incidence_times_its_own_conversion():
     """The arithmetic, on a fixture where the two are far enough apart that the test can fail."""
     res = CalibrationResult(**_valid_kwargs())
     np.testing.assert_allclose(res.sj_conserved_mass, [2.0, 1.5])
 
 
-def test_the_sj_INCIDENCE_is_NOT_the_sj_MASS():
+def test_the_sj_incidence_is_not_the_sj_mass():
     """``count_rna_sj`` is named like a mass but is an incidence count: a fragment deposits ``+1`` on every sj it uses,
     so on real data it runs well over twice the conserved mass. The property must not return the incidence array.
     """
@@ -275,7 +277,7 @@ def test_the_sj_INCIDENCE_is_NOT_the_sj_MASS():
     assert np.all(incidence >= res.sj_conserved_mass - 1e-12)
 
 
-def test_a_sj_NOTHING_crossed_has_ZERO_conserved_mass_not_the_identity():
+def test_a_sj_nothing_crossed_has_zero_conserved_mass_not_the_identity():
     """``mass_per_crossing`` is 1.0 where nothing crossed (the identity, so a deconvolution's mass at an unobserved
     boundary is rescaled by 1 rather than deleted), and multiplying it by the zero incidence gives the correct 0. A
     ``where(count > 0, …)`` fallback to the conversion factor would publish one unit of RNA mass at every sj no fragment
@@ -289,7 +291,7 @@ def test_a_sj_NOTHING_crossed_has_ZERO_conserved_mass_not_the_identity():
     np.testing.assert_allclose(res.sj_conserved_mass[1], 1.5)
 
 
-def test_library_rna_fragments_READS_the_property_so_there_is_ONE_home():
+def test_library_rna_fragments_reads_the_property_so_there_is_one_home():
     """``library_rna_fragments`` reads the property rather than re-spelling the conversion, so the two cannot disagree:
     moving one moves the other.
     """
@@ -315,7 +317,7 @@ def test_the_conserved_mass_survives_the_oracle_arms_dataclass_replace():
     assert not np.allclose(swapped.sj_conserved_mass, res.sj_conserved_mass)
 
 
-def test_the_bulk_density_is_None_or_positive_and_finite():
+def test_the_bulk_density_is_none_or_positive_and_finite():
     """`gdna_bulk_density` is the unit the efficiencies are read in, or ``None`` (no landscape): a zero, a
     negative or a non-finite bulk is refused."""
     kw = _valid_kwargs()

@@ -40,8 +40,8 @@ __all__ = [
 class GdnaDensityFit:
     """A gDNA density estimate with its diagnostics.
 
-    ``rate`` is the one-sided estimate and ``pooled_rate`` the naive one. ``rate_over_pooled`` says how much
-    contamination the fit found; near 1 means the pool was already clean.
+    ``rate`` is the one-sided estimate and ``pooled_rate`` the naive one; their ratio says how much contamination the
+    fit found, near 1 when the pool was already clean.
     """
 
     rate: float
@@ -49,11 +49,6 @@ class GdnaDensityFit:
     n_objects: int
     total_exposure: float
     bracket_ok: bool
-
-    @property
-    def rate_over_pooled(self) -> float:
-        """``rate / pooled_rate`` — 1.0 when the pool was clean, below 1 when contamination was found."""
-        return self.rate / self.pooled_rate if self.pooled_rate > 0.0 else float("nan")
 
     @property
     def informative(self) -> bool:
@@ -75,11 +70,11 @@ def poisson_lower_mean(lam: np.ndarray) -> np.ndarray:
     lp = lam[pos]
     k = np.floor(lp)
     # in log space: a large `lam` overflows `lam**(k+1)` and `k!` separately while their ratio is O(sqrt(lam))
-    out[pos] = np.exp((k + 1.0) * np.log(lp) - lp - _log_factorial(k))
+    out[pos] = np.exp((k + 1.0) * np.log(lp) - lp - log_factorial(k))
     return out
 
 
-def _log_factorial(k: np.ndarray) -> np.ndarray:
+def log_factorial(k: np.ndarray) -> np.ndarray:
     """``gammaln(k + 1)`` for integer-valued ``k``, by table whenever the table is smaller than the data.
 
     The arguments are the integers up to the largest, usually far fewer than the objects, and the table holds the

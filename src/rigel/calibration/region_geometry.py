@@ -22,13 +22,8 @@ from .effective_length import (
     observable_crossing_eff_length,
 )
 from .region_chain import BOUNDARY, REGION, RegionChain
-from .signature import (
-    TS_AMBIG,
-    TS_NEG,
-    TS_POS,
-    rna_active_strands,
-)
-from .simplex_logodds import _solve_regions_logodds_all
+from .signature import rna_active_strands
+from .simplex_logodds import solve_regions_logodds
 
 __all__ = [
     "RegionGeometry",
@@ -39,6 +34,7 @@ __all__ = [
     "build_region_statics",
     "init_beliefs",
     "g1_locked",
+    "slot_signature",
 ]
 
 
@@ -119,94 +115,103 @@ def build_region_geometry(
     sj, RNA           the exonic per-strand reach (``crossing_eff_length``): only a molecule that
                       spliced across a sj uses it
     ================  ==========================================================================
-
-    A sj's donor is the boundary right of ``src_region`` and its acceptor the boundary left of ``dst_region``,
-    read off the chain's adjacency. A reference terminal links to ``-1``, so a sj can never attach across
-    references: this function raises instead.
     """
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    is_region = kind == REGION
-    is_boundary = kind == BOUNDARY
-    n = chain.n_slots
-
-    # ── the two contiguous populations: the mixture, and the certified-RNA floor beside it ───────
-    unspliced_count = np.zeros((n, 2), dtype=np.float64)
-    unspliced_count[is_region] = np.asarray(substrate.region_contained.count, np.float64)[
-        obj[is_region]
-    ]
-    unspliced_count[is_boundary] = np.asarray(substrate.boundary_unspliced.count, np.float64)[
-        obj[is_boundary]
-    ]
-    # REGION slots stay 0: a contained fragment used no sj, so it cannot be a spliced molecule
-    spliced_count = np.zeros((n, 2), dtype=np.float64)
-    spliced_count[is_boundary] = np.asarray(substrate.boundary_spliced.count, np.float64)[
-        obj[is_boundary]
-    ]
-
-    # ── the two per-component divisors ───────────────────────────────────────────────────────────
-    n_regions = int(region_arrays.n_regions)
-
-    def divisor(pmf: np.ndarray) -> np.ndarray:
-        """Per-slot effective length over the observable genome: contained placements at a REGION, crossing
-        placements at a BOUNDARY."""
-        out = np.zeros(n, dtype=np.float64)
-        if n_regions:
-            out[is_region] = observable_contained_eff_length(region_arrays, pmf)[obj[is_region]]
-        if is_boundary.any():
-            out[is_boundary] = observable_crossing_eff_length(region_arrays, pmf)[obj[is_boundary]]
-        return out
-
-    eff_gdna = divisor(gdna_fl_pmf)
-    eff_rna = divisor(rna_fl_pmf)
-
-    # ── the jumping population: a sj is a factor on the boundaries it leaves and enters ───
-    sj_count = np.zeros((n, 2), dtype=np.float64)
-    jc_lo = np.zeros((n, 2), dtype=np.float64)
-    jc_hi = np.zeros((n, 2), dtype=np.float64)
-    route_rate_lo = np.zeros((n, 2), dtype=np.float64)
-    route_rate_hi = np.zeros((n, 2), dtype=np.float64)
-    if sj.n_sj:
-        slot_of_region = np.zeros(int(chain.n_regions_total), dtype=np.int64)
-        slot_of_region[obj[is_region]] = np.flatnonzero(is_region)
-        donor = np.asarray(chain.right)[slot_of_region[np.asarray(sj.src_region, np.int64)]]
-        acceptor = np.asarray(chain.left)[slot_of_region[np.asarray(sj.dst_region, np.int64)]]
-        if np.any(donor < 0) or np.any(acceptor < 0):
-            raise ValueError(
-                "a sj boundary attaches to a reference terminal, which has no boundary beside it. "
-                "Both of an intron's endpoints are interior interfaces of the same reference by "
-                "construction (splice_graph I5), so this is a sj axis addressing a different "
-                "partition than the payload was scanned on."
-            )
-        # the sj's count summed over the genome-strand columns, filed under the sj's transcript strand
-        flux = np.asarray(substrate.sj.count, np.float64).sum(axis=1)
-        eff = crossing_eff_length(rna_fl_pmf, sj.reach_lo, sj.reach_hi)
-        column = np.where(np.asarray(sj.strand) == np.int8(Strand.POS), 0, 1)
-        # ``donor`` is the boundary at the sj's genomic-low end and ``acceptor`` the high one on both strands:
-        # the chain's links are genomic and a sj runs ``src < dst``
-        live_route = eff > 0.0
-        for boundary, rr in ((donor, route_rate_lo), (acceptor, route_rate_hi)):
-            np.add.at(
-                rr,
-                (boundary[live_route], column[live_route]),
-                flux[live_route] / eff[live_route],
-            )
-        for boundary, jc in ((donor, jc_lo), (acceptor, jc_hi)):
-            np.add.at(sj_count, (boundary, column), flux)
-            np.add.at(jc, (boundary, column), flux)
-
+    unspliced_count, spliced_count = _contiguous_counts(chain, substrate)
+    sj_count, sj_count_lo, sj_count_hi, route_rate_lo, route_rate_hi = _sj_factors(
+        chain, substrate, sj, rna_fl_pmf
+    )
     return RegionGeometry(
-        n_slots=int(n),
+        n_slots=int(chain.n_slots),
         unspliced_count=unspliced_count,
-        eff_gdna=eff_gdna,
-        eff_rna=eff_rna,
+        eff_gdna=_slot_divisor(chain, region_arrays, gdna_fl_pmf),
+        eff_rna=_slot_divisor(chain, region_arrays, rna_fl_pmf),
         spliced_count=spliced_count,
         sj_count=sj_count,
-        sj_count_lo=jc_lo,
-        sj_count_hi=jc_hi,
+        sj_count_lo=sj_count_lo,
+        sj_count_hi=sj_count_hi,
         route_rate_lo=route_rate_lo,
         route_rate_hi=route_rate_hi,
     )
+
+
+def _contiguous_counts(chain: RegionChain, substrate) -> tuple[np.ndarray, np.ndarray]:
+    """``(unspliced_count, spliced_count)``, each ``[n_slots, 2]`` by genome strand: the mixture, and the
+    certified-RNA floor beside it. A REGION slot's spliced count stays 0: a contained fragment used no sj, so it cannot
+    be a spliced molecule."""
+    kind = np.asarray(chain.kind)
+    obj = np.asarray(chain.obj_idx, dtype=np.int64)
+    is_region, is_boundary = kind == REGION, kind == BOUNDARY
+    n = chain.n_slots
+    unspliced = np.zeros((n, 2), dtype=np.float64)
+    unspliced[is_region] = np.asarray(substrate.region_contained.count, np.float64)[obj[is_region]]
+    unspliced[is_boundary] = np.asarray(substrate.boundary_unspliced.count, np.float64)[
+        obj[is_boundary]
+    ]
+    spliced = np.zeros((n, 2), dtype=np.float64)
+    spliced[is_boundary] = np.asarray(substrate.boundary_spliced.count, np.float64)[
+        obj[is_boundary]
+    ]
+    return unspliced, spliced
+
+
+def _slot_divisor(chain: RegionChain, region_arrays, pmf: np.ndarray) -> np.ndarray:
+    """Per-slot effective length over the observable genome on one length pmf: contained placements at a REGION,
+    crossing placements at a BOUNDARY."""
+    kind = np.asarray(chain.kind)
+    obj = np.asarray(chain.obj_idx, dtype=np.int64)
+    is_region, is_boundary = kind == REGION, kind == BOUNDARY
+    out = np.zeros(chain.n_slots, dtype=np.float64)
+    if int(region_arrays.n_regions):
+        out[is_region] = observable_contained_eff_length(region_arrays, pmf)[obj[is_region]]
+    if is_boundary.any():
+        out[is_boundary] = observable_crossing_eff_length(region_arrays, pmf)[obj[is_boundary]]
+    return out
+
+
+def _sj_factors(chain: RegionChain, substrate, sj, rna_fl_pmf: np.ndarray):
+    """The jumping population as a factor on the boundaries each sj leaves and enters: ``(sj_count, sj_count_lo,
+    sj_count_hi, route_rate_lo, route_rate_hi)``, each ``[n_slots, 2]`` by transcript strand.
+
+    A sj's low end is the boundary right of ``src_region`` and its high end the boundary left of ``dst_region``, read
+    off the chain's adjacency; the chain's links are genomic and a sj runs ``src < dst``, so this holds on both strands.
+    A reference terminal links to ``-1``, so a sj can never attach across references: this raises instead.
+    """
+    n = chain.n_slots
+    sj_count = np.zeros((n, 2), dtype=np.float64)
+    count_lo = np.zeros((n, 2), dtype=np.float64)
+    count_hi = np.zeros((n, 2), dtype=np.float64)
+    rate_lo = np.zeros((n, 2), dtype=np.float64)
+    rate_hi = np.zeros((n, 2), dtype=np.float64)
+    if not sj.n_sj:
+        return sj_count, count_lo, count_hi, rate_lo, rate_hi
+    is_region = np.asarray(chain.kind) == REGION
+    obj = np.asarray(chain.obj_idx, dtype=np.int64)
+    slot_of_region = np.zeros(int(chain.n_regions_total), dtype=np.int64)
+    slot_of_region[obj[is_region]] = np.flatnonzero(is_region)
+    lo_end = np.asarray(chain.right)[slot_of_region[np.asarray(sj.src_region, np.int64)]]
+    hi_end = np.asarray(chain.left)[slot_of_region[np.asarray(sj.dst_region, np.int64)]]
+    if np.any(lo_end < 0) or np.any(hi_end < 0):
+        raise ValueError(
+            "a sj boundary attaches to a reference terminal, which has no boundary beside it. "
+            "Both of an intron's endpoints are interior interfaces of the same reference by "
+            "construction (splice_graph I5), so this is a sj axis addressing a different "
+            "partition than the payload was scanned on."
+        )
+    # the sj's count summed over the genome-strand columns, filed under the sj's transcript strand
+    flux = np.asarray(substrate.sj.count, np.float64).sum(axis=1)
+    eff = crossing_eff_length(rna_fl_pmf, sj.reach_lo, sj.reach_hi)
+    column = np.where(np.asarray(sj.strand) == np.int8(Strand.POS), 0, 1)
+    live_route = eff > 0.0
+    for boundary, rate in ((lo_end, rate_lo), (hi_end, rate_hi)):
+        np.add.at(
+            rate,
+            (boundary[live_route], column[live_route]),
+            flux[live_route] / eff[live_route],
+        )
+    for boundary, count in ((lo_end, count_lo), (hi_end, count_hi)):
+        np.add.at(sj_count, (boundary, column), flux)
+        np.add.at(count, (boundary, column), flux)
+    return sj_count, count_lo, count_hi, rate_lo, rate_hi
 
 
 def region_gdna_geometry(geometry: RegionGeometry):
@@ -242,8 +247,7 @@ class RegionBelief:
     #: Whether the slot holds a composition: its own composition channel, structural certainty, or a composition
     #: row from a neighbour. A level, a ceiling or a cube row is only a bound and does not count, because a
     #: bound-only slot settles where the prior puts it, and training the prior on it would train it on its own
-    #: echo. Published by ``sweep.solve_chain``; ``None`` before any solve, which the landscape's selector reads as
-    #: the annotation alone.
+    #: echo. Published by ``sweep.solve_chain``; ``None`` on the initial belief, before any solve.
     #: Gate: ``tests/calibration/test_landscape_training_population.py``.
     has_composition: np.ndarray | None = None
 
@@ -314,61 +318,49 @@ class RegionStatics:
 def build_region_statics(
     chain: RegionChain,
     region_arrays,
-    boundary_flags: np.ndarray | None = None,
+    boundary_flags: np.ndarray,
 ) -> RegionStatics:
     """Gather the structural masks onto the chain in one slot-keyed pass over the signatures and adjacency.
 
     A boundary always has a region on both sides, so ``chain.left``/``chain.right`` give its flanks. The mask is a
-    continuity gate: a strand-``s`` unspliced crossing can be RNA only where strand ``s`` is present on both flanks,
-    which makes a TSS/TES boundary (intergenic|exon) a gDNA sink.
+    continuity gate (``signature.rna_active_strands``): a region admits strand ``s`` where its own signature carries
+    ``s``, and a strand-``s`` unspliced crossing can be RNA only where strand ``s`` is present on both flanks, which
+    makes a TSS/TES boundary (intergenic|exon) a gDNA sink.
 
     ``boundary_flags`` is the per-contiguous-boundary ``uint16[E]`` from
-    :func:`~rigel.calibration.splice_graph.build_boundary_flags_array`; ``None`` leaves the field zero, read as no
-    structural information.
+    :func:`~rigel.calibration.splice_graph.build_boundary_flags_array`.
     """
-    kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    is_region = kind == REGION
-    is_boundary = kind == BOUNDARY
+    is_region = np.asarray(chain.kind) == REGION
+    is_boundary = ~is_region
     n = int(chain.n_slots)
     flags = _check_boundary_flags(boundary_flags, int(chain.n_boundaries_total))
-
-    sig = np.asarray(region_arrays.signature).astype(np.int64)
-    n_regions = sig.shape[0]
-    region_idx = np.clip(obj, 0, max(n_regions - 1, 0))
-
-    # the signature at each REGION slot, then read through the chain's adjacency at each BOUNDARY slot
-    slot_sig = np.where(is_region, sig[region_idx] if n_regions else 0, 0)
+    pos, neg = rna_active_strands(slot_signature(chain, region_arrays.signature))
     left = np.clip(np.asarray(chain.left), 0, max(n - 1, 0))
     right = np.clip(np.asarray(chain.right), 0, max(n - 1, 0))
-    sig_l = np.where(is_boundary, slot_sig[left], 0)
-    sig_r = np.where(is_boundary, slot_sig[right], 0)
-
-    ts = np.where(
-        is_region, np.asarray(region_arrays.strand_class)[region_idx] if n_regions else 0, -1
-    )
-    pos_l, neg_l = rna_active_strands(sig_l)
-    pos_r, neg_r = rna_active_strands(sig_r)
-
-    free_pos = np.where(is_region, (ts == TS_POS) | (ts == TS_AMBIG), pos_l & pos_r)
-    free_neg = np.where(is_region, (ts == TS_NEG) | (ts == TS_AMBIG), neg_l & neg_r)
-
     return RegionStatics(
         n_slots=n,
         # No per-slot spliced floor: the message layer owns spliced RNA, and a local floor would count it twice,
         # putting RNA that spliced elsewhere into a boundary's unspliced f_pos.
-        free_pos=free_pos,
-        free_neg=free_neg,
+        free_pos=np.where(is_region, pos, pos[left] & pos[right]),
+        free_neg=np.where(is_region, neg, neg[left] & neg[right]),
         boundary_flags=np.where(
             is_boundary, flags[np.clip(obj, 0, max(flags.shape[0] - 1, 0))], 0
         ).astype(np.uint16),
     )
 
 
+def slot_signature(chain: RegionChain, signature: np.ndarray) -> np.ndarray:
+    """``int64[n_slots]`` — each REGION slot's region signature, and 0 (no transcript feature) at a BOUNDARY slot."""
+    is_region = np.asarray(chain.kind) == REGION
+    out = np.zeros(int(chain.n_slots), dtype=np.int64)
+    obj = np.asarray(chain.obj_idx, dtype=np.int64)[is_region]
+    out[is_region] = np.asarray(signature).astype(np.int64)[obj]
+    return out
+
+
 def _check_boundary_flags(boundary_flags, n_boundaries: int) -> np.ndarray:
     """Validate the per-contiguous-boundary flags against the chain; a mis-sized array would shift every flag."""
-    if boundary_flags is None:
-        return np.zeros(max(n_boundaries, 1), dtype=np.uint16)
     flags = np.asarray(boundary_flags, dtype=np.uint16)
     if flags.shape != (n_boundaries,):
         raise ValueError(
@@ -400,7 +392,7 @@ def init_beliefs(
     fp, fn = np.asarray(st.free_pos, bool), np.asarray(st.free_neg, bool)
     single = fp ^ fn
     count = np.asarray(geometry.unspliced_count, np.float64)
-    deconv = _solve_regions_logodds_all(
+    deconv = solve_regions_logodds(
         count[:, 0],
         count[:, 1],
         fp & single,

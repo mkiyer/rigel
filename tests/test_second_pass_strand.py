@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _index_builder import write_fasta
+from _bam_builder import R1_FWD, R1_REV, R2_FWD, R2_REV, SECONDARY, record, write_bam
+from _index_builder import build_index
+from _length_models import payload_fl_models
 
-from rigel.calibration.fl import build_fl_models
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.splice_graph import build_sj_arrays
 from rigel.config import BamScanConfig
-from rigel.index import TranscriptIndex
 from rigel.pipeline import scan_and_buffer
 from rigel.second_pass import score_held_fragments, strand_terms
 from rigel.types import Strand
@@ -47,79 +47,36 @@ def _scan(tmp_path_factory, label: str, multi_xs):
     ``N_MULTI`` multimappers whose first hit is spliced across that junction with R1 on the other strand, its motif
     tag *multi_xs* (``None``: the aligner wrote none), and whose second hit is unspliced, contained in chr2's first
     exon."""
-    import pysam
-
     base = tmp_path_factory.mktemp(f"strand_placements_{label}")
-    fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {"chr1": GENOME, "chr2": GENOME})
-    gtf.write_text(_gtf())
-    TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
-    index = TranscriptIndex.load(str(base / "idx"))
-
-    def read(
-        qname, ref_id, pos, mate_pos, is_r1, reverse, cigar, nh=1, hi=None, secondary=False, xs=None
-    ):
-        a = pysam.AlignedSegment()
-        a.query_name = qname
-        a.reference_id = ref_id
-        a.reference_start = pos
-        a.mapping_quality = 60
-        a.flag = (
-            0x1
-            | 0x2
-            | (0x40 if is_r1 else 0x80)
-            | (0x10 if reverse else 0)
-            | (0x20 if not reverse else 0)
-            | (0x100 if secondary else 0)
-        )
-        a.cigar = cigar
-        n = sum(length for op, length in cigar if op == _M)
-        a.query_sequence = "A" * n
-        a.query_qualities = pysam.qualitystring_to_array("I" * n)
-        a.next_reference_id = ref_id
-        a.next_reference_start = mate_pos
-        tags = [("NH", nh, "i")] + ([("HI", hi, "i")] if hi is not None else [])
-        if xs is not None:
-            tags.append(("XS", xs, "A"))
-        a.set_tags(tags)
-        return a
+    index = build_index(base, _gtf(), {"chr1": GENOME, "chr2": GENOME})
 
     spliced = [(_M, 50), (_N, 400), (_M, 50)]  # [1550, 1600) | intron [1600, 2000) | [2000, 2050)
     reads = []
     for k in range(N_SENSE):  # R1 forward and spliced on a + motif: sense
         reads += [
-            read(f"s_{k}", 0, 1550, 2080, True, False, spliced, xs="+"),
-            read(f"s_{k}", 0, 2080, 1550, False, True, [(_M, 100)]),
+            record(f"s_{k}", R1_FWD, 1550, spliced, 2080, xs="+"),
+            record(f"s_{k}", R2_REV, 2080, [(_M, 100)], 1550),
         ]
     for k in range(N_ANTISENSE):  # R2 forward and spliced on a + motif, R1 reverse: antisense
         reads += [
-            read(f"a_{k}", 0, 2080, 1550, True, True, [(_M, 100)]),
-            read(f"a_{k}", 0, 1550, 2080, False, False, spliced, xs="+"),
+            record(f"a_{k}", R1_REV, 2080, [(_M, 100)], 1550),
+            record(f"a_{k}", R2_FWD, 1550, spliced, 2080, xs="+"),
         ]
     for k in range(N_BACKGROUND):
         pos = 3000 + 10 * k
         reads += [
-            read(f"b_{k}", 1, pos, pos + 300, True, False, [(_M, 100)]),
-            read(f"b_{k}", 1, pos + 300, pos, False, True, [(_M, 100)]),
+            record(f"b_{k}", R1_FWD, pos, [(_M, 100)], pos + 300, ref=1),
+            record(f"b_{k}", R2_REV, pos + 300, [(_M, 100)], pos, ref=1),
         ]
-    for k in range(
-        N_MULTI
-    ):  # hit 1: R2 forward and spliced on a + motif, R1 reverse; hit 2: unspliced on chr2
+    # hit 1: R2 forward and spliced on a + motif, R1 reverse; hit 2: unspliced on chr2
+    for k in range(N_MULTI):
         reads += [
-            read(f"mm_{k}", 0, 2080, 1550, True, True, [(_M, 100)], nh=2, hi=1),
-            read(f"mm_{k}", 0, 1550, 2080, False, False, spliced, nh=2, hi=1, xs=multi_xs),
-            read(f"mm_{k}", 1, 1320, 1120, True, True, [(_M, 100)], nh=2, hi=2, secondary=True),
-            read(f"mm_{k}", 1, 1120, 1320, False, False, [(_M, 100)], nh=2, hi=2, secondary=True),
+            record(f"mm_{k}", R1_REV, 2080, [(_M, 100)], 1550, nh=2, hi=1),
+            record(f"mm_{k}", R2_FWD, 1550, spliced, 2080, nh=2, hi=1, xs=multi_xs),
+            record(f"mm_{k}", R1_REV | SECONDARY, 1320, [(_M, 100)], 1120, ref=1, nh=2, hi=2),
+            record(f"mm_{k}", R2_FWD | SECONDARY, 1120, [(_M, 100)], 1320, ref=1, nh=2, hi=2),
         ]
-    bam = str(base / "p.bam")
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": "chr1", "LN": GENOME}, {"SN": "chr2", "LN": GENOME}],
-    }
-    with pysam.AlignmentFile(bam, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam, bam)
+    bam = write_bam(base / "p.bam", reads, {"chr1": GENOME, "chr2": GENOME})
     _s, strand_model, _b, payload = scan_and_buffer(
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
@@ -139,7 +96,7 @@ def scanned_untagged(tmp_path_factory):
 def _spliced_placements(scanned):
     """Score the fixture; yield each multimapper's spliced placement with its hypotheses' slice."""
     payload, regions, sj, strand_model = scanned
-    fl = build_fl_models(payload)
+    fl = payload_fl_models(payload)
     scores = score_held_fragments(
         payload, fl_models=fl, rna_sense_frac=strand_model.p_r1_sense, regions=regions, sj=sj
     )
@@ -168,7 +125,7 @@ def test_an_untagged_annotated_splice_reads_its_junctions_strand(scanned_untagge
         np.testing.assert_allclose(scores.terms.strand[hyp], 1.0 - p, rtol=1e-12, atol=0.0)
 
 
-def test_an_observed_annotated_splice_reads_the_RNA_length_law(scanned):
+def test_an_observed_annotated_splice_reads_the_rna_length_law(scanned):
     """A placement whose observed intron resolves to an annotated junction is certified RNA under every one of its
     paths, so each takes the RNA length law; the unconditional anchor is for a path whose component is unknown.
 
@@ -185,7 +142,7 @@ def test_an_observed_annotated_splice_reads_the_RNA_length_law(scanned):
         )
 
 
-def test_a_spliced_placement_never_takes_gDNAs_bound(scanned):
+def test_a_spliced_placement_never_takes_gdnas_bound(scanned):
     """gDNA's floor holds a placement at least at the library's bulk only where gDNA can be. A placement the deposit
     books spliced holds no gDNA, so it keeps its own junction traffic even where that is none: chr2's junction,
     which no unique fragment crossed, reads 0 beside a bulk of 1, and chr1's reads its own traffic.
@@ -193,30 +150,31 @@ def test_a_spliced_placement_never_takes_gDNAs_bound(scanned):
     Perturbation: flooring every placement reads chr2's junction at the bulk.
     """
     from rigel.calibration.effective_length import observable_contained_eff_length
-    from rigel.second_pass import placement_abundance
+    from rigel.second_pass import PlacementPath, placement_abundance
 
     payload, regions, sj, _strand_model = scanned
     d = payload.deferred
-    support = observable_contained_eff_length(regions, build_fl_models(payload).global_pmf)
+    support = observable_contained_eff_length(regions, payload_fl_models(payload).global_pmf)
     chr1_sj = int(payload.ref_sj_offsets[0])
     chr2_sj = int(payload.ref_sj_offsets[1])
     assert (
         float(payload.sj_inv_length_sum[chr2_sj]) == 0.0 < float(payload.sj_inv_length_sum[chr1_sj])
     )
-    p = 0
+    none = np.zeros(0, np.int64)
     for junction, expected in (
         (chr2_sj, 0.0),
         (chr1_sj, float(payload.sj_inv_length_sum[chr1_sj])),
     ):
-        got = placement_abundance(payload, p, np.array([junction], np.int64), support, bulk=1.0)
-        assert got == expected
-    assert placement_abundance(payload, p, np.zeros(0, np.int64), support, bulk=1e9) == 1e9, (
+        path = PlacementPath(sj=np.array([junction], np.int64), boundaries=none, regions=none)
+        assert placement_abundance(payload, path, support, bulk=1.0) == expected
+    unspliced = PlacementPath(sj=none, boundaries=none, regions=none)
+    assert placement_abundance(payload, unspliced, support, bulk=1e9) == 1e9, (
         "a placement no annotated junction cuts reads at least the bulk"
     )
     assert d.n_placements > 0
 
 
-def test_a_wrong_strand_spliced_placement_carries_one_minus_p_beside_an_unspliced_one(scanned):
+def test_a_wrong_strand_spliced_placement_carries_1_minus_p_beside_an_unspliced_one(scanned):
     payload, regions, sj, strand_model = scanned
     p = strand_model.p_r1_sense
     assert 0.9 < p < 1.0, (
@@ -224,7 +182,7 @@ def test_a_wrong_strand_spliced_placement_carries_one_minus_p_beside_an_unsplice
     )
     scores = score_held_fragments(
         payload,
-        fl_models=build_fl_models(payload),
+        fl_models=payload_fl_models(payload),
         rna_sense_frac=p,
         regions=regions,
         sj=sj,

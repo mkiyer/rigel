@@ -1,11 +1,12 @@
 // transfer_rows.h — the row constructors of the composition transfer, shared by the transfer's builders, pass and
-// solve (`transfer_kernel.h`) and ψ's kernel (`psi_kernel.h`), and bound to Python as `native.transfer_rows`.
+// solve (`transfer_kernel.h`) and ψ's kernel (`psi_kernel.h`), and bound for the gates in `_solve_impl.testing`.
 // Each function is a pure function of one face's or one node's numbers over the solve grid `lam`
 // (`f_g = sigma(lam)`, K points) and writes a max-normalised log-row.
 // Gate: tests/calibration/test_transfer_*.py, which recompute with these functions.
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -279,14 +280,16 @@ inline void level_map_lambda(const double* lam, int K, double density_b, double 
     }
 }
 
-// level_bound_row(lam, density_b, opportunity_i, total_i, v): the crossing total's one-sided bound.
+// level_bound_row(lam, density_b, opportunity_i, total_i, v): the crossing total's one-sided bound. v is a sum of
+// counting variances, so positive.
 inline void level_bound_row(const double* lam, int K, double density_b, double opportunity_i, double total_i,
                             double v, double* out) {
-    const double den = std::max(v, 1e-12), log_d = std::log(density_b);
+    assert(v > 0.0);
+    const double log_d = std::log(density_b);
     for (int j = 0; j < K; ++j) {
         const double x = std::log(std::max(sigmoid(lam[j]) * total_i / opportunity_i, TINY)) - log_d;
         const double xp = std::max(x, 0.0);
-        out[j] = -0.5 * (xp * xp) / den;
+        out[j] = -0.5 * (xp * xp) / v;
     }
     norm_inplace(out, K);
 }

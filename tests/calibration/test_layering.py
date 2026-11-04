@@ -73,7 +73,7 @@ def test_the_layers_are_numbered_in_order():
     assert nums == sorted(nums) == list(range(len(nums)))
 
 
-def test_no_import_points_UP_a_layer():
+def test_no_import_points_up_a_layer():
     """An import may point down a layer or sideways within one, never up. An upward import almost always means a type is
     defined too high (``RegionDeconv``, one slot's deconvolution result ``(f_pos, f_neg, f_g)``, is the example, reached
     for by three layers below the strand family that first defined it); the type belongs at the bottom.

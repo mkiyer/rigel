@@ -1,6 +1,6 @@
-# THE JUNCTION ADVERSARIAL PANEL (owner directive 2026-09-01) — one BED12 two-block probe
-# (62 + 63 bp, contiguous only in cDNA) per sj of a probed gene and nothing else: spliced
-# fragments enriched over unspliced/gDNA at the same face.
+# THE JUNCTION ADVERSARIAL PANEL — one BED12 two-block probe (62 + 63 bp, contiguous only in
+# cDNA) per sj of a probed gene and nothing else: spliced fragments enriched over
+# unspliced/gDNA at the same face.
 # DERIVED from test_chr.yaml by build_test_reference.py — do not edit; edit the YAML and re-run it.
 test_chr	94938	102063	junction_B1_cap_sj0	0	.	94938	102063	0	2	62,63	0,7062
 test_chr	102938	110063	junction_B1_cap_sj1	0	.	102938	110063	0	2	62,63	0,7062

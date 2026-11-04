@@ -15,11 +15,10 @@ from __future__ import annotations
 import numpy as np
 
 from rigel.calibration.calibrate import calibrate
-from rigel.calibration.fl import build_fl_models
 from rigel.calibration.region_arrays import RegionArrays
-from rigel.calibration.signature import TS_AMBIG
+from rigel.calibration.signature import rna_active_strands
 from rigel.config import PipelineConfig
-from rigel.pipeline import scan_and_buffer
+from rigel.pipeline import library_fl_models, scan_and_buffer
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 
@@ -81,10 +80,7 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
     cfg = PipelineConfig()
     _st, sm, _buf, pl = scan_and_buffer(bam, idx, cfg.scan)
     ra = RegionArrays.from_frame(idx.regions_df, idx.ref_name_to_id)
-    # The length models from the payload alone, with no index inputs: the RNA pool is not de-tilted
-    # and the gDNA pmf is fitted from the contained pair (production's
-    # `rigel.pipeline.library_fl_models` also passes the index's opportunities and partition).
-    fl = build_fl_models(pl)
+    fl = library_fl_models(pl, idx)
     # The sj axis and the boundary flags are both required against the index the payload was scanned on: an axis
     # addressing a different graph would place every splice on the wrong boundary, so calibrate refuses.
     from rigel.calibration.splice_graph import (
@@ -104,7 +100,8 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
     )
     sc.cleanup()
 
-    ambig = np.flatnonzero(np.asarray(ra.strand_class) == TS_AMBIG)
+    pos, neg = rna_active_strands(ra.signature)
+    ambig = np.flatnonzero(pos & neg)
     assert ambig.size >= 1, "the overlapping pair did not form an AMBIG region"
     g = np.asarray(result.count_gdna_region)[ambig]
     r = np.asarray(result.count_rna_region)[ambig]
@@ -120,9 +117,7 @@ def test_ambig_no_false_gdna_from_nascent(tmp_path):
     # gDNA=0 + nascent: the AMBIG region must not read the nascent/mature RNA as gDNA. Imputation from the strand-clean
     # flanking boundaries drives it to ~0.
     frac = _ambig_gdna_fraction(tmp_path / "none", gdna_abundance=0, nrna_abundance=30.0)
-    assert frac < 0.08, (
-        f"AMBIG gDNA fraction {frac:.3f} too high at gDNA=0+nascent (the fix should be ~0)"
-    )
+    assert frac < 0.08, f"AMBIG gDNA fraction {frac:.3f} too high at gDNA=0+nascent (expected ~0)"
 
 
 def test_ambig_reads_gdna_when_present(tmp_path):

@@ -68,7 +68,7 @@ def test_the_prices_are_the_emission_ratios(eps):
         assert clip == pytest.approx(math.log(clipped[r, b] / aligned[r, r]), rel=1e-12)
 
 
-def test_a_library_with_no_mismatch_makes_one_impossible_and_one_with_no_unique_unspliced_hit_prices_nothing():
+def test_no_mismatch_makes_one_impossible_and_no_unique_unspliced_hit_prices_nothing():
     assert sequence_log_penalties(0.0) == (-math.inf, -math.log(4.0))
     assert sequence_log_penalties(None) == (0.0, 0.0)
 

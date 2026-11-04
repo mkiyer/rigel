@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from rigel.cli import build_parser, _resolve_quant_args, _build_quant_defaults
+from rigel.cli import build_parser, resolve_quant_args, build_quant_defaults
 from rigel.config import BamScanConfig
 
 
@@ -180,9 +180,7 @@ def _quant_with_empty_inputs(tmp_path, *extra):
 
 
 @pytest.mark.parametrize("value", ["nan", "-0.5", "1", "1.5"])
-def test_quant_refuses_a_pruning_threshold_outside_zero_to_one_before_loading_the_index(
-    tmp_path, value
-):
+def test_quant_refuses_a_pruning_threshold_outside_0_1_before_loading_the_index(tmp_path, value):
     """A candidate is pruned when its likelihood falls below this fraction of its fragment's best. At 1 or above, or
     NaN, the margin would be 0 and a fragment keep only its tied-best candidates; below 0 nothing would be pruned. 0
     keeps every candidate, so the range is [0, 1), refused as an error before the index loads."""
@@ -266,12 +264,12 @@ def test_config_yaml_records_every_path_absolute(tmp_path, monkeypatch):
     the annotated BAM and spill directory too, which a rerun from elsewhere would otherwise write elsewhere."""
     import yaml
 
-    from rigel.cli import _write_config_yaml
+    from rigel.cli import write_config_yaml
 
     monkeypatch.chdir(tmp_path)
     args = _parse_quant("--annotated-bam", "ann/annotated.bam", "--tmpdir", "spill")
-    _resolve_quant_args(args, _build_quant_defaults())
-    _write_config_yaml(tmp_path / "config.yaml", args)
+    resolve_quant_args(args, build_quant_defaults())
+    write_config_yaml(tmp_path / "config.yaml", args)
     quant = yaml.safe_load((tmp_path / "config.yaml").read_text())["quant"]
     assert quant["annotated_bam"] == str((tmp_path / "ann/annotated.bam").resolve())
     assert quant["tmpdir"] == str((tmp_path / "spill").resolve())
@@ -324,7 +322,7 @@ def test_sim_accepts_every_documented_scenario_key(tmp_path):
 
 
 class TestQuantDefaults:
-    """Before _resolve_quant_args, overridable args are None."""
+    """Before resolve_quant_args, overridable args are None."""
 
     def test_include_multimap_default_none(self):
         args = _parse_quant()
@@ -385,22 +383,22 @@ class TestBooleanFlags:
 
 
 # ---------------------------------------------------------------------------
-# _resolve_quant_args: CLI > YAML > defaults
+# resolve_quant_args: CLI > YAML > defaults
 # ---------------------------------------------------------------------------
 
 
 class TestResolveQuant:
-    """_resolve_quant_args merges CLI > YAML > defaults."""
+    """resolve_quant_args merges CLI > YAML > defaults."""
 
     def test_hardcoded_defaults_applied(self):
         args = _parse_quant()
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.include_multimap is True
         assert args.sj_strand_tag == ["auto"]
 
     def test_cli_overrides_default(self):
         args = _parse_quant("--no-include-multimap")
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.include_multimap is False
 
     def test_yaml_overrides_default(self, tmp_path):
@@ -412,7 +410,7 @@ class TestResolveQuant:
         """)
         )
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.em_iterations == 500
         assert args.include_multimap is False
 
@@ -425,7 +423,7 @@ class TestResolveQuant:
         """)
         )
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.em_iterations == 500
 
     def test_cli_overrides_yaml(self, tmp_path):
@@ -441,7 +439,7 @@ class TestResolveQuant:
             "--em-iterations",
             "200",
         )
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         # CLI wins
         assert args.em_iterations == 200
 
@@ -449,7 +447,7 @@ class TestResolveQuant:
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("em-iterations: 500\n")
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.em_iterations == 500
 
     def test_yaml_unknown_key_is_refused(self, tmp_path):
@@ -460,16 +458,16 @@ class TestResolveQuant:
             cfg.write_text(body)
             args = _parse_quant("--config", str(cfg))
             with pytest.raises(ValueError, match=r"\['em_iteration'\]"):
-                _resolve_quant_args(args, _build_quant_defaults())
+                resolve_quant_args(args, build_quant_defaults())
 
     def test_an_unknown_key_is_refused_with_the_keys_this_version_knows(self, tmp_path):
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("em_iteration: 500\n")
         args = _parse_quant("--config", str(cfg))
         with pytest.raises(ValueError, match="knows:") as refused:
-            _resolve_quant_args(args, _build_quant_defaults())
+            resolve_quant_args(args, build_quant_defaults())
         known = str(refused.value).split("knows:")[1]
-        for key in [*_build_quant_defaults(), "bam_file", "index_dir", "output_dir", "tsv"]:
+        for key in [*build_quant_defaults(), "bam_file", "index_dir", "output_dir", "tsv"]:
             assert key in known
         assert "written by" not in str(refused.value)
 
@@ -483,13 +481,13 @@ class TestResolveQuant:
         the removed keys added and the renamed one under its 0.7.1 name, so a change to the header the writer emits
         breaks this test, not the hint."""
         import rigel
-        from rigel.cli import _write_config_yaml
+        from rigel.cli import write_config_yaml
 
         monkeypatch.setattr(rigel, "__version__", "0.8.0")
         written = _parse_quant()
-        _resolve_quant_args(written, _build_quant_defaults())
+        resolve_quant_args(written, build_quant_defaults())
         cfg = tmp_path / "config.yaml"
-        _write_config_yaml(cfg, written)
+        write_config_yaml(cfg, written)
         ours = "Generated by 0.8.0 on "
         assert ours in cfg.read_text()
         removed = (
@@ -504,7 +502,7 @@ class TestResolveQuant:
         )
         args = _parse_quant("--config", str(cfg))
         with pytest.raises(ValueError, match="written by rigel 0.7.1") as refused:
-            _resolve_quant_args(args, _build_quant_defaults())
+            resolve_quant_args(args, build_quant_defaults())
         for key in (
             "assignment_min_posterior",
             "gdna_em_llr_bias",
@@ -516,16 +514,16 @@ class TestResolveQuant:
 
     def test_a_config_this_version_wrote_is_refused_with_no_version_hint(self, tmp_path):
         """A key misspelt into this version's own ``config.yaml`` is a typo, not a removed key."""
-        from rigel.cli import _write_config_yaml
+        from rigel.cli import write_config_yaml
 
         written = _parse_quant()
-        _resolve_quant_args(written, _build_quant_defaults())
+        resolve_quant_args(written, build_quant_defaults())
         cfg = tmp_path / "config.yaml"
-        _write_config_yaml(cfg, written)
+        write_config_yaml(cfg, written)
         cfg.write_text(cfg.read_text().replace("\nquant:\n", "\nquant:\n  em_iteration: 500\n"))
         args = _parse_quant("--config", str(cfg))
         with pytest.raises(ValueError, match=r"\['em_iteration'\]") as refused:
-            _resolve_quant_args(args, _build_quant_defaults())
+            resolve_quant_args(args, build_quant_defaults())
         assert "written by" not in str(refused.value)
 
     def test_yaml_sj_strand_tag_string(self, tmp_path):
@@ -533,7 +531,7 @@ class TestResolveQuant:
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("sj_strand_tag: XS\n")
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.sj_strand_tag == "XS"
 
     def test_yaml_sj_strand_tag_list(self, tmp_path):
@@ -541,7 +539,7 @@ class TestResolveQuant:
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("sj_strand_tag: [XS, ts]\n")
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.sj_strand_tag == ["XS", "ts"]
 
     def test_yaml_scan_read_name_batch_size(self, tmp_path):
@@ -549,7 +547,7 @@ class TestResolveQuant:
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("scan_read_name_batch_size: 128\n")
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.scan_read_name_batch_size == 128
 
     def test_cli_scan_read_name_batch_size_overrides_yaml(self, tmp_path):
@@ -557,37 +555,37 @@ class TestResolveQuant:
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("scan_read_name_batch_size: 128\n")
         args = _parse_quant("--config", str(cfg), "--scan-read-name-batch-size", "256")
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.scan_read_name_batch_size == 256
 
     def test_yaml_tsv_and_emit_locus_stats_apply_when_the_flags_are_absent(self, tmp_path):
         """A boolean set in the YAML reaches the run unless the command line names the flag."""
-        from rigel.cli import _build_pipeline_config
+        from rigel.cli import build_pipeline_config
 
         cfg = tmp_path / "cfg.yaml"
         cfg.write_text("tsv: true\nemit_locus_stats: true\n")
         args = _parse_quant("--config", str(cfg))
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.tsv is True
         assert args.emit_locus_stats is True
-        assert _build_pipeline_config(args).emit_locus_stats is True
+        assert build_pipeline_config(args).emit_locus_stats is True
 
         args = _parse_quant("--config", str(cfg), "--no-tsv", "--no-emit-locus-stats")
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         assert args.tsv is False
         assert args.emit_locus_stats is False
 
     def test_config_yaml_rerun_keeps_tsv_and_emit_locus_stats(self, tmp_path):
         """The config.yaml a run writes reproduces its --tsv and --emit-locus-stats."""
-        from rigel.cli import _write_config_yaml
+        from rigel.cli import write_config_yaml
 
         args = _parse_quant("--tsv", "--emit-locus-stats")
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
         written = tmp_path / "config.yaml"
-        _write_config_yaml(written, args)
+        write_config_yaml(written, args)
 
         rerun = build_parser().parse_args(["quant", "--config", str(written)])
-        _resolve_quant_args(rerun, _build_quant_defaults())
+        resolve_quant_args(rerun, build_quant_defaults())
         assert rerun.tsv is True
         assert rerun.emit_locus_stats is True
 
@@ -604,12 +602,12 @@ class TestConfigRoundTrip:
         """No CLI/YAML overrides → config matches PipelineConfig() defaults."""
         import dataclasses
         from rigel.config import PipelineConfig
-        from rigel.cli import _build_pipeline_config
+        from rigel.cli import build_pipeline_config
 
         args = _parse_quant()
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
 
-        result = _build_pipeline_config(args)
+        result = build_pipeline_config(args)
         ref = PipelineConfig()
 
         # EM fields, the seed included: an unset --seed is the config's fixed seed, never a timestamp
@@ -624,29 +622,29 @@ class TestConfigRoundTrip:
         assert result.scoring.overhang_log_penalty == ref.scoring.overhang_log_penalty
 
     def test_param_specs_cover_all_defaults(self):
-        """Every key in _build_quant_defaults matches a _ParamSpec or is CLI-only."""
-        from rigel.cli import _PARAM_SPECS
+        """Every key in build_quant_defaults matches a ParamSpec or is CLI-only."""
+        from rigel.cli import PARAM_SPECS
 
-        spec_dests = {s.cli_dest for s in _PARAM_SPECS}
+        spec_dests = {s.cli_dest for s in PARAM_SPECS}
         cli_only: set[str] = set()
-        defaults = _build_quant_defaults()
+        defaults = build_quant_defaults()
         for key in defaults:
             assert key in spec_dests or key in cli_only, (
-                f"Default key {key!r} not in _PARAM_SPECS or cli_only"
+                f"Default key {key!r} not in PARAM_SPECS or cli_only"
             )
 
     def test_scan_read_name_batch_size_flows_to_config(self):
         """``--scan-read-name-batch-size`` reaches ``BamScanConfig``."""
-        from rigel.cli import _build_pipeline_config
+        from rigel.cli import build_pipeline_config
 
         args = _parse_quant("--scan-read-name-batch-size", "256")
-        _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args)
+        resolve_quant_args(args, build_quant_defaults())
+        cfg = build_pipeline_config(args)
         assert cfg.scan.read_name_batch_size == 256
 
     def test_scan_performance_flags_flow_to_config(self):
         """The scan performance flags reach ``BamScanConfig``."""
-        from rigel.cli import _build_pipeline_config
+        from rigel.cli import build_pipeline_config
 
         args = _parse_quant(
             "--threads",
@@ -658,8 +656,8 @@ class TestConfigRoundTrip:
             "--scan-fragments-per-chunk",
             "1234",
         )
-        _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args)
+        resolve_quant_args(args, build_quant_defaults())
+        cfg = build_pipeline_config(args)
         assert cfg.em.n_threads == 8
         assert cfg.scan.total_threads == 8
         assert cfg.calibration.n_threads == 8

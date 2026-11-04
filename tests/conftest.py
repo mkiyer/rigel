@@ -1,14 +1,24 @@
-"""The suite-wide pytest fixtures, and the one custom option.
+"""The suite-wide pytest fixtures, the one custom option, and the import path to `scripts/`.
 
 One fixture built on the minimal GTF in `_index_builder`: a session-scoped `TranscriptIndex`
 (`mini_index`), which lets a structural test run with no real genomic data.
 `--update-golden` is registered here because a pytest option has to be declared in a conftest, and
 `tests/test_golden_output.py` reads it.
+
+`scripts/` is not a package: a script runs with its own directory first on the path and imports its siblings by
+name. Both trees a test imports from go first on the suite's path here, once, so a test imports a script module by
+name the same way (`import quant_accuracy`).
 """
+
+import sys
+from pathlib import Path
 
 import pytest
 
 from _index_builder import MINI_GTF, build_test_index
+
+for _tree in ("design", "sim"):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / _tree))
 
 # ---------------------------------------------------------------------------
 # Global pytest options

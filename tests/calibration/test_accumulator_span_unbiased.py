@@ -10,18 +10,18 @@ span is unrecoverable. Each scenario is small and seeded so the suite can afford
 from __future__ import annotations
 
 import numpy as np
+from _bam_builder import R1_FWD, R2_REV, record, write_bam
 
 from rigel.calibration.effective_length import (
     UNBOUNDED_REACH,
     contained_eff_length,
     crossing_eff_length,
 )
-from rigel.calibration.fl import build_fl_models
 from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.config import BamScanConfig
-from rigel.pipeline import scan_and_buffer
+from rigel.pipeline import library_fl_models, scan_and_buffer
 
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
 
@@ -43,11 +43,8 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     """
     _s, sm, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
-    CalibrationSubstrate._check_alignment(pl, ra)
-    # The length models from the payload alone, with no index inputs, so the gDNA pmf is fitted from
-    # the contained pair (production's `rigel.pipeline.library_fl_models` also passes the index's
-    # opportunities and partition).
-    flm = build_fl_models(pl)
+    CalibrationSubstrate.check_alignment(pl, ra)
+    flm = library_fl_models(pl, index)
     gpmf = flm.gdna_pmf
     region_eff = contained_eff_length(ra.region_size_bp, gpmf)
     # gDNA's template is the chromosome, so a boundary's divisor is the unbounded-reach limit mu_g − 1, the same at
@@ -154,30 +151,6 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not cut)"
 
 
-def _write_pair(out, qn, *, r1_pos, r1_cigar, r2_pos, r2_cigar, xs):
-    import re
-
-    import pysam
-
-    def seg(is_r1, pos, cigar, mpos):
-        a = pysam.AlignedSegment()
-        a.query_name = qn
-        a.reference_id = 0
-        a.reference_start = pos
-        a.mapping_quality = 60
-        a.cigarstring = cigar
-        a.next_reference_id = 0
-        a.next_reference_start = mpos
-        a.query_sequence = "A" * sum(int(x) for x in re.findall(r"(\d+)[MIS]", cigar))
-        a.flag = (0x1 | 0x2) | (0x40 if is_r1 else 0x80) | (0x20 if is_r1 else 0x10)
-        tags = [("NH", 1)] + ([("XS", "+", "A")] if (is_r1 and xs) else [])
-        a.set_tags(tags)
-        return a
-
-    out.write(seg(True, r1_pos, r1_cigar, r2_pos))
-    out.write(seg(False, r2_pos, r2_cigar, r1_pos))
-
-
 def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     """``SPLICE_ARTIFACT`` fragments (a blacklisted CIGAR-N sj) are held out of the accumulator entirely (no contained
     or boundary mass) while other fragments deposit normally, so total mass == n_deposited, artifacts excluded.
@@ -186,42 +159,31 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     blacklist all 70 deposit (the 50 as spliced); blacklisting that sj turns the 50 into artifacts (sj removed →
     n_sj_blacklisted > 0 → SPLICE_ARTIFACT), which must then deposit nothing.
     """
-    import numpy as np
     import pandas as pd
-    import pysam
 
-    from _index_builder import rebuild_with_splice_blacklist
+    from _index_builder import build_index, rebuild_with_splice_blacklist
     from rigel.index import TranscriptIndex
 
-    fasta = tmp_path / "g.fa"
-    fasta.write_text(">chr1\n" + "ACGT" * 1000 + "\n")
-    pysam.faidx(str(fasta))
-    gtf = tmp_path / "a.gtf"
     # 2-exon transcript → annotated sj at 0-based [200, 300).
-    gtf.write_text(
+    gtf = (
         'chr1\tsrc\texon\t1\t200\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
         'chr1\tsrc\texon\t301\t500\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
     )
-    idx_dir = tmp_path / "idx"
-    TranscriptIndex.build(fasta_file=str(fasta), gtf_file=str(gtf), output_dir=str(idx_dir))
+    idx = build_index(tmp_path, gtf, {"chr1": 4000})
+    idx_dir = idx.index_dir
 
-    bam = tmp_path / "art.bam"
-    header = {"HD": {"VN": "1.6", "SO": "queryname"}, "SQ": [{"SN": "chr1", "LN": 4000}]}
-    with pysam.AlignmentFile(str(bam), "wb", header=header) as out:
-        for i in range(20):  # unspliced positive control (exon 1)
-            _write_pair(
-                out, f"u{i:03d}", r1_pos=20, r1_cigar="100M", r2_pos=120, r2_cigar="80M", xs=False
-            )
-        for i in range(50):  # span the annotated sj [200, 300)
-            _write_pair(
-                out,
-                f"r{i:03d}",
-                r1_pos=150,
-                r1_cigar="50M100N50M",
-                r2_pos=350,
-                r2_cigar="80M",
-                xs=True,
-            )
+    reads = []
+    for i in range(20):  # unspliced positive control (exon 1)
+        reads += [
+            record(f"u{i:03d}", R1_FWD, 20, "100M", 120),
+            record(f"u{i:03d}", R2_REV, 120, "80M", 20),
+        ]
+    for i in range(50):  # span the annotated sj [200, 300)
+        reads += [
+            record(f"r{i:03d}", R1_FWD, 150, "50M100N50M", 350, xs="+"),
+            record(f"r{i:03d}", R2_REV, 350, "80M", 150),
+        ]
+    bam = write_bam(tmp_path / "art.bam", reads, {"chr1": 4000})
 
     def total_mass(payload) -> float:
         """Every deposit on every axis. ``region_start_count`` is the fragment tally, one per accepted fragment, and is
@@ -231,7 +193,6 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     cfg = BamScanConfig(sj_strand_tag="XS")
 
     # Control: no blacklist → all 70 deposit (the 50 as annotated splices).
-    idx = TranscriptIndex.load(str(idx_dir))
     s0, _, _, pl0 = scan_and_buffer(str(bam), idx, cfg)
     assert s0.n_sj_blacklisted == 0
     assert s0.n_with_annotated_sj == 50

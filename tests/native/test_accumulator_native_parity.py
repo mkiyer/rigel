@@ -22,7 +22,7 @@ import dataclasses
 import numpy as np
 import pytest
 
-from rigel.native import Accumulator as NativeAccumulator
+from rigel._bam_impl.testing import Accumulator as NativeAccumulator
 from rigel.types import Strand
 
 from ._accumulator_reference import (
@@ -380,7 +380,7 @@ CASES: list[tuple[str, dict]] = [
 ]
 
 
-def test_the_battery_is_byte_identical_and_reaches_every_arbitration_OUTCOME():
+def test_the_battery_is_byte_identical_and_reaches_every_arbitration_outcome():
     """The battery, deposited in order into one accumulator pair so state accumulates, with parity asserted after every
     case. It also checks that the deferred queue and the gap census are non-empty, since byte-identity over banks
     nothing wrote compares only zeros.
@@ -480,7 +480,7 @@ def test_a_reference_with_no_sj_table_agrees():
         _deposit_both(reference, native, label, **kw)
 
 
-def test_the_deferred_RECORD_carries_the_fragment_WHOLE_and_the_two_agree_on_it():
+def test_the_deferred_record_carries_the_fragment_whole_and_the_two_agree_on_it():
     """The bank the second pass reads, field by field. Asserted against literals as well as the reference: parity alone
     cannot catch a bank that both sides store wrongly, such as the unclipped extent, or one that drops the hypotheses
     the length filter removed.
@@ -518,7 +518,7 @@ def test_the_deferred_RECORD_carries_the_fragment_WHOLE_and_the_two_agree_on_it(
     assert got["hypothesis_introns"].tolist() == [201, 900, 100, 200]
 
 
-def test_TWO_accumulators_STAMP_THEIR_OWN_REFERENCE():
+def test_two_accumulators_stamp_their_own_reference():
     """Two accumulators with different ids must stamp the same fragment differently. Every other fixture is
     single-reference or defers only on reference 0, so a constant stamp would pass them. The scan builds one Accumulator
     per reference and hands each its own index; this is the unit of that contract.
@@ -621,7 +621,7 @@ def test_ten_thousand_random_fragments_are_byte_identical():
     _assert_parity(reference, native, "10,000 random fragments")
 
 
-def test_the_batched_sj_lookup_IS_the_scalar_rule_the_second_pass_used_to_keep():
+def test_the_batched_sj_lookup_is_the_scalar_rule_written_out():
     """`sj_edge_ids` answers many introns at once, and the second pass reads it instead of keeping its own copy of the
     rule in Python.
 
@@ -766,7 +766,7 @@ def _assert_unchanged(before: dict, after: dict, label: str) -> None:
         _assert_array(got, want, label, name)
 
 
-def test_an_accumulator_merging_ITSELF_is_refused_before_ANY_bank_is_touched():
+def test_an_accumulator_merging_itself_is_refused_before_any_bank_is_touched():
     """``merge_from`` refuses ``other is this`` before anything else.
 
     Every other precondition holds trivially between an accumulator and itself, so without the refusal every bank would
@@ -794,7 +794,7 @@ def test_an_accumulator_merging_ITSELF_is_refused_before_ANY_bank_is_touched():
         _assert_unchanged(before, _exported(accumulator), f"a refused self-merge, {label}")
 
 
-def test_a_merge_across_two_WIDTHS_is_refused_before_ANY_bank_is_touched():
+def test_a_merge_across_two_widths_is_refused_before_any_bank_is_touched():
     """``merge_from`` checks ``max_length`` with every other precondition, before merging anything.
 
     ``max_length`` is the width of the pool and deposited-length histograms. A check placed after the bank merges would
@@ -820,7 +820,7 @@ def test_a_merge_across_two_WIDTHS_is_refused_before_ANY_bank_is_touched():
         )
 
 
-def test_an_EMPTY_hypothesis_set_is_the_UNSPLICED_ONLY_set_and_does_not_CRASH():
+def test_an_empty_hypothesis_set_is_the_unspliced_only_set_and_does_not_crash():
     """The specification defaults ``hypotheses`` to :data:`UNSPLICED_ONLY`; the native binding has no default, so a
     caller writing ``hypotheses=()`` offers an empty set. An empty set must mean the same thing as the specification's
     default and deposit identically, rather than reach ``survivors.front()`` on an empty vector. Production never offers
@@ -839,7 +839,7 @@ def test_an_EMPTY_hypothesis_set_is_the_UNSPLICED_ONLY_set_and_does_not_CRASH():
     _assert_parity(reference_default, native_default, "empty-hypotheses vs UNSPLICED_ONLY")
 
 
-def test_a_GENERATOR_of_hypotheses_is_the_same_fragment_as_the_tuple():
+def test_a_generator_of_hypotheses_is_the_same_fragment_as_the_tuple():
     """The binding reads ``hypotheses`` in one pass, so a one-shot iterable marshals as its tuple does.
 
     A second pass over a generator would see nothing, and an empty set deposits as the unspliced fragment alone: an

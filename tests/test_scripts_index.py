@@ -1,8 +1,9 @@
 """The hand-written indexes of `scripts/` are checked against the disk in both directions.
 
-`scripts/design/` is indexed by a table in `CLAUDE.md` and `scripts/profiling/` by `scripts/README.md`. Every script
-on disk must have a row and every row must name a file that exists; every script in the three trees must also import
-and carry a module docstring. The gates do not judge whether a row's prose is accurate, which no test can.
+`scripts/design/` is indexed by a table in `CLAUDE.md`, and `scripts/profiling/` and the `_`-prefixed helper modules
+of `design/` and `sim/` by `scripts/README.md`. Every script on disk must have a row and every row must name a file
+that exists; every script in the three trees must also import and carry a module docstring. The gates do not judge
+whether a row's prose is accurate, which no test can.
 """
 
 from __future__ import annotations
@@ -76,7 +77,7 @@ def _import_error(path: pathlib.Path) -> str | None:
     return None
 
 
-def test_every_instrument_still_imports():
+def test_every_instrument_imports():
     """A `src/` deletion breaks instruments silently, since the rest of the suite stays green.
 
     Importing is the cheapest check that an instrument is still connected to the code it measures. Import
@@ -127,6 +128,21 @@ def test_the_profiling_tree_is_indexed_in_the_scripts_readme():
         f"silence as 'that script does not exist' and rebuilds it."
     )
     assert not ghosts, f"scripts/README.md names profiling files that do not exist: {ghosts}"
+
+
+def test_the_helper_modules_are_indexed_in_the_scripts_readme():
+    """The `_`-prefixed helper modules of `design/` and `sim/` answer no question of their own, so `CLAUDE.md`'s table
+    has no row for them; `scripts/README.md` names each, tree-qualified, in both directions, so a reader can find
+    the module an instrument imports by name.
+    """
+    readme = (SCRIPTS / "README.md").read_text()
+    listed = frozenset(re.findall(r"`((?:design|sim)/_[a-z0-9_]+\.py)`", readme))
+    on_disk = frozenset(_rel(p) for tree in (DESIGN_DIR, SIM_DIR) for p in tree.glob("_*.py"))
+    assert on_disk, "no helper modules found — delete this gate, or the trees moved"
+    missing = sorted(on_disk - listed)
+    ghosts = sorted(listed - on_disk)
+    assert not missing, f"helper modules not named in scripts/README.md: {missing}"
+    assert not ghosts, f"scripts/README.md names helper modules that do not exist: {ghosts}"
 
 
 def test_every_instrument_says_what_it_is_for():

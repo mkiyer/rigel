@@ -591,7 +591,7 @@ def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_c
     assert em.log_liks[0] == default.log_liks[t0]
 
 
-def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_routed_one():
+def test_a_hard_gate_drops_a_deterministic_fragment_as_it_drops_an_em_routed_one():
     """At alpha 0 an overhang excludes a candidate outright. A fragment whose only candidate fails the gate is dropped
     and counted as gated whatever its routing: the deterministic path, which assigns an unambiguous annotated-spliced
     fragment without scoring it, reads the overhang too, so the same fragment is never kept when deterministic and
@@ -631,6 +631,54 @@ def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_r
     )
     assert default_stats.deterministic_unambig_units == 1
     assert default_stats.n_gated_out == 0
+
+
+@pytest.mark.parametrize(
+    "strand_model",
+    [StrandModel(pos_pos=20), StrandModel(pos_neg=20), StrandModel()],
+    ids=["r1_sense", "r1_antisense", "no_observations"],
+)
+@pytest.mark.parametrize("align_strand", [Strand.POS, Strand.NEG], ids=["same", "opposite"])
+def test_a_fragment_takes_the_same_antisense_column_on_every_route(strand_model, align_strand):
+    """A unique spliced fragment, counted directly, and the same fragment routed to the EM take the sense or antisense
+    column by one rule at every library, including the uninformative ½ of a library with no spliced observations."""
+    index = _Index(
+        t_to_g=[0, 1],
+        t_to_strand=[int(Strand.POS), int(Strand.POS)],
+        g_to_strand=[int(Strand.POS), int(Strand.POS)],
+    )
+
+    def bf(t_inds):
+        n = len(t_inds)
+        return _BF(
+            t_inds=np.array(t_inds, dtype=np.int32),
+            splice_type=int(SpliceType.SPLICED_ANNOT),
+            align_strand=int(align_strand),
+            frag_lengths=np.full(n, 200, dtype=np.int32),
+            exon_bp=np.full(n, 100, dtype=np.int16),
+            intron_bp=np.zeros(n, dtype=np.int16),
+            read_length=100,
+        )
+
+    strand_models = StrandModels(exonic_spliced=strand_model)
+    _, max_frag_size, estimator, stats = _make_env(index)
+    em = _route_buffer(
+        _Buffer(
+            [
+                _Chunk(bfs=[bf([0])], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1]),
+                _Chunk(bfs=[bf([0, 1])], fragment_classes=[FRAG_AMBIG_SAME_STRAND], frag_ids=[2]),
+            ]
+        ),
+        index,
+        strand_models,
+        max_frag_size,
+        estimator,
+        stats,
+    )
+    assert stats.deterministic_unambig_units == 1 and em.n_units == 1
+    (direct_col,) = np.flatnonzero(estimator.unambig_counts[0])
+    (em_col,) = em.count_cols[em.t_indices == 0]
+    assert direct_col == em_col
 
 
 def _gated_chunk(route):
@@ -770,19 +818,19 @@ def _live_fl():
 
 
 @pytest.mark.parametrize("footprint", [300, 5000])
-def test_an_ARTIFACT_splice_is_unspliced_and_a_gdna_candidate_whatever_its_footprint(footprint):
+def test_an_artifact_splice_is_unspliced_and_a_gdna_candidate_whatever_its_footprint(footprint):
     em, _ = _one_unit([_hit(SpliceType.SPLICE_ARTIFACT, footprint)], [FRAG_UNAMBIG], [1])
     assert not em.is_spliced[0]
     assert float(em.gdna_log_liks[0]) == _unspliced_term(footprint)
 
 
-def test_a_sequenced_junction_that_survived_the_blacklist_is_RNA_only():
+def test_a_sequenced_junction_that_survived_the_blacklist_is_rna_only():
     em, _ = _one_unit([_hit(SpliceType.SPLICED_ANNOT, 300)], [FRAG_AMBIG_SAME_STRAND], [1])
     assert em.is_spliced[0]
     assert em.gdna_log_liks[0] == -np.inf
 
 
-def test_a_multimapper_with_ONE_unspliced_alignment_is_a_gdna_candidate():
+def test_a_multimapper_with_one_unspliced_alignment_is_a_gdna_candidate():
     """One spliced alignment does not remove gDNA from the group: the unspliced alignment is a place
     gDNA could have come from, and the gDNA term is taken over the eligible alignments alone."""
     em, _ = _one_unit(
@@ -794,7 +842,7 @@ def test_a_multimapper_with_ONE_unspliced_alignment_is_a_gdna_candidate():
     assert float(em.gdna_log_liks[0]) == _unspliced_term(250)
 
 
-def test_a_multimapper_of_IMPLICIT_and_ARTIFACT_alignments_is_a_gdna_candidate():
+def test_a_multimapper_of_implicit_and_artifact_alignments_is_a_gdna_candidate():
     em, _ = _one_unit(
         [_hit(SpliceType.SPLICED_IMPLICIT, 400, t=0), _hit(SpliceType.SPLICE_ARTIFACT, 400, t=1)],
         [FRAG_MULTIMAPPER] * 2,
@@ -808,14 +856,14 @@ def test_a_multimapper_of_IMPLICIT_and_ARTIFACT_alignments_is_a_gdna_candidate()
 @pytest.mark.parametrize(
     "splice_type", [SpliceType.UNSPLICED, SpliceType.SPLICED_IMPLICIT, SpliceType.SPLICE_ARTIFACT]
 )
-def test_the_gdna_term_is_the_unspliced_term_AT_THE_FOOTPRINT_whatever_the_label(splice_type):
+def test_the_gdna_term_is_the_unspliced_term_at_the_footprint_whatever_the_label(splice_type):
     fl = _live_fl()
     assert _unspliced_term(250, fl=fl) != _unspliced_term(300, fl=fl)  # the law is live
     em, _ = _one_unit([_hit(splice_type, 300)], [FRAG_UNAMBIG], [1], fl=fl)
     assert float(em.gdna_log_liks[0]) == pytest.approx(fl._log_prob[300] + math.log(0.5), abs=1e-5)
 
 
-def test_a_multimapper_s_gdna_term_excludes_its_spliced_hit_and_keeps_its_reported_type():
+def test_a_multimappers_gdna_term_excludes_its_spliced_hit_and_keeps_its_type():
     fl = _live_fl()
     em, _ = _one_unit(
         [_hit(SpliceType.SPLICED_ANNOT, 400, t=0), _hit(SpliceType.UNSPLICED, 250, t=1, nm=1)],
@@ -827,7 +875,7 @@ def test_a_multimapper_s_gdna_term_excludes_its_spliced_hit_and_keeps_its_report
     assert em.splice_type[0] == SpliceType.SPLICED_ANNOT
 
 
-def test_a_multimapper_s_gdna_term_is_the_SUM_of_its_eligible_hits_terms():
+def test_a_multimappers_gdna_term_is_the_sum_of_its_eligible_hits_terms():
     fl = _live_fl()
     a = _unspliced_term(300, nm=0, fl=fl)
     b = _unspliced_term(300, nm=1, fl=fl)
@@ -854,7 +902,7 @@ def _geometric_fl():
 @pytest.mark.parametrize(
     "splice_type", [SpliceType.UNSPLICED, SpliceType.SPLICED_IMPLICIT, SpliceType.SPLICE_ARTIFACT]
 )
-def test_gdna_is_PRUNED_exactly_as_an_RNA_candidate_is(splice_type):
+def test_gdna_is_pruned_exactly_as_an_rna_candidate_is(splice_type):
     """The unit's RNA candidate reads its own length (200); gDNA reads the footprint. gDNA stays a candidate
     iff its term is within -log(1e-4) of the best RNA candidate's, and that bound — not a length — decides:
     both outcomes occur across the footprints, and each matches the bound computed from the two terms."""
@@ -876,7 +924,7 @@ def test_gdna_is_PRUNED_exactly_as_an_RNA_candidate_is(splice_type):
     assert kept and pruned
 
 
-def test_an_ARTIFACT_whose_footprint_the_law_cannot_produce_is_pruned():
+def test_an_artifact_whose_footprint_the_law_cannot_produce_is_pruned():
     """Its footprint still spans the rejected intron; at 5,000 bp the law has no mass, so gDNA does not
     compete."""
     em, _ = _one_unit([_hit(SpliceType.SPLICE_ARTIFACT, 5000)], [FRAG_UNAMBIG], [1], fl=_live_fl())
@@ -884,7 +932,7 @@ def test_an_ARTIFACT_whose_footprint_the_law_cannot_produce_is_pruned():
     assert em.gdna_log_liks[0] == -np.inf
 
 
-def test_a_multimapper_s_gdna_sum_takes_every_eligible_hit_even_one_the_law_cannot_produce():
+def test_a_multimappers_gdna_sum_takes_every_eligible_hit_even_an_impossible_one():
     fl = _live_fl()
     a = fl._log_prob[1000] + math.log(0.5)  # an implicit hit at 1,000 bp: the floor
     b = _unspliced_term(250, nm=1, fl=fl)
@@ -897,7 +945,7 @@ def test_a_multimapper_s_gdna_sum_takes_every_eligible_hit_even_one_the_law_cann
     assert float(em.gdna_log_liks[0]) == pytest.approx(np.logaddexp(a, b), abs=1e-5)
 
 
-def test_a_multimapper_is_RNA_only_when_no_alignment_can_be_gdna_or_its_gdna_is_pruned():
+def test_a_multimapper_is_rna_only_if_no_alignment_can_be_gdna_or_its_gdna_is_pruned():
     fl = _live_fl()
     certified, _ = _one_unit(
         [_hit(SpliceType.SPLICED_ANNOT, 300, t=0), _hit(SpliceType.SPLICED_ANNOT, 300, t=1)],

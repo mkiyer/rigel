@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 # the data root, as every instrument spells it
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "design"))
 
+from rigel.sim.annotation import write_splice_motif  # noqa: E402
 from rigel.sim.genome import MutableGenome  # noqa: E402
 from rigel.transcript import Transcript  # noqa: E402
 from rigel.types import Interval, Strand  # noqa: E402
@@ -206,17 +207,15 @@ def intron_spans(transcripts: list[Transcript]) -> list[tuple[int, int, Strand]]
     return out
 
 
-def inject_motifs(genome: MutableGenome, introns: list[tuple[int, int, Strand]]) -> int:
-    """GT..AG at every intron, reverse-complemented on the minus strand (CT..AC in genomic terms).
+def inject_motifs(genome: MutableGenome, introns: list[tuple[int, int, Strand]]) -> None:
+    """GT..AG at every intron, reverse-complemented on the minus strand (CT..AC in genomic terms), as the simulator
+    writes them.
 
     The motif must be written in genomic orientation, which is what an aligner reads: backwards on ``−`` it
     is invisible in the FASTA and shows up only as unaligned spliced reads.
     """
     for start, end, strand in introns:
-        donor, acceptor = ("GT", "AG") if strand != Strand.NEG else ("CT", "AC")
-        genome.edit(start, donor)
-        genome.edit(end - 2, acceptor)
-    return len(introns)
+        write_splice_motif(genome, start, end, strand)
 
 
 def check_transcripts(transcripts: list[Transcript], abundances: dict, shadows: list[Transcript] | None = None,
@@ -376,11 +375,11 @@ _PROBE_HEADERS = {
                "# union piece's start (a piece shorter than one probe gets a single probe centred on it), so\n"
                "# no probe spans an sj (a split probe suppresses exactly the\n"
                "# boundary-crossing gDNA). BED12, 0-based half-open."),
-    "sparse": ("# THE SPARSE ADVERSARIAL PANEL (owner directive 2026-09-01) — one 125 bp probe CENTRED on\n"
-               "# every annotated exon of a probed gene: faces depleted, mid-exon enriched. BED12."),
-    "junction": ("# THE JUNCTION ADVERSARIAL PANEL (owner directive 2026-09-01) — one BED12 two-block probe\n"
-                 "# (62 + 63 bp, contiguous only in cDNA) per sj of a probed gene and nothing else: spliced\n"
-                 "# fragments enriched over unspliced/gDNA at the same face."),
+    "sparse": ("# THE SPARSE ADVERSARIAL PANEL — one 125 bp probe CENTRED on every annotated exon of a probed\n"
+               "# gene: faces depleted, mid-exon enriched. BED12."),
+    "junction": ("# THE JUNCTION ADVERSARIAL PANEL — one BED12 two-block probe (62 + 63 bp, contiguous only in\n"
+                 "# cDNA) per sj of a probed gene and nothing else: spliced fragments enriched over\n"
+                 "# unspliced/gDNA at the same face."),
 }
 
 
@@ -467,41 +466,52 @@ def build(spec_path: Path, out: Path, render_dir: Path | None = HERE) -> dict:
 
 # ── the self-test ────────────────────────────────────────────────────────────────────────────────
 
+#: the self-test's spec: one probed two-exon gene, one unprobed single-exon gene and a shadow
+_SELF_TEST_SPEC = {"genome_length": 50_000, "genes": [
+    {"gene_id": "gA", "strand": "+", "probed": True,
+     "transcripts": [{"t_id": "A", "exons": [[1000, 2000], [9000, 10000]], "abundance": 10, "nrna_abundance": 3}]},
+    {"gene_id": "gB", "strand": "-", "transcripts": [{"t_id": "B", "exons": [[20000, 21000]], "abundance": 5}]},
+], "shadow_genes": [
+    {"gene_id": "gS", "strand": "-", "transcripts": [{"t_id": "S", "exons": [[100, 600]], "abundance": 2}]},
+]}
 
-def self_test() -> int:
-    """Every check perturbed, with no I/O against the real reference."""
-    ok = fail = 0
 
-    def check(name, cond):
-        nonlocal ok, fail
-        if cond:
-            ok += 1
-        else:
-            fail += 1
-            print(f"   ⛔ {name}")
+def _test_tx(t_id, exons, strand=Strand.POS, ref=REF_NAME, ab=1.0, nr=0.0) -> Transcript:
+    return _tx(t_id, "g_" + t_id, ref, Strand.to_str(strand), exons, ab, nr)
 
-    def tx(t_id, exons, strand=Strand.POS, ref=REF_NAME, ab=1.0, nr=0.0):
-        return _tx(t_id, "g_" + t_id, ref, Strand.to_str(strand), exons, ab, nr)
 
-    # ── the genome is reproducible, and the seed is what makes it so
+def _check_genome(check) -> None:
+    """The genome is reproducible, and the seed is what makes it so."""
     a = MutableGenome(2000, seed=GENOME_SEED, name=REF_NAME).seq
     b = MutableGenome(2000, seed=GENOME_SEED, name=REF_NAME).seq
     check("the chromosome is reproducible from its seed", a == b)
     check("a different seed gives a different chromosome",
           MutableGenome(2000, seed=GENOME_SEED + 1, name=REF_NAME).seq != a)
+    check("the two contigs are distinct sequences",
+          MutableGenome(2000, seed=GENOME_SEED, name=REF_NAME).seq != MutableGenome(2000, seed=BLANK_GENOME_SEED, name=BLANK_REF_NAME).seq)
 
-    # ── motifs: written, in genomic orientation, and only where the annotation says
+
+def _check_motifs(check) -> None:
+    """Motifs are written in genomic orientation, and only where the annotation declares an intron."""
+    introns = intron_spans([_test_tx("T", [(100, 200), (400, 500)])])
+    check("one intron gives one motif pair", len(introns) == 1)
     g = MutableGenome(2000, seed=1, name=REF_NAME)
-    n = inject_motifs(g, intron_spans([tx("T", [(100, 200), (400, 500)])]))
-    check("one intron gives one motif pair", n == 1)
+    inject_motifs(g, introns)
     check("a + intron gets GT..AG", g[200:202] == "GT" and g[398:400] == "AG")
     gm = MutableGenome(2000, seed=1, name=REF_NAME)
-    inject_motifs(gm, intron_spans([tx("T", [(100, 200), (400, 500)], strand=Strand.NEG)]))
+    inject_motifs(gm, intron_spans([_test_tx("T", [(100, 200), (400, 500)], strand=Strand.NEG)]))
     check("a − intron gets CT..AC in genomic orientation",
           gm[200:202] == "CT" and gm[398:400] == "AC")
-    check("a single-exon transcript declares no intron", intron_spans([tx("S", [(10, 900)])]) == [])
+    check("a single-exon transcript declares no intron", intron_spans([_test_tx("S", [(10, 900)])]) == [])
+    check("zero transcripts declares no intron", intron_spans([]) == [])
+    gb = MutableGenome(8000, seed=BLANK_GENOME_SEED, name=BLANK_REF_NAME)
+    inject_motifs(gb, intron_spans([_test_tx("shadow_A", [(1000, 2000), (5000, 6000)], ref=BLANK_REF_NAME)]))
+    check("a shadow intron gets its motif on the BLANK genome", gb[2000:2002] == "GT" and gb[4998:5000] == "AG")
 
-    # ── the checks fire on what would break a build, and pass on what would not
+
+def _check_transcripts(check) -> None:
+    """The checks fire on what would break a build, and pass on what would not; zero transcripts is legal."""
+    tx = _test_tx
     good = [tx("T1", [(1000, 2000), (5000, 6000)])]
     ab = {"T1": (100.0, 25.0)}
     check("a well-formed transcript with an abundance passes", check_transcripts(good, ab) == [])
@@ -521,8 +531,14 @@ def self_test() -> int:
           any("twice" in p for p in check_transcripts(good + good, ab)))
     check("the wrong reference name is caught",
           any("expected" in p for p in check_transcripts([tx("X", [(10, 90)], ref="chr1")], {"X": (1.0, 0.0)})))
+    check("zero transcripts is legal", check_transcripts([], {}) == [])
 
-    # ── the blank chromosome and its shadows
+
+def _check_shadows(check) -> None:
+    """A shadow lives on the blank chromosome, is unknown to the annotation and carries no nascent abundance."""
+    tx = _test_tx
+    good = [tx("T1", [(1000, 2000), (5000, 6000)])]
+    ab = {"T1": (100.0, 25.0)}
     sh = [tx("shadow_A", [(1000, 2000), (5000, 6000)], ref=BLANK_REF_NAME)]
     both = {"T1": (100.0, 25.0), "shadow_A": (5.0, 0.0)}
     check("a shadow on the blank chromosome with an abundance row passes", check_transcripts(good, both, sh) == [])
@@ -535,24 +551,11 @@ def self_test() -> int:
     check("a shadow with no abundance row is caught", any("no row" in p for p in check_transcripts(good, ab, sh)))
     check("a shadow with nascent abundance is caught",
           any("shadow IS" in p for p in check_transcripts(good, {**both, "shadow_A": (5.0, 1.0)}, sh)))
-    gb = MutableGenome(8000, seed=BLANK_GENOME_SEED, name=BLANK_REF_NAME)
-    inject_motifs(gb, intron_spans(sh))
-    check("a shadow intron gets its motif on the BLANK genome", gb[2000:2002] == "GT" and gb[4998:5000] == "AG")
-    check("the two contigs are distinct sequences",
-          MutableGenome(2000, seed=GENOME_SEED, name=REF_NAME).seq != MutableGenome(2000, seed=BLANK_GENOME_SEED, name=BLANK_REF_NAME).seq)
 
-    # ── zero transcripts is the starting state and must be legal
-    check("zero transcripts is legal", check_transcripts([], {}) == [])
-    check("zero transcripts declares no intron", intron_spans([]) == [])
 
-    # ── the YAML spec: shape problems are collected, not raised
-    cfg = {"genome_length": 50_000, "genes": [
-        {"gene_id": "gA", "strand": "+", "probed": True,
-         "transcripts": [{"t_id": "A", "exons": [[1000, 2000], [9000, 10000]], "abundance": 10, "nrna_abundance": 3}]},
-        {"gene_id": "gB", "strand": "-", "transcripts": [{"t_id": "B", "exons": [[20000, 21000]], "abundance": 5}]},
-    ], "shadow_genes": [
-        {"gene_id": "gS", "strand": "-", "transcripts": [{"t_id": "S", "exons": [[100, 600]], "abundance": 2}]},
-    ]}
+def _check_spec(check) -> None:
+    """The YAML spec: shape problems are collected, not raised."""
+    cfg = _SELF_TEST_SPEC
     spec = spec_from_dict(cfg)
     check("a well-formed spec has no problems", check_spec(spec) == [])
     check("the spec's abundances carry mature AND nascent", spec.abundances["A"] == (10.0, 3.0))
@@ -564,14 +567,20 @@ def self_test() -> int:
     bad = spec_from_dict({**cfg, "shadow_genes": [{**cfg["shadow_genes"][0], "probed": True}]})
     check("a probed shadow is caught", any("shadow gene cannot be probed" in p for p in bad.problems))
 
-    # ── strand balance: the counts differ by at most one
-    gpos = Gene("g", "+", False, [tx("P", [(10, 90)])])
-    gneg = Gene("g", "-", False, [tx("N", [(10, 90)])])
+
+def _check_strand_balance(check) -> None:
+    """The strand counts differ by at most one."""
+    gpos = Gene("g", "+", False, [_test_tx("P", [(10, 90)])])
+    gneg = Gene("g", "-", False, [_test_tx("N", [(10, 90)])])
     check("balanced strands pass", check_strand_balance([gpos, gneg, gpos]) == [])
     check("a one-strand chromosome is refused", check_strand_balance([gpos, gpos, gpos]) != [])
     check("an empty chromosome is balanced", check_strand_balance([]) == [])
 
-    # ── the renders
+
+def _check_renders(check) -> None:
+    """The GTF, the abundances and the three probe panels render as specified, and the check refuses drift."""
+    cfg = _SELF_TEST_SPEC
+    spec = spec_from_dict(cfg)
     gtf = render_gtf(spec.transcripts, "x")
     check("the GTF is one exon line per exon, 1-based inclusive",
           "test_chr\trigel_test\texon\t1001\t2000\t.\t+\t.\tgene_id \"gA\"; transcript_id \"A\";" in gtf
@@ -620,6 +629,22 @@ def self_test() -> int:
         (d / "test_chr.gtf").write_text("edited by hand\n")
         check("a hand-edited render is caught by the check", check_renders(spec, d) == ["test_chr.gtf"])
 
+
+def self_test() -> int:
+    """Every check perturbed, with no I/O against the real reference."""
+    ok = fail = 0
+
+    def check(name, cond):
+        nonlocal ok, fail
+        if cond:
+            ok += 1
+        else:
+            fail += 1
+            print(f"   ⛔ {name}")
+
+    for group in (_check_genome, _check_motifs, _check_transcripts, _check_shadows, _check_spec,
+                  _check_strand_balance, _check_renders):
+        group(check)
     print(f"\n   self-test: {ok} passed, {fail} failed")
     return 1 if fail else 0
 

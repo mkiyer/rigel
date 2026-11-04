@@ -1,5 +1,5 @@
 /**
- * constants.h — Shared constants and helper types for rigel C++ extensions.
+ * constants.h — Shared constants for rigel C++ extensions.
  *
  * The enum-mirror constants must match the Python values each block names; the fragment classes are
  * defined here alone and Python reads them from the native module.
@@ -7,12 +7,8 @@
 
 #pragma once
 
-#include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <iterator>
-#include <utility>
-#include <vector>
 
 namespace rigel {
 
@@ -33,12 +29,6 @@ static constexpr int32_t SPLICE_IMPLICIT        = 2;  // PE gap spans an annotat
 static constexpr int32_t SPLICE_ARTIFACT        = 3;  // CIGAR sj rejected by blacklist
 // Must equal `len(rigel.splice.SpliceType)`: it sizes the scanner's per-fragment splice census.
 static constexpr size_t NUM_SPLICE_TYPES        = 4;
-
-// MergeOutcome: the resolver's merge levels (mirrored in tests/_resolution_reference.py)
-static constexpr int32_t MC_INTERSECTION          = 0;
-static constexpr int32_t MC_INTERSECTION_NONEMPTY = 1;
-static constexpr int32_t MC_UNION                 = 2;
-static constexpr int32_t MC_EMPTY                 = 3;
 
 // Strand (rigel.types.Strand)
 static constexpr int32_t STRAND_NONE      = 0;
@@ -88,205 +78,77 @@ inline bool is_unannotated_splice(int32_t verdict) {
     return verdict == HIT_CONTRADICTORY || verdict == HIT_NOVEL_JUNCTION || verdict == HIT_UNSUPPORTED;
 }
 
+// Why a template is withheld: it has candidate hits and none is usable (`judge_template`). The label is the annotated
+// BAM's ZC and the stats export's name.
+static constexpr int32_t WITHHELD_NONE               = 0;
+static constexpr int32_t WITHHELD_UNPAIRED           = 1;  // none of its hits is a molecule
+static constexpr int32_t WITHHELD_UNANNOTATED_SPLICE = 2;  // the annotated-path rule withheld one of its hits
+static constexpr int32_t WITHHELD_OFF_INDEX          = 3;  // one of its hits lies on a reference outside the index
+static constexpr int32_t WITHHELD_CHIMERIC           = 4;  // one of its hits has a mate aligned in pieces
+static constexpr int32_t N_WITHHELD                  = 5;
+
+// The rest of a read pair's outcomes, numbered after the WITHHELD_* ones (`pair_digest`)
+static constexpr int32_t PAIR_EXCLUDED_BY_OPTION  = N_WITHHELD;
+static constexpr int32_t PAIR_PLACED_UNIQUE       = N_WITHHELD + 1;
+static constexpr int32_t PAIR_PLACED_MULTIMAPPING = N_WITHHELD + 2;
+
 // ================================================================
 // Scoring constants (shared by scoring.cpp and the Python side)
 // ================================================================
 static constexpr double LOG_HALF       = -0.6931471805599453;       // log(0.5): a strand with no preference
 static constexpr double TAIL_DECAY_LP  = -0.01005033585350145;      // log(0.99): per-bp penalty past the length table
+// Candidates scored in a stack buffer before falling back to the heap, so the common fragment needs no malloc.
+static constexpr int SCORED_STACK_CAPACITY = 64;
 
 // ================================================================
-// Geometric helper types shared across modules
+// The locus EM (_em_impl)
 // ================================================================
 
-struct ExonBlock {
-    int32_t ref_id;
-    int32_t start;
-    int32_t end;
-    int32_t strand;
-};
+// The EM's log floor, log(θ + EM_LOG_EPSILON), and the smallest total it divides by.
+static constexpr double EM_LOG_EPSILON = 1e-300;
+// One SQUAREM iteration runs three EM steps (two plain, one stabilising), so `iterations / 3` SQUAREM iterations
+// spend the budget `EMConfig.iterations` names.
+static constexpr int SQUAREM_BUDGET_DIVISOR = 3;
+// VBEM's floor: the smallest alpha a component keeps. digamma(1e-300) ≈ −1e300, so after max-subtraction the E-step
+// gives a component at the floor exactly zero responsibility and the evidence-proportional prior gives it nothing: it
+// stays dead unless it holds deterministic fragments. Only the EM's own step may put a component there, never
+// SQUAREM's extrapolation (`backtracked_squarem_step`).
+static constexpr double VBEM_SQUAREM_PRIOR_FLOOR = EM_LOG_EPSILON;
 
-struct IntronBlock {
-    int32_t ref_id;
-    int32_t start;
-    int32_t end;
-    int32_t strand;
-};
+// The mode codes are labels, not quantities. `_em_impl` exports them for rigel.estimator, and
+// `batch_locus_em_partitioned` refuses any other value.
+static constexpr int ASSIGN_FRACTIONAL   = 0;  // every candidate keeps its posterior share
+static constexpr int ASSIGN_SAMPLE       = 1;  // count first, then one component per unit
+static constexpr int WARM_START_COVERAGE = 0;  // the coverage-weighted seed
+static constexpr int WARM_START_PRIOR    = 1;  // the prior alone: the seed is zeroed
+static constexpr int WARM_START_UNIFORM  = 2;  // every component equal
 
-// Merge result: sorted vector of transcript indices + criteria
-struct MergeResult {
-    std::vector<int32_t> t_inds;
-    int32_t criteria;
-    bool is_empty() const { return t_inds.empty(); }
-};
-
-// Fold one int32 key field into a running hash (the boost hash_combine step). 0x9e3779b9 is 2^32/φ, the
-// golden-ratio increment that spreads consecutive values across the bits.
-inline void hash_combine(size_t& h, int32_t v) {
-    h ^= std::hash<int32_t>()(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
-}
-
-// SJ exact-match map key
-struct SJKey {
-    int32_t ref_id;
-    int32_t start;
-    int32_t end;
-    int32_t strand;
-
-    bool operator==(const SJKey& o) const {
-        return ref_id == o.ref_id && start == o.start &&
-               end == o.end && strand == o.strand;
-    }
-};
-
-struct SJKeyHash {
-    size_t operator()(const SJKey& k) const {
-        size_t h = std::hash<int32_t>()(k.ref_id);
-        hash_combine(h, k.start);
-        hash_combine(h, k.end);
-        hash_combine(h, k.strand);
-        return h;
-    }
-};
-
-// Splice-junction artifact blacklist key.
-// Strand-agnostic: alignable records a single entry per (ref, start, end).
-struct SJBlacklistKey {
-    int32_t ref_id;
-    int32_t start;
-    int32_t end;
-
-    bool operator==(const SJBlacklistKey& o) const {
-        return ref_id == o.ref_id && start == o.start && end == o.end;
-    }
-};
-
-struct SJBlacklistKeyHash {
-    size_t operator()(const SJBlacklistKey& k) const {
-        size_t h = std::hash<int32_t>()(k.ref_id);
-        hash_combine(h, k.start);
-        hash_combine(h, k.end);
-        return h;
-    }
-};
-
-struct SJBlacklistEntry {
-    int32_t max_anchor_left;
-    int32_t max_anchor_right;
-};
+// A unit's winner beside a transcript index: none, the locus's own gDNA, or the intergenic term.
+static constexpr int32_t EM_WINNER_NONE       = -1;
+static constexpr int32_t EM_WINNER_GDNA       = -2;
+static constexpr int32_t EM_WINNER_INTERGENIC = -3;
 
 // ================================================================
-// RawResolveResult — internal result from _resolve_core()
+// The calibration solve (_solve_impl)
 // ================================================================
 
-struct RawResolveResult {
-    std::vector<int32_t> t_inds;
-    int32_t ambig_strand = 0;
-    int32_t splice_type = 0;
-    int32_t align_strand = 0;
-    int32_t sj_strand = 0;
-    int32_t genomic_footprint = -1;
-    int32_t genomic_start = -1;
-    int32_t merge_criteria = MC_EMPTY;
-    int32_t read_length = 0;
-    // Parallel arrays to t_inds
-    std::vector<int32_t> frag_lengths;
-    std::vector<int32_t> t_exon_bp;
-    std::vector<int32_t> t_intron_bp;
-
-    // CIGAR junctions rejected by the alignment-time blacklist. The caller sets it before _resolve_core, so the
-    // resolver can promote SPLICE_UNSPLICED to SPLICE_ARTIFACT.
-    int32_t n_sj_blacklisted = 0;
-
-    // The per-junction strand table's key: the leftmost annotated CIGAR-N junction this fragment crosses (-1 when
-    // none), completed by `sj_strand`, the fragment's one motif strand. A qualified fragment carries one strand bit
-    // (mates whose XS/ts tags disagree OR to STRAND_AMBIGUOUS and are rejected), so all its junctions agree, and
-    // crediting one junction per fragment keeps the 2×2 marginal identity. The pick is the leftmost so it is
-    // deterministic, and it must be an annotated junction because `sj_strand` is the OR of annotated introns only.
-    int32_t sj_key_ref = -1;
-    int32_t sj_key_start = -1;
-    int32_t sj_key_end = -1;
-
-    // Every explanation of this fragment's unsequenced gaps, flat: hypothesis h owns introns
-    // [gap_intron_offsets[h], gap_intron_offsets[h+1]) (`FragmentResolver::enumerate_gap_hypotheses`). The empty
-    // hypothesis is the unspliced, genomic one; the synthetic span is this hypothesis, never a separate one.
-    std::vector<IntronBlock> gap_introns;
-    std::vector<int32_t>     gap_intron_offsets;      // n_hypotheses + 1, always starts at 0
-    std::vector<int32_t>     gap_sj_strand;           // n_hypotheses
-
-    int32_t n_gap_hypotheses() const {
-        return gap_intron_offsets.empty()
-                   ? 0
-                   : static_cast<int32_t>(gap_intron_offsets.size()) - 1;
-    }
-};
+// The message policies `solve_blocks` switches on; the silent policy runs no message layer.
+static constexpr int POLICY_SILENT   = 0;
+static constexpr int POLICY_TRANSFER = 1;
+// A slot holds its own composition evidence when its strand evidence exceeds this guard; the strand evidence clips
+// its fractions to it.
+static constexpr double OWN_EVIDENCE_EPS = 1.0e-9;
 
 // ================================================================
-// Set operations
+// The scan's capacities: bounds on memory and hand-off, not model parameters
 // ================================================================
 
-inline void sort_unique(std::vector<int32_t>& v) {
-    std::sort(v.begin(), v.end());
-    v.erase(std::unique(v.begin(), v.end()), v.end());
-}
-
-// Sorted-vector intersection.
-inline std::vector<int32_t> vec_intersect(const std::vector<int32_t>& a,
-                                          const std::vector<int32_t>& b) {
-    std::vector<int32_t> out;
-    out.reserve(std::min(a.size(), b.size()));
-    std::set_intersection(a.begin(), a.end(), b.begin(), b.end(),
-                          std::back_inserter(out));
-    return out;
-}
-
-// Progressive set merging.
-inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
-    if (sets.empty()) return {{}, MC_EMPTY};
-
-    // Separate non-empty sets
-    std::vector<const std::vector<int32_t>*> non_empty;
-    for (const auto& s : sets)
-        if (!s.empty()) non_empty.push_back(&s);
-    if (non_empty.empty()) return {{}, MC_EMPTY};
-
-    bool has_empty_set = (non_empty.size() < sets.size());
-
-    // 1. Intersection of ALL sets (only meaningful if none are empty)
-    if (!has_empty_set) {
-        std::vector<int32_t> isect = *non_empty[0];
-        for (size_t i = 1; i < non_empty.size() && !isect.empty(); i++)
-            isect = vec_intersect(isect, *non_empty[i]);
-        if (!isect.empty())
-            return {std::move(isect), MC_INTERSECTION};
-    } else {
-        // 2. Intersection of non-empty sets only
-        if (non_empty.size() == 1) {
-            return {*non_empty[0], MC_INTERSECTION_NONEMPTY};
-        }
-        std::vector<int32_t> isect = *non_empty[0];
-        for (size_t i = 1; i < non_empty.size() && !isect.empty(); i++)
-            isect = vec_intersect(isect, *non_empty[i]);
-        if (!isect.empty())
-            return {std::move(isect), MC_INTERSECTION_NONEMPTY};
-    }
-
-    // 3. Union of all sets
-    std::vector<int32_t> sorted_union;
-    std::vector<int32_t> tmp;
-    for (const auto* s : non_empty) {
-        if (sorted_union.empty()) {
-            sorted_union = *s;
-            continue;
-        }
-        tmp.clear();
-        tmp.reserve(sorted_union.size() + s->size());
-        std::set_union(sorted_union.begin(), sorted_union.end(),
-                       s->begin(), s->end(),
-                       std::back_inserter(tmp));
-        sorted_union.swap(tmp);
-    }
-    if (!sorted_union.empty()) return {std::move(sorted_union), MC_UNION};
-    return {{}, MC_EMPTY};
-}
+// Input-queue capacity per worker: the read-name batches the reader may hold queued before it blocks.
+static constexpr int INPUT_BATCHES_PER_WORKER = 4;
+// Output-queue capacity per worker: the finished chunks the workers may hold queued before they block on the main
+// thread.
+static constexpr int OUTPUT_CHUNKS_PER_WORKER = 2;
+// The transcripts one fragment touches, the resolver's initial capacity for their list: a hint, it grows past it.
+static constexpr size_t TOUCHED_TRANSCRIPTS_RESERVE = 512;
 
 }  // namespace rigel

@@ -19,10 +19,10 @@ from rigel.config import BamScanConfig
 from rigel.pipeline import scan_and_buffer
 from rigel.sim import ReadSimConfig, Scenario
 from rigel.splice import SpliceType
-from rigel.types import GenomicInterval, Strand
+from rigel.types import Strand
 
 from _index_builder import build_test_index
-from _resolution_reference import make_fragment, resolve_fragment
+from _resolution_reference import GenomicInterval, make_fragment, resolve_fragment
 
 
 # Geometry of the fixture GTF below (0-based half-open, after the GTF parse):
@@ -124,7 +124,7 @@ class TestImplicitSpliceDiscriminant:
         assert result.splice_type == int(SpliceType.UNSPLICED)
 
     # (c) intron protrudes 2 bp left of gap, K=3 → SPLICED_IMPLICIT
-    def test_c_protrusion_within_K(self, with_tolerance):
+    def test_c_protrusion_within_k(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
         # t_short intron is (200,299). gap (202,299): left protrusion = 2.
@@ -134,7 +134,7 @@ class TestImplicitSpliceDiscriminant:
         assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
 
     # (d) intron protrudes 5 bp left of gap, K=3 → UNSPLICED
-    def test_d_protrusion_exceeds_K(self, with_tolerance):
+    def test_d_protrusion_exceeds_k(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
         # gap (205,299): left protrusion = 5 bp > K=3.
@@ -192,7 +192,7 @@ class TestImplicitSpliceDiscriminant:
         assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
 
     # (h2) a transcript the read contradicts is not a candidate → UNSPLICED
-    def test_h2_a_CONTRADICTED_transcript_is_not_a_candidate(self, with_tolerance):
+    def test_h2_a_contradicted_transcript_is_not_a_candidate(self, with_tolerance):
         """A candidate is any transcript with a compatible combination of introns and exons, and
         ``cr.t_inds`` is not that set: it comes from ``merge_sets``, which falls back to a union when the
         intersection is empty, so a transcript the reads contradict can be in it.
@@ -270,7 +270,7 @@ class TestImplicitSpliceDiscriminant:
         assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
 
     # (m) nearby but disjoint intron within K bp of gap → UNSPLICED
-    def test_m_disjoint_intron_within_K(self, with_tolerance):
+    def test_m_disjoint_intron_within_k(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
         # t_short intron (200,299). gap (302,350): intron_end 299 < gap_start 302.
@@ -322,7 +322,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
         )
 
     # U1: a spliced fragment's gap intron is found.
-    def test_U1_a_spliced_fragment_has_the_intron_in_its_mate_gap_found(self, with_tolerance):
+    def test_u1_a_spliced_fragment_has_the_intron_in_its_mate_gap_found(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
         result = self._resolve_mixed(index, self.MIXED_BLOCKS, self.OBSERVED)
@@ -334,7 +334,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
         assert result.n_gap_hypotheses == 1
 
     # U2: the observed CIGAR-N gap is not re-derived.
-    def test_U2_the_observed_cigar_n_intron_is_not_re_derived(self, with_tolerance):
+    def test_u2_the_observed_cigar_n_intron_is_not_re_derived(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
         result = self._resolve_mixed(index, self.MIXED_BLOCKS, self.OBSERVED)
@@ -345,7 +345,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
         )
 
     # U4: the classification does not move; a gap intron changes L, not the label.
-    def test_U4_splice_type_does_not_move_when_a_gap_intron_is_found(self, with_tolerance):
+    def test_u4_splice_type_does_not_move_when_a_gap_intron_is_found(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
         result = self._resolve_mixed(index, self.MIXED_BLOCKS, self.OBSERVED)
@@ -397,7 +397,7 @@ def scenario(tmp_path):
     sc.cleanup()
 
 
-def test_ONE_candidate_transcript_DEPOSITS_with_the_strand_inferred_from_it(scenario):
+def test_one_candidate_transcript_deposits_with_the_strand_inferred_from_it(scenario):
     """The unanimous case. One isoform, so the implied intron is not in doubt and the fragment tallies.
 
     Zero deposits here would mean the unanimity test is unsatisfiable and every implicit fragment is
@@ -422,7 +422,7 @@ def test_ONE_candidate_transcript_DEPOSITS_with_the_strand_inferred_from_it(scen
     assert int(payload.sj_count.sum()) > 0
 
 
-def test_TWO_candidates_implying_DIFFERENT_introns_are_DEFERRED(scenario):
+def test_two_candidates_implying_different_introns_are_deferred(scenario):
     """The ambiguous case: two isoforms whose introns start at different places inside the same gap.
 
     Their implied ``L`` differs by 100 bp, so there is no answer to deposit — picking either is picking a
@@ -445,7 +445,7 @@ def test_TWO_candidates_implying_DIFFERENT_introns_are_DEFERRED(scenario):
     assert int(np.diff(payload.deferred.hypothesis_offsets).min()) >= 2
 
 
-def test_A_RETAINED_INTRON_ISOFORM_ALONE_IS_ENOUGH_TO_DEFER(scenario):
+def test_a_retained_intron_isoform_alone_is_enough_to_defer(scenario):
     """``t2`` covers the whole locus as one exon, so for it the mate gap holds no intron at all: the
     fragment is unspliced with an ``L`` that includes the gap. That is a different hypothesis from
     ``t1``'s spliced ``L``, so "implies nothing here" has to count as a distinct answer — and GENCODE is
@@ -484,7 +484,7 @@ def test_A_RETAINED_INTRON_ISOFORM_ALONE_IS_ENOUGH_TO_DEFER(scenario):
     )
 
 
-def test_A_SPAN_OVER_THE_LIMIT_RULES_OUT_the_retained_intron_hypothesis(scenario):
+def test_a_span_over_the_limit_rules_out_the_retained_intron_hypothesis(scenario):
     """The other side of the same rule, on a real scan.
 
     "If the genomic span exceeds ``max_fragment_length``, assume it is RNA" is the ordinary hypothesis

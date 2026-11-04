@@ -14,18 +14,17 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from _index_builder import write_fasta
+from _bam_builder import R1_FWD, R2_REV, SECONDARY, record, write_bam
+from _index_builder import build_index
+from _length_models import payload_fl_models
 
-from rigel.calibration.fl import build_fl_models
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
 from rigel.config import BamScanConfig
-from rigel.index import TranscriptIndex
 from rigel.pipeline import scan_and_buffer
 from rigel.second_pass import choose_hypotheses, drain, score_held_fragments
 
 GENOME = 6_000
-_M = 0
 N_MULTI = 200
 
 
@@ -54,71 +53,50 @@ def _scan(
     the scorer reads. ``background`` unique pairs per contig lie in its last intergenic region, the library's gDNA
     bulk; a multimapper's read 1 carries ``multi_nm[f]`` mismatches on contig ``f``, and every unique read
     ``unique_nm``, which sets the library's mismatch rate."""
-    import pysam
-
     base = tmp_path_factory.mktemp(f"placements_{label}")
-    fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {"chr1": GENOME, "chr2": GENOME}, unknown)
-    gtf.write_text(_gtf())
-    TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
-    index = TranscriptIndex.load(str(base / "idx"))
-
-    def read(qname, ref_id, pos, mate_pos, is_r1, nh=1, hi=None, secondary=False, nm=0):
-        a = pysam.AlignedSegment()
-        a.query_name = qname
-        a.reference_id = ref_id
-        a.reference_start = pos
-        a.mapping_quality = 60
-        a.flag = 0x1 | 0x2 | (0x40 | 0x20 if is_r1 else 0x80 | 0x10) | (0x100 if secondary else 0)
-        a.cigar = [(_M, 100)]
-        a.query_sequence = "A" * 100
-        a.query_qualities = pysam.qualitystring_to_array("I" * 100)
-        a.next_reference_id = ref_id
-        a.next_reference_start = mate_pos
-        a.set_tags(
-            [("NH", nh, "i"), ("NM", nm, "i")] + ([("HI", hi, "i")] if hi is not None else [])
-        )
-        return a
+    index = build_index(base, _gtf(), {"chr1": GENOME, "chr2": GENOME}, unknown)
 
     reads = []
     for ref_id, depth in enumerate(unique_depth):
         for k in range(depth):
             reads += [
-                read(f"u_{ref_id}_{k}", ref_id, 1100, 1300, True, nm=unique_nm),
-                read(f"u_{ref_id}_{k}", ref_id, 1300, 1100, False, nm=unique_nm),
+                record(f"u_{ref_id}_{k}", R1_FWD, 1100, "100M", 1300, ref=ref_id, nm=unique_nm),
+                record(f"u_{ref_id}_{k}", R2_REV, 1300, "100M", 1100, ref=ref_id, nm=unique_nm),
             ]
     for ref_id in (0, 1):
         for k in range(background):
             pos = 3000 + 10 * k
             reads += [
-                read(f"b_{ref_id}_{k}", ref_id, pos, pos + 200, True, nm=unique_nm),
-                read(f"b_{ref_id}_{k}", ref_id, pos + 200, pos, False, nm=unique_nm),
+                record(f"b_{ref_id}_{k}", R1_FWD, pos, "100M", pos + 200, ref=ref_id, nm=unique_nm),
+                record(f"b_{ref_id}_{k}", R2_REV, pos + 200, "100M", pos, ref=ref_id, nm=unique_nm),
             ]
     for k in range(N_MULTI):
         for ref_id, hi in ((0, 1), (1, 2)):
             reads += [
-                read(
+                record(
                     f"mm_{k}",
-                    ref_id,
+                    R1_FWD | (SECONDARY if hi == 2 else 0),
                     1120,
+                    "100M",
                     1320,
-                    True,
+                    ref=ref_id,
                     nh=2,
                     hi=hi,
-                    secondary=hi == 2,
                     nm=multi_nm[ref_id],
                 ),
-                read(f"mm_{k}", ref_id, 1320, 1120, False, nh=2, hi=hi, secondary=hi == 2),
+                record(
+                    f"mm_{k}",
+                    R2_REV | (SECONDARY if hi == 2 else 0),
+                    1320,
+                    "100M",
+                    1120,
+                    ref=ref_id,
+                    nh=2,
+                    hi=hi,
+                    nm=0,
+                ),
             ]
-    bam = str(base / "p.bam")
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": "chr1", "LN": GENOME}, {"SN": "chr2", "LN": GENOME}],
-    }
-    with pysam.AlignmentFile(bam, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam, bam)
+    bam = write_bam(base / "p.bam", reads, {"chr1": GENOME, "chr2": GENOME})
     _s, strand_model, _b, payload = scan_and_buffer(
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
@@ -136,7 +114,7 @@ def _scored(scanned):
     payload, region_types, sj, strand_model, regions = scanned
     scores = score_held_fragments(
         payload,
-        fl_models=build_fl_models(payload),
+        fl_models=payload_fl_models(payload),
         rna_sense_frac=strand_model.p_r1_sense,
         regions=regions,
         sj=sj,
@@ -274,7 +252,7 @@ def _bulk_by_hand(scanned) -> float:
     from rigel.calibration.signature import coarse_type_array
 
     payload, _rt, _sj, _sm, regions = scanned
-    support = observable_contained_eff_length(regions, build_fl_models(payload).global_pmf)
+    support = observable_contained_eff_length(regions, payload_fl_models(payload).global_pmf)
     intergenic = coarse_type_array(regions.signature) == 0
     counts = np.asarray(payload.region_contained_count, dtype=np.float64).sum(axis=1)
     return float(counts[intergenic].sum() / support[intergenic].sum())
@@ -295,7 +273,7 @@ def test_a_copy_with_no_unique_traffic_reads_the_bulk_beside_one_that_has_some(
     payload, scores, multi, runs, _rt, _sj = _scored(one_side_only_over_a_bulk)
     bulk = _bulk_by_hand(one_side_only_over_a_bulk)
     regions = one_side_only_over_a_bulk[4]
-    support = observable_contained_eff_length(regions, build_fl_models(payload).global_pmf)
+    support = observable_contained_eff_length(regions, payload_fl_models(payload).global_pmf)
     exon = int(payload.ref_region_offsets[0]) + 1  # chr1's first exon, where its unique pairs sit
     own = float(np.asarray(payload.region_contained_count[exon], dtype=np.float64).sum()) / float(
         support[exon]
@@ -374,7 +352,7 @@ def test_a_frame_of_another_partition_is_refused(three_to_one):
     with pytest.raises(ValueError, match="different partitions"):
         score_held_fragments(
             payload,
-            fl_models=build_fl_models(payload),
+            fl_models=payload_fl_models(payload),
             rna_sense_frac=strand_model.p_r1_sense,
             regions=other,
             sj=sj,

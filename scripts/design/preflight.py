@@ -30,14 +30,13 @@ from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-from _shared import RUNS  # noqa: E402
+from _shared import PANELS, RUNS, refuses  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-SUITE = RUNS / "suite"
-SUITE_INDEX = SUITE / "rigel_index"
-LADDER = SUITE / "ladder"
+REFERENCE = RUNS / "suite" / "reference"
+SUITE_INDEX, LADDER = PANELS["ladder"]
 TESTREF = RUNS / "test_reference"
-TESTREF_INDEX = TESTREF / "idx"
+TESTREF_INDEX, TESTREF_SCENARIOS = PANELS["test"]
 
 
 class Report:
@@ -81,13 +80,13 @@ def check_toolchain(rep: Report) -> None:
 
 
 def check_reference(rep: Report) -> None:
-    rep.add((SUITE / "reference" / "genome.fa").is_file(), "panel reference genome + GTF",
-            str(SUITE / "reference"),
+    rep.add((REFERENCE / "genome.fa").is_file(), "panel reference genome + GTF",
+            str(REFERENCE),
             "scripts/sim/build_suite_reference.py --fasta <source.fa> --gtf <source.gtf> "
             "--refs chr21 chr22 --ercc -o <reference>")
     rep.add(SUITE_INDEX.is_dir(), "panel rigel index", str(SUITE_INDEX),
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
-    rep.add((SUITE / "reference" / "capture_panel.tsv").is_file(), "panel capture probes", "",
+    rep.add((REFERENCE / "capture_panel.tsv").is_file(), "panel capture probes", "",
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
     # the method-development reference: one hand-edited YAML in the repo, the GTFs / abundances /
     # probe panels rendered beside it, everything else derived
@@ -105,10 +104,14 @@ def check_reference(rep: Report) -> None:
 
 def _sim_script(name: str):
     """A ``scripts/sim/`` script loaded by path, so a check here reads the rule from the script that
-    builds what it checks instead of restating it."""
+    builds what it checks instead of restating it. Its directory goes on the path, as running it puts it
+    there: the sim scripts import their helper modules by name."""
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / "sim" / f"{name}.py")
+    sim = REPO / "scripts" / "sim"
+    if str(sim) not in sys.path:
+        sys.path.insert(0, str(sim))
+    spec = importlib.util.spec_from_file_location(name, sim / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -136,7 +139,7 @@ def _refusal(check, *args) -> str:
     A refusal is what `build_scan_cache.py` re-scans and the instruments refuse to read: a key that does
     not describe this build and index, a manifest without a key it needs, a file that is not there.
     Anything else escapes, because it is not a stale cache."""
-    from rigel.scan_cache import ScanCacheKeyError
+    from _scan_cache import ScanCacheKeyError
 
     try:
         check(*args)
@@ -150,12 +153,12 @@ def _refusal(check, *args) -> str:
 def _cache_refusal(cache_dir: Path, index) -> str:
     """"" when the cache at *cache_dir* is one this build reads against *index*, else why it is not.
 
-    The cache module's own check, from the manifest alone: `scan_cache.check_scan_cache`, the one
+    The cache module's own check, from the manifest alone: `_scan_cache.check_scan_cache`, the one
     `build_scan_cache.py` decides a skip by, under the scan settings every instrument reads a cache with. The BAM is
     compared at its recorded path when it is still there, and its bytes are read only when its size matches and its
     modification time does not."""
     from rigel.config import BamScanConfig
-    from rigel.scan_cache import check_scan_cache
+    from _scan_cache import check_scan_cache
 
     if not (cache_dir / "payload.npz").is_file():
         return "missing"
@@ -297,7 +300,7 @@ def self_test() -> int:
 
     # the cache rows: a stale cache is counted and the first one named with the reason the cache module
     # gave; an error that is not a refusal is not turned into a verdict
-    from rigel.scan_cache import ScanCacheKeyError
+    from _scan_cache import ScanCacheKeyError
 
     check("every cache valid passes", cache_verdict([("a", ""), ("b", "")]) == (True, "2/2 valid"))
     check("a stale cache fails the row, counted, the FIRST named with its reason",
@@ -315,12 +318,7 @@ def self_test() -> int:
     check("an accepted cache has no refusal", _refusal(lambda: None) == "")
     check("a manifest without a key is a refusal",
           _refusal(lambda: {}["reach_digest"]) == "KeyError: 'reach_digest'")
-    try:
-        _refusal(broken)
-        escaped = False
-    except ValueError:
-        escaped = True
-    check("an error that is not a refusal escapes", escaped)
+    check("an error that is not a refusal escapes", refuses(_refusal, broken, exc=ValueError))
     print(f"\n   self-test: {ok} passed, {fail} failed")
     return 1 if fail else 0
 
@@ -339,7 +337,7 @@ def main() -> int:
     check_reference(ref)
     check_panel(panel, LADDER, SUITE_INDEX, "panel (16 conditions)",
                 "python scripts/sim/panel.py simulate --config scripts/sim/configs/gdna_ladder.yaml --jobs 16")
-    check_panel(testref, TESTREF / "scenarios", TESTREF_INDEX, "test chromosome",
+    check_panel(testref, TESTREF_SCENARIOS, TESTREF_INDEX, "test chromosome",
                 "python scripts/sim/panel.py simulate --config scripts/sim/configs/test_reference.yaml")
     check_instruments(inst, args.full)
 

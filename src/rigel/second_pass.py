@@ -25,6 +25,7 @@ import numpy as np
 
 from .calibration.effective_length import observable_contained_eff_length
 from .calibration.signature import coarse_type_array
+from .native import PLACE_BOUNDARY, PLACE_REGION, PLACE_SJ
 from .native import Accumulator as NativeAccumulator
 from .scoring import sequence_log_penalties
 from .scan_payload import (
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
 __all__ = [
     "HeldScores",
     "HypothesisTerms",
+    "PlacementPath",
     "choose_hypotheses",
     "combine_factors",
     "drain",
@@ -178,7 +180,7 @@ def _bottleneck(values: list[float]) -> float:
     return float(min(values)) if values else 0.0
 
 
-def _resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Answer, one reference at a time, the two questions the scoring loop asks of each hypothesis intron.
 
     Which annotated junction it is, if any (the kernel's own ``Accumulator.sj_edge_ids``), and the local boundary
@@ -295,47 +297,42 @@ class _Accumulators:
         return accumulator
 
 
-def _covered_segments(start: int, end: int, observed: np.ndarray) -> list[tuple[int, int]]:
-    """The contiguous segments of ``[start, end)`` with the observed introns cut out, in order; the introns are
-    clipped to the extent and merged where they overlap or abut."""
-    cuts = []
-    for a, b in sorted((max(int(a), start), min(int(b), end)) for a, b in observed.tolist()):
-        if b <= a:
-            continue
-        if cuts and a <= cuts[-1][1]:
-            cuts[-1] = (cuts[-1][0], max(cuts[-1][1], b))
-        else:
-            cuts.append((a, b))
-    segments, cursor = [], start
-    for a, b in cuts:
-        if a > cursor:
-            segments.append((cursor, a))
-        cursor = max(cursor, b)
-    if cursor < end:
-        segments.append((cursor, end))
-    return segments
+@dataclass(frozen=True, slots=True)
+class PlacementPath:
+    """The accumulator objects a placement's observed path deposits on, as flat ids on the payload's axes, read by
+    the deposit's own rule (``Accumulator.placement_masses``): the annotated junctions its observed introns resolve
+    to (``sj``), the contiguous boundaries it crosses (``boundaries``), and the one region that contains it
+    (``regions``, empty unless the path neither crosses nor splices)."""
+
+    sj: np.ndarray
+    boundaries: np.ndarray
+    regions: np.ndarray
+
+    @property
+    def spliced(self) -> bool:
+        """The deposit books the placement spliced: certified RNA under every one of its paths."""
+        return bool(self.sj.size)
 
 
-def _annotated_junctions(
+def _placement_path(
     payload: AccumulatorPayload, p: int, accumulator: NativeAccumulator
-) -> np.ndarray:
-    """The payload's sj ids of the annotated junctions that placement ``p``'s observed introns resolve to, by the
-    deposit's own rule (``Accumulator::sj_edge_id``). Empty when none resolves or the motif is ambiguous. Non-empty
-    means the deposit books the placement spliced: certified RNA under every one of its paths."""
+) -> PlacementPath:
+    """Placement ``p``'s :class:`PlacementPath`, from the accumulator of its reference."""
     d = payload.deferred
-    observed = d.observed_introns_of(p)
-    motif = int(d.sj_strand[p])
-    if not observed.shape[0] or motif == int(Strand.AMBIGUOUS):
-        return np.zeros(0, dtype=np.int64)
-    local = np.asarray(
-        accumulator.sj_edge_ids(
-            starts=np.ascontiguousarray(observed[:, 0], dtype=np.int64),
-            ends=np.ascontiguousarray(observed[:, 1], dtype=np.int64),
-            sj_strand=np.full(observed.shape[0], motif, dtype=np.int32),
-        ),
-        dtype=np.int64,
+    ref = int(d.ref[p])
+    kinds, ids, _masses = accumulator.placement_masses(
+        start=int(d.start[p]),
+        end=int(d.end[p]),
+        observed_introns=[tuple(q) for q in d.observed_introns_of(p).tolist()],
+        align_strand=int(d.align_strand[p]),
+        sj_strand=int(d.sj_strand[p]),
     )
-    return int(payload.ref_sj_offsets[int(d.ref[p])]) + local[local >= 0]
+    kinds, ids = np.asarray(kinds), np.asarray(ids, dtype=np.int64)
+    return PlacementPath(
+        sj=ids[kinds == PLACE_SJ] + int(payload.ref_sj_offsets[ref]),
+        boundaries=ids[kinds == PLACE_BOUNDARY] + int(payload.ref_boundary_offsets[ref]),
+        regions=ids[kinds == PLACE_REGION] + int(payload.ref_region_offsets[ref]),
+    )
 
 
 def pass_one_bulk(
@@ -353,18 +350,14 @@ def pass_one_bulk(
 
 def placement_abundance(
     payload: AccumulatorPayload,
-    p: int,
-    junctions: np.ndarray,
+    path: PlacementPath,
     region_support: np.ndarray,
     bulk: float,
 ) -> float:
     """``A_p``: the pass-one unique traffic at the objects the placement's own path deposits on, held at least at
-    gDNA's *bulk* wherever gDNA can be.
+    gDNA's *bulk* wherever gDNA can be. By the deposit rule the path (:class:`PlacementPath`) deposits on:
 
-    The path is the placement's extent with its observed introns cut out. By the deposit rule it deposits on:
-
-    * the annotated junctions it uses (*junctions*, :func:`_annotated_junctions`): the bottleneck of their
-      ``sj_inv_length_sum``;
+    * the annotated junctions it uses: the bottleneck of their ``sj_inv_length_sum``;
     * else the contiguous boundaries it crosses: the bottleneck of their ``boundary_unspliced_inv_length_sum``;
     * else the one region that contains it: its ``region_contained_count`` per observable start. *region_support* is
       each region's contained support over its observable pieces under the unconditional anchor
@@ -377,47 +370,175 @@ def placement_abundance(
     however much gDNA it holds. gDNA is one template at a uniform rate and capture only enriches, so a placement not
     booked spliced reads ``max(A_p, bulk)``: a max, because ``A_p`` already holds gDNA's share where pass one saw it.
     """
-    if junctions.size:
-        return _bottleneck([float(payload.sj_inv_length_sum[int(j)]) for j in junctions])
-    return max(_unspliced_abundance(payload, p, region_support), bulk)
+    if path.spliced:
+        return _bottleneck(payload.sj_inv_length_sum[path.sj].tolist())
+    if path.boundaries.size:
+        traffic = _bottleneck(payload.boundary_unspliced_inv_length_sum[path.boundaries].tolist())
+    elif path.regions.size:
+        (region,) = path.regions.tolist()
+        count = float(np.asarray(payload.region_contained_count[region], dtype=np.float64).sum())
+        opportunity = float(region_support[region])
+        traffic = count / opportunity if opportunity > 0.0 else 0.0
+    else:
+        traffic = 0.0
+    return max(traffic, bulk)
 
 
-def _unspliced_abundance(payload: AccumulatorPayload, p: int, region_support: np.ndarray) -> float:
-    """:func:`placement_abundance`'s contiguous and contained forms, for a path no annotated junction cuts."""
-    d = payload.deferred
-    ref = int(d.ref[p])
-    start, end = int(d.start[p]), int(d.end[p])
-    lo, hi = (
-        int(payload.ref_region_bound_offsets[ref]),
-        int(payload.ref_region_bound_offsets[ref + 1]),
-    )
-    bounds = np.asarray(payload.region_bounds[lo:hi], dtype=np.int64)
-    if bounds.shape[0] < 2:
-        return 0.0
-    segments = _covered_segments(start, end, d.observed_introns_of(p))
-    if not segments:
-        return 0.0
-    boundary_base = int(payload.ref_boundary_offsets[ref])
-    crossed = []
-    for seg_start, seg_end in segments:
-        first = int(np.searchsorted(bounds, seg_start, side="right"))
-        last = int(np.searchsorted(bounds, seg_end, side="left"))
-        crossed += [boundary_base + b - 1 for b in range(first, last)]
-    if crossed:
-        return _bottleneck([float(payload.boundary_unspliced_inv_length_sum[b]) for b in crossed])
+@dataclass(frozen=True, slots=True)
+class _HeldScorer:
+    """What scoring a held fragment reads beyond the fragment itself: the length laws, the strand fraction, the
+    pass-one tallies' derived terms and the per-reference accumulators (:func:`score_held_fragments`)."""
 
-    def region_of(position: int) -> int:
-        return min(
-            max(int(np.searchsorted(bounds, position, side="right")) - 1, 0), bounds.shape[0] - 2
+    payload: AccumulatorPayload
+    rna_pmf: np.ndarray
+    global_pmf: np.ndarray
+    max_size: int
+    rna_sense_frac: float
+    #: A_p's divisor per region: the unconditional anchor over the region's observable pieces
+    region_support: np.ndarray
+    bulk: float
+    #: the EM's sequence prices at the library's mismatch rate
+    mismatch_price: float
+    clip_price: float
+    junction_strands: np.ndarray
+    accumulators: _Accumulators
+    #: over the flat hypothesis-intron axis: each intron's sj id or -1, and its distinguishing boundary range
+    sj_of: np.ndarray
+    first_of: np.ndarray
+    last_of: np.ndarray
+    intron_offsets: np.ndarray
+
+    @classmethod
+    def build(
+        cls, payload: AccumulatorPayload, fl_models, rna_sense_frac: float, regions, sj
+    ) -> "_HeldScorer":
+        n_regions = int(np.asarray(payload.region_contained_count).shape[0])
+        if regions.n_regions != n_regions:
+            raise ValueError(
+                f"score_held_fragments: the frame has {regions.n_regions:,} regions and the payload {n_regions:,} — "
+                "they address different partitions. Pass RegionArrays.from_index of the index the scan used."
+            )
+        region_types = coarse_type_array(regions.signature)
+        region_support = observable_contained_eff_length(regions, fl_models.global_pmf)
+        mismatch_price, clip_price = sequence_log_penalties(payload.mismatch_rate)
+        accumulators = _Accumulators(payload, region_types, sj)
+        sj_of, first_of, last_of = resolve_intron_lookups(payload, accumulators)
+        return cls(
+            payload=payload,
+            rna_pmf=fl_models.rna_pmf,
+            global_pmf=fl_models.global_pmf,
+            max_size=int(fl_models.max_size),
+            rna_sense_frac=rna_sense_frac,
+            region_support=region_support,
+            bulk=pass_one_bulk(payload, region_types, region_support),
+            mismatch_price=mismatch_price,
+            clip_price=clip_price,
+            junction_strands=np.asarray(sj.strand, dtype=np.int64),
+            accumulators=accumulators,
+            sj_of=sj_of,
+            first_of=first_of,
+            last_of=last_of,
+            intron_offsets=np.asarray(payload.deferred.hypothesis_intron_offsets, dtype=np.int64),
         )
 
-    first_region, last_region = region_of(segments[0][0]), region_of(segments[-1][1] - 1)
-    if first_region != last_region:
-        return 0.0
-    region = int(payload.ref_region_offsets[ref]) + first_region
-    count = float(np.asarray(payload.region_contained_count[region], dtype=np.float64).sum())
-    opportunity = float(region_support[region])
-    return count / opportunity if opportunity > 0.0 else 0.0
+    def score_placement(self, p: int, multi: bool, terms: HypothesisTerms) -> None:
+        """Write placement ``p``'s factors into *terms*, one slot per hypothesis; the placement's own terms (``A_p``
+        and the sequence price) only on a multi-placement record."""
+        d = self.payload.deferred
+        accumulator = self.accumulators[int(d.ref[p])]
+        h0, h1 = int(d.hypothesis_offsets[p]), int(d.hypothesis_offsets[p + 1])
+        path = _placement_path(self.payload, p, accumulator)
+        if multi:
+            terms.placement_abundance[h0:h1] = placement_abundance(
+                self.payload, path, self.region_support, self.bulk
+            )
+            nm, clip = int(d.nm[p]), int(d.clip[p])
+            terms.sequence[h0:h1] = (nm * self.mismatch_price if nm else 0.0) + (
+                clip * self.clip_price if clip else 0.0
+            )
+        hypotheses = [
+            (
+                [tuple(q) for q in d.hypothesis_introns_of(h).tolist()],
+                int(d.hypothesis_sj_strand[h]),
+            )
+            for h in range(h0, h1)
+        ]
+        # `length_under` needs the hypothesis objects back in the shape the binding reads.
+        spans = [_Span(introns, implied) for introns, implied in hypotheses]
+        observed = [tuple(q) for q in d.observed_introns_of(p).tolist()]
+        align, observed_motif = int(d.align_strand[p]), int(d.sj_strand[p])
+        for local, (introns, implied_strand) in enumerate(hypotheses):
+            slot = h0 + local
+            L = int(
+                accumulator.length_under(
+                    start=int(d.start[p]),
+                    end=int(d.end[p]),
+                    observed_introns=observed,
+                    align_strand=align,
+                    sj_strand=observed_motif,
+                    hypotheses=spans,
+                    hypothesis_index=local,
+                )
+            )
+            terms.length[slot] = L
+            terms.density[slot] = self._density(p, slot, implies_introns=bool(introns))
+            pmf = self.rna_pmf if (introns or path.spliced) else self.global_pmf
+            terms.length_likelihood[slot] = float(pmf[L]) if 0 <= L <= self.max_size else 0.0
+            terms.strand[slot] = self._strand(
+                align, observed_motif, path, implied_strand, implies_introns=bool(introns)
+            )
+
+    def _density(self, p: int, slot: int, *, implies_introns: bool) -> float:
+        """``rho``: a spliced path's evidence is its junctions' ``sj_inv_length_sum``, deposited by the same rule as a
+        contiguous boundary's, so it is on ∅'s scale; the genomic path's is the unspliced crossing density where the
+        others jump. ∅ is scored only over the union of the competing implied introns, the stretch it claims
+        contiguous and every spliced path jumps, so it is not penalised for touching more objects than they do; that
+        union is the placement's contiguous run of the flat hypothesis-intron axis."""
+        payload, offsets = self.payload, self.intron_offsets
+        if implies_introns:
+            observed_densities = []
+            for t in range(int(offsets[slot]), int(offsets[slot + 1])):
+                jid = int(self.sj_of[t])
+                observed_densities.append(0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid]))
+            return _bottleneck(observed_densities)
+        d = payload.deferred
+        h0, h1 = int(d.hypothesis_offsets[p]), int(d.hypothesis_offsets[p + 1])
+        boundary_base = int(payload.ref_boundary_offsets[int(d.ref[p])])
+        boundary_densities = []
+        for t in range(int(offsets[h0]), int(offsets[h1])):
+            for boundary in range(int(self.first_of[t]), int(self.last_of[t])):
+                boundary_densities.append(
+                    float(payload.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1])
+                )
+        return _bottleneck(boundary_densities)
+
+    def _strand(
+        self,
+        align: int,
+        observed_motif: int,
+        path: PlacementPath,
+        implied_strand: int,
+        *,
+        implies_introns: bool,
+    ) -> float:
+        """The probability of the observed orientation under the placement's own reading. An observed motif makes
+        every hypothesis RNA on the motif's strand, since its intron is cut under all of them: constant within the
+        placement, not across a multimapper's, where an unspliced hit carries gDNA's ½. An annotated splice the
+        aligner wrote no motif for is RNA on the strand of the transcripts holding its junctions, as the deposit books
+        it; both strands say nothing."""
+        if observed_motif != int(Strand.NONE):
+            reading = observed_motif
+        elif path.spliced:
+            reading = int(np.bitwise_or.reduce(self.junction_strands[path.sj]))
+        else:
+            spliced_term, genomic_term = strand_terms(
+                align=align, implied_strand=implied_strand, rna_sense_frac=self.rna_sense_frac
+            )
+            return spliced_term if implies_introns else genomic_term
+        term, _ = strand_terms(
+            align=align, implied_strand=reading, rna_sense_frac=self.rna_sense_frac
+        )
+        return term
 
 
 def score_held_fragments(
@@ -446,166 +567,34 @@ def score_held_fragments(
     """
     deferred = payload.deferred
     n_hyp = deferred.n_hypotheses
-    length = np.zeros(n_hyp, np.int64)
-    density = np.zeros(n_hyp, np.float64)
-    length_likelihood = np.zeros(n_hyp, np.float64)
-    strand = np.ones(n_hyp, np.float64)
-    abundance = np.ones(n_hyp, np.float64)
-    sequence = np.zeros(n_hyp, np.float64)
+    terms = HypothesisTerms(
+        length=np.zeros(n_hyp, np.int64),
+        density=np.zeros(n_hyp, np.float64),
+        length_likelihood=np.zeros(n_hyp, np.float64),
+        strand=np.ones(n_hyp, np.float64),
+        placement_abundance=np.ones(n_hyp, np.float64),
+        sequence=np.zeros(n_hyp, np.float64),
+    )
+    scorer = _HeldScorer.build(payload, fl_models, rna_sense_frac, regions, sj)
     score = np.zeros(n_hyp, np.float64)
-
-    rna_pmf, global_pmf = fl_models.rna_pmf, fl_models.global_pmf
-    max_size = int(fl_models.max_size)
-
-    n_regions = int(np.asarray(payload.region_contained_count).shape[0])
-    if regions.n_regions != n_regions:
-        raise ValueError(
-            f"score_held_fragments: the frame has {regions.n_regions:,} regions and the payload {n_regions:,} — "
-            "they address different partitions. Pass RegionArrays.from_index of the index the scan used."
-        )
-    region_types = coarse_type_array(regions.signature)
-    # A_p's divisor per region: the unconditional anchor over the region's observable pieces
-    region_support = observable_contained_eff_length(regions, global_pmf)
-    bulk = pass_one_bulk(payload, region_types, region_support)
-    # the EM's sequence prices at the library's mismatch rate
-    mismatch_price, clip_price = sequence_log_penalties(payload.mismatch_rate)
-    junction_strands = np.asarray(sj.strand, dtype=np.int64)
-    accumulators = _Accumulators(payload, region_types, sj)
-    sj_of, first_of, last_of = _resolve_intron_lookups(payload, accumulators)
-    intron_offsets = np.asarray(deferred.hypothesis_intron_offsets, dtype=np.int64)
-
     record_runs = deferred.record_hypothesis_offsets
     n_undecided = 0
     for i in range(deferred.n_fragments):
         placements = deferred.placements_of(i)
         multi = len(placements) > 1
         for p in placements:
-            ref = int(deferred.ref[p])
-            start, end = int(deferred.start[p]), int(deferred.end[p])
-            align = int(deferred.align_strand[p])
-            observed_motif = int(deferred.sj_strand[p])
-            observed = [tuple(q) for q in deferred.observed_introns_of(p).tolist()]
-            h0, h1 = int(deferred.hypothesis_offsets[p]), int(deferred.hypothesis_offsets[p + 1])
-            hypotheses = [
-                (
-                    [tuple(q) for q in deferred.hypothesis_introns_of(h).tolist()],
-                    int(deferred.hypothesis_sj_strand[h]),
-                )
-                for h in range(h0, h1)
-            ]
-            acc = accumulators[ref]
-            boundary_base = int(payload.ref_boundary_offsets[ref])
-            # A placement the deposit books spliced is certified RNA under every one of its paths.
-            junctions = _annotated_junctions(payload, p, acc)
-            if multi:
-                # The placement's own terms, carried per hypothesis; applied only on a multi-placement record.
-                abundance[h0:h1] = placement_abundance(payload, p, junctions, region_support, bulk)
-                nm, clip = int(deferred.nm[p]), int(deferred.clip[p])
-                sequence[h0:h1] = (nm * mismatch_price if nm else 0.0) + (
-                    clip * clip_price if clip else 0.0
-                )
-            # ∅ is scored only over the union of the competing implied introns, the stretch it claims contiguous
-            # and every spliced path jumps, so it is not penalised for touching more objects than they do. That
-            # union is the placement's contiguous run of the flat hypothesis-intron axis.
-            contested_lo, contested_hi = int(intron_offsets[h0]), int(intron_offsets[h1])
-
-            # `length_under` needs the hypothesis objects back in the shape the binding reads.
-            spans = [_Span(introns, sj) for introns, sj in hypotheses]
-
-            for local, (introns, implied_strand) in enumerate(hypotheses):
-                slot = h0 + local
-                L = int(
-                    acc.length_under(
-                        start=start,
-                        end=end,
-                        observed_introns=observed,
-                        align_strand=align,
-                        sj_strand=observed_motif,
-                        hypotheses=spans,
-                        hypothesis_index=local,
-                    )
-                )
-                length[slot] = L
-
-                # -- rho ------------------------------------------------------------------------------
-                if introns:
-                    # A spliced path's evidence is its junctions' `sj_inv_length_sum`, deposited by the same
-                    # rule as a contiguous boundary's, so it is on ∅'s scale.
-                    observed_densities = []
-                    for t in range(int(intron_offsets[slot]), int(intron_offsets[slot + 1])):
-                        jid = int(sj_of[t])
-                        observed_densities.append(
-                            0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid])
-                        )
-                    density[slot] = _bottleneck(observed_densities)
-                else:
-                    # The genomic path's evidence is the unspliced crossing density where the others jump.
-                    boundary_densities = []
-                    for t in range(contested_lo, contested_hi):
-                        for boundary in range(int(first_of[t]), int(last_of[t])):
-                            boundary_densities.append(
-                                float(
-                                    payload.boundary_unspliced_inv_length_sum[
-                                        boundary_base + boundary - 1
-                                    ]
-                                )
-                            )
-                    density[slot] = _bottleneck(boundary_densities)
-
-                # -- f(L) -----------------------------------------------------------------------------
-                pmf = rna_pmf if (introns or junctions.size) else global_pmf
-                length_likelihood[slot] = float(pmf[L]) if 0 <= L <= max_size else 0.0
-
-                # -- strand ---------------------------------------------------------------------------
-                # The probability of the observed orientation under the placement's own reading. An observed
-                # motif makes every hypothesis RNA on the motif's strand, since its intron is cut under all of
-                # them: constant within the placement, not across a multimapper's, where an unspliced hit
-                # carries gDNA's ½.
-                if observed_motif != int(Strand.NONE):
-                    strand[slot], _ = strand_terms(
-                        align=align,
-                        implied_strand=observed_motif,
-                        rna_sense_frac=rna_sense_frac,
-                    )
-                elif junctions.size:
-                    # An annotated splice the aligner wrote no motif for is RNA on the strand of the
-                    # transcripts holding its junctions, as the deposit books it; both strands say nothing.
-                    strand[slot], _ = strand_terms(
-                        align=align,
-                        implied_strand=int(np.bitwise_or.reduce(junction_strands[junctions])),
-                        rna_sense_frac=rna_sense_frac,
-                    )
-                else:
-                    spliced_term, genomic_term = strand_terms(
-                        align=align,
-                        implied_strand=implied_strand,
-                        rna_sense_frac=rna_sense_frac,
-                    )
-                    strand[slot] = spliced_term if introns else genomic_term
-
+            scorer.score_placement(p, multi, terms)
         # Combined over the record's whole run, every placement's hypotheses at once.
         r0, r1 = int(record_runs[i]), int(record_runs[i + 1])
         score[r0:r1], undecided = combine_factors(
-            density[r0:r1],
-            length_likelihood[r0:r1],
-            strand[r0:r1],
-            abundance[r0:r1] if multi else None,
-            sequence[r0:r1] if multi else None,
+            terms.density[r0:r1],
+            terms.length_likelihood[r0:r1],
+            terms.strand[r0:r1],
+            terms.placement_abundance[r0:r1] if multi else None,
+            terms.sequence[r0:r1] if multi else None,
         )
         n_undecided += undecided
-
-    return HeldScores(
-        score=score,
-        terms=HypothesisTerms(
-            length=length,
-            density=density,
-            length_likelihood=length_likelihood,
-            strand=strand,
-            placement_abundance=abundance,
-            sequence=sequence,
-        ),
-        n_undecided=n_undecided,
-    )
+    return HeldScores(score=score, terms=terms, n_undecided=n_undecided)
 
 
 def choose_hypotheses(scores: HeldScores, payload: AccumulatorPayload, *, seed: int) -> np.ndarray:

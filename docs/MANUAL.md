@@ -1007,7 +1007,7 @@ fragment it shares and still have produced dozens of them, and only its total sa
 
 **Can a transcript's EM component die and never recover?**
 Yes, and only the EM's own step may do it. A component at the floor (`EM_LOG_EPSILON` ≈ 1e-300 in
-`src/rigel/native/em_solver.cpp`) receives zero responsibility in the E-step and no share of the prior,
+`src/rigel/native/constants.h`) receives zero responsibility in the E-step and no share of the prior,
 so it stays dead unless it holds fragments no other component can explain. Rigel accelerates the EM
 with SQUAREM, which jumps ahead along the EM's path; a jump that would carry a still-live component
 below the floor is shortened toward the plain EM step instead of being cut off there, in VBEM and

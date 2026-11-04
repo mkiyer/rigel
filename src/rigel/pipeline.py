@@ -24,7 +24,7 @@ from .annotate import (
     AF_UNRESOLVED,
     winner_flags,
 )
-from .buffer import FRAG_MULTIMAPPER, FragmentBuffer, _FinalizedChunk
+from .buffer import FRAG_MULTIMAPPER, FragmentBuffer, FinalizedChunk
 from .config import (
     CONSTANTS,
     EMConfig,
@@ -47,11 +47,14 @@ from .strand_model import StrandModels
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import pandas as pd
+
     from .annotate import AnnotationTable
     from .calibration import CalibrationResult
     from .calibration.fl import FLModels
     from .calibration.region_arrays import RegionArrays
     from .calibration.shared_length_law import LengthTables
+    from .scan_payload import AccumulatorPayload
     from .scored_fragments import ScoredFragments
 
 logger = logging.getLogger(__name__)
@@ -69,16 +72,16 @@ class PipelineResult:
     stats: PipelineStats
     strand_models: StrandModels
     estimator: AbundanceEstimator
-    pipeline_config: "PipelineConfig" = None
-    calibration: "CalibrationResult" = None
+    pipeline_config: PipelineConfig
+    calibration: CalibrationResult
     # Library-wide FL distributions actually built + used for calibration (global / RNA / gDNA); the
     # empirical views feed the summary QC report.
-    fl_models: "FLModels" = None
+    fl_models: FLModels
     # The EM's two length tables and the decision behind them (`calibration.shared_length_law`).
-    length_tables: "LengthTables" = None
+    length_tables: LengthTables
     # Per-region genome-wide gDNA track (ref/start/end + gDNA mass/density/frac),
     # built from the calibration result; feeds the report's genome track + bedGraph.
-    calibration_track: "object" = None
+    calibration_track: pd.DataFrame
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -186,7 +189,7 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
     )
 
 
-def _check_scan_accounting(stats: PipelineStats) -> None:
+def check_scan_accounting(stats: PipelineStats) -> None:
     """Every read pair has one outcome and every record one status, so the scan's counts reconcile by construction; a
     difference is a defect in the scan, and the run stops rather than report counts that do not add up."""
     withheld = (
@@ -252,12 +255,11 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         setattr(stats, key, value)
 
 
-def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
-    """Warn when calibration's strand decision (`region_init.strand_discriminability` on the sense fraction
+def warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
+    """Warn when calibration's strand decision (`strand_balance.strand_discriminability` on the sense fraction
     `strand_balance.fit_strand_balance` fits) reads the library as unstranded. Silent with no spliced observation,
     which is warned about where it is counted."""
-    from .calibration.region_init import strand_discriminability
-    from .calibration.strand_balance import fit_strand_balance
+    from .calibration.strand_balance import fit_strand_balance, strand_discriminability
 
     balance = fit_strand_balance(strand_models)
     if balance.fallback_used:
@@ -302,11 +304,7 @@ def _check_bam_header(bam_path: str, index: TranscriptIndex) -> None:
         )
     bam_refs = {sq["SN"]: int(sq["LN"]) for sq in header.get("SQ", [])}
     shared = [name for name in bam_refs if name in index.ref_lengths]
-
-    def some(names):
-        names = list(names)
-        return ", ".join(names[:3]) + (f" and {len(names) - 3:,} more" if len(names) > 3 else "")
-
+    some = CONSTANTS.qc.examples
     if bam_refs and not shared:
         raise BamInputError(
             f"None of {bam_path}'s {len(bam_refs):,} references is in the index ({some(bam_refs)}, against "
@@ -335,12 +333,7 @@ def scan_and_buffer(
     bam_path: str,
     index: TranscriptIndex,
     scan: "BamScanConfig",
-) -> tuple[
-    PipelineStats,
-    StrandModels,
-    FragmentBuffer,
-    "object",  # AccumulatorPayload
-]:
+) -> tuple[PipelineStats, StrandModels, FragmentBuffer, "AccumulatorPayload"]:
     """One native BAM pass: parse, resolve, train the strand models and buffer the fragments.
 
     Parameters
@@ -355,50 +348,34 @@ def scan_and_buffer(
     Returns
     -------
     tuple
-        ``(stats, strand_models, buffer, calibration_payload)``.
+        ``(stats, strand_models, buffer, calibration_payload)``. A scan that fails cleans its buffer up, so it leaves
+        no spilled chunk behind.
 
     No fragment-length model comes out of here: every length law is built from the payload by
     :func:`rigel.calibration.fl.build_fl_models`, so length is measured by one rule, the accumulator's ``L``.
     """
     _check_bam_header(bam_path, index)
-    stats = PipelineStats()
     buffer = FragmentBuffer(
         max_memory_bytes=scan.buffer_size_bytes,
         spill_dir=None if scan.spill_dir is None else Path(scan.spill_dir),
     )
+    try:
+        stats, strand_models, payload = _scan(bam_path, index, scan, buffer)
+    except BaseException:
+        buffer.cleanup()
+        raise
+    return stats, strand_models, buffer, payload
+
+
+def _scan(
+    bam_path: str, index: TranscriptIndex, scan: "BamScanConfig", buffer: FragmentBuffer
+) -> tuple[PipelineStats, StrandModels, "AccumulatorPayload"]:
+    """The scan itself, its fragments streamed into *buffer*: the counters, checked to reconcile, the strand models
+    and the calibration payload."""
+    from .scan_payload import AccumulatorPayload
+
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
-
-    # The index installs what it knows (the transcript strands among it); the scan sets what is a setting.
-    resolve_ctx = index.resolver
-
-    # The intron-overhang tolerance K (`BamScanConfig.intron_overhang_tolerance`): it decides which pairs are one
-    # molecule, the candidates' lengths, calibration's tally and which unspliced fragments become SPLICED_IMPLICIT
-    resolve_ctx.set_intron_overhang_tolerance(int(scan.intron_overhang_tolerance))
-    # The pair rule's fragment-length limit: no pair whose molecule is longer is one.
-    resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
-
-    # Create the native scanner
-    sj_spec = _sj_tag_to_spec(scan.sj_strand_tag)
-    scanner = _NativeBamScanner(
-        resolve_ctx,
-        sj_spec,
-        skip_duplicates=scan.skip_duplicates,
-        include_multimap=scan.include_multimap,
-    )
-
-    # The splice graph's region partition, so the scan tallies per-region evidence
-    _wire_calibration_regions(
-        scanner,
-        index,
-        scan.max_frag_length,
-    )
-
-    # Streaming chunk callback: a zero-copy dict from C++
-    def _on_chunk(raw: dict) -> None:
-        chunk = _FinalizedChunk.from_raw(raw)
-        buffer.inject_chunk(chunk)
-
-    # Execute the full BAM scan in C++ with streaming chunk output
+    scanner = _native_scanner(index, scan)
     n_scan, n_bgzf = scan.resolved_scan_threads()
     if scan.bgzf_threads is not None and n_bgzf != scan.bgzf_threads:
         logger.info(
@@ -410,30 +387,18 @@ def scan_and_buffer(
         )
     result = scanner.scan(
         bam_path,
-        chunk_callback=_on_chunk,
+        # each chunk a zero-copy dict from C++
+        chunk_callback=lambda raw: buffer.inject_chunk(FinalizedChunk.from_raw(raw)),
         chunk_size=scan.fragments_per_chunk,
         n_workers=n_scan,
         n_decomp_threads=n_bgzf,
         qname_batch_size=scan.read_name_batch_size,
     )
 
-    # Replay stats
+    stats = PipelineStats()
     _apply_scan_stats(stats, result["stats"])
-    _check_scan_accounting(stats)
-
-    # The strand models, built once; the spliced 2×2 is the marginal of the per-sj strand table
-    strand_models = StrandModels.from_scan(result["strand_observations"])
-    # One strand-qualified fragment credits one sj, so the 2×2 is exactly the table's marginal and both halves of
-    # the RNA strand Beta-Binomial are fitted on one population. The C++ counts the fragments independently of the
-    # table, so this is a real cross-check.
-    n_credited = strand_models.sj_table.n_observations
-    if n_credited != stats.n_strand_trained:
-        raise RuntimeError(
-            f"SJ strand table credited {n_credited:,} observations but the scanner "
-            f"qualified {stats.n_strand_trained:,} fragments; one qualified fragment must "
-            "credit exactly one sj."
-        )
-
+    check_scan_accounting(stats)
+    strand_models = _strand_models(result["strand_observations"], stats)
     logger.info(
         f"[DONE] Native scan: {stats.n_fragments:,} fragments → "
         f"{stats.n_same_strand:,} same-strand, "
@@ -445,15 +410,49 @@ def scan_and_buffer(
         f"{stats.n_multimapper_groups:,} multimapper molecules"
     )
     strand_models.log_summary()
+    # The calibration payload, keyed by `graph_hash` (regions and boundaries), because the payload's sj axis is
+    # meaningless against a different sj CSR
+    return (
+        stats,
+        strand_models,
+        AccumulatorPayload.from_scan_result(result, graph_hash=index.graph_hash),
+    )
 
-    # The calibration payload: the C++ scanner's accumulator tally, typed.
-    from .scan_payload import AccumulatorPayload
 
-    # Keyed by `graph_hash` (regions and boundaries), because the payload's sj axis is meaningless against a
-    # different sj CSR
-    calibration_payload = AccumulatorPayload.from_scan_result(result, graph_hash=index.graph_hash)
+def _native_scanner(index: TranscriptIndex, scan: "BamScanConfig") -> _NativeBamScanner:
+    """The native scanner over the index's resolver, the splice graph installed. The index installs what it knows
+    (the transcript strands among it); the scan sets what is a setting."""
+    resolve_ctx = index.resolver
+    # The intron-overhang tolerance K (`BamScanConfig.intron_overhang_tolerance`): it decides which pairs are one
+    # molecule, the candidates' lengths, calibration's tally and which unspliced fragments become SPLICED_IMPLICIT
+    resolve_ctx.set_intron_overhang_tolerance(int(scan.intron_overhang_tolerance))
+    # The pair rule's fragment-length limit: no pair whose molecule is longer is one.
+    resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
+    scanner = _NativeBamScanner(
+        resolve_ctx,
+        _sj_tag_to_spec(scan.sj_strand_tag),
+        skip_duplicates=scan.skip_duplicates,
+        include_multimap=scan.include_multimap,
+    )
+    # The splice graph's region partition, so the scan tallies per-region evidence
+    _wire_calibration_regions(scanner, index, scan.max_frag_length)
+    return scanner
 
-    return stats, strand_models, buffer, calibration_payload
+
+def _strand_models(strand_observations: dict, stats: PipelineStats) -> StrandModels:
+    """The strand models, built once; the spliced 2×2 is the marginal of the per-sj strand table. One strand-qualified
+    fragment credits one sj, so the 2×2 is exactly the table's marginal and both halves of the RNA strand
+    Beta-Binomial are fitted on one population. The C++ counts the fragments independently of the table, so this is a
+    real cross-check."""
+    strand_models = StrandModels.from_scan(strand_observations)
+    n_credited = strand_models.sj_table.n_observations
+    if n_credited != stats.n_strand_trained:
+        raise RuntimeError(
+            f"SJ strand table credited {n_credited:,} observations but the scanner "
+            f"qualified {stats.n_strand_trained:,} fragments; one qualified fragment must "
+            "credit exactly one sj."
+        )
+    return strand_models
 
 
 def library_fl_models(payload, index: TranscriptIndex) -> "FLModels":
@@ -504,8 +503,8 @@ def length_tables(
     )
 
 
-def _drain_side_buffer(
-    payload, index: TranscriptIndex, strand_models, *, seed: int, _lift: dict | None = None
+def drain_side_buffer(
+    payload, index: TranscriptIndex, strand_models, *, seed: int, lift: dict | None = None
 ):
     """The second pass: score the held fragments, draw one hypothesis each, and re-deposit them.
 
@@ -518,10 +517,10 @@ def _drain_side_buffer(
     once, score once, drain once: the confident set is biased short, so feeding the drained law back into the score
     would favour the shorter, more-spliced path, and the loop could run away.
 
-    ``_lift`` is an out-parameter for an origin-split oracle (``lift_choices`` in `tests/calibration/_oracle.py`):
+    ``lift`` is an out-parameter for an origin-split oracle (``lift_choices`` in `scripts/design/_oracle.py`):
     the drain conditions on the whole tally, so the oracle replays the whole's drawn choices inside each partition,
     and needs the choices, the undrained payload and the two index-derived arrays `drain` takes, which exist only
-    here. Like ``calibrate(_debug=)``, it is inert in production. An empty side buffer leaves ``_lift`` untouched.
+    here. Like ``calibrate(diagnostics=)``, it is inert in production. An empty side buffer leaves ``lift`` untouched.
     """
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
@@ -549,10 +548,10 @@ def _drain_side_buffer(
     )
     choices = choose_hypotheses(scores, payload, seed=seed)
     drained = drain(payload, choices, region_types=region_types, sj=sj)
-    if _lift is not None:
+    if lift is not None:
         # ``undrained`` is the payload as it entered here, not ``drained``: the drained bank is empty by
         # design ("after it nothing is held"), so it cannot supply `lift_choices`' key pool.
-        _lift.update(undrained=payload, choices=choices, region_types=region_types, sj=sj)
+        lift.update(undrained=payload, choices=choices, region_types=region_types, sj=sj)
     report = drained.drain
     logger.info(
         "[SP2] drained %d held fragments (%d held on their placements) in %.1f s: %d deposited, "
@@ -612,7 +611,7 @@ def _wire_calibration_regions(
 # ---------------------------------------------------------------------------
 
 
-def _setup_geometry_and_estimator(
+def setup_geometry_and_estimator(
     index: TranscriptIndex,
     rna_fl,
     em_config: EMConfig,
@@ -658,7 +657,7 @@ def _setup_geometry_and_estimator(
     return estimator
 
 
-def _score_fragments(
+def score_fragments(
     buffer: FragmentBuffer,
     index: TranscriptIndex,
     strand_models: StrandModels,
@@ -704,7 +703,7 @@ def _assign_locus_ids(estimator: AbundanceEstimator, multi_loci: list) -> None:
             estimator.locus_id_per_transcript[int(t_idx)] = locus.multi_locus_id
 
 
-def _populate_em_annotations(
+def populate_em_annotations(
     batch_parts,
     out_winner_tid,
     out_winner_post,
@@ -793,7 +792,7 @@ def em_pseudocounts(
     return gdna_prior, strength - gdna_prior
 
 
-def _run_locus_em_partitioned(
+def run_locus_em_partitioned(
     estimator: AbundanceEstimator,
     partitions: dict,
     multi_loci: list,
@@ -803,7 +802,6 @@ def _run_locus_em_partitioned(
     *,
     em_config: EMConfig,
     intergenic_rate: float = 0.0,
-    rna_prior_weight: np.ndarray | None = None,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> None:
@@ -812,42 +810,84 @@ def _run_locus_em_partitioned(
     Packs each ``LocusPartition`` into the C++ 8-tuple, runs the whole batch in one
     ``run_batch_locus_em_partitioned`` call (the solver runs its own threads), and appends a per-locus dict to
     ``estimator.locus_results`` for ``get_loci_df``. Calibration enters as its per-locus gDNA count, which
-    :func:`em_pseudocounts` reads against the unique part of the locus calibration counted: its non-multimapper
-    units the blacklist did not reject, plus its transcripts' deterministic fragments. The loci table's
-    ``has_gdna`` is structural: some unspliced unit carries a finite gDNA log-likelihood.
-
-    ``rna_prior_weight`` is per transcript and passed flat, while every other prior array is subscripted by ``ids``
-    into locus order: the RNA prior's total belongs to the locus, its allocation to the transcripts, and the C++
-    remaps the allocation per sub-problem. Subscripting it by ``ids`` would read transcript rows at locus positions.
+    :func:`em_pseudocounts` reads against the unique part of the locus calibration counted
+    (:func:`_calibrated_units`). The loci table's ``has_gdna`` is structural: some unspliced unit carries a finite
+    gDNA log-likelihood.
     """
     if not multi_loci:
         return
 
     parts = [partitions[loc.multi_locus_id] for loc in multi_loci]
-    partition_tuples = [
-        (
-            p.offsets,
-            p.t_indices,
-            p.log_liks,
-            p.coverage_weights,
-            p.count_cols,
-            p.is_spliced,
-            p.gdna_log_liks,
-            p.intergenic_log_liks,
-        )
-        for p in parts
-    ]
-    locus_t_lists = [loc.transcript_indices for loc in multi_loci]
     ids = [loc.multi_locus_id for loc in multi_loci]
-    g_eff = np.ascontiguousarray(gdna_eff_len[ids], dtype=np.float64)
     n_gdna_eligible = np.array(
         [np.count_nonzero((p.is_spliced == 0) & np.isfinite(p.gdna_log_liks)) for p in parts],
         dtype=np.float64,
     )
-    # The unique part of calibration's sample: the deterministic fragments (unique by construction) and every
-    # deposited unit that is neither a multimapper nor a fragment whose every junction the blacklist rejected
+    gdna_prior, rna_prior = em_pseudocounts(
+        np.asarray(gdna_count, dtype=np.float64)[ids],
+        _calibrated_units(estimator, parts, multi_loci),
+        n_gdna_eligible,
+    )
+    gdna_prior = np.ascontiguousarray(gdna_prior)
+    rna_prior = np.ascontiguousarray(rna_prior)
+
+    em_result = estimator.run_batch_locus_em_partitioned(
+        [_partition_tuple(p) for p in parts],
+        [loc.transcript_indices for loc in multi_loci],
+        gdna_prior,
+        rna_prior_count=rna_prior,
+        gdna_eff_len=np.ascontiguousarray(gdna_eff_len[ids], dtype=np.float64),
+        intergenic_rate=intergenic_rate,
+        em_iterations=em_config.iterations,
+        em_convergence_delta=em_config.convergence_delta,
+        emit_locus_stats=emit_locus_stats,
+        emit_assignments=annotations is not None,
+    )
+    total_gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
+    if annotations is not None and len(em_result) > 3:
+        populate_em_annotations(parts, em_result[3], em_result[4], em_result[5], annotations, index)
+    _record_locus_results(
+        estimator,
+        multi_loci,
+        index,
+        rna_arr,
+        gdna_arr,
+        gdna_prior,
+        rna_prior,
+        has_gdna=n_gdna_eligible > 0,
+        gdna_eff_len=gdna_eff_len,
+    )
+
+    estimator._gdna_em_total = total_gdna_em
+    n_units = sum(len(loc.unit_indices) for loc in multi_loci)
+    logger.info(
+        "[DONE] Per-locus EM: %d loci, %d ambiguous fragments, gDNA EM=%.0f",
+        len(multi_loci),
+        n_units,
+        total_gdna_em,
+    )
+
+
+def _partition_tuple(p) -> tuple:
+    """A ``LocusPartition`` as the 8-tuple the native batch EM reads."""
+    return (
+        p.offsets,
+        p.t_indices,
+        p.log_liks,
+        p.coverage_weights,
+        p.count_cols,
+        p.is_spliced,
+        p.gdna_log_liks,
+        p.intergenic_log_liks,
+    )
+
+
+def _calibrated_units(estimator: AbundanceEstimator, parts: list, multi_loci: list) -> np.ndarray:
+    """Per locus, the unique part of calibration's sample: the deterministic fragments of its transcripts (unique by
+    construction) and every deposited unit that is neither a multimapper nor a fragment whose every junction the
+    blacklist rejected."""
     deterministic = estimator.unambig_counts.sum(axis=1)
-    n_calibrated = np.array(
+    return np.array(
         [
             np.count_nonzero(
                 (p.frag_class != FRAG_MULTIMAPPER) & (p.splice_type != SpliceType.SPLICE_ARTIFACT)
@@ -857,36 +897,24 @@ def _run_locus_em_partitioned(
         ],
         dtype=np.float64,
     )
-    gdna_prior, rna_prior = em_pseudocounts(
-        np.asarray(gdna_count, dtype=np.float64)[ids], n_calibrated, n_gdna_eligible
-    )
-    gdna_prior = np.ascontiguousarray(gdna_prior)
-    rna_prior = np.ascontiguousarray(rna_prior)
-    has_gdna = n_gdna_eligible > 0
 
-    em_result = estimator.run_batch_locus_em_partitioned(
-        partition_tuples,
-        locus_t_lists,
-        gdna_prior,
-        rna_prior_count=rna_prior,
-        # flat and per transcript, never `[ids]`: the C++ remaps it per sub-problem
-        rna_prior_weight=rna_prior_weight,
-        gdna_eff_len=g_eff,
-        intergenic_rate=intergenic_rate,
-        em_iterations=em_config.iterations,
-        em_convergence_delta=em_config.convergence_delta,
-        emit_locus_stats=emit_locus_stats,
-        emit_assignments=annotations is not None,
-    )
-    total_gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
-    if annotations is not None and len(em_result) > 3:
-        _populate_em_annotations(
-            parts, em_result[3], em_result[4], em_result[5], annotations, index
-        )
 
+def _record_locus_results(
+    estimator: AbundanceEstimator,
+    multi_loci: list,
+    index: TranscriptIndex,
+    rna_arr: np.ndarray,
+    gdna_arr: np.ndarray,
+    gdna_prior: np.ndarray,
+    rna_prior: np.ndarray,
+    *,
+    has_gdna: np.ndarray,
+    gdna_eff_len: np.ndarray,
+) -> None:
+    """Append each locus's lean result to ``estimator.locus_results``, the rows ``get_loci_df`` builds the loci table
+    from; ``n_genes`` counts the annotated genes among the locus's transcripts."""
     t_to_g = index.t_to_g_arr
     is_synth_g = index.g_df["is_synthetic"].to_numpy()
-
     for i, loc in enumerate(multi_loci):
         lid = loc.multi_locus_id
         gene_set = {
@@ -908,15 +936,6 @@ def _run_locus_em_partitioned(
                 "gdna_em_effective_length": float(gdna_eff_len[lid]),
             }
         )
-
-    estimator._gdna_em_total = total_gdna_em
-    n_units = sum(len(loc.unit_indices) for loc in multi_loci)
-    logger.info(
-        "[DONE] Per-locus EM: %d loci, %d ambiguous fragments, gDNA EM=%.0f",
-        len(multi_loci),
-        n_units,
-        total_gdna_em,
-    )
 
 
 def quant_from_buffer(
@@ -957,11 +976,11 @@ def quant_from_buffer(
     rna_fl = FragmentLengthModel.from_pmf(tables.rna, max_size)
     gdna_fl = FragmentLengthModel.from_pmf(tables.gdna, max_size)
 
-    estimator = _setup_geometry_and_estimator(
+    estimator = setup_geometry_and_estimator(
         index, rna_fl, em_config, calibration, region_arrays, tables
     )
 
-    em_data = _score_fragments(
+    em_data = score_fragments(
         buffer,
         index,
         strand_models,
@@ -984,7 +1003,7 @@ def quant_from_buffer(
 
     priors = assemble_priors(calibration, region_arrays, multi_loci)
     partitions = partition_and_free(em_data, multi_loci)
-    _run_locus_em_partitioned(
+    run_locus_em_partitioned(
         estimator,
         partitions,
         multi_loci,
@@ -1015,7 +1034,7 @@ def run_pipeline(
     """Run the complete quantification pipeline with locus-level EM.
 
     Reads the BAM once with the native scanner, drains the held fragments, calibrates, then quantifies with the
-    per-locus EM.
+    per-locus EM. The fragment buffer is cleaned up on every path, a failure included.
 
     Parameters
     ----------
@@ -1035,115 +1054,24 @@ def run_pipeline(
     """
     if config is None:
         config = PipelineConfig()
-
     bam_path = str(bam_path)
-
-    # -- Single BAM pass (C++ native scanner) --
     scan = config.scan
     stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
-    _log_sj_tags(stats, scan)
-    _log_record_tags(stats)
-    _log_hit_verdicts(stats)
-
-    # -- The second pass: drain the side buffer, before calibration --
-    calibration_payload = _drain_side_buffer(
-        calibration_payload, index, strand_models, seed=config.second_pass_seed
-    )
-
-    # -- Calibration: deconvolve every region and boundary into gDNA / RNA+ / RNA− --
-    from .calibration import calibrate
-    from .calibration.region_arrays import RegionArrays
-    from .calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
-
-    _warn_if_calibration_strand_unidentifiable(strand_models)
-    confidence = CONSTANTS.qc.strand_ci_confidence
-    strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=confidence)
-    logger.info(
-        "[CAL] Strand trainer: n_spliced_obs=%d  ss_est=%.6f  ε_CI(%g%%)=%.4g",
-        strand_models.n_observations,
-        strand_models.strand_specificity,
-        100.0 * confidence,
-        strand_ci_eps,
-    )
-
-    # No alignment check here: calibrate() runs it (CalibrationSubstrate.from_payload)
-    region_arrays = RegionArrays.from_index(index)
-    boundary_flags = build_boundary_flags_array(index)
-    # The sj axis, in the accumulator's sj slot order: where each sj attaches, its transcript strand and its exonic
-    # reach either side. The calibrator places each sj as a factor on its two endpoint regions, never as a message
-    # channel, because every sj closes a loop and the graph is not a tree.
-    sj = build_sj_geometry_arrays(index)
-
-    # The two component length models the calibrator's effective lengths need, refit on the drained tally
-    fl_models = library_fl_models(calibration_payload, index)
-    gdna_fl_pmf = fl_models.gdna_pmf
-    _bins = np.arange(gdna_fl_pmf.size, dtype=np.float64)
-    logger.info(
-        "[CAL] FL models: n_gdna_pool=%.0f gdna_fl_mean=%.1f rna_fl_mean=%.1f global_fl_mean=%.1f",
-        fl_models.n_gdna,
-        float(np.dot(_bins, fl_models.gdna_pmf)),
-        float(np.dot(_bins, fl_models.rna_pmf)),
-        float(np.dot(_bins, fl_models.global_pmf)),
-    )
-
-    # The buffer stays: quant_from_buffer routes it below
-    calibration = calibrate(
-        payload=calibration_payload,
-        region_arrays=region_arrays,
-        strand_model=strand_models,
-        gdna_fl_pmf=gdna_fl_pmf,
-        rna_fl_pmf=fl_models.rna_pmf,
-        config=config.calibration,
-        sj=sj,
-        boundary_flags=boundary_flags,
-    )
-
-    # Fragments, not object incidences: each axis (regions, boundaries, sj) is converted by its own population's
-    # mass per crossing before the sum, since raw banks count a fragment once per boundary it crosses and once
-    # per sj it uses
-    logger.info(
-        "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "gDNA_fragments=%.0f RNA_fragments=%.0f (sj incidences %.0f)",
-        calibration.n_regions,
-        calibration.n_boundaries,
-        calibration.n_sj,
-        calibration.gdna_density_global,
-        calibration.rna_sense_frac,
-        calibration.library_gdna_fragments,
-        calibration.library_rna_fragments,
-        float(calibration.count_rna_sj.sum()),
-    )
-
-    # -- The EM's two length tables: one shared law unless the data show a difference capture cannot make --
-    tables = length_tables(fl_models, calibration, region_arrays)
-    decision = tables.decision
-    logger.info(
-        "[FL] length tables: kappa=%.4f captured=%.4f contrast=%.4f bound=%.4f noise=%.3g weight=%.3f "
-        "rna_mean=%.1f gdna_table_mean=%.1f",
-        decision.kappa,
-        decision.captured,
-        decision.contrast,
-        decision.bound,
-        decision.noise,
-        decision.weight,
-        float(np.dot(_bins, tables.rna)),
-        float(np.dot(_bins, tables.gdna)),
-    )
-
-    # -- Quantification: calibration prior → per-locus EM --
-    # Annotation table for the optional annotated-BAM pass (opt-in).
-    annotations = None
-    if config.annotated_bam_path is not None:
-        from .annotate import AnnotationTable
-
-        annotations = AnnotationTable.create(
-            capacity=max(
-                buffer.total_fragments + CONSTANTS.resources.annotation_table_padding,
-                CONSTANTS.resources.annotation_table_min_capacity,
-            )
+    with buffer:
+        _log_sj_tags(stats, scan)
+        _log_record_tags(stats)
+        _log_hit_verdicts(stats)
+        # The second pass drains the side buffer before calibration
+        calibration_payload = drain_side_buffer(
+            calibration_payload, index, strand_models, seed=config.second_pass_seed
         )
-
-    try:
+        calibration, region_arrays, fl_models = _calibrate(
+            calibration_payload, index, strand_models, config.calibration
+        )
+        # The EM's two length tables: one shared law unless the data show a difference capture cannot make
+        tables = length_tables(fl_models, calibration, region_arrays)
+        _log_length_tables(tables)
+        annotations = None if config.annotated_bam_path is None else _annotation_table(buffer)
         estimator = quant_from_buffer(
             buffer,
             index,
@@ -1158,13 +1086,9 @@ def run_pipeline(
             annotations=annotations,
             emit_locus_stats=config.emit_locus_stats,
         )
-    finally:
-        buffer.cleanup()
 
     # The genome-wide gDNA track for the QC report and the bedGraph: the per-region calibration solution
     from .calibration.track import build_gdna_track
-
-    calibration_track = build_gdna_track(calibration, region_arrays, index.ref_names)
 
     result = PipelineResult(
         stats=stats,
@@ -1174,12 +1098,12 @@ def run_pipeline(
         calibration=calibration,
         fl_models=fl_models,
         length_tables=tables,
-        calibration_track=calibration_track,
+        calibration_track=build_gdna_track(calibration, region_arrays, index.ref_names),
     )
     if before_annotated_bam is not None:
         before_annotated_bam(result)
 
-    # -- The annotated-BAM pass: re-read the BAM and write it with assignment tags (opt-in) --
+    # The annotated-BAM pass: re-read the BAM and write it with assignment tags (opt-in)
     if annotations is not None:
         from .annotate import write_annotated_bam
 
@@ -1195,3 +1119,98 @@ def run_pipeline(
             locus_id_per_transcript=estimator.locus_id_per_transcript,
         )
     return result
+
+
+def _calibrate(
+    payload, index: TranscriptIndex, strand_models: StrandModels, calibration_config
+) -> tuple["CalibrationResult", "RegionArrays", "FLModels"]:
+    """Calibration on the drained tally: deconvolve every region and boundary into gDNA / RNA+ / RNA−. Returns the
+    result with the region frame it was solved over and the fragment-length models it read, refit on that tally."""
+    from .calibration import calibrate
+    from .calibration.region_arrays import RegionArrays
+    from .calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
+
+    warn_if_calibration_strand_unidentifiable(strand_models)
+    confidence = CONSTANTS.qc.strand_ci_confidence
+    logger.info(
+        "[CAL] Strand trainer: n_spliced_obs=%d  ss_est=%.6f  ε_CI(%g%%)=%.4g",
+        strand_models.n_observations,
+        strand_models.strand_specificity,
+        100.0 * confidence,
+        strand_models.strand_specificity_ci_epsilon(),
+    )
+
+    # No alignment check here: calibrate() runs it (CalibrationSubstrate.from_payload)
+    region_arrays = RegionArrays.from_index(index)
+    boundary_flags = build_boundary_flags_array(index)
+    # The sj axis, in the accumulator's sj slot order: where each sj attaches, its transcript strand and its exonic
+    # reach either side. The calibrator places each sj as a factor on its two endpoint regions, never as a message
+    # channel, because every sj closes a loop and the graph is not a tree.
+    sj = build_sj_geometry_arrays(index)
+
+    # The two component length models the calibrator's effective lengths need, refit on the drained tally
+    fl_models = library_fl_models(payload, index)
+    bins = np.arange(fl_models.gdna_pmf.size, dtype=np.float64)
+    logger.info(
+        "[CAL] FL models: n_gdna_pool=%.0f gdna_fl_mean=%.1f rna_fl_mean=%.1f global_fl_mean=%.1f",
+        fl_models.n_gdna,
+        float(np.dot(bins, fl_models.gdna_pmf)),
+        float(np.dot(bins, fl_models.rna_pmf)),
+        float(np.dot(bins, fl_models.global_pmf)),
+    )
+
+    calibration = calibrate(
+        payload=payload,
+        region_arrays=region_arrays,
+        strand_model=strand_models,
+        gdna_fl_pmf=fl_models.gdna_pmf,
+        rna_fl_pmf=fl_models.rna_pmf,
+        config=calibration_config,
+        sj=sj,
+        boundary_flags=boundary_flags,
+    )
+    # Fragments, not object incidences: each axis (regions, boundaries, sj) is converted by its own population's
+    # mass per crossing before the sum, since raw banks count a fragment once per boundary it crosses and once
+    # per sj it uses
+    logger.info(
+        "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
+        "gDNA_fragments=%.0f RNA_fragments=%.0f (sj incidences %.0f)",
+        calibration.n_regions,
+        calibration.n_boundaries,
+        calibration.n_sj,
+        calibration.gdna_density_global,
+        calibration.rna_sense_frac,
+        calibration.library_gdna_fragments,
+        calibration.library_rna_fragments,
+        float(calibration.count_rna_sj.sum()),
+    )
+    return calibration, region_arrays, fl_models
+
+
+def _log_length_tables(tables: "LengthTables") -> None:
+    decision = tables.decision
+    bins = np.arange(tables.rna.size, dtype=np.float64)
+    logger.info(
+        "[FL] length tables: kappa=%.4f captured=%.4f contrast=%.4f bound=%.4f noise=%.3g weight=%.3f "
+        "rna_mean=%.1f gdna_table_mean=%.1f",
+        decision.kappa,
+        decision.captured,
+        decision.contrast,
+        decision.bound,
+        decision.noise,
+        decision.weight,
+        float(np.dot(bins, tables.rna)),
+        float(np.dot(bins, tables.gdna)),
+    )
+
+
+def _annotation_table(buffer: FragmentBuffer) -> "AnnotationTable":
+    """The empty per-fragment table the annotated-BAM pass reads, sized to the buffered fragments."""
+    from .annotate import AnnotationTable
+
+    return AnnotationTable.create(
+        capacity=max(
+            buffer.total_fragments + CONSTANTS.resources.annotation_table_padding,
+            CONSTANTS.resources.annotation_table_min_capacity,
+        )
+    )

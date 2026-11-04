@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.special import logsumexp
 
-from rigel.native import transfer_rows as rows
+from rigel._solve_impl import testing as rows
 
 
 def blur(row, grid, variance):

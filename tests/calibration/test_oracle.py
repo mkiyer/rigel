@@ -1,4 +1,4 @@
-"""The CI check for the calibration oracle (``tests/calibration/_oracle.py``).
+"""The CI check for the calibration oracle (``scripts/design/_oracle.py``).
 
 The oracle's correctness rests on one identity: partitioning the sim BAM by true fragment origin and running the
 production accumulator on each partition reproduces the full payload, because the accumulator deposits each fragment
@@ -17,7 +17,7 @@ import pytest
 from rigel.config import PipelineConfig
 from rigel.sim import Scenario, ReadSimConfig, GDNAConfig
 
-from _oracle import _BANKS, ORIGINS, OracleTruth  # noqa: E402
+from _oracle import BANKS, ORIGINS, OracleTruth
 
 
 @pytest.fixture(scope="module")
@@ -53,7 +53,7 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
     # Every bank on all three axes sums to full exactly. Every bank is integer-valued, but six are float64, and float
     # addition across scanner threads can land a hair under an integer, so round before the integer cast: a real
     # one-fragment loss survives rounding, a 1e-14 re-association does not.
-    for bank in _BANKS:
+    for bank in BANKS:
         full = np.rint(np.asarray(getattr(orc.full, bank), np.float64)).astype(np.int64)
         parts = np.rint(
             sum(np.asarray(getattr(orc.parts[k], bank), np.float64) for k in ORIGINS)
@@ -70,12 +70,8 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
     # every read accounted for; gDNA and mRNA partitions both non-empty (scenario has both).
     assert orc.read_counts["gdna"] > 0 and orc.read_counts["mrna"] > 0
 
-    # the true gDNA fraction is a valid fraction wherever there is contained mass.
-    fg, tot = orc.region_true_fg()
-    assert np.all((fg[tot > 0] >= 0) & (fg[tot > 0] <= 1))
 
-
-def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario, tmp_path):
+def test_oracle_override_conserves_mass_on_each_axis_separately(oracle_scenario, tmp_path):
     """The override masses must equal the full object count, checked per axis, not pooled: ``E`` and ``N`` differ by
     only ``n_refs``, so an error on the region axis could cancel an opposite one on the boundary axis.
     """
@@ -106,7 +102,7 @@ def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario,
     np.testing.assert_allclose(ov["count_rna_sj"], np.asarray(full.sj.count, np.float64).sum(1))
 
 
-def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_path):
+def test_the_oracle_result_is_a_valid_calibration_result(oracle_scenario, tmp_path):
     """``override_masses`` returns exactly the fields ``dataclasses.replace`` needs, so a schema rename it missed
     surfaces here rather than in the first A/B that used it."""
     import dataclasses
@@ -168,7 +164,7 @@ def _as_drained(payload):
     return dataclasses.replace(payload, drain=qc)
 
 
-def test_undrained_frame_still_refuses_gdna_spliced_deposits(oracle_scenario, tmp_path):
+def test_the_undrained_frame_refuses_gdna_spliced_deposits(oracle_scenario, tmp_path):
     """In the pass-one (undrained) frame a spliced deposit in the gdna partition is physically impossible and must
     raise. The injection keeps sum-to-full intact (full and part move together), so the exact-zeros check is what fires.
     """
@@ -196,7 +192,7 @@ def test_drained_frame_records_the_leak_instead_of_refusing(oracle_scenario, tmp
     assert truth.gdna_spliced_leak == {"boundary_spliced_count": 3, "sj_count": 2, "sj_mass": 0}
 
 
-def test_drained_frame_still_enforces_sum_to_full(oracle_scenario, tmp_path):
+def test_the_drained_frame_enforces_sum_to_full(oracle_scenario, tmp_path):
     """The frame changes one check: sum-to-full is the lift's end-to-end identity and must keep raising in the drained
     frame."""
     orc = OracleTruth.from_bam(

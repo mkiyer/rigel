@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from _bam_builder import R1_FWD, R2_REV, record, write_bam
 from _index_builder import write_fasta
 
 from rigel.config import BamScanConfig
@@ -63,7 +64,7 @@ def test_the_two_compatible_paths_have_the_lengths_the_owner_computed():
         assert length == expected
 
 
-def test_TWO_COMPATIBLE_PATHS_are_BUFFERED_and_neither_is_chosen():
+def test_two_compatible_paths_are_buffered_and_neither_is_chosen():
     """450 bp and 400 bp are both real molecules and nothing sequenced says which."""
     acc = _acc()
     outcome = acc.deposit(0, 1800, 4200, hypotheses=(TA, TB))
@@ -81,7 +82,7 @@ def test_TWO_COMPATIBLE_PATHS_are_BUFFERED_and_neither_is_chosen():
     assert t.gap_resolution["gap_deferred_which_introns"] == 1
 
 
-def test_the_SAME_fragment_deposits_when_only_ONE_transcript_is_compatible():
+def test_the_same_fragment_deposits_when_only_one_transcript_is_compatible():
     """The ambiguity is a property of the annotation, not of the fragment: drop TB from the candidate set and the same
     molecule has one answer, so it deposits at TA's 450 bp.
     """
@@ -93,7 +94,7 @@ def test_the_SAME_fragment_deposits_when_only_ONE_transcript_is_compatible():
     assert t.gap_resolution["gap_resolved_spliced"] == 1
 
 
-def test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST():
+def test_the_genomic_hypothesis_is_always_the_longest():
     """A spliced hypothesis cuts bases the genomic one keeps, so ``L_spliced <= L_genomic`` for any extent, observed
     introns and implied path. The single arbitration filter is ``L <= max_fragment_length``, so if the genomic path
     survives every spliced path survives too, and the survivors are never exactly ``{genomic}`` while a spliced path was
@@ -129,7 +130,7 @@ def test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST():
     assert checked > 15_000, f"only {checked} pairs compared; the sweep is not doing its job"
 
 
-def test_the_genomic_hypothesis_is_the_EMPTY_path_and_needs_no_flag():
+def test_the_genomic_hypothesis_is_the_empty_path_and_needs_no_flag():
     """Cutting nothing means the gap is real template: the molecule is gDNA, or RNA unspliced there, the same span. So
     "could this be genomic?" needs no separate flag, and a synthetic span is not a separate candidate: it is this
     hypothesis.
@@ -146,7 +147,7 @@ def test_the_genomic_hypothesis_is_the_EMPTY_path_and_needs_no_flag():
     assert acc.tally.gap_resolution["gap_deferred_which_introns"] == 0
 
 
-def test_a_fragment_with_NO_gap_hypothesis_is_not_in_the_umbrella_at_all():
+def test_a_fragment_with_no_gap_hypothesis_is_not_in_the_umbrella_at_all():
     """A fragment that never had a question to answer must not be counted as having answered one, or the umbrella's
     denominator becomes the whole library."""
     acc = _acc()
@@ -157,7 +158,7 @@ def test_a_fragment_with_NO_gap_hypothesis_is_not_in_the_umbrella_at_all():
 # ── the span rule is the max_fragment_length filter applied to the unspliced hypothesis ─────────────────────
 
 
-def test_a_span_over_the_limit_RULES_OUT_the_genomic_hypothesis():
+def test_a_span_over_the_limit_rules_out_the_genomic_hypothesis():
     """ "If the genomic span exceeds max_fragment_length, it is RNA" is not a separate rule: the unspliced hypothesis's
     ``L`` is that span, so the ordinary hypothesis filter deletes it. Span 2400 against a limit of 1000 leaves TA alone,
     and it deposits at 450.
@@ -170,7 +171,7 @@ def test_a_span_over_the_limit_RULES_OUT_the_genomic_hypothesis():
     assert not t.deferred
 
 
-def test_under_the_limit_the_unspliced_hypothesis_SURVIVES_and_the_fragment_is_DEFERRED():
+def test_under_the_limit_the_unspliced_hypothesis_survives_and_is_deferred():
     """The other side of the same rule: a short unspliced fragment with an intron in its gap is compatible with DNA and
     with RNA, so it is always deferred."""
     acc = _acc(max_fragment_length=1000)
@@ -185,7 +186,7 @@ def test_under_the_limit_the_unspliced_hypothesis_SURVIVES_and_the_fragment_is_D
 # ── conservation: nothing offered may be lost ──────────────────────────────────────────────────────
 
 
-def test_EVERY_OFFERED_FRAGMENT_IS_ACCOUNTED_FOR_EXACTLY_ONCE():
+def test_every_offered_fragment_is_accounted_for_exactly_once():
     """``deposited + deferred + dropped_* == offered``, exactly.
 
     Until the second pass drains the bank the tally is thinner by design (the ambiguous mass is retained, not yet
@@ -217,7 +218,7 @@ def test_EVERY_OFFERED_FRAGMENT_IS_ACCOUNTED_FOR_EXACTLY_ONCE():
     assert int(acc.tally.region_start_count.sum()) == qc["deposited"] == 2
 
 
-def test_the_gap_resolution_SUBCLASSES_CLOSE_against_the_umbrella_and_the_deferred_queue():
+def test_the_gap_resolution_subclasses_close_on_the_umbrella_and_the_deferred_queue():
     """Two identities: the subclasses partition the umbrella, and the three ``DEFERRED_*`` subclasses are exactly what
     was held.
     """
@@ -259,7 +260,7 @@ LONG = (0, 1800, 4200, (TA, TB))
 SHORT = (0, 1800, 2700, (GapHypothesis(((2100, 2500),)), GapHypothesis()))
 
 
-def test_the_deferred_queue_FLATTENS_to_a_CSR_that_round_trips():
+def test_the_deferred_queue_flattens_to_a_csr_that_round_trips():
     """The reference stores records for readability; the payload carries arrays. The flattening is specified in the
     reference and checked here, so the two are one representation."""
     acc = _acc(max_fragment_length=1000)
@@ -284,7 +285,7 @@ def test_the_deferred_queue_FLATTENS_to_a_CSR_that_round_trips():
     ).tally.deferred_arrays()["hypothesis_offsets"].tolist() == [0]
 
 
-def test_the_FLATTENED_queue_DOES_NOT_DEPEND_ON_DEPOSIT_ORDER():
+def test_the_flattened_queue_does_not_depend_on_deposit_order():
     """Every other bank is a per-object sum, so uint32 counts merge exactly and float64 fractions to a derived tolerance
     in any chunk order. The deferred queue is a list: concatenating per-worker queues would give different bytes at 1,
     2, 4 and 8 workers with identical contents. Sorting on each record's own content is the canonical form, which is why
@@ -354,8 +355,6 @@ L_PINNED_M = (2150 - 1100) - 200 - 200  # 650: tM's narrow one was cut
 @pytest.fixture(scope="module")
 def scanned(tmp_path_factory):
     """Scan the fixture BAM once and hand back the payload."""
-    import pysam
-
     from rigel.index import TranscriptIndex
 
     base = tmp_path_factory.mktemp("gap_strand")
@@ -368,46 +367,19 @@ def scanned(tmp_path_factory):
     with pytest.warns(RuntimeWarning, match="strand-coincident"):
         index = TranscriptIndex.load(str(index_dir))
 
-    header = {"HD": {"VN": "1.6", "SO": "queryname"}, "SQ": [{"SN": "chr1", "LN": GENOME}]}
-    M, N = 0, 3
-
-    def read(qname, pos, cigar, mate_pos, is_r1, motif=None):
-        a = pysam.AlignedSegment()
-        a.query_name = qname
-        a.reference_id = 0
-        a.reference_start = pos
-        a.mapping_quality = 60
-        a.flag = 0x1 | 0x2 | (0x40 | 0x20 if is_r1 else 0x80 | 0x10)
-        a.cigar = cigar
-        n = sum(length for op, length in cigar if op == M)
-        a.query_sequence = "A" * n
-        a.query_qualities = pysam.qualitystring_to_array("I" * n)
-        a.next_reference_id = 0
-        a.next_reference_start = mate_pos
-        tags = [("NH", 1, "i")]
-        # XS is the aligner's genomic motif strand, and it pins the fragment: a GT..AG intron is on +, its reverse
-        # complement CT..AC on -, and no annotation is consulted.
-        if motif is not None:
-            tags.append(("XS", motif, "A"))
-        a.set_tags(tags)
-        return a
-
-    spliced = [(M, 100), (N, 200), (M, 150)]
+    # XS is the aligner's genomic motif strand, and it pins the fragment: a GT..AG intron is on +, its reverse
+    # complement CT..AC on -, and no annotation is consulted.
     reads = [
-        read("pinned_p", 1100, spliced, 2050, True, motif="+"),
-        read("pinned_p", 2050, [(M, 100)], 1100, False),
-        read("pinned_m", 1100, spliced, 2050, True, motif="-"),
-        read("pinned_m", 2050, [(M, 100)], 1100, False),
-        read("open", 1450, [(M, 100)], 2050, True),
-        read("open", 2050, [(M, 100)], 1450, False),
-        read("same_path", 3050, [(M, 100)], 3650, True),
-        read("same_path", 3650, [(M, 100)], 3050, False),
+        record("pinned_p", R1_FWD, 1100, "100M200N150M", 2050, xs="+"),
+        record("pinned_p", R2_REV, 2050, "100M", 1100),
+        record("pinned_m", R1_FWD, 1100, "100M200N150M", 2050, xs="-"),
+        record("pinned_m", R2_REV, 2050, "100M", 1100),
+        record("open", R1_FWD, 1450, "100M", 2050),
+        record("open", R2_REV, 2050, "100M", 1450),
+        record("same_path", R1_FWD, 3050, "100M", 3650),
+        record("same_path", R2_REV, 3650, "100M", 3050),
     ]
-    bam_path = str(base / "gap_strand.bam")
-    with pysam.AlignmentFile(bam_path, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam_path, bam_path)
+    bam_path = write_bam(base / "gap_strand.bam", reads, {"chr1": GENOME})
 
     _stats, _strand, _buffer, payload = scan_and_buffer(
         bam_path, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
@@ -441,7 +413,7 @@ def _lengths(payload) -> dict[int, int]:
 # ── an observed sj pins the strand ───────────────────────────────────────────────────────────
 
 
-def test_an_OBSERVED_sj_PINS_the_gap_hypotheses_to_its_own_strand(scanned):
+def test_an_observed_sj_pins_the_gap_hypotheses_to_its_own_strand(scanned):
     """``tP`` and ``tM`` cover the same sequenced blocks and share the observed sj's coordinates, so only the motif
     separates them. A ``+`` motif leaves only tP's 400 bp gap intron and a ``-`` motif only tM's 200 bp one, and the
     deposited ``L`` says which was believed. Without the pin both transcripts survive and the fragment is deferred, so
@@ -464,7 +436,7 @@ def test_an_OBSERVED_sj_PINS_the_gap_hypotheses_to_its_own_strand(scanned):
 # ── an unspliced fragment leaves both strands open ─────────────────────────────────────────────────
 
 
-def test_an_UNSPLICED_fragment_offers_BOTH_STRANDS(scanned):
+def test_an_unspliced_fragment_offers_both_strands(scanned):
     """Nothing sequenced pins the strand, so nothing may narrow it. The two spliced hypotheses here differ in strand and
     in implied length; without the second pass's strand term they would be separated by length alone.
     """
@@ -487,7 +459,7 @@ def test_an_UNSPLICED_fragment_offers_BOTH_STRANDS(scanned):
 # ── one path claimed by two strands ────────────────────────────────────────────────────────────────
 
 
-def test_ONE_PATH_claimed_by_BOTH_STRANDS_is_marked_AMBIGUOUS(scanned):
+def test_one_path_claimed_by_both_strands_is_marked_ambiguous(scanned):
     """``tQ`` (+) and ``tR`` (−) imply the same intron ``(3200,3600)``.
 
     It is one path, so one hypothesis is the correct count, but the hypothesis carries one ``sj_strand``, and taking the

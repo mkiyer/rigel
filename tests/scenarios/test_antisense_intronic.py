@@ -17,7 +17,7 @@ of gene ambiguity, and reduced strand specificity, which is what takes the separ
 import pytest
 from rigel.sim import Scenario
 
-from .conftest import (
+from _scenarios import (
     STRAND_LEVELS,
     NRNA_LEVELS,
     STRESS_COMBOS,
@@ -73,7 +73,7 @@ class TestAntisenseIntronicOverlap:
         yield sc
         sc.cleanup()
 
-    def test_mRNA_only_no_leak(self, scenario):
+    def test_mrna_only_no_leak(self, scenario):
         """Pure mRNA from g1: zero nRNA, zero T2 counts."""
         bench = build_and_run(scenario, n_fragments=2000, scenario_name="anti_intron_mRNA")
         assert_alignment(bench)

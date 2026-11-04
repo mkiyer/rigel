@@ -66,6 +66,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         4,
         "strand — which strand a fragment came from",
+        # The library's sense fraction and the strand protocol decision read from it.
         ("strand_balance",),
     ),
     (
@@ -85,13 +86,12 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # The backbone and the message policy. `sweep` owns the shape of the solve and its assertions and runs it
         # in one native call; `messages/` owns what a message says.
         (
-            # `region_init` is the strand protocol decision
-            "region_init",
-            # `sweep` is the backbone; `blocks` is the diagnostics capture and the chain's view
-            "blocks",
+            # `sweep` is the backbone;`diagnostics` is the instruments' record of a solve, which production never passes
+            "diagnostics",
             "sweep",
             "messages",
-            # `messages/__init__` is the policy interface (a name, a strand model, a library) and the chain view;
+            # `messages/__init__` is the policy interface (a name, a strand model, a library), the chain view and the
+            # per-slot arrays it is built from;
             # `messages/silent` is the floor every policy is judged against; `messages/transfer` is the shipped
             # composition-transfer policy, whose builders, passes and solve are the kernel's
             # (`native/transfer_kernel.h`).
@@ -103,7 +103,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         7,
         "assemble — turning the solve into a result",
         (
-            "derive",
             "priors",
             "result",
             "track",

@@ -8,7 +8,7 @@ The chain interleaves REGION and BOUNDARY slots in genomic order. A reference wi
 It starts and ends with a REGION, so every boundary has a region on both sides: boundary ``i`` lies between regions
 ``i`` and ``i + 1``, an implicit relation computed only here. A slot is addressed by ``(kind, obj_idx)``, where
 ``obj_idx`` indexes the region axis or the contiguous-boundary axis, so every per-object statistic stays in its own
-payload-shaped array. Splice junctions are not slots: each closes an undirected loop, so a sj is a factor on its
+payload-shaped array (:func:`on_object_axis` places a per-slot array back on one). Splice junctions are not slots: each closes an undirected loop, so a sj is a factor on its
 endpoints, never a message channel.
 
 Gate: ``tests/calibration/test_region_geometry.py``.
@@ -29,6 +29,7 @@ __all__ = [
     "RegionDeconv",
     "build_region_chain",
     "locus_blocks",
+    "on_object_axis",
 ]
 
 REGION = 0
@@ -58,6 +59,15 @@ class RegionChain:
         return int(self.kind.shape[0])
 
 
+def on_object_axis(chain: RegionChain, values: np.ndarray, kind: int, n: int) -> np.ndarray:
+    """``float64[n]`` — a per-slot array's values at the slots of ``kind`` (``REGION`` or ``BOUNDARY``), placed on that
+    kind's object axis of length ``n``."""
+    at = np.asarray(chain.kind) == kind
+    out = np.zeros(int(n), dtype=np.float64)
+    out[np.asarray(chain.obj_idx, dtype=np.int64)[at]] = np.asarray(values, dtype=np.float64)[at]
+    return out
+
+
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 # One slot's deconvolution result. It lives in the bottom layer because layers 3 and 6 both use it.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -67,7 +77,7 @@ class RegionChain:
 class RegionDeconv:
     """Per-slot deconvolution result, with two uses and hence optional fields.
 
-    * The per-slot solve (``simplex_logodds._solve_regions_logodds_all``) returns the fractions and ``gdna_frac_var``
+    * The per-slot solve (``simplex_logodds.solve_regions_logodds``) returns the fractions and ``gdna_frac_var``
       but no mass, since mass is per face and the solve is face-invariant.
     * The chain projection (``sweep.chain_region_deconv`` / ``chain_boundary_deconv``) returns the masses and
       fractions ``CalibrationResult`` publishes, but no variance.
@@ -77,7 +87,8 @@ class RegionDeconv:
     # per-strand RNA fractions of the unspliced mass, so f_pos + f_neg + gdna_frac = 1
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
-    # the projection's masses; None on the per-slot solve. ``derive`` and the capture efficiencies read the gDNA one.
+    # the projection's masses; None on the per-slot solve. The library density and the capture efficiencies read the
+    # gDNA one.
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
     # Var(log f_g), not Var(f_g), so not bounded by ¼; set by the per-slot solve, read by the landscape's training
@@ -96,33 +107,16 @@ def build_region_chain(
     """
     region_offsets = np.asarray(ref_region_offsets, dtype=np.int64)
     boundary_offsets = np.asarray(ref_boundary_offsets, dtype=np.int64)
-    if region_offsets.shape != boundary_offsets.shape:
-        raise ValueError(
-            f"ref_region_offsets has shape {region_offsets.shape} and ref_boundary_offsets "
-            f"{boundary_offsets.shape}; both are per-reference CSR arrays of length n_refs + 1."
-        )
-    n_refs = region_offsets.shape[0] - 1
+    _check_offsets(region_offsets, boundary_offsets)
     regions_per_ref = np.diff(region_offsets)
-    boundaries_per_ref = np.diff(boundary_offsets)
-    expected = np.maximum(regions_per_ref - 1, 0)
-    if not np.array_equal(boundaries_per_ref, expected):
-        bad = int(np.argmax(boundaries_per_ref != expected))
-        raise ValueError(
-            f"reference {bad}: the payload reports {int(boundaries_per_ref[bad])} contiguous boundaries for "
-            f"{int(regions_per_ref[bad])} regions, but a reference with k regions has exactly k-1 interior "
-            f"boundaries (expected {int(expected[bad])}). There are no terminal boundary slots: a boundary is the "
-            f"boundary BETWEEN two adjacent regions. Both offset arrays come from ONE accumulator payload, so "
-            f"this is an accumulator/payload inconsistency, not a stale index — rebuilding will not fix it."
-        )
-
-    n_slots = int(regions_per_ref.sum() + boundaries_per_ref.sum())
+    n_slots = int(regions_per_ref.sum() + np.diff(boundary_offsets).sum())
     kind = np.empty(n_slots, dtype=np.int8)
     obj_idx = np.empty(n_slots, dtype=np.int64)
     left = np.full(n_slots, -1, dtype=np.int64)
     right = np.full(n_slots, -1, dtype=np.int64)
 
     slot = 0
-    for f in range(n_refs):
+    for f in range(region_offsets.shape[0] - 1):
         k = int(regions_per_ref[f])
         if k == 0:
             continue
@@ -150,6 +144,27 @@ def build_region_chain(
         n_regions_total=int(region_offsets[-1]),
         n_boundaries_total=int(boundary_offsets[-1]),
     )
+
+
+def _check_offsets(region_offsets: np.ndarray, boundary_offsets: np.ndarray) -> None:
+    """Refuse offsets in which a reference's boundary count is not its region count less one."""
+    if region_offsets.shape != boundary_offsets.shape:
+        raise ValueError(
+            f"ref_region_offsets has shape {region_offsets.shape} and ref_boundary_offsets "
+            f"{boundary_offsets.shape}; both are per-reference CSR arrays of length n_refs + 1."
+        )
+    regions_per_ref = np.diff(region_offsets)
+    boundaries_per_ref = np.diff(boundary_offsets)
+    expected = np.maximum(regions_per_ref - 1, 0)
+    if not np.array_equal(boundaries_per_ref, expected):
+        bad = int(np.argmax(boundaries_per_ref != expected))
+        raise ValueError(
+            f"reference {bad}: the payload reports {int(boundaries_per_ref[bad])} contiguous boundaries for "
+            f"{int(regions_per_ref[bad])} regions, but a reference with k regions has exactly k-1 interior "
+            f"boundaries (expected {int(expected[bad])}). There are no terminal boundary slots: a boundary is the "
+            f"boundary BETWEEN two adjacent regions. Both offset arrays come from ONE accumulator payload, so "
+            f"this is an accumulator/payload inconsistency, not a stale index — rebuilding will not fix it."
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -70,7 +70,7 @@ _RECS = [
 _CHOICES = np.array([1, 0, 1, 1, 0, 0, 1, 0, 1, 0], np.int64)
 
 
-def test_L1_a_partition_that_is_the_whole_gets_its_own_choices_back():
+def test_a_partition_that_is_the_whole_gets_its_own_choices_back():
     """The degenerate case, and it must be exact: if the identity fails here it fails everywhere."""
     whole = _P(_bank(_RECS))
     lifted, ambiguous = lift_choices(whole, [whole], _CHOICES)
@@ -78,7 +78,7 @@ def test_L1_a_partition_that_is_the_whole_gets_its_own_choices_back():
     assert np.array_equal(lifted[0], _CHOICES)
 
 
-def test_L2_a_proper_subset_gets_exactly_the_choices_ITS_records_drew():
+def test_a_proper_subset_gets_exactly_the_choices_its_records_drew():
     """Checked per record against the whole's own choice for the same key. An aggregate check (the same multiset of
     choices) would pass with two records swapped, which would misattribute one origin's mass to another."""
     keep = [_RECS[0], _RECS[2], _RECS[4], _RECS[6]]
@@ -91,7 +91,7 @@ def test_L2_a_proper_subset_gets_exactly_the_choices_ITS_records_drew():
         assert int(lifted[0][j]) == want[r], (j, r, lifted[0][j], want[r])
 
 
-def test_L3_a_complete_split_consumes_every_choice_EXACTLY_ONCE():
+def test_a_complete_split_consumes_every_choice_exactly_once():
     """Two disjoint partitions covering the whole must between them use each whole-library choice once, which gives
     ``Sum(partitions) == whole`` after the drain."""
     a = [_RECS[0], _RECS[3], _RECS[5], _RECS[8]]
@@ -104,7 +104,7 @@ def test_L3_a_complete_split_consumes_every_choice_EXACTLY_ONCE():
     assert len(got) == len(_RECS)
 
 
-def test_L4_a_record_the_whole_does_NOT_hold_RAISES():
+def test_a_record_the_whole_does_not_hold_raises():
     """A partition scanned from a different BAM, or a drifted payload pair, would otherwise produce a plausible tally,
     so it must be an error."""
     whole = _P(_bank(_RECS[:3]))
@@ -113,7 +113,7 @@ def test_L4_a_record_the_whole_does_NOT_hold_RAISES():
         lift_choices(whole, [part], _CHOICES[:3])
 
 
-def test_L5_a_wrong_length_choice_array_RAISES():
+def test_a_wrong_length_choice_array_raises():
     """One choice per held record is the contract; a mismatch means the choices came from a different
     scan and every index below would be off by an unknown amount."""
     whole = _P(_bank(_RECS))
@@ -121,7 +121,7 @@ def test_L5_a_wrong_length_choice_array_RAISES():
         lift_choices(whole, [whole], _CHOICES[:2])
 
 
-def test_L6_duplicate_keys_split_across_partitions_are_COUNTED():
+def test_duplicate_keys_split_across_partitions_are_counted():
     """Two records with the same key are identical (``DeferredFragments``' guarantee), so no partition can know which of
     them it holds: the deposits are interchangeable, the origin attribution is not. The count is returned, and it bounds
     the truth error exactly. It is per record of the partition, so a partition holding one of a duplicate pair reports
@@ -143,7 +143,7 @@ def test_L6_duplicate_keys_split_across_partitions_are_COUNTED():
     assert int(l3[0][0]) == 1
 
 
-def test_L7_the_key_uses_EVERY_field_of_the_record_identity():
+def test_the_key_uses_every_field_of_the_record_identity():
     """``_RECS`` contains pairs differing only in ``align_strand``, only in ``sj_strand``, only in ``nm`` and only in
     ``clip``, so a lift ignoring a trailing field would collapse each pair into one queue and hand the same choice to
     both, a mismatch against the whole's own per-record choice.
@@ -166,7 +166,7 @@ def test_L7_the_key_uses_EVERY_field_of_the_record_identity():
         assert ca != cb, (a, b, ca, cb)
 
 
-def test_L8_partitions_holding_MORE_copies_of_a_key_than_the_whole_RAISES():
+def test_partitions_holding_more_copies_of_a_key_than_the_whole_raises():
     """Two partitions each holding a record whose key is unique in the whole are not a partition of one scan (two scans,
     or a double-counted fragment). Without the guard the second partition would re-use the first's choice, giving
     ``sum(partitions) > whole``.

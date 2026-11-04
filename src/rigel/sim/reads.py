@@ -48,7 +48,7 @@ class GDNAConfig:
     ----------
     abundance : relative gDNA abundance (transcript-abundance scale).
     frag_mean, frag_std, frag_min, frag_max : gDNA fragment-length distribution (bp).
-    gdna_strand_overdispersion : float or None
+    strand_overdispersion : float
         The intra-class correlation of the per-region sense/antisense split, in ``[0, 1)``, in the
         calibrator's units. ``0`` is an exact Binomial 50/50; larger is more region-to-region skew.
     """
@@ -58,13 +58,11 @@ class GDNAConfig:
     frag_std: float = 100.0
     frag_min: int = 100
     frag_max: int = 1000
-    gdna_strand_overdispersion: float | None = None
+    strand_overdispersion: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.gdna_strand_overdispersion is not None:
-            od = float(self.gdna_strand_overdispersion)
-            if not (0.0 <= od < 1.0):
-                raise ValueError(
-                    "GDNAConfig.gdna_strand_overdispersion must be in [0, 1); "
-                    f"got {self.gdna_strand_overdispersion!r}."
-                )
+        if not (0.0 <= float(self.strand_overdispersion) < 1.0):
+            raise ValueError(
+                "GDNAConfig.strand_overdispersion must be in [0, 1); "
+                f"got {self.strand_overdispersion!r}."
+            )

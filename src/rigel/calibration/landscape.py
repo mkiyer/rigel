@@ -22,7 +22,7 @@ from scipy.special import gammaln
 
 from ..config import CONSTANTS
 from ..native import transfer_rows as _rows
-from .simplex_logodds import _block_rows
+from .simplex_logodds import block_rows
 
 #: the arm's clips, shared with the kernel arm that evaluates this prior (``psi_kernel.h``)
 _EPS = float(_rows.ARM_EPS)
@@ -37,8 +37,8 @@ class DensityLandscape:
     slot's gDNA support, by linear interpolation with the ends held constant (``native/psi_kernel.h``, ``Arm``).
     ``logP`` is bare: a density in log-rate needs no Jacobian, since its conversion to linear rate cancels ψ's
     ``log σ'(λ)`` change of variable exactly, and ψ's arm adds the reference measure itself. The grid spans the
-    data's support (:func:`_grid`), so the held ends act only at ψ's extreme fractions, where the prior has no more
-    information."""
+    data's support (:func:`log_rate_grid`), so the held ends act only at ψ's extreme fractions, where the prior has no
+    more information."""
 
     log_rho: np.ndarray
     logP: np.ndarray
@@ -75,7 +75,7 @@ class DensityLandscape:
         return float(max(0.0, np.max(np.log1p(-f) - np.log(f))))
 
 
-def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
+def log_rate_grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
     """The log10 rate axis: exactly the domain ψ's fitted arm can ask the curve about.
 
     ψ evaluates the prior at ``ρ_g = f_g·M/E`` for ``f_g ∈ (0, 1]``. The top is ``max_i log10(M_i/E_i)``: no region
@@ -94,7 +94,7 @@ def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
     return np.linspace(lo, hi, CONSTANTS.landscape.grid_points)
 
 
-def _poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np.ndarray:
+def poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np.ndarray:
     """Per-region ``P(count | ρ·E)`` on the grid, each row normalised to unit mass; ``(n, K)``.
 
     At ``count = 0`` the kernel is ``e^{−ρE}``, which says "ρ is anywhere below the resolution wall"; a point-estimate
@@ -107,12 +107,9 @@ def _poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np
     return pn / np.maximum(pn.sum(1, keepdims=True), _EPS)
 
 
-def knn_widths(
-    centres: np.ndarray,
-    grid_step: float,
-    scale: float = CONSTANTS.landscape.knn_scale,
-) -> np.ndarray:
-    """The population resolution: ``h_i = scale · dist(a_i, k-th nearest neighbour)``, ``k = √n``.
+def knn_widths(centres: np.ndarray, grid_step: float) -> np.ndarray:
+    """The population resolution: ``h_i = scale · dist(a_i, k-th nearest neighbour)``, ``k = √n`` and ``scale`` the
+    ``CONSTANTS.landscape.knn_scale``.
 
     The per-region Poisson likelihood is a measurement width, ``1/(√g·ln10)`` decades on the log axis, which shrinks
     as ρ^(−1/2) and falls below one grid step where the enriched mode lives; measurement widths alone render a smooth
@@ -150,7 +147,7 @@ def knn_widths(
         return np.maximum(a - srt[j], srt[j + k] - a)
 
     d_k = np.minimum(_radius(j0), _radius(j0 - 1))
-    return np.maximum(scale * d_k, grid_step)
+    return np.maximum(CONSTANTS.landscape.knn_scale * d_k, grid_step)
 
 
 def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.ndarray:
@@ -175,7 +172,7 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
     return np.where(anchor, 1.0, ref / (v + ref))
 
 
-def _estep_kernels(kernels: np.ndarray, count: np.ndarray, grid: np.ndarray, prev) -> np.ndarray:
+def estep_kernels(kernels: np.ndarray, count: np.ndarray, grid: np.ndarray, prev) -> np.ndarray:
     """The E-step on the kernels that have no location.
 
     A region trained at less than one fragment is centred at its resolution wall, and its Poisson kernel is flat
@@ -203,7 +200,7 @@ def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
 
     Convolution is linear, so the kernels are grouped by width (``CONSTANTS.landscape.width_bins`` groups) and each
     group's sum is convolved once. The kernels are built and summed a row tile at a time
-    (``simplex_logodds._block_rows``), so the training set never exists as an ``(n, K)`` matrix. Each row joins its
+    (``simplex_logodds.block_rows``), so the training set never exists as an ``(n, K)`` matrix. Each row joins its
     group's sum in row order whatever the tile height, so the tile height sets the working set and changes no bit.
     """
     n_bins = CONSTANTS.landscape.width_bins
@@ -212,10 +209,10 @@ def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
     # the bin of each width: the last bin includes its upper boundary, every other bin excludes it
     bin_of = np.clip(np.searchsorted(boundaries, widths, side="right") - 1, 0, n_bins - 1)
     sums = np.zeros((n_bins, grid.size))
-    rows = _block_rows(grid.size, sums.itemsize)
+    rows = block_rows(grid.size, sums.itemsize)
     for r0 in range(0, count.size, rows):
         sl = slice(r0, r0 + rows)
-        kernels = _estep_kernels(_poisson_kernels(count[sl], eff[sl], grid), count[sl], grid, prev)
+        kernels = estep_kernels(poisson_kernels(count[sl], eff[sl], grid), count[sl], grid, prev)
         contrib = weights[sl, None] * kernels
         for b in np.unique(bin_of[sl]):
             part = contrib[bin_of[sl] == b]
@@ -258,7 +255,7 @@ def fit_landscape(
     population (a slot with no composition does not train). The grid then spans the consumers while the kernels stay
     the training set's; without it, a consumer above the training set's top density would read a flat prior.
 
-    ``prev`` is the previous refit's landscape, or ``None`` at the first fit (:func:`_estep_kernels`).
+    ``prev`` is the previous refit's landscape, or ``None`` at the first fit (:func:`estep_kernels`).
 
     The estimator is a weighted sum of zero-native per-region kernels at the population resolution, with no EM, no
     competition between components and no iteration: it is deterministic, every region's contribution is traceable,
@@ -275,12 +272,16 @@ def fit_landscape(
     var = np.asarray(var, dtype=np.float64)[live]
 
     if domain is None:
-        grid = _grid(mass, eff)
+        grid = log_rate_grid(mass, eff)
     else:
         d_mass = np.asarray(domain[0], dtype=np.float64)
         d_eff = np.asarray(domain[1], dtype=np.float64)
         d_live = np.isfinite(d_mass) & np.isfinite(d_eff) & (d_eff > _EPS)
-        grid = _grid(d_mass[d_live], d_eff[d_live]) if d_live.any() else _grid(mass, eff)
+        grid = (
+            log_rate_grid(d_mass[d_live], d_eff[d_live])
+            if d_live.any()
+            else log_rate_grid(mass, eff)
+        )
     centres = np.clip(np.log10(np.maximum(count, 1.0)) - np.log10(eff), grid[0], grid[-1])
     widths = knn_widths(centres, float(grid[1] - grid[0]))
     weights = _reliability(count, var, anchor)

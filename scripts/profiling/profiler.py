@@ -47,7 +47,7 @@ from pathlib import Path
 
 # the one SECTION.FIELD=VALUE parser, shared with the design instruments' ``--set``
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "design"))
-from _shared import set_field  # noqa: E402
+from _shared import add_set_option, configured  # noqa: E402
 
 #: every stage worth naming, as (label, module, attribute path). Nesting is not declared: it is whatever
 #: the call stack says at run time, so a stage called from two places appears under both parents. Probe
@@ -57,7 +57,7 @@ PROBES: tuple[tuple[str, str, str], ...] = (
     ("index load", "rigel.index", "TranscriptIndex.load"),
     ("run_pipeline", "rigel.pipeline", "run_pipeline"),
     ("scan", "rigel.pipeline", "scan_and_buffer"),
-    ("second pass (drain)", "rigel.pipeline", "_drain_side_buffer"),
+    ("second pass (drain)", "rigel.pipeline", "drain_side_buffer"),
     ("score held fragments", "rigel.second_pass", "score_held_fragments"),
     ("choose hypotheses", "rigel.second_pass", "choose_hypotheses"),
     ("drain held fragments", "rigel.second_pass", "drain"),
@@ -75,21 +75,21 @@ PROBES: tuple[tuple[str, str, str], ...] = (
     ("region statics", "rigel.calibration.region_geometry", "build_region_statics"),
     ("sweep", "rigel.calibration.sweep", "solve_chain"),
     ("locus blocks (native)", "rigel.calibration.sweep", "solve_blocks"),
-    ("psi grid solve", "rigel.calibration.simplex_logodds", "_solve_regions_logodds_all"),
+    ("psi grid solve", "rigel.calibration.simplex_logodds", "solve_regions_logodds"),
     ("landscape fit", "rigel.calibration.landscape", "fit_landscape"),
     ("region deconv", "rigel.calibration.sweep", "chain_region_deconv"),
     ("boundary deconv", "rigel.calibration.sweep", "chain_boundary_deconv"),
     ("quant", "rigel.pipeline", "quant_from_buffer"),
-    ("setup geometry + estimator", "rigel.pipeline", "_setup_geometry_and_estimator"),
+    ("setup geometry + estimator", "rigel.pipeline", "setup_geometry_and_estimator"),
     ("capture effective lengths", "rigel.calibration.capture_eff_length", "transcript_capture_eff_lengths"),
-    ("score fragments", "rigel.pipeline", "_score_fragments"),
+    ("score fragments", "rigel.pipeline", "score_fragments"),
     ("build loci", "rigel.locus", "build_multi_loci"),
     ("assemble priors", "rigel.calibration.priors", "assemble_priors"),
-    ("region locus shares", "rigel.calibration.priors", "_region_locus_shares"),
-    ("boundary locus shares", "rigel.calibration.priors", "_boundary_locus_shares"),
-    ("sum by locus", "rigel.calibration.priors", "_sum_by_locus"),
+    ("region locus shares", "rigel.calibration.priors", "region_locus_shares"),
+    ("boundary locus shares", "rigel.calibration.priors", "boundary_locus_shares"),
+    ("sum by locus", "rigel.calibration.priors", "sum_by_locus"),
     ("partition", "rigel.locus_partition", "partition_and_free"),
-    ("locus EM", "rigel.pipeline", "_run_locus_em_partitioned"),
+    ("locus EM", "rigel.pipeline", "run_locus_em_partitioned"),
     ("gDNA track", "rigel.calibration.track", "build_gdna_track"),
 )
 
@@ -325,8 +325,7 @@ def profile_run(bam: str, index_dir: str, *, threads: int | None, knobs: list[st
         cfg = dataclasses.replace(cfg, scan=dataclasses.replace(cfg.scan, total_threads=threads),
                                   em=dataclasses.replace(cfg.em, n_threads=threads),
                                   calibration=dataclasses.replace(cfg.calibration, n_threads=threads))
-    for knob in knobs:
-        cfg = set_field(cfg, knob)
+    cfg = configured(knobs, cfg)
 
     import rigel.pipeline as pipeline  # noqa: F401 — imported so its bindings exist to be patched
 
@@ -488,8 +487,7 @@ def main() -> int:
     ap.add_argument("--index", help="rigel index directory")
     ap.add_argument("--label", default=None, help="report label (default: the library directory)")
     ap.add_argument("--threads", type=int, default=None, help="the scan's, the EM's and calibration's thread budget")
-    ap.add_argument("--set", dest="knobs", action="append", default=[], metavar="SECTION.FIELD=VALUE",
-                    help="override one PipelineConfig field; repeatable")
+    add_set_option(ap, "override one PipelineConfig field; repeatable")
     ap.add_argument("--cprofile", default=None, metavar="OUT.prof", help="also write a cProfile dump")
     ap.add_argument("--scan-only", action="store_true", help="run the scan alone, not the pipeline")
     ap.add_argument("--out", default=None, help="write the JSON report here")
@@ -506,7 +504,7 @@ def main() -> int:
     if not (args.bam and args.index):
         ap.error("--bam and --index are required (or --compare / --self-test)")
     label = args.label or Path(args.bam).resolve().parent.parent.name
-    rep = profile_run(args.bam, args.index, threads=args.threads, knobs=args.knobs, label=label,
+    rep = profile_run(args.bam, args.index, threads=args.threads, knobs=args.settings, label=label,
                       cprofile_path=args.cprofile, scan_only=args.scan_only)
     print(format_report(rep))
     if args.cprofile:

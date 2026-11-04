@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pysam
 import pytest
+from _constants import replaced
 
 from rigel import index as index_module
 from rigel.config import CONSTANTS
@@ -139,7 +140,7 @@ class TestTheDigestItself:
         at_default = source_record(payload)["sha256"]
 
         monkeypatch.setattr(
-            index_module, "CONSTANTS", CONSTANTS.replaced("resources.digest_chunk_bytes", 7)
+            index_module, "CONSTANTS", replaced(CONSTANTS, "resources.digest_chunk_bytes", 7)
         )
         assert source_record(payload)["sha256"] == at_default == sha256_of(payload)
 
@@ -227,8 +228,8 @@ class TestBuildFlags:
         assert flags["splice_blacklist_min_count"] == 2
 
 
-class TestExistingKeysSurvive:
-    def test_format_version_and_rigel_version_are_still_recorded(
+class TestTheVersionKeysAreRecorded:
+    def test_format_version_and_rigel_version_are_recorded(
         self, sources: tuple[Path, Path], tmp_path: Path
     ) -> None:
         """The version gate at load time reads these; provenance is additive to it, not a replacement."""

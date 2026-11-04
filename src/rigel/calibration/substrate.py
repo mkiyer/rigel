@@ -101,7 +101,7 @@ class CalibrationSubstrate:
     def from_payload(
         cls, payload: AccumulatorPayload, region_arrays: RegionArrays
     ) -> "CalibrationSubstrate":
-        cls._check_alignment(payload, region_arrays)
+        cls.check_alignment(payload, region_arrays)
 
         def view(name, count, mass=None) -> PopulationView:
             # the sj mass arrives per strand and is folded to one column: it turns an incidence total into a
@@ -137,7 +137,7 @@ class CalibrationSubstrate:
         )
 
     @staticmethod
-    def _check_alignment(payload: AccumulatorPayload, region_arrays: RegionArrays) -> None:
+    def check_alignment(payload: AccumulatorPayload, region_arrays: RegionArrays) -> None:
         """Enforce that the geometry addresses the payload 1:1.
 
         Matching totals are not enough: a geometry can have the right object count but slice it differently across

@@ -249,7 +249,7 @@ the opportunity-weighted mean `Σ_p A_p f_p / Σ_p A_p` of the de-tilted pools, 
 counts (`Var count_p ∝ A_p`); not one divisor on the pooled histogram (`TRAPS: opposite-tilts-must-not-pool`). It is
 gDNA's law where §4.4's contrast declines.
 
-**4.4 The two-pool contrast** (`fl._deconvolved_gdna_counts`). The intergenic and intronic contained pools share one
+**4.4 The two-pool contrast** (`fl.deconvolved_gdna_counts`). The intergenic and intronic contained pools share one
 geometry, so de-tilted by their own opportunities they are two shapes at purities `a_p = min(ρE_p/n_p, 1)` (`ρ` §7):
 
     f_0 = a_0 g + (1−a_0) r,   f_1 = a_1 g + (1−a_1) r   ⇒   î = [(1−a_1) f_0 − (1−a_0) f_1] / (a_0 − a_1)
@@ -299,7 +299,7 @@ approximation; the message claims use the exact conditional binomial (§3.2). Th
 
     I_λ = n (2κ−1)² [f_g(1−f_g)]² / (4 p(1−p))           exactly 0 at κ = ½
 
-**5.2b The channel is live iff the protocol preserves strand** (`region_init.strand_discriminability`; the kernel's
+**5.2b The channel is live iff the protocol preserves strand** (`strand_balance.strand_discriminability`; the kernel's
 `strand_evidence` is `τ_λ`, read in §9c):
 
     disc = 4(κ̂−½)² if BF₁₀ > 1 else 0,   τ_λ = N · disc · [f_g(1−f_g)]²/(4p(1−p))
@@ -365,7 +365,7 @@ unstranded library §5.2's information is 0, so that shortfall is depth-independ
 
 ## 9b. The EM's RNA prior goes to every RNA component, in proportion to its evidence
 
-`native/em_solver.cpp`'s `apply_grouped_prior_update`; the pseudocounts are §9b.3's.
+`native/em_prior.h`'s `apply_grouped_prior_update`; the pseudocounts are §9b.3's.
 
     rna_count = Σ_{i≠g} raw[i]
     out[g] = raw[g] + gdna_prior,     out[i] = raw[i] · (1 + rna_prior/rna_count)   for every i ≠ g
@@ -402,7 +402,7 @@ and the residual after `log c` normalises away is bounded by `1/(2α_min)`, vani
 
 ### 9b.3 The pseudocounts' odds are calibration's gDNA share of the locus
 
-`pipeline.em_pseudocounts`, formed in `_run_locus_em_partitioned`; gate `tests/test_em_pseudocounts.py`. The
+`pipeline.em_pseudocounts`, formed in `run_locus_em_partitioned`; gate `tests/test_em_pseudocounts.py`. The
 deterministic fragments (one candidate, an annotated junction) skip the E-step but enter every M-step, so θ_g is
 gDNA's share of all `N` fragments — as it must be, since a transcript's length counts its spliced starts. The grouped
 update is exact EM for `log L(θ) + P_g log θ_g + P_R log(1 − θ_g)`, which leaves the EM's fixed point in place iff
@@ -428,7 +428,7 @@ in would release the whole count precision at empty slots.
 
 ## 9e. ψ's θ quadrature — the nodes follow the strand term's peak
 
-`native/psi_kernel.h`'s `tilt_window`; `simplex_logodds._TILT_NODES`. At an AMBIG slot ψ is read on the θ-marginal
+`native/psi_kernel.h`'s `tilt_window`; `simplex_logodds.TILT_NODES`. At an AMBIG slot ψ is read on the θ-marginal
 `M(λ) = ∫ exp ψ(λ, sin θ) dθ`, `θ ∈ [−π/2, π/2]`; the tilt's arcsine measure `(1−τ²)^{−½}` is cancelled by
 `|dτ/dθ| = cos θ`, so θ carries no weight. With `a(λ) = (1 − f_g)(κ − ½)`, `p = ½ + a τ`, so at fixed λ the strand term
 is an exact Gaussian in τ:
@@ -519,7 +519,7 @@ mappability split evenly and an expressed copy keeps its traffic. The exact `k_p
 ## 11. The conserved frame — every component's shares of its objects at their capture efficiencies
 
 `effective_length.conserved_cut_shares`, `capture_eff_length`, `capture_efficiency.capture_efficiencies`,
-`priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`. Under capture the EM divides each component — the
+`priors.assemble_priors`, `effective_length.observable_cut_shares`. Under capture the EM divides each component — the
 locus gDNA, each synthetic span, each transcript — by the sum over the objects its fragments deposit on of its
 CONSERVED SHARE of the object times the object's capture efficiency:
 
@@ -623,7 +623,7 @@ at its Poisson variance `v_x = c_s + c_o`: `count_logvar(n_s) + count_logvar(c_s
 
 ## 13. Whole counts are a transportation problem
 
-`em_solver.cpp`'s `assign_posteriors` (`assignment_mode = "sample"`); gate `tests/test_estimator.py`'s
+`em_assign.h`'s `assign_posteriors` (`assignment_mode = "sample"`); gate `tests/test_estimator.py`'s
 `TestWholeCounts`. In one locus fragment `u` has candidates `C_u` with posteriors `p_uc > 0`; `n_c = Σ_u p_uc`,
 `Σ_c n_c = m`. An ASSIGNMENT `z` sends each fragment to one candidate, with counts `N_c`.
 
@@ -685,7 +685,7 @@ bisection on the slope.
 Jakobsson–Fellman), preserved by the affine map, so `E_g φ(ρ_m) ≤ E_g φ(1 − κ + κL/μ_g)` for convex `φ`: every
 f-divergence is at most the size-biased mixture's. For Hellinger, `H(g, g_m) ≤ B`, `B² = H²(g, (1 − κ)g + κ g l/μ_g)`,
 non-decreasing in `κ`. A faster-than-proportional response can exceed it
-(`test_a_response_that_rewards_length_faster_than_proportionally_can_exceed_the_bound`).
+(`test_a_response_rewarding_length_faster_than_proportionally_can_exceed_the_bound`).
 
 **14.6 The decision, on a metric** (`trust`, `geometric_path`). `H²(a, b) = Σ_l (√a_l − √b_l)²` is a squared L2
 distance, so `H` is a metric (the root of the symmetrised KL is not). On equal chemistry `H(g, r) ≤ B`; otherwise the
@@ -716,7 +716,7 @@ At one table this is `Σ_o c_o S_o(g)`, the normaliser exactly under the null (�
 ## 15. A multimapper's places
 
 `scoring.cpp`'s `merge_places`, `flush_mm_group`; `capture_eff_length.place_efficiencies`, `place_log_weights`;
-`em_solver.cpp`'s `IntergenicTerm`, `intergenic_log_weight`; `priors.intergenic_gdna_rate`.
+`em_locus.h`'s `IntergenicTerm`, `intergenic_log_weight`; `priors.intergenic_gdna_rate`.
 
 **15.1 One fragment, several places.** The molecule came from one component `c`, at one place, with one length:
 

@@ -6,28 +6,21 @@ answer must not depend on the buffer's order: an opposite-strand overlap is wher
 obvious, so it is where an order dependence would first show.
 """
 
-import logging
-from pathlib import Path
-
 import numpy as np
 import pysam
+import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import GDNAConfig, Scenario, ReadSimConfig, run_benchmark
+from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
-logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 N_FRAGMENTS = 2000
 SIM_SEED = 42
 PIPELINE_SEED = 42
 GENOME_LENGTH = 20_000
 
 
-def _sim_config(*, strand_specificity: float = 0.9, seed: int = SIM_SEED):
+def _sim_config(strand_specificity: float) -> ReadSimConfig:
     return ReadSimConfig(
         frag_mean=200,
         frag_std=30,
@@ -35,332 +28,90 @@ def _sim_config(*, strand_specificity: float = 0.9, seed: int = SIM_SEED):
         frag_max=450,
         read_length=100,
         strand_specificity=strand_specificity,
-        seed=seed,
+        seed=SIM_SEED,
     )
 
 
 def _gdna_config(abundance: float) -> GDNAConfig | None:
     if abundance == 0:
         return None
-    return GDNAConfig(
-        abundance=abundance,
-        frag_mean=350,
-        frag_std=100,
-        frag_min=100,
-        frag_max=1000,
-    )
+    return GDNAConfig(abundance=abundance, frag_mean=350, frag_std=100, frag_min=100, frag_max=1000)
 
 
-def _build_scenario(tmp_path, name="opp_strand"):
-    """Build the 20kb scenario with two opposite-strand transcripts."""
-    sc = Scenario(
-        name,
-        genome_length=GENOME_LENGTH,
-        seed=SIM_SEED,
-        work_dir=tmp_path / name,
-    )
-    # T1: + strand, multi-exon
+def _build_scenario(tmp_path, name: str) -> Scenario:
+    """The 20 kb scenario: T1 on +, T2 on −, their spans overlapping and their exons not."""
+    sc = Scenario(name, genome_length=GENOME_LENGTH, seed=SIM_SEED, work_dir=tmp_path / name)
     sc.add_gene(
         "G1",
         "+",
-        [
-            {
-                "t_id": "T1",
-                "exons": [(1000, 1500), (3000, 3500), (8000, 10000)],
-                "abundance": 100,
-            },
-        ],
+        [{"t_id": "T1", "exons": [(1000, 1500), (3000, 3500), (8000, 10000)], "abundance": 100}],
     )
-    # T2: - strand, multi-exon, on opposite strand
     sc.add_gene(
         "G2",
         "-",
-        [
-            {
-                "t_id": "T2",
-                "exons": [(6000, 7000), (12000, 13000), (15000, 15500)],
-                "abundance": 100,
-            },
-        ],
+        [{"t_id": "T2", "exons": [(6000, 7000), (12000, 13000), (15000, 15500)], "abundance": 100}],
     )
     return sc
 
 
-def _run(tmp_path, *, gdna_abundance=0, nrna_abundance=0, strand_specificity=0.9, label=""):
-    """Build scenario, run pipeline, return pipeline result + scenario result."""
-    sc = _build_scenario(tmp_path, name=label or "opp_strand")
-    sim = _sim_config(strand_specificity=strand_specificity)
-    gdna = _gdna_config(gdna_abundance)
-
-    result = sc.build_oracle(
-        n_fragments=N_FRAGMENTS,
-        sim_config=sim,
-        gdna_config=gdna,
-        nrna_abundance=nrna_abundance,
-    )
-
-    config = PipelineConfig(
-        em=EMConfig(seed=PIPELINE_SEED),
-        scan=BamScanConfig(sj_strand_tag="auto"),
-    )
-    pr = run_pipeline(result.bam_path, result.index, config=config)
-    bench = run_benchmark(result, pr, scenario_name=label or "opp_strand")
-    return sc, result, pr, bench
-
-
-def _shuffle_bam(input_bam: Path, output_bam: Path, seed: int = 99):
-    """Shuffle *read-name groups* in a name-sorted BAM.
-
-    Reads all records, groups by read name, shuffles groups,
-    writes a new name-sorted BAM with the shuffled order.
-    """
-    # Read all records grouped by read name
+def _shuffle_bam(input_bam, output_bam, seed: int = 99) -> None:
+    """Write *input_bam*'s read-name groups to *output_bam* in a permuted order, each group kept whole."""
     groups: dict[str, list] = {}
     with pysam.AlignmentFile(str(input_bam), "rb") as inf:
         header = inf.header.to_dict()
         for rec in inf:
-            qname = rec.query_name
-            if qname not in groups:
-                groups[qname] = []
-            groups[qname].append(rec)
-
-    # Shuffle the groups
-    rng = np.random.default_rng(seed)
-    group_keys = list(groups.keys())
-    rng.shuffle(group_keys)
-
-    # Write shuffled BAM
-    # Change header to indicate name-sorted
+            groups.setdefault(rec.query_name, []).append(rec)
+    names = list(groups)
+    np.random.default_rng(seed).shuffle(names)
     header["HD"]["SO"] = "queryname"
-    with pysam.AlignmentFile(str(output_bam), "wb", header=header) as outf:
-        for key in group_keys:
-            for rec in groups[key]:
-                outf.write(rec)
+    with pysam.AlignmentFile(str(output_bam), "wb", header=header) as out:
+        for name in names:
+            for rec in groups[name]:
+                out.write(rec)
 
 
-def _extract_results(pr, bench, result):
-    """Extract key metrics from a pipeline run."""
+def _answer(pr, result) -> dict:
+    """The run's per-transcript counts, its gDNA and its loci table."""
     est = pr.estimator
-
-    info = {}
+    answer = {"gdna_em": float(est.gdna_em_count), "n_loci": len(est.locus_results)}
     for t in result.transcripts:
-        ti = t.t_index
-        tid = t.t_id
-        info[f"{tid}_mrna"] = float(est.em_counts[ti].sum())
-        info[f"{tid}_nrna"] = float(est.em_counts[ti].sum()) if t.is_single_exon else 0.0
-        info[f"{tid}_unambig"] = float(est.unambig_counts[ti].sum())
-
-    info["gdna_total"] = float(est.gdna_em_count)
-    info["gdna_em"] = float(est.gdna_em_count)
-    info["n_loci"] = len(est.locus_results)
-
-    # Locus details, from the loci table
+        answer[f"{t.t_id}_em"] = float(est.em_counts[t.t_index].sum())
+        answer[f"{t.t_id}_unambig"] = float(est.unambig_counts[t.t_index].sum())
     for i, row in enumerate(est.get_loci_df(result.index).itertuples(index=False)):
-        info[f"locus_{i}_n_transcripts"] = row.n_transcripts
-        info[f"locus_{i}_n_nascent"] = row.n_nascent
-        info[f"locus_{i}_n_em_fragments"] = row.n_em_fragments
-        info[f"locus_{i}_count_gdna_prior"] = row.count_gdna_prior
-
-    return info
-
-
-def _compare_results(r1, r2, label=""):
-    """Compare two result dicts, return (n_diffs, max_abs_diff, details)."""
-    all_keys = sorted(set(r1.keys()) | set(r2.keys()))
-    diffs = []
-    for k in all_keys:
-        v1 = r1.get(k, float("nan"))
-        v2 = r2.get(k, float("nan"))
-        if v1 != v2:
-            abs_diff = abs(v1 - v2)
-            denom = max(abs(v1), abs(v2), 1e-30)
-            rel_diff = abs_diff / denom
-            diffs.append((k, v1, v2, abs_diff, rel_diff))
-    return diffs
-
-
-# ===========================================================================
-# Tests
-# ===========================================================================
-
-
-class TestOppositeStrandOverlap:
-    """Test two opposite-strand transcripts sharing genomic territory."""
-
-    # -------------------------------------------------------------------
-    # Part 1: Locus structure under different conditions
-    # -------------------------------------------------------------------
-
-    def test_mrna_only_independent(self, tmp_path):
-        """With no gDNA and no nascent RNA, the transcripts are independent."""
-        sc, result, pr, bench = _run(
-            tmp_path,
-            gdna_abundance=0,
-            nrna_abundance=0,
-            strand_specificity=1.0,
-            label="mrna_only",
+        answer[f"locus_{i}"] = (
+            row.n_transcripts,
+            row.n_nascent,
+            row.n_em_fragments,
+            row.count_gdna_prior,
         )
-        info = _extract_results(pr, bench, result)
+    return answer
 
-        # Each transcript should be in its own locus (no shared fragments)
-        print("\n=== mRNA-only (no gDNA, no nRNA, SS=1.0) ===")
-        print(f"Number of loci: {info['n_loci']}")
-        for k, v in sorted(info.items()):
-            print(f"  {k}: {v}")
 
-        # T1 and T2 exons don't overlap, but unspliced reads may share
-        # genomic territory, causing them to be in the same locus even
-        # with no gDNA/nRNA. This is expected behavior when SS < 1.0
-        # or when unspliced fragments from strand-ambiguous regions connect them.
-        # With SS=1.0, check if they are truly independent:
-        if info["n_loci"] == 1:
-            print("  NOTE: T1 and T2 are in the SAME locus (shared unspliced territory)")
-        else:
-            print(f"  T1 and T2 are in SEPARATE loci ({info['n_loci']} total)")
-        sc.cleanup()
+@pytest.mark.parametrize(
+    ("gdna", "nrna", "strand_specificity", "n_loci"),
+    [(0, 0, 1.0, 2), (0, 50, 0.9, 1), (50, 0, 0.9, 1), (50, 50, 0.9, 1)],
+    ids=["rna_only", "nascent", "gdna", "nascent_and_gdna"],
+)
+def test_the_loci_and_the_answer_do_not_depend_on_fragment_order(
+    tmp_path, gdna, nrna, strand_specificity, n_loci
+):
+    """The two transcripts are separate loci until nascent spans or gDNA candidates join them, and the run on the
+    permuted BAM gives the same answer to the bit."""
+    sc = _build_scenario(tmp_path, "opp_strand")
+    result = sc.build_oracle(
+        n_fragments=N_FRAGMENTS,
+        sim_config=_sim_config(strand_specificity),
+        gdna_config=_gdna_config(gdna),
+        nrna_abundance=nrna,
+    )
+    config = PipelineConfig(
+        em=EMConfig(seed=PIPELINE_SEED), scan=BamScanConfig(sj_strand_tag="auto")
+    )
+    original = _answer(run_pipeline(result.bam_path, result.index, config=config), result)
+    assert original["n_loci"] == n_loci, original
 
-    def test_nrna_creates_shared_locus(self, tmp_path):
-        """With nRNA, unspliced reads span introns → shared territory."""
-        sc, result, pr, bench = _run(
-            tmp_path,
-            gdna_abundance=0,
-            nrna_abundance=50,
-            strand_specificity=0.9,
-            label="nrna_sharing",
-        )
-        info = _extract_results(pr, bench, result)
-
-        print("\n=== nRNA=50, gDNA=0, SS=0.9 ===")
-        print(f"Number of loci: {info['n_loci']}")
-        for k, v in sorted(info.items()):
-            print(f"  {k}: {v}")
-        sc.cleanup()
-
-    def test_gdna_creates_shared_locus(self, tmp_path):
-        """With gDNA, genomic reads span both genes → shared territory."""
-        sc, result, pr, bench = _run(
-            tmp_path,
-            gdna_abundance=50,
-            nrna_abundance=0,
-            strand_specificity=0.9,
-            label="gdna_sharing",
-        )
-        info = _extract_results(pr, bench, result)
-
-        print("\n=== nRNA=0, gDNA=50, SS=0.9 ===")
-        print(f"Number of loci: {info['n_loci']}")
-        for k, v in sorted(info.items()):
-            print(f"  {k}: {v}")
-        sc.cleanup()
-
-    def test_full_stress(self, tmp_path):
-        """Both nRNA and gDNA active."""
-        sc, result, pr, bench = _run(
-            tmp_path,
-            gdna_abundance=50,
-            nrna_abundance=50,
-            strand_specificity=0.9,
-            label="full_stress",
-        )
-        info = _extract_results(pr, bench, result)
-
-        print("\n=== nRNA=50, gDNA=50, SS=0.9 ===")
-        print(f"Number of loci: {info['n_loci']}")
-        for k, v in sorted(info.items()):
-            print(f"  {k}: {v}")
-        sc.cleanup()
-
-    # -------------------------------------------------------------------
-    # Part 2: Fragment order sensitivity
-    # -------------------------------------------------------------------
-
-    def test_fragment_order_mrna_only(self, tmp_path):
-        """Annotated RNA only: shuffling does not change results."""
-        self._test_order_sensitivity(
-            tmp_path,
-            gdna_abundance=0,
-            nrna_abundance=0,
-            strand_specificity=1.0,
-            label="order_mrna",
-        )
-
-    def test_fragment_order_with_nrna(self, tmp_path):
-        """nRNA active: shuffling should not change results."""
-        self._test_order_sensitivity(
-            tmp_path,
-            gdna_abundance=0,
-            nrna_abundance=50,
-            strand_specificity=0.9,
-            label="order_nrna",
-        )
-
-    def test_fragment_order_with_gdna(self, tmp_path):
-        """gDNA active: shuffling should not change results."""
-        self._test_order_sensitivity(
-            tmp_path,
-            gdna_abundance=50,
-            nrna_abundance=0,
-            strand_specificity=0.9,
-            label="order_gdna",
-        )
-
-    def test_fragment_order_full_stress(self, tmp_path):
-        """Both nRNA and gDNA: shuffling should not change results."""
-        self._test_order_sensitivity(
-            tmp_path,
-            gdna_abundance=50,
-            nrna_abundance=50,
-            strand_specificity=0.9,
-            label="order_full",
-        )
-
-    def _test_order_sensitivity(
-        self, tmp_path, *, gdna_abundance, nrna_abundance, strand_specificity, label
-    ):
-        """Run pipeline on original + shuffled BAM, compare results."""
-        # --- Run 1: normal order ---
-        sc = _build_scenario(tmp_path, name=f"{label}_orig")
-        sim = _sim_config(strand_specificity=strand_specificity)
-        gdna = _gdna_config(gdna_abundance)
-        result = sc.build_oracle(
-            n_fragments=N_FRAGMENTS,
-            sim_config=sim,
-            gdna_config=gdna,
-            nrna_abundance=nrna_abundance,
-        )
-        config = PipelineConfig(
-            em=EMConfig(seed=PIPELINE_SEED),
-            scan=BamScanConfig(sj_strand_tag="auto"),
-        )
-        pr1 = run_pipeline(result.bam_path, result.index, config=config)
-        bench1 = run_benchmark(result, pr1, scenario_name=f"{label}_orig")
-        info1 = _extract_results(pr1, bench1, result)
-
-        # --- Shuffle BAM ---
-        shuffled_bam = tmp_path / f"{label}_shuffled.bam"
-        _shuffle_bam(result.bam_path, shuffled_bam, seed=99)
-
-        # --- Run 2: shuffled order ---
-        pr2 = run_pipeline(shuffled_bam, result.index, config=config)
-        bench2 = run_benchmark(result, pr2, scenario_name=f"{label}_shuffled")
-        info2 = _extract_results(pr2, bench2, result)
-
-        # --- Compare ---
-        diffs = _compare_results(info1, info2, label=label)
-
-        print(f"\n=== Order sensitivity: {label} ===")
-        print(f"  gdna={gdna_abundance}, nrna={nrna_abundance}, ss={strand_specificity}")
-        if not diffs:
-            print("  RESULT: BIT-EXACT (no differences)")
-        else:
-            print(f"  RESULT: {len(diffs)} differences found")
-            for k, v1, v2, ad, rd in sorted(diffs, key=lambda x: -x[3]):
-                print(f"    {k}: {v1:.10f} vs {v2:.10f} (abs={ad:.2e}, rel={rd:.2e})")
-
-        # Check that results are close (allow small FP tolerance)
-        for k, v1, v2, ad, rd in diffs:
-            if any(s in k for s in ("n_loci", "n_transcripts", "n_nascent", "n_em_fragments")):
-                # Structural properties must be exact
-                assert v1 == v2, f"Structural difference in {k}: {v1} vs {v2}"
-
-        sc.cleanup()
+    shuffled_bam = tmp_path / "shuffled.bam"
+    _shuffle_bam(result.bam_path, shuffled_bam)
+    shuffled = _answer(run_pipeline(shuffled_bam, result.index, config=config), result)
+    assert shuffled == original
+    sc.cleanup()

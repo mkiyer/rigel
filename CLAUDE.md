@@ -30,9 +30,10 @@ for robustness, so a number measured at the panel's nascent share is a stress re
 
 ## Where things stand
 
-- `src/` has not changed since 81fc67b6. ec996bba is a frozen **preview candidate**.
-- Its validation beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
+- `src/`'s numbers are 81fc67b6's; the code pass after it is a proven numeric no-op.
+- The validation of ec996bba beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
   (`docs/ROADMAP.md`).
+- **No preview ships.** A pre-release waits for the capture reader and a review of the open issues.
 - The next work is the **capture reader**, developed together with the owner. Its working memory is
   `docs/dev/CAPTURE_IDEAS.md`.
 - Everything retired at the 2026-11-03 reset is in `$RIGEL_RUNS/archive/cleanup_2026-11-03/`.
@@ -84,8 +85,8 @@ An import may point down a layer or sideways, never up. `src/rigel/calibration/_
 | one slot's own numbers and ψ | **3 · geometry + the per-slot solve**: `region_geometry` `simplex_logodds` |
 | which strand a fragment came from | **4 · strand**: `strand_balance` |
 | how dense a component is, and the priors | **5 · density and prior**: `landscape` `capture_efficiency` |
-| what one neighbour tells another | **6 · the solve**: `sweep` + `blocks` + `messages/` + `region_init` |
-| turning the solve into a result | **7 · assemble**: `calibrate` `priors` `result` `derive` `track` |
+| what one neighbour tells another | **6 · the solve**: `sweep` + `diagnostics` + `messages/` |
+| turning the solve into a result | **7 · assemble**: `calibrate` `priors` `result` `track` |
 
 The sweep is one native call (`native.solve_blocks`). `message_policy = "transfer"` ships; `"silent"` is the measured
 floor.
@@ -121,7 +122,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The baseline: 0 failed / 3,440 passed / 0 skipped, 3,440 collected** (re-derived 2026-11-04, after the cleanup). Any failure is a regression.
+**The baseline: 0 failed / 3,444 passed / 0 skipped, 3,444 collected** (re-derived 2026-11-04, after the code pass). Any failure is a regression.
 - Re-derive the count; never edit it by hand. Only adding or removing a test moves it.
 - A golden update (`--update-golden`) is where a regression gets laundered into "intended". Read the diff and check the
   truth-scored instruments first.
@@ -131,7 +132,7 @@ python scripts/design/preflight.py --full       # every instrument's --self-test
 
 Each instrument's module docstring and `--help` are its manual. `docs/SUCCESS.md` gives the run order.
 `tests/test_scripts_index.py` holds the `design/` rows below against the disk, and `scripts/README.md` indexes
-`scripts/profiling/`.
+`scripts/profiling/` and the `_`-prefixed helper modules of `scripts/design/` and `scripts/sim/`.
 
 | | the question it answers |
 |---|---|

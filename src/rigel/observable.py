@@ -162,7 +162,10 @@ def mask_from_store(
     chroms = {str(k): int(v) for k, v in store.chromosomes.items()}
     differ = [r for r, n in ref_lengths.items() if r in chroms and chroms[r] != int(n)]
     if differ:
-        shown = ", ".join(f"{r} ({ref_lengths[r]:,} against {chroms[r]:,})" for r in differ[:5])
+        shown = ", ".join(
+            f"{r} ({ref_lengths[r]:,} against {chroms[r]:,})"
+            for r in differ[: CONSTANTS.qc.report_examples]
+        )
         raise ValueError(
             f"The alignable store {store_path} holds {len(differ):,} of the FASTA's references at another length "
             f"({shown}): it was built for another assembly."
@@ -174,7 +177,7 @@ def mask_from_store(
             "their N runs.",
             f"{len(absent):,}",
             f"{len(ref_lengths):,}",
-            ", ".join(absent[:5]) + (f" and {len(absent) - 5:,} more" if len(absent) > 5 else ""),
+            CONSTANTS.qc.examples(absent),
         )
     read_length = int(max(store.read_length_bins))
     from_fasta = _fasta_runs(fasta_file, absent) if absent else {}
@@ -214,7 +217,10 @@ def check_mask(mask: pd.DataFrame, ref_lengths: Mapping[str, int]) -> pd.DataFra
     order = {name: i for i, name in enumerate(ref_lengths)}
     unknown = sorted(set(ref) - set(order))
     if unknown:
-        raise ValueError(f"the unobservable mask names references the index lacks: {unknown[:5]}")
+        raise ValueError(
+            "the unobservable mask names references the index lacks: "
+            f"{unknown[: CONSTANTS.qc.report_examples]}"
+        )
     length = np.array([ref_lengths[r] for r in ref], dtype=np.int64)
     if np.any(start < 0) or np.any(end <= start) or np.any(end > length):
         raise ValueError("the unobservable mask holds a run that is empty or outside its reference")

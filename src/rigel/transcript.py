@@ -48,6 +48,9 @@ def _first_attr(val):
 
 @dataclass(slots=True)
 class Transcript:
+    """One transcript, annotated or a synthetic span the index adds: its reference, strand and exons in order
+    (0-based half-open), its gene, and the integer ids the index gives it (``t_index``, ``g_index``)."""
+
     ref: str | None = None
     strand: Strand = Strand.NONE
     exons: list[Interval] = field(default_factory=list)
@@ -74,7 +77,7 @@ class Transcript:
     abundance: float | None = None
     nrna_abundance: float = 0.0
     """A simulator input, read only by ``rigel.sim``: the abundance of RNA that has not spliced, sampled contiguously
-    over the genomic span (pooled onto the span's single-exon entity, ``sim.whole_genome.assign_nrna_to_entities``).
+    over the genomic span (pooled onto the span's single-exon entity, ``sim.transcriptome.assign_nrna_to_entities``).
     Independent of ``abundance``; read fractions are proportional to::
 
         spliced template : abundance      × spliced_effective_length
@@ -84,27 +87,23 @@ class Transcript:
     """The IDs of the identical transcripts ``--collapse-duplicate-transcripts`` folded into this one."""
 
     @classmethod
-    def from_gtf(cls, feature) -> "Transcript":
-        """A Transcript from a GTF feature's reference, strand, IDs and tags."""
-        t = cls()
-        if not hasattr(feature, "seqname"):
-            raise AttributeError("GTF feature missing seqname")
-        t.ref = feature.seqname
-        t.strand = Strand.from_str(getattr(feature, "strand", "."))
-        t.abundance = getattr(feature, "score", None)
-
-        attrs = getattr(feature, "attrs", None) or {}
-        t.t_id = _first_attr(attrs.get("transcript_id"))
-        t.g_id = _first_attr(attrs.get("gene_id"))
-        t.g_name = _first_attr(attrs.get("gene_name"))
-        # GENCODE writes gene_type, Ensembl gene_biotype
-        t.g_type = _first_attr(attrs.get("gene_type")) or _first_attr(attrs.get("gene_biotype"))
-        # GENCODE tags
-        tags = getattr(feature, "tags", set()) or set()
-        t.is_basic = "basic" in tags
-        t.is_mane = ("MANE_Select" in tags) or ("MANE_Plus_Clinical" in tags)
-        t.is_ccds = "CCDS" in tags
-        return t
+    def from_gtf(cls, feature: GTFRecord) -> "Transcript":
+        """A Transcript from a GTF feature's reference, strand, IDs and tags; its exons are added by the reader."""
+        attrs, tags = feature.attrs, feature.tags
+        return cls(
+            ref=feature.seqname,
+            strand=Strand.from_str(feature.strand),
+            abundance=feature.score,
+            t_id=_first_attr(attrs.get("transcript_id")),
+            g_id=_first_attr(attrs.get("gene_id")),
+            g_name=_first_attr(attrs.get("gene_name")),
+            # GENCODE writes gene_type, Ensembl gene_biotype
+            g_type=_first_attr(attrs.get("gene_type")) or _first_attr(attrs.get("gene_biotype")),
+            # GENCODE tags
+            is_basic="basic" in tags,
+            is_mane=("MANE_Select" in tags) or ("MANE_Plus_Clinical" in tags),
+            is_ccds="CCDS" in tags,
+        )
 
     @property
     def start(self) -> int:
@@ -116,17 +115,20 @@ class Transcript:
         """End coordinate of the last exon (0 if empty)."""
         return self.exons[-1].end if self.exons else 0
 
-    def compute_length(self):
+    def compute_length(self) -> int:
+        """The spliced length, the exons' total, computed once and kept in :attr:`length`."""
         if self.length is not None:
             return self.length
         self.length = sum((e.end - e.start) for e in self.exons)
         return self.length
 
     def introns(self):
+        """The ``(start, end)`` of each intron, between consecutive exons."""
         for i in range(1, len(self.exons)):
             yield self.exons[i - 1].end, self.exons[i].start
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
+        """The transcript-table row (``transcripts.feather``)."""
         return {
             "ref": self.ref,
             "start": self.start,

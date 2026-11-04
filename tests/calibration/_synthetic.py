@@ -132,11 +132,27 @@ def make_synthetic_sj():
     )
 
 
-def make_gdna_fl_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
-    """A spiked gDNA fragment-length pmf for calibration tests (μ_FL = ``mean``)."""
+def spike_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
+    """A fragment-length pmf with all its mass at ``mean``."""
     pmf = np.zeros(max_size + 1, dtype=np.float64)
     pmf[mean] = 1.0
     return pmf
+
+
+def normal_pmf(mean=200.0, sd=50.0, lo=100, hi=300) -> np.ndarray:
+    """A normal fragment-length pmf truncated to ``[lo, hi]``."""
+    w = np.arange(hi + 1, dtype=np.float64)
+    p = np.exp(-0.5 * ((w - mean) / sd) ** 2)
+    p[(w < lo) | (w > hi)] = 0.0
+    return p / p.sum()
+
+
+def contained_support(lengths, pmf) -> np.ndarray:
+    """The contained support ``Σ_w f(w)(ℓ − w + 1)⁺`` per piece of length ``ℓ``, by brute force over the pmf; 0 for a
+    piece shorter than every fragment."""
+    w = np.arange(pmf.shape[0], dtype=np.float64)
+    L = np.asarray(lengths, dtype=np.float64)[:, None]
+    return (pmf[None, :] * np.maximum(L - w[None, :] + 1.0, 0.0)).sum(1)
 
 
 def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):
@@ -208,7 +224,6 @@ def make_chain_parts(
 
     from rigel.calibration.region_chain import build_region_chain
     from rigel.calibration.region_geometry import build_region_geometry, build_region_statics
-    from rigel.calibration.signature import transcript_strand_class
     from rigel.calibration.splice_graph import SpliceJunctionGeometry
 
     sig = np.asarray(signatures, dtype=np.uint8)
@@ -265,7 +280,6 @@ def make_chain_parts(
         start=start,
         end=start + region_sz.astype(np.int64),
         signature=sig,
-        strand_class=transcript_strand_class(sig.astype(np.int64)),
         region_size_bp=region_sz,
         ref_offsets=rno.astype(np.int32),
         n_refs=int(rno.shape[0] - 1),
@@ -284,5 +298,9 @@ def make_chain_parts(
         substrate=substrate,
         region_arrays=region_arrays,
         geometry=geometry,
-        statics=build_region_statics(chain, region_arrays, boundary_flags),
+        statics=build_region_statics(
+            chain,
+            region_arrays,
+            np.zeros(n_boundaries, np.uint16) if boundary_flags is None else boundary_flags,
+        ),
     )

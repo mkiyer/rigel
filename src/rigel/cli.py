@@ -6,15 +6,25 @@ Subcommands:
     rigel sim     — Generate synthetic test scenarios
     rigel export  — Convert feather outputs to TSV or Parquet
     rigel report  — Build a self-contained HTML QC report from a quant output directory
+
+``rigel quant``'s tunable options map onto :class:`rigel.config.PipelineConfig` through one table, ``PARAM_SPECS``:
+the parser's defaults, the keys a ``--config`` YAML may set, the run's configuration and the ``config.yaml`` a run
+writes are all read from it.
 """
+
+from __future__ import annotations
 
 import argparse
 import logging
 import os
 import sys
 import time
-from dataclasses import dataclass as _dataclass
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .config import PipelineConfig
 
 
 def get_version() -> str:
@@ -61,10 +71,8 @@ def index_command(args: argparse.Namespace) -> int:
             alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
             splice_blacklist_min_count=args.splice_blacklist_min_count,
         )
-    except (
-        ValueError,
-        OSError,
-    ) as exc:  # a malformed annotation, an unreadable store, references that disagree
+    # a malformed annotation, an unreadable store, references that disagree
+    except (ValueError, OSError) as exc:
         sys.exit(f"Error: {exc}")
     return 0
 
@@ -72,59 +80,26 @@ def index_command(args: argparse.Namespace) -> int:
 def quant_command(args: argparse.Namespace) -> int:
     """Run the ``rigel quant`` subcommand.
 
-    Resolves the arguments (CLI flags over the ``--config`` YAML over the config defaults), loads
-    the index, runs :func:`rigel.pipeline.run_pipeline` — one BAM scan, calibration, then the
-    per-locus EM — and writes the output tables, ``summary.json`` and ``config.yaml``; with
-    ``--annotated-bam``, a second pass over the BAM then writes the annotated BAM, checked against the scan.
+    Resolves the arguments (CLI flags over the ``--config`` YAML over the config defaults), loads the index, runs
+    :func:`rigel.pipeline.run_pipeline` — one BAM scan, calibration, then the per-locus EM — and writes the output
+    tables, ``summary.json`` and ``config.yaml``; with ``--annotated-bam``, a second pass over the BAM then writes the
+    annotated BAM, checked against the scan. Every setting is checked before the index loads, and every refusal is an
+    error, not a traceback.
     """
-    from .index import TranscriptIndex
-    from .pipeline import run_pipeline
+    from .index import IndexLoadError, TranscriptIndex
+    from .pipeline import BamInputError, run_pipeline
 
-    # -- Resolve parameters: CLI > YAML > hardcoded defaults --
     try:
-        _resolve_quant_args(args, _build_quant_defaults())
+        resolve_quant_args(args, build_quant_defaults())
+        bam_path, index_dir, output_dir = _quant_paths(args)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        # YAML may deliver a bare string; the CLI always delivers a list
+        if isinstance(args.sj_strand_tag, str):
+            args.sj_strand_tag = [args.sj_strand_tag]
+        pipeline_config = build_pipeline_config(args)
     except ValueError as exc:
         sys.exit(f"Error: {exc}")
-
-    # -- Validate required I/O args (may come from CLI or YAML config) --
-    for attr, flag in [
-        ("bam_file", "--bam"),
-        ("index_dir", "--index"),
-        ("output_dir", "-o/--output-dir"),
-    ]:
-        if getattr(args, attr, None) is None:
-            sys.exit(f"Error: {flag} is required (via CLI or --config YAML)")
-
-    bam_path = Path(args.bam_file)
-    index_dir = Path(args.index_dir)
-    output_dir = Path(args.output_dir)
-
-    if not bam_path.exists():
-        sys.exit(f"Error: BAM file not found: {bam_path}")
-    if not index_dir.is_dir():
-        sys.exit(f"Error: Index directory not found: {index_dir}")
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # YAML may deliver a bare string; the CLI always delivers a list
-    if isinstance(args.sj_strand_tag, str):
-        args.sj_strand_tag = [args.sj_strand_tag]
-
-    # -- Build the pipeline config first: a refused value costs no index load --
-    try:
-        pipeline_config = _build_pipeline_config(args)
-    except ValueError as exc:
-        sys.exit(f"Error: {exc}")
-    annotated = pipeline_config.annotated_bam_path
-    if annotated is not None:
-        target_dir = Path(annotated).resolve().parent
-        if not target_dir.is_dir() or not os.access(target_dir, os.W_OK):
-            sys.exit(
-                f"Error: --annotated-bam {annotated}: {target_dir} is not a directory this run can write to"
-            )
-
-    # -- Load reference index --
-    from .index import IndexLoadError
+    _check_annotated_bam_target(pipeline_config.annotated_bam_path)
 
     logging.info(f"[START] Loading index from {index_dir}")
     try:
@@ -136,15 +111,13 @@ def quant_command(args: argparse.Namespace) -> int:
         f"{index.num_annotated_genes} genes"
     )
 
-    # -- Run; the tables are written before the optional annotated-BAM pass, so a failure there loses nothing --
-    from .pipeline import BamInputError
-
+    # The tables are written before the optional annotated-BAM pass, so a failure there loses nothing
     try:
         run_pipeline(
             bam_path,
             index,
             config=pipeline_config,
-            before_annotated_bam=lambda result: _write_quant_outputs(
+            before_annotated_bam=lambda result: write_quant_outputs(
                 result, index, output_dir, args
             ),
         )
@@ -153,54 +126,64 @@ def quant_command(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# quant_command helpers
-# ---------------------------------------------------------------------------
+def _quant_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
+    """The BAM, the index directory and the output directory: each required on the command line or in the
+    ``--config`` YAML, and the first two must exist."""
+    for attr, flag in (
+        ("bam_file", "--bam"),
+        ("index_dir", "--index"),
+        ("output_dir", "-o/--output-dir"),
+    ):
+        if getattr(args, attr) is None:
+            raise ValueError(f"{flag} is required (via CLI or --config YAML)")
+    bam_path, index_dir = Path(args.bam_file), Path(args.index_dir)
+    if not bam_path.exists():
+        raise ValueError(f"BAM file not found: {bam_path}")
+    if not index_dir.is_dir():
+        raise ValueError(f"Index directory not found: {index_dir}")
+    return bam_path, index_dir, Path(args.output_dir)
 
 
-def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noqa: F821
-    """Translate resolved CLI args into a ``PipelineConfig``.
+def _check_annotated_bam_target(annotated) -> None:
+    """Refuse, before the run, an annotated BAM the second pass could not write: that pass runs after the
+    quantification, so the failure would otherwise come only at the end."""
+    if annotated is None:
+        return
+    target_dir = Path(annotated).resolve().parent
+    if not target_dir.is_dir() or not os.access(target_dir, os.W_OK):
+        sys.exit(
+            f"Error: --annotated-bam {annotated}: {target_dir} is not a directory this run can write to"
+        )
 
-    Field mapping is driven by the declarative ``_PARAM_SPECS`` registry.
-    """
+
+def build_pipeline_config(args: argparse.Namespace) -> PipelineConfig:
+    """The resolved arguments as a ``PipelineConfig``, field by field through ``PARAM_SPECS``."""
     from .config import (
-        EMConfig,
-        PipelineConfig,
         BamScanConfig,
-        FragmentScoringConfig,
         CalibrationConfig,
+        EMConfig,
+        FragmentScoringConfig,
+        PipelineConfig,
     )
 
-    em_kw: dict = {}
-    scan_kw: dict = {}
-    scoring_kw: dict = {}
-    calibration_kw: dict = {}
-    top_kw: dict = {}
-    _section = {
-        "em": em_kw,
-        "scan": scan_kw,
-        "scoring": scoring_kw,
-        "calibration": calibration_kw,
-    }
-
-    for spec in _PARAM_SPECS:
-        cli_val = getattr(args, spec.cli_dest)
-        config_val = _cli_to_config(cli_val, spec.transform)
-        if "." in spec.config_path:
-            section, field_name = spec.config_path.split(".", 1)
-            _section[section][field_name] = config_val
-        else:
-            top_kw[spec.config_path] = config_val
-
-    cfg = PipelineConfig(
-        em=EMConfig(**em_kw),
-        scan=BamScanConfig(**scan_kw),
-        scoring=FragmentScoringConfig(**scoring_kw),
-        calibration=CalibrationConfig(**calibration_kw),
-        **top_kw,
+    sections: dict[str, dict] = {"em": {}, "scan": {}, "scoring": {}, "calibration": {}}
+    top: dict = {}
+    for spec in PARAM_SPECS:
+        value = _cli_to_config(getattr(args, spec.cli_dest), spec.transform)
+        section, _, field_name = spec.config_path.rpartition(".")
+        (sections[section] if section else top)[field_name] = value
+    return PipelineConfig(
+        em=EMConfig(**sections["em"]),
+        scan=BamScanConfig(**sections["scan"]),
+        scoring=FragmentScoringConfig(**sections["scoring"]),
+        calibration=CalibrationConfig(**sections["calibration"]),
+        **top,
     )
-    return cfg
 
+
+# ---------------------------------------------------------------------------
+# rigel quant's outputs: the tables, summary.json and config.yaml
+# ---------------------------------------------------------------------------
 
 #: summary.json schema version, which a consumer should read before parsing. The fragment-length
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
@@ -214,15 +197,16 @@ SUMMARY_DECIMALS = 6
 #: summary.json's fragment counts are rounded to this many decimals: a hundredth of a fragment.
 SUMMARY_COUNT_DECIMALS = 2
 
+#: summary.json's lengths in bp (a length law's mean, median and standard deviation) are rounded to this many
+#: decimals: a hundredth of a base.
+SUMMARY_LENGTH_DECIMALS = 2
+
 #: summary.json's strand posterior variance keeps this many significant digits: it is p(1 − p)/n, of order 1e-8 at a
 #: million fragments, where fixed decimals print 0, and at most 0.25, so 8 significant digits are at least 8 decimals.
 SUMMARY_VARIANCE_DIGITS = 8
 
-
-def _significant(x: float, digits: int) -> float:
-    """``x`` rounded to ``digits`` significant digits."""
-    return float(f"{x:.{digits}g}")
-
+#: The tables every run writes, each as ``<name>.feather`` with a TSV mirror under ``--tsv``, in the order written.
+_QUANT_TABLES = ("quant", "gene_quant", "nascent_quant", "loci")
 
 #: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. Named here, not derived from the
 #: enum, because they are an output contract: a rename in the enum must not rename a reported category.
@@ -233,7 +217,6 @@ _POOL_REPORT_NAMES = (
     "pool_gdna_intergenic_exon",
     "pool_rna_spliced",
 )
-
 
 #: What a store-built index records of the store its unobservable mask was read from (`rigel.observable`).
 _MASK_STORE_KEYS = (
@@ -247,7 +230,143 @@ _MASK_STORE_KEYS = (
 )
 
 
-def _observable_genome_summary(index) -> dict:
+def write_quant_outputs(result, index, output_dir: Path, args: argparse.Namespace) -> None:
+    """Write everything ``rigel quant`` produces: the four quantification tables, ``locus_stats.feather`` when the
+    run collected it, ``summary.json``, ``fragment_lengths.feather``, the calibration track and ``config.yaml``."""
+    import json
+
+    estimator = result.estimator
+    _remove_stale_outputs(output_dir, args.tsv, bool(estimator.locus_stats))
+    for key, val in sorted(result.stats.to_dict().items()):
+        if isinstance(val, (int, float)):
+            logging.info(f"  {key}: {val:,}")
+
+    tables = _write_tables(estimator, index, output_dir, args.tsv)
+    fl_summary, fl_histogram_df = fragment_length_report(result.fl_models)
+
+    summary_path = output_dir / "summary.json"
+    with open(summary_path, "w") as f:
+        json.dump(_summary(result, index, output_dir, args, tables, fl_summary), f, indent=2)
+    logging.info(f"[DONE] Summary written to {summary_path}")
+
+    # The raw fragment-length histograms, long form: one (category, length, count) row per 1-bp bin
+    fragment_lengths_path = output_dir / "fragment_lengths.feather"
+    _write_table(fl_histogram_df, fragment_lengths_path, args.tsv)
+    logging.info(f"[DONE] Wrote {fragment_lengths_path} ({len(fl_histogram_df)} rows)")
+
+    _write_calibration_track(result.calibration_track, output_dir)
+    write_config_yaml(output_dir / "config.yaml", args)
+
+
+def _remove_stale_outputs(output_dir: Path, tsv: bool, locus_stats: bool) -> None:
+    """A reused output directory keeps no product this run does not write: a quant.tsv from an earlier --tsv run
+    beside this run's quant.feather would disagree with it silently."""
+    stale = []
+    if not tsv:
+        stale += [output_dir / f"{name}.tsv" for name in (*_QUANT_TABLES, "fragment_lengths")]
+    if not locus_stats:
+        stale.append(output_dir / "locus_stats.feather")
+    for path in stale:
+        path.unlink(missing_ok=True)
+
+
+def _write_table(df, path: Path, tsv: bool) -> None:
+    """One output table: Feather v2 with zstd, and its TSV mirror under ``--tsv``."""
+    df.to_feather(str(path), compression="zstd")
+    if tsv:
+        df.to_csv(str(path.with_suffix(".tsv")), sep="\t", index=False)
+
+
+def _write_tables(estimator, index, output_dir: Path, tsv: bool) -> dict:
+    """Write the four quantification tables, and the per-locus EM profile when the run collected one; return the
+    tables by name."""
+    import pandas as pd
+
+    tables = {
+        "quant": estimator.get_counts_df(index),
+        "gene_quant": estimator.get_gene_counts_df(index),
+        "nascent_quant": estimator.get_nascent_quant_df(index),
+        "loci": estimator.get_loci_df(index),
+    }
+    paths = [output_dir / f"{name}.feather" for name in _QUANT_TABLES]
+    for name, path in zip(_QUANT_TABLES, paths):
+        _write_table(tables[name], path, tsv)
+    logging.info(f"[DONE] Wrote {', '.join(str(path) for path in paths)}")
+
+    if estimator.locus_stats:
+        locus_stats_path = output_dir / "locus_stats.feather"
+        locus_stats_df = pd.DataFrame(estimator.locus_stats)
+        locus_stats_df.to_feather(str(locus_stats_path), compression="zstd")
+        logging.info(f"[DONE] Wrote {locus_stats_path} ({len(locus_stats_df)} loci)")
+    return tables
+
+
+def _write_calibration_track(track, output_dir: Path) -> None:
+    """The genome-wide gDNA track, calibration's per-region gDNA level: a Feather (the report's input) and a bedGraph
+    (for a genome browser)."""
+    if track is None or len(track) == 0:
+        return
+    from .calibration.track import write_bedgraph
+
+    track_path = output_dir / "calibration_track.feather"
+    bedgraph_path = output_dir / "calibration_track.bedgraph"
+    track.to_feather(str(track_path), compression="zstd")
+    write_bedgraph(track, bedgraph_path)
+    logging.info(f"[DONE] Wrote {track_path} + {bedgraph_path.name} ({len(track)} regions)")
+
+
+def _summary(result, index, output_dir: Path, args, tables: dict, fl_summary: dict) -> dict:
+    """``summary.json``: the run's command and configuration, then what the scan saw, the strand and calibration
+    answers, the length laws and the quantification's pools."""
+    from . import __version__
+
+    stats = result.stats
+    return {
+        "schema_version": SUMMARY_SCHEMA_VERSION,
+        "rigel_version": __version__,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "command": {
+            "subcommand": "quant",
+            "arguments": _command_arguments(args, output_dir),
+            "config_file": str(Path(args.config).resolve()) if args.config else None,
+        },
+        "configuration": result.pipeline_config.to_dict(),
+        "input": {
+            "bam_file": str(Path(args.bam_file).resolve()),
+            "index_dir": str(Path(args.index_dir).resolve()),
+        },
+        # the observable genome every opportunity of the run was read over: the index's mask and where it came from
+        "observable_genome": observable_genome_summary(index),
+        "alignment_stats": _alignment_summary(stats),
+        "read_pairs": _read_pair_summary(stats),
+        "fragment_stats": _fragment_summary(stats, index),
+        "strand_model": _strand_model_summary(result.strand_models),
+        "calibration": _calibration_summary(result.calibration),
+        "gdna_em_effective_length": _series_summary(tables["loci"], "gdna_em_effective_length"),
+        "fragment_length": fl_summary,
+        "length_tables": _length_tables_summary(result.length_tables),
+        "quantification": _quantification_summary(
+            stats, result.estimator, index, float(tables["quant"]["count"].sum())
+        ),
+    }
+
+
+def _command_arguments(args: argparse.Namespace, output_dir: Path) -> dict:
+    """The command's arguments: the three paths resolved, then every tunable option as the run resolved it."""
+    arguments: dict = {
+        "bam_file": str(Path(args.bam_file).resolve()),
+        "index_dir": str(Path(args.index_dir).resolve()),
+        "output_dir": str(output_dir.resolve()),
+    }
+    for dest in _OPTION_DESTS:
+        val = getattr(args, dest)
+        if dest == "sj_strand_tag" and not isinstance(val, str):
+            val = list(val) if val else val
+        arguments[dest] = val
+    return arguments
+
+
+def observable_genome_summary(index) -> dict:
     """The observable genome the run read (`rigel.observable`): the index's record of what its unobservable mask is —
     ``rule``, and the store's ``read_length`` bin it reads (``None`` without a store) — the observable and unobservable
     bases over the genome and ``by_reference``, and the ``store`` the mask was read from (``None`` without one, when the
@@ -274,98 +393,167 @@ def _observable_genome_summary(index) -> dict:
     }
 
 
-def _length_tables_summary(tables) -> dict | None:
-    """The EM's two length tables and the decision behind them (`calibration.shared_length_law`): ``weight`` 0 is one
-    shared law for both origins, 1 gDNA's own law brought into RNA's captured frame, continuous between. ``kappa`` is
-    RNA's captured fraction, ``captured`` the capture mixture's fraction, ``contrast`` and ``bound`` the Hellinger
-    distances the weight compares, ``noise`` the squared distance sampling noise alone adds; the three means are the
-    two tables' and gDNA's uncaptured law's, in bp."""
-    if tables is None:
-        return None
-    import numpy as np
-
-    d = tables.decision
-    L = np.arange(tables.rna.size, dtype=np.float64)
+def _alignment_summary(stats) -> dict:
+    """The records: each flag counter counts every record carrying its flag (``proper_pairs`` the primary records
+    flagged as a proper pair), and every record has one status."""
     return {
-        "weight": round(float(d.weight), SUMMARY_DECIMALS),
-        "kappa": round(float(d.kappa), SUMMARY_DECIMALS),
-        "captured": round(float(d.captured), SUMMARY_DECIMALS),
-        "contrast": round(float(d.contrast), SUMMARY_DECIMALS),
-        "bound": round(float(d.bound), SUMMARY_DECIMALS),
-        "noise": round(float(d.noise), SUMMARY_DECIMALS),
-        "rna_table_mean": round(float(tables.rna @ L), 2),
-        "gdna_table_mean": round(float(tables.gdna @ L), 2),
-        "gdna_uncaptured_mean": round(float(tables.anchor @ L), 2),
+        "total_reads": stats.total,
+        "mapped_reads": stats.total - stats.unmapped,
+        "unmapped_reads": stats.unmapped,
+        "secondary_reads": stats.secondary,
+        "supplementary_reads": stats.supplementary,
+        "proper_pairs": stats.proper_pair,
+        "duplicate_reads": stats.duplicate,
+        "qc_fail_reads": stats.qc_fail,
+        # One status per record, summing to ``total_reads``: filtered (unmapped, QC-failed or a skipped duplicate),
+        # used (a usable alignment's), unused (in a placed read pair, in no usable alignment), or unplaced (in a read
+        # pair withheld or excluded by the multimap option)
+        "records": {
+            "filtered": stats.filtered,
+            "used": stats.n_records_used,
+            "unused": stats.n_records_unused,
+            "unplaced": stats.n_records_unplaced,
+        },
+        # Each spliced record's junction-strand tag, read on that record: given a strand, given none, or ambiguous
+        # because its XS and ts disagree; ``invalid`` counts the tag values that were neither '+' nor '-', each read
+        # as absent.
+        "sj_strand_tag": {
+            "tagged": stats.n_sj_tag_tagged,
+            "untagged": stats.n_sj_tag_untagged,
+            "conflicting": stats.n_sj_tag_conflicting,
+            "invalid": stats.n_sj_tag_invalid,
+        },
+        # NM and NH on each record: ``missing`` without the tag, ``invalid`` holding it as anything but an integer,
+        # each read as absent (NM 0, NH 1); ``conflicting`` counts the alignments whose records disagree on NM, each
+        # read with the larger
+        "nm_tag": {
+            "missing": stats.n_nm_tag_missing,
+            "invalid": stats.n_nm_tag_invalid,
+            "conflicting": stats.n_nm_conflicting,
+        },
+        "nh_tag": {"missing": stats.n_nh_tag_missing, "invalid": stats.n_nh_tag_invalid},
     }
 
 
-def _fragment_length_report(fl_models):
-    """Split the fragment-length models into a lean summary + a tidy histogram table.
-
-    Returns ``(summary_by_category, histogram_df)`` where
-
-    * ``summary_by_category`` is ``{category: {n_observations, mean, std, median,
-      mode, max_size, overflow_count, overflow_fraction}}`` — small, human-readable,
-      destined for ``summary.json`` (no raw per-bin arrays).
-    * ``histogram_df`` is a long ``(category, length, count)`` DataFrame — the raw
-      1-bp histograms, destined for ``fragment_lengths.feather``, which keeps them out of
-      ``summary.json``.
-
-    Every category measures one quantity, the accumulator's ``L``, over a stated population:
-
-    ``global``
-        the unconditional anchor: every deposited fragment, no purity condition.
-    ``gdna`` / ``rna``
-        the two modelled pools, the empirical views of what scoring and calibration actually use.
-    the five ``pool_*`` rows
-        the five pools unaggregated (none is pure). ``gdna`` is the fitted uniform-frame gDNA
-        histogram and ``rna`` the de-tilted ``pool_rna_spliced``; the two ``*_exon`` crossing rows are
-        the on-target gDNA, shown on their own so the off-target / on-target comparison is an output.
-
-    There are no per-splice-type histograms: the scanner measures those by other rules than ``L``. The splice
-    counts come from the scanner's census instead.
-    """
-    import pandas as pd
-
-    entries: dict = {"global": fl_models.global_model().to_dict()}
-    entries["gdna"] = fl_models.gdna_model().to_dict()
-    entries["rna"] = fl_models.rna_model().to_dict()
-    for i, name in enumerate(_POOL_REPORT_NAMES):
-        entries[name] = fl_models._empirical(fl_models.pool_counts[i]).to_dict()
-
-    summary_by_category: dict = {}
-    cats: list = []
-    lengths: list = []
-    counts: list = []
-    for cat, d in entries.items():
-        s = d["summary"]
-        summary_by_category[cat] = {
-            "n_observations": s["n_observations"],
-            "mean": s["mean"],
-            "std": s["std"],
-            "median": s["median"],
-            "mode": s["mode"],
-            "max_size": s["max_size"],
-            "overflow_count": s["overflow"]["count"],
-            "overflow_fraction": s["overflow"]["fraction"],
-        }
-        lo, _hi = d["histogram"]["range"]
-        for i, c in enumerate(d["histogram"]["values"]):
-            cats.append(cat)
-            lengths.append(lo + i)
-            counts.append(c)
-
-    histogram_df = pd.DataFrame(
-        {
-            "category": pd.Series(cats, dtype="category"),
-            "length": pd.Series(lengths, dtype="int32"),
-            "count": pd.Series(counts, dtype="float64"),
-        }
-    )
-    return summary_by_category, histogram_df
+def _read_pair_summary(stats) -> dict:
+    """One outcome per read pair (a run of records sharing a name), summing to ``total``: excluded (every record
+    filtered), withheld with no usable alignment by reason (an unpaired one also by the furthest check any of its
+    alignments reached), excluded by the multimap option, or placed, unique or multimapping."""
+    return {
+        "total": stats.n_read_pairs,
+        "excluded": stats.n_excluded,
+        "withheld": {
+            "unpaired": stats.n_withheld_unpaired,
+            "unannotated_splice": stats.n_withheld_unannotated_splice,
+            "off_index": stats.n_withheld_off_index,
+            "chimeric": stats.n_withheld_chimeric,
+        },
+        "unpaired_by_reason": {
+            "missing_mate": stats.n_withheld_unpaired_missing_mate,
+            "reference": stats.n_withheld_unpaired_reference,
+            "strand": stats.n_withheld_unpaired_strand,
+            "outward": stats.n_withheld_unpaired_outward,
+            "length": stats.n_withheld_unpaired_length,
+        },
+        "excluded_by_option": stats.n_excluded_by_option,
+        "placed": {
+            "unique": stats.n_placed_unique,
+            "multimapping": stats.n_placed_multimapping,
+        },
+    }
 
 
-def _strand_fit_summary(strand_models) -> dict:
+def _fragment_summary(stats, index) -> dict:
+    """The fragments: genic and intergenic, the hits rejected by reason, the splice census and the mismatch rate."""
+    rate = stats.mismatch_rate
+    return {
+        "total": stats.n_fragments,
+        "genic": stats.n_fragments - stats.n_intergenic,
+        "intergenic": stats.n_intergenic,
+        "with_annotated_sj": stats.n_with_annotated_sj,
+        # Templates whose NH exceeds the alignments reported for them (a truncated output)
+        "nh_above_reported": stats.n_nh_above_reported,
+        "hits_rejected": {
+            "missing_mate": stats.n_hits_rejected_missing_mate,
+            "reference": stats.n_hits_rejected_reference,
+            "strand": stats.n_hits_rejected_strand,
+            "outward": stats.n_hits_rejected_outward,
+            "length": stats.n_hits_rejected_length,
+            "contradictory": stats.n_hits_rejected_contradictory,
+            "novel_junction": stats.n_hits_rejected_novel_junction,
+            "unsupported": stats.n_hits_rejected_unsupported,
+            "off_index": stats.n_hits_rejected_off_index,
+            "chimeric": stats.n_hits_rejected_chimeric,
+        },
+        "splice": _splice_summary(stats, index),
+        # The library's mismatch rate, read on its unique unspliced hits (their NM over the read bases they align):
+        # the price of a multimapper's hit's mismatches and soft-clipped bases; null with no such hit
+        "mismatch_rate": {
+            "rate": None if rate is None else round(rate, SUMMARY_DECIMALS),
+            "mismatches": stats.n_unique_unspliced_mismatches,
+            "bases": stats.n_unique_unspliced_bases,
+        },
+    }
+
+
+def _splice_summary(stats, index) -> dict:
+    """The splice-type breakdown: the scanner's per-fragment census, which counts every fragment it offers the
+    accumulator (and closes against the accumulator's qc block), plus the blacklist tally. It reports the
+    ``spliced_implicit`` and ``splice_artifact`` classes the ``with_*_sj`` counters omit. The blacklist's size tells
+    "detection off" (no blacklist in the index: 0) from "detection on, 0 artifacts found"."""
+    from .splice import SpliceType, census_field
+
+    blacklist_size = int(index.sj_blacklist_size)
+    census = {
+        "unspliced": SpliceType.UNSPLICED,
+        "spliced_annotated": SpliceType.SPLICED_ANNOT,
+        "spliced_implicit": SpliceType.SPLICED_IMPLICIT,
+        "splice_artifact": SpliceType.SPLICE_ARTIFACT,
+    }
+    return {
+        **{label: int(getattr(stats, census_field(stype))) for label, stype in census.items()},
+        "sj_blacklisted": int(stats.n_sj_blacklisted),
+        "sj_blacklist_size": blacklist_size,
+        "sj_blacklist_loaded": bool(blacklist_size),
+    }
+
+
+def _strand_model_summary(sm) -> dict:
+    """The strand model: the protocol and its specificity from the spliced reads, the junction table behind it, the
+    junction fit (:func:`strand_fit_summary`) and the all-exonic diagnostic."""
+    spliced = sm.exonic_spliced
+    ci_lo, ci_hi = spliced.posterior_95ci()
+    return {
+        "protocol": "R1-sense" if sm.read1_sense else "R1-antisense",
+        "strand_specificity": round(sm.strand_specificity, SUMMARY_DECIMALS),
+        "p_r1_sense": round(sm.p_r1_sense, SUMMARY_DECIMALS),
+        "read1_sense": bool(sm.read1_sense),
+        "n_training_fragments": sm.n_observations,
+        "posterior_variance": _significant(spliced.posterior_variance(), SUMMARY_VARIANCE_DIGITS),
+        "ci_95": [round(ci_lo, SUMMARY_DECIMALS), round(ci_hi, SUMMARY_DECIMALS)],
+        # The per-sj strand table this 2×2 is the marginal of, and the population the junction fit reads κ from.
+        "sj": sm.sj_table.to_dict(),
+        **strand_fit_summary(sm),
+        # The all-exonic (RNA + gDNA) diagnostic model, never used for scoring. A positive ``contamination_gap`` means
+        # unstranded gDNA pulls the all-exonic estimate toward 0.5 relative to the spliced-only model: a sign of gDNA
+        # contamination.
+        "diagnostics": {
+            "exonic_all_specificity": round(sm.exonic.strand_specificity, SUMMARY_DECIMALS),
+            "exonic_all_p_r1_sense": round(sm.exonic.p_r1_sense, SUMMARY_DECIMALS),
+            "exonic_all_n_fragments": sm.exonic.n_observations,
+            "contamination_gap": round(
+                spliced.strand_specificity - sm.exonic.strand_specificity, SUMMARY_DECIMALS
+            ),
+        },
+    }
+
+
+def _significant(x: float, digits: int) -> float:
+    """``x`` rounded to ``digits`` significant digits."""
+    return float(f"{x:.{digits}g}")
+
+
+def strand_fit_summary(strand_models) -> dict:
     """``summary.json``'s view of the junction fit behind κ.
 
     κ, the spliced reads' sense fraction, pooled over every junction and over the junctions the three-class fit
@@ -375,8 +563,7 @@ def _strand_fit_summary(strand_models) -> dict:
     overdispersion, 0 by policy for gDNA and RNA alike, so the channel is binomial. Where the channel is dead the
     classes are not identified and calibration reads the pooled counts (``StrandModel.genuine_n_same``), so the
     genuine κ is the pooled one and there are no class shares."""
-    from .calibration.region_init import strand_discriminability
-    from .calibration.strand_balance import fit_strand_balance
+    from .calibration.strand_balance import fit_strand_balance, strand_discriminability
     from .junction_fit import junction_classes
 
     table = strand_models.sj_table
@@ -407,12 +594,183 @@ def _strand_fit_summary(strand_models) -> dict:
     }
 
 
-def _quantification_pools(
+def _calibration_summary(cal) -> dict | None:
+    """Calibration's library scalars, never a per-region dict."""
+    if cal is None:
+        return None
+    return {
+        # full precision: a density is a few fragments per Mb, which a fixed count of decimals rounds to 0
+        "gdna_density_global": float(cal.gdna_density_global),
+        # calibration's capture answer, which the ruler reads: the gDNA bulk density the capture efficiencies are
+        # read against (None = no gDNA landscape, nothing contracted) and the landscape's saturated level against
+        # that bulk (1 = no level above it)
+        "gdna_bulk_density": (
+            None if cal.gdna_bulk_density is None else float(cal.gdna_bulk_density)
+        ),
+        "gdna_capture_saturation": float(cal.gdna_capture_saturation),
+        "fraction_rna_sense": round(float(cal.rna_sense_frac), SUMMARY_DECIMALS),
+        "n_regions": int(cal.n_regions),
+        "n_boundaries": int(cal.n_boundaries),
+        "n_sj": int(cal.n_sj),
+    }
+
+
+def _series_summary(df, column: str) -> dict[str, float]:
+    """A table column's min, median, 95th percentile and max; zeros when the table is empty or lacks it."""
+    if column not in df.columns or df.empty:
+        return {"min": 0.0, "median": 0.0, "p95": 0.0, "max": 0.0}
+    values = df[column]
+    return {
+        "min": round(float(values.min()), SUMMARY_DECIMALS),
+        "median": round(float(values.median()), SUMMARY_DECIMALS),
+        "p95": round(float(values.quantile(0.95)), SUMMARY_DECIMALS),
+        "max": round(float(values.max()), SUMMARY_DECIMALS),
+    }
+
+
+def _length_tables_summary(tables) -> dict | None:
+    """The EM's two length tables and the decision behind them (`calibration.shared_length_law`): ``weight`` 0 is one
+    shared law for both origins, 1 gDNA's own law brought into RNA's captured frame, continuous between. ``kappa`` is
+    RNA's captured fraction, ``captured`` the capture mixture's fraction, ``contrast`` and ``bound`` the Hellinger
+    distances the weight compares, ``noise`` the squared distance sampling noise alone adds; the three means are the
+    two tables' and gDNA's uncaptured law's, in bp."""
+    if tables is None:
+        return None
+    import numpy as np
+
+    d = tables.decision
+    L = np.arange(tables.rna.size, dtype=np.float64)
+    return {
+        "weight": round(float(d.weight), SUMMARY_DECIMALS),
+        "kappa": round(float(d.kappa), SUMMARY_DECIMALS),
+        "captured": round(float(d.captured), SUMMARY_DECIMALS),
+        "contrast": round(float(d.contrast), SUMMARY_DECIMALS),
+        "bound": round(float(d.bound), SUMMARY_DECIMALS),
+        "noise": round(float(d.noise), SUMMARY_DECIMALS),
+        "rna_table_mean": round(float(tables.rna @ L), SUMMARY_LENGTH_DECIMALS),
+        "gdna_table_mean": round(float(tables.gdna @ L), SUMMARY_LENGTH_DECIMALS),
+        "gdna_uncaptured_mean": round(float(tables.anchor @ L), SUMMARY_LENGTH_DECIMALS),
+    }
+
+
+def fragment_length_report(fl_models):
+    """Split the fragment-length models into a lean summary + a tidy histogram table.
+
+    Returns ``(summary_by_category, histogram_df)`` where
+
+    * ``summary_by_category`` is ``{category: {n_observations, mean, std, median, mode, max_size, overflow_count,
+      overflow_fraction}}`` (:func:`length_summary`) — small, human-readable, destined for ``summary.json`` (no raw
+      per-bin arrays).
+    * ``histogram_df`` is a long ``(category, length, count)`` DataFrame — the raw 1-bp histograms
+      (:func:`length_histogram`), destined for ``fragment_lengths.feather``, which keeps them out of ``summary.json``.
+
+    Every category measures one quantity, the accumulator's ``L``, over a stated population:
+
+    ``global``
+        the unconditional anchor: every deposited fragment, no purity condition.
+    ``gdna`` / ``rna``
+        the two modelled pools, the empirical views of what scoring and calibration actually use.
+    the five ``pool_*`` rows
+        the five pools unaggregated (none is pure). ``gdna`` is the fitted uniform-frame gDNA
+        histogram and ``rna`` the de-tilted ``pool_rna_spliced``; the two ``*_exon`` crossing rows are
+        the on-target gDNA, shown on their own so the off-target / on-target comparison is an output.
+
+    There are no per-splice-type histograms: the scanner measures those by other rules than ``L``. The splice
+    counts come from the scanner's census instead.
+    """
+    import pandas as pd
+
+    models = {
+        "global": fl_models.global_model(),
+        "gdna": fl_models.gdna_model(),
+        "rna": fl_models.rna_model(),
+        **{
+            name: fl_models._empirical(fl_models.pool_counts[i])
+            for i, name in enumerate(_POOL_REPORT_NAMES)
+        },
+    }
+    cats: list = []
+    lengths: list = []
+    counts: list = []
+    for name, model in models.items():
+        bins, values = length_histogram(model)
+        cats += [name] * len(bins)
+        lengths += bins.tolist()
+        counts += values.tolist()
+    histogram_df = pd.DataFrame(
+        {
+            "category": pd.Series(cats, dtype="category"),
+            "length": pd.Series(lengths, dtype="int32"),
+            "count": pd.Series(counts, dtype="float64"),
+        }
+    )
+    return {name: length_summary(model) for name, model in models.items()}, histogram_df
+
+
+def length_summary(model) -> dict:
+    """A length law's statistics as ``summary.json`` reports them. ``mean``, ``std`` and ``mode`` describe the
+    in-range lengths; the right-censored tail (lengths ``>= max_size``) is ``overflow_count`` and
+    ``overflow_fraction``."""
+    total = model.total_weight
+    overflow = model.overflow_count
+    return {
+        "n_observations": int(model.n_observations),
+        "mean": float(round(model.mean, SUMMARY_LENGTH_DECIMALS)),
+        "std": float(round(model.std, SUMMARY_LENGTH_DECIMALS)),
+        "median": float(round(model.median, SUMMARY_LENGTH_DECIMALS)),
+        "mode": int(model.mode),
+        "max_size": int(model.max_size),
+        "overflow_count": float(round(overflow, SUMMARY_COUNT_DECIMALS)),
+        "overflow_fraction": float(round(overflow / total, SUMMARY_DECIMALS)) if total > 0 else 0.0,
+    }
+
+
+def length_histogram(model):
+    """``(lengths, counts)``: a length law's 1-bp histogram, trimmed to its first and last non-empty bins."""
+    import numpy as np
+
+    nonzero = np.flatnonzero(model.counts)
+    if nonzero.size == 0:
+        return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.float64)
+    lo, hi = int(nonzero[0]), int(nonzero[-1]) + 1
+    return np.arange(lo, hi), model.counts[lo:hi]
+
+
+def _quantification_summary(stats, estimator, index, count_annotated: float) -> dict:
+    """The quantification: what was counted and assigned, then the pools (:func:`quantification_pools`)."""
+    is_synthetic = index.t_df["is_synthetic"].to_numpy(dtype=bool)
+    n_nascent = int(is_synthetic.sum())
+    return {
+        # the annotated transcripts, single-exon included; ``n_nascent`` counts the synthetic spans
+        "n_transcripts": int(is_synthetic.size) - n_nascent,
+        "n_nascent": n_nascent,
+        "n_genes": index.num_annotated_genes,
+        "n_loci": len(estimator.locus_results),
+        "n_unambig_assigned": stats.deterministic_unambig_units,
+        "n_em_assigned": (
+            stats.em_routed_unambig_units
+            + stats.em_routed_ambig_same_strand_units
+            + stats.em_routed_ambig_opp_strand_units
+            + stats.em_routed_multimapper_units
+        ),
+        # dropped by a hard scoring gate (an alpha of 0): every candidate failed it, so no pool holds them
+        "n_gated_out": stats.n_gated_out,
+        **quantification_pools(
+            stats,
+            count_annotated,
+            float(estimator.synthetic_count),
+            float(estimator.gdna_em_count),
+            float(estimator.gdna_intergenic_em_count),
+        ),
+    }
+
+
+def quantification_pools(
     stats,
     count_annotated: float,
     count_nascent: float,
     count_gdna_em: float,
-    count_gdna_intergenic_em: float = 0.0,
+    count_gdna_intergenic_em: float,
 ) -> dict:
     """``summary.json``'s pools and their fractions of every fragment counted.
 
@@ -443,408 +801,35 @@ def _quantification_pools(
     }
 
 
-def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
-    """Write quantification tables and summary.json."""
-    import json
+def write_config_yaml(config_yaml_path: Path, args: argparse.Namespace) -> None:
+    """Write a config.yaml that reproduces the run.
 
-    quant_path = output_dir / "quant.feather"
-    gene_quant_path = output_dir / "gene_quant.feather"
-    nascent_quant_path = output_dir / "nascent_quant.feather"
-    loci_path = output_dir / "loci.feather"
-    summary_path = output_dir / "summary.json"
-    fragment_lengths_path = output_dir / "fragment_lengths.feather"
-    calibration_track_path = output_dir / "calibration_track.feather"
-    calibration_bedgraph_path = output_dir / "calibration_track.bedgraph"
-    config_yaml_path = output_dir / "config.yaml"
-    locus_stats_path = output_dir / "locus_stats.feather"
-
-    # A reused output directory keeps no product this run does not write: a quant.tsv from an earlier --tsv run
-    # beside this run's quant.feather would disagree with it silently.
-    estimator = result.estimator
-    stale = []
-    if not getattr(args, "tsv", False):
-        tables = (quant_path, gene_quant_path, nascent_quant_path, loci_path, fragment_lengths_path)
-        stale += [path.with_suffix(".tsv") for path in tables]
-    if not (getattr(args, "emit_locus_stats", False) and estimator.locus_stats):
-        stale.append(locus_stats_path)
-    for path in stale:
-        path.unlink(missing_ok=True)
-
-    # Log stats
-    for key, val in sorted(result.stats.to_dict().items()):
-        if isinstance(val, (int, float)):
-            logging.info(f"  {key}: {val:,}")
-
-    # Write quant tables (Feather v2 + ZSTD compression)
-    quant_df = estimator.get_counts_df(index)
-    gene_quant_df = estimator.get_gene_counts_df(index)
-    nascent_quant_df = estimator.get_nascent_quant_df(index)
-    loci_df = estimator.get_loci_df(index)
-
-    feather_kw = {"compression": "zstd"}
-    quant_df.to_feather(str(quant_path), **feather_kw)
-    gene_quant_df.to_feather(str(gene_quant_path), **feather_kw)
-    nascent_quant_df.to_feather(str(nascent_quant_path), **feather_kw)
-    loci_df.to_feather(str(loci_path), **feather_kw)
-    logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, {nascent_quant_path}, {loci_path}")
-
-    # Write locus-level profiling stats if requested
-    if getattr(args, "emit_locus_stats", False) and estimator.locus_stats:
-        import pandas as _pd
-
-        locus_stats_df = _pd.DataFrame(estimator.locus_stats)
-        locus_stats_df.to_feather(str(locus_stats_path), **feather_kw)
-        logging.info(f"[DONE] Wrote {locus_stats_path} ({len(locus_stats_df)} loci)")
-
-    # Write TSV mirrors if requested
-    if getattr(args, "tsv", False):
-        for df, path in [
-            (quant_df, quant_path),
-            (gene_quant_df, gene_quant_path),
-            (nascent_quant_df, nascent_quant_path),
-            (loci_df, loci_path),
-        ]:
-            df.to_csv(str(path.with_suffix(".tsv")), sep="\t", index=False)
-
-    # Build and write summary.json
-    stats = result.stats
-    sm = result.strand_models
-    count_annotated = float(quant_df["count"].sum())
-    count_nascent = float(estimator.synthetic_count)
-    count_gdna_em = float(estimator.gdna_em_count)
-    is_synthetic = index.t_df["is_synthetic"].to_numpy(dtype=bool)
-    n_nascent = int(is_synthetic.sum())
-
-    def _df_series_summary(df, column: str) -> dict[str, float]:
-        if column not in df.columns or df.empty:
-            return {"min": 0.0, "median": 0.0, "p95": 0.0, "max": 0.0}
-        values = df[column]
-        return {
-            "min": round(float(values.min()), SUMMARY_DECIMALS),
-            "median": round(float(values.median()), SUMMARY_DECIMALS),
-            "p95": round(float(values.quantile(0.95)), SUMMARY_DECIMALS),
-            "max": round(float(values.max()), SUMMARY_DECIMALS),
-        }
-
-    from . import __version__
-
-    # Strand model summary (exonic_spliced only)
-    sm_primary = sm.exonic_spliced
-    ci_lo, ci_hi = sm_primary.posterior_95ci()
-    strand_fit = _strand_fit_summary(sm)
-
-    # Fragment length: per-category statistics go into summary.json, the raw 1-bp histograms into
-    # fragment_lengths.feather. Every category comes from result.fl_models, built from the accumulator payload
-    # alone, all binned at the accumulator's L.
-    fl_models = result.fl_models
-    fl_summary, fl_histogram_df = _fragment_length_report(fl_models)
-
-    # Splice-type breakdown: the scanner's per-fragment census, which counts every fragment it offers the
-    # accumulator (and closes against the accumulator's qc block), plus the blacklist tally. It reports the
-    # ``spliced_implicit`` and ``splice_artifact`` classes the ``with_*_sj`` counters omit.
-    from .splice import SpliceType, census_field
-
-    def _splice_n(stype) -> int:
-        return int(getattr(stats, census_field(stype)))
-
-    # Tells "detection off (no blacklist in the index)" from "detection on, 0 artifacts found";
-    # TranscriptIndex.load always sets the size (0 without a blacklist)
-    bl_size = int(index.sj_blacklist_size)
-    splice_counts = {
-        "unspliced": _splice_n(SpliceType.UNSPLICED),
-        "spliced_annotated": _splice_n(SpliceType.SPLICED_ANNOT),
-        "spliced_implicit": _splice_n(SpliceType.SPLICED_IMPLICIT),
-        "splice_artifact": _splice_n(SpliceType.SPLICE_ARTIFACT),
-        "sj_blacklisted": int(stats.n_sj_blacklisted),
-        "sj_blacklist_size": bl_size,
-        "sj_blacklist_loaded": bool(bl_size),
-    }
-    # The library's mismatch rate, read on its unique unspliced hits (their NM over the read bases they align): the
-    # price of a multimapper's hit's mismatches and soft-clipped bases; null with no such hit
-    rate = stats.mismatch_rate
-    mismatch_rate = {
-        "rate": None if rate is None else round(rate, SUMMARY_DECIMALS),
-        "mismatches": stats.n_unique_unspliced_mismatches,
-        "bases": stats.n_unique_unspliced_bases,
-    }
-
-    # Calibration section — library scalars only, never a per-region dict.
-    cal = getattr(result, "calibration", None)
-    cal_dict = (
-        None
-        if cal is None
-        else {
-            # full precision: a density is a few fragments per Mb, which a fixed count of decimals rounds to 0
-            "gdna_density_global": float(cal.gdna_density_global),
-            # calibration's capture answer, which the ruler reads: the gDNA bulk density the capture
-            # efficiencies are read against (None = no gDNA landscape, nothing contracted) and the
-            # landscape's saturated level against that bulk (1 = no level above it)
-            "gdna_bulk_density": (
-                None if cal.gdna_bulk_density is None else float(cal.gdna_bulk_density)
-            ),
-            "gdna_capture_saturation": float(cal.gdna_capture_saturation),
-            "fraction_rna_sense": round(float(cal.rna_sense_frac), SUMMARY_DECIMALS),
-            "n_regions": int(cal.n_regions),
-            "n_boundaries": int(cal.n_boundaries),
-            "n_sj": int(cal.n_sj),
-        }
-    )
-
-    # Command section — record CLI arguments
-    cmd_params: dict = {
-        "bam_file": str(Path(args.bam_file).resolve()),
-        "index_dir": str(Path(args.index_dir).resolve()),
-        "output_dir": str(output_dir.resolve()),
-    }
-    seen = set()
-    for spec in _PARAM_SPECS:
-        dest = spec.cli_dest
-        if dest in seen:
-            continue
-        seen.add(dest)
-        val = getattr(args, dest, None)
-        if dest == "sj_strand_tag" and not isinstance(val, str):
-            val = list(val) if val else val
-        cmd_params[dest] = val
-
-    summary = {
-        "schema_version": SUMMARY_SCHEMA_VERSION,
-        "rigel_version": __version__,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "command": {
-            "subcommand": "quant",
-            "arguments": cmd_params,
-            "config_file": (
-                str(Path(args.config).resolve()) if getattr(args, "config", None) else None
-            ),
-        },
-        "configuration": result.pipeline_config.to_dict(),
-        "input": {
-            "bam_file": str(Path(args.bam_file).resolve()),
-            "index_dir": str(Path(args.index_dir).resolve()),
-        },
-        # the observable genome every opportunity of the run was read over: the index's mask and where it came from
-        "observable_genome": _observable_genome_summary(index),
-        "alignment_stats": {
-            # Records, each counter every record carrying its flag; ``proper_pairs`` the primary records flagged as a
-            # proper pair
-            "total_reads": stats.total,
-            "mapped_reads": stats.total - stats.unmapped,
-            "unmapped_reads": stats.unmapped,
-            "secondary_reads": stats.secondary,
-            "supplementary_reads": stats.supplementary,
-            "proper_pairs": stats.proper_pair,
-            "duplicate_reads": stats.duplicate,
-            "qc_fail_reads": stats.qc_fail,
-            # One status per record, summing to ``total_reads``: filtered (unmapped, QC-failed or a skipped
-            # duplicate), used (a usable alignment's), unused (in a placed read pair, in no usable alignment), or
-            # unplaced (in a read pair withheld or excluded by the multimap option)
-            "records": {
-                "filtered": stats.filtered,
-                "used": stats.n_records_used,
-                "unused": stats.n_records_unused,
-                "unplaced": stats.n_records_unplaced,
-            },
-            # Each spliced record's junction-strand tag, read on that record: given a strand, given none,
-            # or ambiguous because its XS and ts disagree; ``invalid`` counts the tag values that were
-            # neither '+' nor '-', each read as absent.
-            "sj_strand_tag": {
-                "tagged": stats.n_sj_tag_tagged,
-                "untagged": stats.n_sj_tag_untagged,
-                "conflicting": stats.n_sj_tag_conflicting,
-                "invalid": stats.n_sj_tag_invalid,
-            },
-            # NM and NH on each record: ``missing`` without the tag, ``invalid`` holding it as anything but an
-            # integer, each read as absent (NM 0, NH 1); ``conflicting`` counts the alignments whose records
-            # disagree on NM, each read with the larger
-            "nm_tag": {
-                "missing": stats.n_nm_tag_missing,
-                "invalid": stats.n_nm_tag_invalid,
-                "conflicting": stats.n_nm_conflicting,
-            },
-            "nh_tag": {"missing": stats.n_nh_tag_missing, "invalid": stats.n_nh_tag_invalid},
-        },
-        # One outcome per read pair (a run of records sharing a name), summing to ``total``: excluded (every record
-        # filtered), withheld with no usable alignment by reason (an unpaired one also by the furthest check any of its
-        # alignments reached), excluded by the multimap option, or placed, unique or multimapping
-        "read_pairs": {
-            "total": stats.n_read_pairs,
-            "excluded": stats.n_excluded,
-            "withheld": {
-                "unpaired": stats.n_withheld_unpaired,
-                "unannotated_splice": stats.n_withheld_unannotated_splice,
-                "off_index": stats.n_withheld_off_index,
-                "chimeric": stats.n_withheld_chimeric,
-            },
-            "unpaired_by_reason": {
-                "missing_mate": stats.n_withheld_unpaired_missing_mate,
-                "reference": stats.n_withheld_unpaired_reference,
-                "strand": stats.n_withheld_unpaired_strand,
-                "outward": stats.n_withheld_unpaired_outward,
-                "length": stats.n_withheld_unpaired_length,
-            },
-            "excluded_by_option": stats.n_excluded_by_option,
-            "placed": {
-                "unique": stats.n_placed_unique,
-                "multimapping": stats.n_placed_multimapping,
-            },
-        },
-        "fragment_stats": {
-            "total": stats.n_fragments,
-            "genic": stats.n_fragments - stats.n_intergenic,
-            "intergenic": stats.n_intergenic,
-            "with_annotated_sj": stats.n_with_annotated_sj,
-            # Templates whose NH exceeds the alignments reported for them (a truncated output)
-            "nh_above_reported": stats.n_nh_above_reported,
-            "hits_rejected": {
-                "missing_mate": stats.n_hits_rejected_missing_mate,
-                "reference": stats.n_hits_rejected_reference,
-                "strand": stats.n_hits_rejected_strand,
-                "outward": stats.n_hits_rejected_outward,
-                "length": stats.n_hits_rejected_length,
-                "contradictory": stats.n_hits_rejected_contradictory,
-                "novel_junction": stats.n_hits_rejected_novel_junction,
-                "unsupported": stats.n_hits_rejected_unsupported,
-                "off_index": stats.n_hits_rejected_off_index,
-                "chimeric": stats.n_hits_rejected_chimeric,
-            },
-            "splice": splice_counts,
-            "mismatch_rate": mismatch_rate,
-        },
-        "strand_model": {
-            "protocol": "R1-sense" if sm.read1_sense else "R1-antisense",
-            "strand_specificity": round(sm.strand_specificity, SUMMARY_DECIMALS),
-            "p_r1_sense": round(sm.p_r1_sense, SUMMARY_DECIMALS),
-            "read1_sense": bool(sm.read1_sense),
-            "n_training_fragments": sm.n_observations,
-            "posterior_variance": _significant(
-                sm_primary.posterior_variance(), SUMMARY_VARIANCE_DIGITS
-            ),
-            "ci_95": [round(ci_lo, SUMMARY_DECIMALS), round(ci_hi, SUMMARY_DECIMALS)],
-            # The per-sj strand table this 2×2 is the marginal of, and the population
-            # the junction fit reads κ from.
-            "sj": sm.sj_table.to_dict(),
-            **strand_fit,
-            # The all-exonic (RNA + gDNA) diagnostic model, never used for scoring. A positive
-            # ``contamination_gap`` means unstranded gDNA pulls the all-exonic estimate toward 0.5 relative to the
-            # spliced-only model: a sign of gDNA contamination.
-            "diagnostics": {
-                "exonic_all_specificity": round(sm.exonic.strand_specificity, SUMMARY_DECIMALS),
-                "exonic_all_p_r1_sense": round(sm.exonic.p_r1_sense, SUMMARY_DECIMALS),
-                "exonic_all_n_fragments": sm.exonic.n_observations,
-                "contamination_gap": round(
-                    sm.exonic_spliced.strand_specificity - sm.exonic.strand_specificity,
-                    SUMMARY_DECIMALS,
-                ),
-            },
-        },
-        "calibration": cal_dict,
-        "gdna_em_effective_length": _df_series_summary(loci_df, "gdna_em_effective_length"),
-        "fragment_length": fl_summary,
-        "length_tables": _length_tables_summary(result.length_tables),
-        "quantification": {
-            # the annotated transcripts, single-exon included; ``n_nascent`` counts the synthetic spans
-            "n_transcripts": int(is_synthetic.size) - n_nascent,
-            "n_nascent": n_nascent,
-            "n_genes": index.num_annotated_genes,
-            "n_loci": len(estimator.locus_results),
-            "n_unambig_assigned": stats.deterministic_unambig_units,
-            "n_em_assigned": (
-                stats.em_routed_unambig_units
-                + stats.em_routed_ambig_same_strand_units
-                + stats.em_routed_ambig_opp_strand_units
-                + stats.em_routed_multimapper_units
-            ),
-            # dropped by a hard scoring gate (an alpha of 0): every candidate failed it, so no pool holds them
-            "n_gated_out": stats.n_gated_out,
-            **_quantification_pools(
-                stats,
-                count_annotated,
-                count_nascent,
-                count_gdna_em,
-                float(estimator.gdna_intergenic_em_count),
-            ),
-        },
-    }
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
-    logging.info(f"[DONE] Summary written to {summary_path}")
-
-    # The raw fragment-length histograms, long form: one (category, length, count) row per 1-bp bin
-    fl_histogram_df.to_feather(str(fragment_lengths_path), **feather_kw)
-    if getattr(args, "tsv", False):
-        fl_histogram_df.to_csv(
-            str(fragment_lengths_path.with_suffix(".tsv")), sep="\t", index=False
-        )
-    logging.info(f"[DONE] Wrote {fragment_lengths_path} ({len(fl_histogram_df)} rows)")
-
-    # The genome-wide gDNA track, calibration's per-region gDNA level: a Feather (the report's input) and a
-    # bedGraph (for a genome browser)
-    track = getattr(result, "calibration_track", None)
-    if track is not None and len(track) > 0:
-        from .calibration.track import write_bedgraph
-
-        track.to_feather(str(calibration_track_path), **feather_kw)
-        write_bedgraph(track, calibration_bedgraph_path)
-        logging.info(
-            f"[DONE] Wrote {calibration_track_path} + {calibration_bedgraph_path.name} "
-            f"({len(track)} regions)"
-        )
-
-    # Write config.yaml — reproducible run configuration
-    _write_config_yaml(config_yaml_path, args, result.pipeline_config)
-
-
-def _write_config_yaml(
-    config_yaml_path: Path, args: argparse.Namespace, pipeline_config=None
-) -> None:
-    """Write a config.yaml that can reproduce the current run.
-
-    The file uses the same key format accepted by ``--config``, so a user
-    can rerun with::
+    The file uses the keys ``--config`` accepts, every path absolute, so a user can rerun it from any directory::
 
         rigel quant --config results/config.yaml
 
-    With the run's ``pipeline_config`` the junction-strand tag is the one the scan read with, not ``auto``.
+    The junction-strand tag is the one the run read with, as the list the CLI takes.
     """
     import yaml
 
     from . import __version__
 
-    data: dict = {}
+    data: dict = {
+        key: str(Path(getattr(args, key)).resolve())
+        for key in ("bam_file", "index_dir", "output_dir")
+        if getattr(args, key) is not None
+    }
     quant: dict = {}
-
-    # I/O paths (resolved to absolute)
-    for key in ("bam_file", "index_dir", "output_dir"):
-        val = getattr(args, key, None)
-        if val is not None:
-            data[key] = str(Path(val).resolve())
-
-    # All tunable parameters from the declarative registry
-    seen: set[str] = set()
-    for spec in _PARAM_SPECS:
-        dest = spec.cli_dest
-        if dest in seen:
-            continue
-        seen.add(dest)
-        val = getattr(args, dest, None)
-        # Paths absolute, as the I/O paths above, so the config reruns from any directory
+    for dest in _OPTION_DESTS:
+        val = getattr(args, dest)
         if dest in ("annotated_bam", "tmpdir") and val is not None:
-            val = Path(val).resolve()
-        # Normalise types for clean YAML serialisation
-        if isinstance(val, Path):
-            val = str(val)
-        elif isinstance(val, tuple):
-            val = list(val)
+            val = str(Path(val).resolve())
+        elif dest == "sj_strand_tag":
+            tags = _cli_to_config(val, "sj_tag")
+            val = list(tags) if isinstance(tags, tuple) else tags.split(",")
         quant[dest] = val
-
-    if pipeline_config is not None:
-        tags = pipeline_config.scan.sj_strand_tag
-        quant["sj_strand_tag"] = list(tags) if isinstance(tags, (list, tuple)) else tags.split(",")
     data["quant"] = quant
-
-    # Extra flags not in _PARAM_SPECS
-    data["tsv"] = bool(getattr(args, "tsv", False))
+    data["tsv"] = bool(args.tsv)
 
     header = (
         f"# Rigel run configuration\n"
@@ -856,15 +841,13 @@ def _write_config_yaml(
     )
     with open(config_yaml_path, "w") as f:
         f.write(header)
-        yaml.dump(
-            data,
-            f,
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-        )
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
     logging.info(f"[DONE] Config written to {config_yaml_path}")
 
+
+# ---------------------------------------------------------------------------
+# rigel sim, export and report
+# ---------------------------------------------------------------------------
 
 #: The read-model keys a ``rigel sim`` scenario passes to ``ReadSimConfig``.
 _SIM_READ_KEYS = ("frag_mean", "frag_std", "frag_min", "frag_max", "read_length", "error_rate")
@@ -912,8 +895,8 @@ def _read_sim_scenario(path) -> dict:
 
 
 def sim_command(args: argparse.Namespace) -> int:
-    """Run the ``rigel sim`` subcommand."""
-    from .sim import Scenario, ReadSimConfig
+    """Run the ``rigel sim`` subcommand; a scenario's YAML value wins over the command-line flag of its name."""
+    from .sim import ReadSimConfig, Scenario
 
     try:
         cfg = _read_sim_scenario(args.config)
@@ -922,34 +905,24 @@ def sim_command(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    genome_length = cfg.get("genome_length", args.genome_length)
     seed = cfg.get("seed", args.seed)
-    ref_name = cfg.get("ref_name", "chr1")
-
     sim_config = ReadSimConfig(**{k: cfg[k] for k in _SIM_READ_KEYS if k in cfg}, seed=seed)
-
     sc = Scenario(
         name=cfg.get("name", "scenario"),
-        genome_length=genome_length,
+        genome_length=cfg.get("genome_length", args.genome_length),
         seed=seed,
         work_dir=output_dir,
-        ref_name=ref_name,
+        ref_name=cfg.get("ref_name", "chr1"),
     )
-
-    # Add genes from config
     for gene in cfg["genes"]:
+        # a gene's optional keys are passed only when given, so the simulator's own defaults stand
         sc.add_gene(
             gene_id=gene["gene_id"],
             strand=gene["strand"],
             transcripts=gene["transcripts"],
-            gene_name=gene.get("gene_name"),
-            gene_type=gene.get("gene_type", "protein_coding"),
+            **{key: gene[key] for key in ("gene_name", "gene_type") if key in gene},
         )
-
-    result = sc.build(
-        n_fragments=cfg.get("n_fragments", args.num_reads),
-        sim_config=sim_config,
-    )
+    result = sc.build(n_fragments=cfg.get("n_fragments", args.num_reads), sim_config=sim_config)
 
     logging.info(f"Scenario artifacts written to {output_dir}")
     logging.info(f"  FASTA: {result.fasta_path}")
@@ -999,20 +972,15 @@ def report_command(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Declarative CLI ↔ config registry
+# The quant options ↔ PipelineConfig registry
 # ---------------------------------------------------------------------------
 #
-# _PARAM_SPECS is the single mapping from argparse dest names to config
-# dataclass fields.  Adding a new tuneable parameter requires:
-#   1. Add the dataclass field in config.py
-#   2. Add the argparse argument below in build_parser()
-#   3. Add a _ParamSpec entry here
-# Everything else (_build_quant_defaults, _build_pipeline_config,
-# _write_config_yaml, and the summary loop in _write_quant_outputs) is driven by this registry.
+# A new tunable needs its config field (config.py), its option (the _add_quant_*_options builders) and a ParamSpec
+# row below; its default, the config the run reads, summary.json's arguments and config.yaml all follow from the row.
 
 
-@_dataclass(frozen=True)
-class _ParamSpec:
+@dataclass(frozen=True)
+class ParamSpec:
     """Maps a CLI argparse dest to a config dataclass field."""
 
     cli_dest: str  # argparse dest, e.g. "em_iterations"
@@ -1022,47 +990,46 @@ class _ParamSpec:
     )
 
 
-_PARAM_SPECS: tuple[_ParamSpec, ...] = (
+PARAM_SPECS: tuple[ParamSpec, ...] = (
     # -- EMConfig: direct mappings --
-    _ParamSpec("seed", "em.seed"),
-    _ParamSpec("em_iterations", "em.iterations"),
-    _ParamSpec("em_convergence_delta", "em.convergence_delta"),
-    _ParamSpec("assignment_mode", "em.assignment_mode"),
-    _ParamSpec("em_mode", "em.mode"),
+    ParamSpec("seed", "em.seed"),
+    ParamSpec("em_iterations", "em.iterations"),
+    ParamSpec("em_convergence_delta", "em.convergence_delta"),
+    ParamSpec("assignment_mode", "em.assignment_mode"),
+    ParamSpec("em_mode", "em.mode"),
     # -- BamScanConfig: direct --
-    _ParamSpec("include_multimap", "scan.include_multimap"),
-    _ParamSpec("intron_overhang_tolerance", "scan.intron_overhang_tolerance"),
-    _ParamSpec("scan_bgzf_threads", "scan.bgzf_threads"),
-    _ParamSpec("scan_fragments_per_chunk", "scan.fragments_per_chunk"),
-    _ParamSpec("scan_read_name_batch_size", "scan.read_name_batch_size"),
+    ParamSpec("include_multimap", "scan.include_multimap"),
+    ParamSpec("intron_overhang_tolerance", "scan.intron_overhang_tolerance"),
+    ParamSpec("scan_bgzf_threads", "scan.bgzf_threads"),
+    ParamSpec("scan_fragments_per_chunk", "scan.fragments_per_chunk"),
+    ParamSpec("scan_read_name_batch_size", "scan.read_name_batch_size"),
     # -- BamScanConfig: transformed --
-    _ParamSpec("keep_duplicates", "scan.skip_duplicates", "invert_bool"),
-    _ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
-    _ParamSpec("tmpdir", "scan.spill_dir", "path_or_none"),
-    # -- FragmentScoringConfig: transformed --
-    _ParamSpec("overhang_alpha", "scoring.overhang_alpha"),
-    _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
+    ParamSpec("keep_duplicates", "scan.skip_duplicates", "invert_bool"),
+    ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
+    ParamSpec("tmpdir", "scan.spill_dir", "path_or_none"),
+    # -- FragmentScoringConfig --
+    ParamSpec("overhang_alpha", "scoring.overhang_alpha"),
+    ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig: advanced --
-    _ParamSpec("calib_refit_iters", "calibration.calib_refit_iters"),
-    _ParamSpec("sweep_block_slots", "calibration.sweep_block_slots"),
+    ParamSpec("calib_refit_iters", "calibration.calib_refit_iters"),
+    ParamSpec("sweep_block_slots", "calibration.sweep_block_slots"),
     # -- Fan-out: total threads → the EM's, the scan's and calibration's budgets --
-    _ParamSpec("threads", "em.n_threads"),
-    _ParamSpec("threads", "scan.total_threads"),
-    _ParamSpec("threads", "calibration.n_threads"),
+    ParamSpec("threads", "em.n_threads"),
+    ParamSpec("threads", "scan.total_threads"),
+    ParamSpec("threads", "calibration.n_threads"),
     # -- BamScanConfig: buffer sizing --
-    _ParamSpec("scan_buffer_size", "scan.buffer_size_bytes", "gb_to_bytes"),
+    ParamSpec("scan_buffer_size", "scan.buffer_size_bytes", "gb_to_bytes"),
     # -- Top-level PipelineConfig --
-    _ParamSpec("annotated_bam", "annotated_bam_path"),
-    _ParamSpec("emit_locus_stats", "emit_locus_stats"),
+    ParamSpec("annotated_bam", "annotated_bam_path"),
+    ParamSpec("emit_locus_stats", "emit_locus_stats"),
 )
 
+#: Each tunable option once, in table order: ``threads`` fans out to three config fields but is one option.
+_OPTION_DESTS: tuple[str, ...] = tuple(dict.fromkeys(spec.cli_dest for spec in PARAM_SPECS))
 
-def _resolve_config_path(cfg: object, path: str) -> object:
-    """Follow a dotted path like ``'em.iterations'`` on a config object."""
-    obj = cfg
-    for attr in path.split("."):
-        obj = getattr(obj, attr)
-    return obj
+#: The keys a ``--config`` YAML may set besides the tunable options, each with the value it takes when neither the
+#: command line nor the YAML sets it.
+_CONFIG_FILE_KEYS = {"bam_file": None, "index_dir": None, "output_dir": None, "tsv": False}
 
 
 def _config_to_cli(val: object, transform: str) -> object:
@@ -1097,27 +1064,67 @@ def _cli_to_config(val: object, transform: str) -> object:
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
-# ---------------------------------------------------------------------------
-# YAML config / CLI merge helpers
-# ---------------------------------------------------------------------------
-
-
-def _build_quant_defaults() -> dict:
-    """Build quant subcommand defaults from config dataclasses.
-
-    Single source of truth: all default values derived from the frozen
-    dataclasses in ``config.py`` via the ``_PARAM_SPECS`` registry.
-    """
+def build_quant_defaults() -> dict:
+    """Every tunable option's default, read off ``PipelineConfig()`` through ``PARAM_SPECS``, so the config
+    dataclasses are the one source of every default; a fanned-out option takes its first field's."""
     from .config import PipelineConfig
 
     cfg = PipelineConfig()
     defaults: dict = {}
-    for spec in _PARAM_SPECS:
+    for spec in PARAM_SPECS:
         if spec.cli_dest in defaults:
-            continue  # skip fan-out duplicates (e.g. threads)
-        val = _resolve_config_path(cfg, spec.config_path)
+            continue
+        val = cfg
+        for attr in spec.config_path.split("."):
+            val = getattr(val, attr)
         defaults[spec.cli_dest] = _config_to_cli(val, spec.transform)
     return defaults
+
+
+# ---------------------------------------------------------------------------
+# The --config YAML: CLI > YAML > defaults
+# ---------------------------------------------------------------------------
+
+
+def resolve_quant_args(args: argparse.Namespace, defaults: dict) -> None:
+    """Fill every option in place: an explicit CLI flag wins, then the ``--config`` YAML, then *defaults*.
+
+    Every overridable argparse default is ``None``, so a non-``None`` value on *args* is one the user gave on the
+    command line.
+    """
+    yaml_config = _read_config_file(args.config, defaults) if args.config else {}
+    for key, default_val in {**_CONFIG_FILE_KEYS, **defaults}.items():
+        if getattr(args, key) is not None:
+            continue  # CLI wins
+        yaml_val = yaml_config.get(key)
+        setattr(args, key, default_val if yaml_val is None else yaml_val)
+
+
+def _read_config_file(config_path, defaults: dict) -> dict:
+    """A ``--config`` YAML's keys and values: hyphens read as underscores, a ``quant:`` block's keys under the
+    top-level ones, and a key that is neither an option nor one of ``_CONFIG_FILE_KEYS`` refused."""
+    import yaml
+
+    with open(config_path) as fh:
+        text = fh.read()
+    raw = yaml.safe_load(text) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{config_path} must hold a mapping of keys to values, not a {type(raw).__name__}"
+        )
+    raw_normalized = {k.replace("-", "_"): v for k, v in raw.items()}
+    quant_block = raw_normalized.pop("quant", None)
+    yaml_config: dict = {}
+    if quant_block is not None:
+        if not isinstance(quant_block, dict):
+            raise ValueError("quant config block must be a mapping.")
+        yaml_config.update({str(k).replace("-", "_"): v for k, v in quant_block.items()})
+    yaml_config.update(raw_normalized)
+    valid_keys = set(defaults) | set(_CONFIG_FILE_KEYS)
+    unknown = set(yaml_config) - valid_keys
+    if unknown:
+        raise ValueError(_unknown_config_keys(config_path, text, unknown, valid_keys))
+    return yaml_config
 
 
 def _unknown_config_keys(config_path, text: str, unknown: set, valid_keys: set) -> str:
@@ -1140,70 +1147,6 @@ def _unknown_config_keys(config_path, text: str, unknown: set, valid_keys: set) 
     return message
 
 
-def _resolve_quant_args(
-    args: argparse.Namespace,
-    defaults: dict,
-) -> None:
-    """Merge CLI arguments, YAML config file, and hardcoded defaults.
-
-    Priority (highest → lowest):
-        1. Explicit CLI flags
-        2. Values from the ``--config`` YAML file
-        3. Hardcoded *defaults*
-
-    Detection of "explicitly set on CLI" relies on all overridable
-    argparse defaults being ``None``.  A non-None ``getattr(args, key)``
-    means the user provided it on the command line.
-
-    The *args* namespace is modified **in place**.
-    """
-    import yaml
-
-    yaml_config: dict = {}
-    config_path = getattr(args, "config", None)
-    if config_path:
-        with open(config_path) as fh:
-            text = fh.read()
-        raw = yaml.safe_load(text) or {}
-        if not isinstance(raw, dict):
-            raise ValueError(
-                f"{config_path} must hold a mapping of keys to values, not a {type(raw).__name__}"
-            )
-        # Normalise: allow hyphens, convert to underscores
-        raw_normalized = {k.replace("-", "_"): v for k, v in raw.items()}
-        quant_block = raw_normalized.pop("quant", None)
-        yaml_config = {}
-        if quant_block is not None:
-            if not isinstance(quant_block, dict):
-                raise ValueError("quant config block must be a mapping.")
-            yaml_config.update({str(k).replace("-", "_"): v for k, v in quant_block.items()})
-        yaml_config.update(raw_normalized)
-        # I/O keys and extra flags are valid in config YAML
-        valid_keys = set(defaults) | {"bam_file", "index_dir", "output_dir", "tsv"}
-        unknown = set(yaml_config) - valid_keys
-        if unknown:
-            raise ValueError(_unknown_config_keys(config_path, text, unknown, valid_keys))
-
-    # Populate I/O args and extra flags from YAML when not set on CLI
-    for io_key in ("bam_file", "index_dir", "output_dir", "tsv"):
-        cli_val = getattr(args, io_key, None)
-        if cli_val is not None:
-            continue
-        yaml_val = yaml_config.get(io_key)
-        if yaml_val is not None:
-            setattr(args, io_key, yaml_val)
-
-    for key, default_val in defaults.items():
-        cli_val = getattr(args, key, None)
-        if cli_val is not None:
-            continue  # CLI wins
-        yaml_val = yaml_config.get(key)
-        if yaml_val is not None:
-            setattr(args, key, yaml_val)
-        else:
-            setattr(args, key, default_val)
-
-
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -1211,38 +1154,27 @@ def _resolve_quant_args(
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level argument parser with all subcommands."""
-    from .config import CONSTANTS, IndexConfig
-
-    # Every default a help string names is read from the config, never restated here.
-    qd = _build_quant_defaults()
-
-    def yes_no(flag: bool) -> str:
-        return "yes" if flag else "no"
-
     parser = argparse.ArgumentParser(
         prog="rigel",
         description="rigel: Bayesian RNA-seq fragment abundance estimation",
     )
+    parser.add_argument("--version", action="version", version=get_version())
     parser.add_argument(
-        "--version",
-        action="version",
-        version=get_version(),
+        "-v", "--verbose", action="store_true", help="Enable verbose (DEBUG-level) logging"
     )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        default=False,
-        help="Enable verbose (DEBUG-level) logging",
-    )
-
     subparsers = parser.add_subparsers(dest="command", required=True)
+    _add_index_parser(subparsers)
+    _add_quant_parser(subparsers)
+    _add_sim_parser(subparsers)
+    _add_export_parser(subparsers)
+    _add_report_parser(subparsers)
+    return parser
 
-    # --- INDEX ---------------------------------------------------------------
-    idx = subparsers.add_parser(
-        "index",
-        help="Build reference index from FASTA + GTF",
-    )
+
+def _add_index_parser(subparsers) -> None:
+    from .config import IndexConfig
+
+    idx = subparsers.add_parser("index", help="Build reference index from FASTA + GTF")
     idx.add_argument(
         "--fasta",
         dest="fasta_file",
@@ -1255,30 +1187,21 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Gene annotation GTF file (GENCODE recommended)",
     )
-    idx.add_argument(
-        "-o",
-        "--output-dir",
-        dest="output_dir",
-        required=True,
-        help="Output directory for index files",
-    )
+    idx.add_argument("-o", "--output-dir", required=True, help="Output directory for index files")
     idx.add_argument(
         "--feather-compression",
-        dest="feather_compression",
         default=IndexConfig.feather_compression,
         choices=["lz4", "zstd", "uncompressed"],
         help="Compression for Feather files (default: %(default)s)",
     )
     idx.add_argument(
         "--no-tsv",
-        dest="no_tsv",
         action="store_true",
         default=not IndexConfig.write_tsv,
         help="Skip writing human-readable TSV mirror files",
     )
     idx.add_argument(
         "--gtf-parse-mode",
-        dest="gtf_parse_mode",
         default=IndexConfig.gtf_parse_mode,
         choices=["strict", "warn-skip"],
         help=(
@@ -1288,7 +1211,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     idx.add_argument(
         "--collapse-duplicate-transcripts",
-        dest="collapse_duplicate_transcripts",
         action="store_true",
         default=IndexConfig.collapse_duplicate_transcripts,
         help=(
@@ -1303,7 +1225,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     idx.add_argument(
         "--nascent-tolerance",
-        dest="nascent_tolerance",
         type=int,
         default=IndexConfig.nascent_tolerance,
         help=(
@@ -1313,8 +1234,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     idx.add_argument(
         "--alignable-zarr",
-        dest="alignable_zarr",
-        default=None,
         help=(
             "Path to an alignable Zarr store built for the same genome+aligner. "
             "Provides the splice-junction artifact blacklist (for filtering "
@@ -1325,9 +1244,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     idx.add_argument(
         "--no-mappability",
-        dest="no_mappability",
         action="store_true",
-        default=False,
         help=(
             "Explicitly opt out of the alignable store: no splice blacklist, and the "
             "unobservable genome is the FASTA's N runs alone. Use this for synthetic "
@@ -1337,7 +1254,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     idx.add_argument(
         "--splice-blacklist-min-count",
-        dest="splice_blacklist_min_count",
         type=int,
         default=IndexConfig.splice_blacklist_min_count,
         help=(
@@ -1350,209 +1266,181 @@ def build_parser() -> argparse.ArgumentParser:
     )
     idx.set_defaults(func=index_command)
 
-    # --- QUANT ---------------------------------------------------------------
-    quant_parser = subparsers.add_parser(
+
+def _add_quant_parser(subparsers) -> None:
+    """``rigel quant``'s options, by group. Every overridable default is ``None``, so ``resolve_quant_args`` can tell
+    a flag the user gave from one the YAML or the config supplies; every default a help string names is read from the
+    config, never restated here."""
+    quant = subparsers.add_parser(
         "quant",
         help="Single-pass BAM scan and Bayesian transcript abundance estimation",
     )
+    defaults = build_quant_defaults()
+    _add_quant_io_options(quant.add_argument_group("input / output"))
+    _add_quant_alignment_options(quant.add_argument_group("alignment options"), defaults)
+    _add_quant_model_options(quant.add_argument_group("model parameters"), defaults)
+    _add_quant_performance_options(quant.add_argument_group("performance"), defaults)
+    _add_quant_advanced_options(quant.add_argument_group("advanced options"), defaults)
+    quant.set_defaults(func=quant_command)
 
-    # -- Input / Output -------------------------------------------------------
-    io_grp = quant_parser.add_argument_group("input / output")
-    io_grp.add_argument(
+
+def _yes_no(flag: bool) -> str:
+    return "yes" if flag else "no"
+
+
+def _add_quant_io_options(grp) -> None:
+    grp.add_argument(
         "--bam",
         dest="bam_file",
-        default=None,
         help="Name-sorted or collated paired-end BAM file. STAR and minimap2 "
         "are supported. A read pair's multiplicity is its usable alignments; "
         "the NH tag is read only to find a truncated output.",
     )
-    io_grp.add_argument(
+    grp.add_argument(
         "--index",
         dest="index_dir",
-        default=None,
         help="Directory containing rigel index files (from 'rigel index').",
     )
-    io_grp.add_argument(
-        "-o",
-        "--output-dir",
-        dest="output_dir",
-        default=None,
-        help="Output directory for quantification results.",
-    )
-    io_grp.add_argument(
+    grp.add_argument("-o", "--output-dir", help="Output directory for quantification results.")
+    grp.add_argument(
         "--config",
-        dest="config",
-        default=None,
         help="YAML configuration file. Accepts the same keys as CLI "
         "options (with underscores). CLI flags override config file "
         "values. A config.yaml is written to the output directory "
         "after each run for easy reproducibility.",
     )
-    io_grp.add_argument(
+    grp.add_argument(
         "--annotated-bam",
-        dest="annotated_bam",
-        default=None,
         help="Write an annotated BAM with per-fragment assignment tags "
         "(ZT, ZG, ZR, ZI, ZJ, ZF, ZW, ZC, ZH, ZN, ZS, ZL, ZB) to this path. "
         "Requires a second pass over the BAM.",
     )
-    io_grp.add_argument(
+    grp.add_argument(
         "--tsv",
-        dest="tsv",
         action=argparse.BooleanOptionalAction,
-        default=None,
         help="Also write TSV (.tsv) mirrors of quant tables (default: no).",
     )
 
-    # -- Alignment options ----------------------------------------------------
-    aln_grp = quant_parser.add_argument_group("alignment options")
-    aln_grp.add_argument(
+
+def _add_quant_alignment_options(grp, qd: dict) -> None:
+    grp.add_argument(
         "--include-multimap",
-        dest="include_multimap",
         action=argparse.BooleanOptionalAction,
-        default=None,
         help="Include read pairs with more than one usable alignment "
-        f"(default: {yes_no(qd['include_multimap'])}). Off, each is excluded, counted in summary.json and "
+        f"(default: {_yes_no(qd['include_multimap'])}). Off, each is excluded, counted in summary.json and "
         "written to the annotated BAM as dropped.",
     )
-    aln_grp.add_argument(
+    grp.add_argument(
         "--keep-duplicates",
-        dest="keep_duplicates",
         action=argparse.BooleanOptionalAction,
-        default=None,
-        help=f"Keep reads marked as PCR/optical duplicates (default: {yes_no(qd['keep_duplicates'])}).",
+        help=f"Keep reads marked as PCR/optical duplicates (default: {_yes_no(qd['keep_duplicates'])}).",
     )
-    aln_grp.add_argument(
+    grp.add_argument(
         "--sj-strand-tag",
-        dest="sj_strand_tag",
         nargs="+",
-        default=None,
         help=f"BAM tag(s) for splice-junction strand (default: {' '.join(qd['sj_strand_tag'])}). "
         "'auto' reads XS and minimap2's ts on every spliced record; when both are present and disagree, the "
         "junction's strand is ambiguous. Name 'XS' (HISAT2, or STAR with --outSAMstrandField intronMotif) or "
         "'ts' (minimap2) to read only that tag, or list two to check in order (e.g. XS ts).",
     )
 
-    # -- Model parameters -----------------------------------------------------
-    model_grp = quant_parser.add_argument_group("model parameters")
-    model_grp.add_argument(
+
+def _add_quant_model_options(grp, qd: dict) -> None:
+    grp.add_argument(
         "--seed",
-        dest="seed",
         type=int,
-        default=None,
         help=f"Seed of the sampled assignment's draw (default: {qd['seed']}); another seed is another draw from "
         "the same posterior.",
     )
-    model_grp.add_argument(
+    grp.add_argument(
         "--em-iterations",
-        dest="em_iterations",
         type=int,
-        default=None,
         help=f"EM iteration budget (default: {qd['em_iterations']}). The EM runs accelerated (SQUAREM) steps of "
         "three EM updates each, up to a third of this budget, until it converges. At least one "
         "step always runs, so 0 does not skip the EM: every fragment is still assigned.",
     )
-    model_grp.add_argument(
+    grp.add_argument(
         "--em-mode",
-        dest="em_mode",
         choices=["vbem", "map"],
-        default=None,
         help=f"EM algorithm variant (default: {qd['em_mode']}). "
         "'vbem' uses Variational Bayes EM with digamma-based soft "
         "updates. 'map' uses MAP-EM: each step adds the calibration's gDNA and RNA "
         "pseudocounts to the components' fragment counts and normalises.",
     )
-    model_grp.add_argument(
+    grp.add_argument(
         "--assignment-mode",
-        dest="assignment_mode",
         choices=["sample", "fractional"],
-        default=None,
         help=f"Post-EM fragment assignment (default: {qd['assignment_mode']}). 'sample' gives every fragment to one "
         "transcript: each transcript's fractional count is rounded within its locus, then each fragment "
         "is drawn from its own posterior toward the transcripts still short of their count. "
         "'fractional' keeps each fragment's posterior weights.",
     )
 
-    # -- Performance ----------------------------------------------------------
-    perf_grp = quant_parser.add_argument_group("performance")
-    perf_grp.add_argument(
+
+def _add_quant_performance_options(grp, qd: dict) -> None:
+    from .config import CONSTANTS
+
+    grp.add_argument(
         "--threads",
-        dest="threads",
         type=int,
-        default=None,
         help=f"Total thread budget for Rigel (default: {qd['threads']} = all available "
         "cores). During BAM scan, this budget is split between scan "
         "workers and --scan-bgzf-threads; locus EM uses the same budget "
         "because the stages run serially.",
     )
-    perf_grp.add_argument(
+    grp.add_argument(
         "--scan-bgzf-threads",
-        dest="scan_bgzf_threads",
         type=int,
-        default=None,
         help="BGZF decompression threads reserved from --threads during "
         "BAM scan (default: derived from the budget, one per "
         f"{CONSTANTS.resources.scan_workers_per_bgzf_thread} threads). "
         "Set to 0 to disable htslib threaded decompression.",
     )
-    perf_grp.add_argument(
+    grp.add_argument(
         "--scan-buffer-size",
-        dest="scan_buffer_size",
         type=float,
-        default=None,
         help="Maximum scan buffer size in GiB before chunks are spilled "
         f"to disk (default: {qd['scan_buffer_size']:g}). Increase if you have ample RAM to reduce "
         "spill I/O.",
     )
-    perf_grp.add_argument(
+    grp.add_argument(
         "--tmpdir",
-        default=None,
         help="Directory for temporary buffer spill files when memory "
         "limits are exceeded (default: system temp directory).",
     )
-    perf_grp.add_argument(
+    grp.add_argument(
         "--scan-fragments-per-chunk",
-        dest="scan_fragments_per_chunk",
         type=int,
-        default=None,
         help="Buffered fragments per scan chunk before the native scanner "
         f"hands data to the Python fragment buffer (default: {qd['scan_fragments_per_chunk']}).",
     )
-    perf_grp.add_argument(
+    grp.add_argument(
         "--scan-read-name-batch-size",
-        dest="scan_read_name_batch_size",
         type=int,
-        default=None,
         help="Advanced: read-name groups per native scanner input queue "
         f"item (default: {qd['scan_read_name_batch_size']}). Lower values are useful for queue-boundary "
         "debugging; larger values may reduce queue overhead at the cost "
         "of slightly more in-flight memory.",
     )
 
-    # -- Advanced scoring / convergence ---------------------------------------
-    adv = quant_parser.add_argument_group("advanced options")
-    adv.add_argument(
+
+def _add_quant_advanced_options(grp, qd: dict) -> None:
+    grp.add_argument(
         "--em-convergence-delta",
-        dest="em_convergence_delta",
         type=float,
-        default=None,
         help=f"Convergence threshold for EM parameter updates (default: {qd['em_convergence_delta']:g}).",
     )
-    adv.add_argument(
+    grp.add_argument(
         "--calib-refit-iters",
-        dest="calib_refit_iters",
         type=int,
-        default=None,
         help=f"Calibration prior-bootstrap iterations (default {qd['calib_refit_iters']}). Each one re-fits the population gDNA "
         "landscape on the current solve, resets the belief, and re-solves; later iterations change the "
         "answer little, and each costs one extra full sweep. 0 = the prior-free pass-0 alone, which fits no gDNA landscape and so applies no "
         "capture correction. Advanced calibration knob.",
     )
-    adv.add_argument(
+    grp.add_argument(
         "--sweep-block-slots",
-        dest="sweep_block_slots",
         type=int,
-        default=None,
         help="Calibration working set: the chain is solved one locus block at a time, the pieces between "
         f"intergenic regions merged up to this many slots per block (default {qd['sweep_block_slots']}; 'none' is not "
         "accepted here — the whole chain is a config choice). "
@@ -1560,28 +1448,22 @@ def build_parser() -> argparse.ArgumentParser:
         "arena, so smaller blocks use less memory per sweep. Advanced "
         "calibration knob.",
     )
-    adv.add_argument(
+    grp.add_argument(
         "--overhang-alpha",
-        dest="overhang_alpha",
         type=float,
-        default=None,
         help=f"Per-base overhang penalty alpha in [0,1] (default: {qd['overhang_alpha']:g}). "
         "0 = hard gate, 1 = no penalty.",
     )
-    adv.add_argument(
+    grp.add_argument(
         "--pruning-min-posterior",
-        dest="pruning_min_posterior",
         type=float,
-        default=None,
         help="Minimum posterior threshold for candidate pruning, in [0,1) "
         f"(default: {qd['pruning_min_posterior']:g}). Lower values keep more candidates "
         "(conservative). Set to 0 to disable pruning entirely.",
     )
-    adv.add_argument(
+    grp.add_argument(
         "--intron-overhang-tolerance",
-        dest="intron_overhang_tolerance",
         type=int,
-        default=None,
         help="Intron-overhang tolerance K (bp): how many bases an aligned read end may lie inside "
         "an annotated intron, at the edge of a gap the reads did not sequence or at a fragment's "
         "outer end, as when an aligner runs a read a base or two across a splice site. A transcript "
@@ -1592,103 +1474,74 @@ def build_parser() -> argparse.ArgumentParser:
         "are matched exactly. "
         f"Default: {qd['intron_overhang_tolerance']}.",
     )
-    adv.add_argument(
+    grp.add_argument(
         "--emit-locus-stats",
-        dest="emit_locus_stats",
         action=argparse.BooleanOptionalAction,
-        default=None,
         help="Write per-locus EM convergence profiling data to "
-        f"locus_stats.feather in the output directory (default: {yes_no(qd['emit_locus_stats'])}). Includes "
+        f"locus_stats.feather in the output directory (default: {_yes_no(qd['emit_locus_stats'])}). Includes "
         "iteration counts, timing, and equivalence class statistics "
         "for every locus. Useful for debugging convergence.",
     )
-    quant_parser.set_defaults(func=quant_command)
 
-    # --- SIM -----------------------------------------------------------------
-    sim = subparsers.add_parser(
-        "sim",
-        help="Generate synthetic test scenarios",
+
+def _add_sim_parser(subparsers) -> None:
+    from .config import CONSTANTS
+
+    defaults = CONSTANTS.simulator
+    sim = subparsers.add_parser("sim", help="Generate synthetic test scenarios")
+    sim.add_argument(
+        "--config", required=True, help="YAML configuration file defining the scenario"
     )
     sim.add_argument(
-        "--config",
-        dest="config",
-        required=True,
-        help="YAML configuration file defining the scenario",
-    )
-    sim.add_argument(
-        "-o",
-        "--output-dir",
-        dest="output_dir",
-        required=True,
-        help="Output directory for scenario artifacts",
+        "-o", "--output-dir", required=True, help="Output directory for scenario artifacts"
     )
     sim.add_argument(
         "--genome-length",
-        dest="genome_length",
         type=int,
-        default=5000,
-        help="Genome length in bases (default: 5000, overridden by YAML)",
+        default=defaults.scenario_genome_length,
+        help=f"Genome length in bases (default: {defaults.scenario_genome_length}, overridden by YAML)",
     )
     sim.add_argument(
         "--seed",
-        dest="seed",
         type=int,
-        default=42,
-        help="Random seed (default: 42, overridden by YAML)",
+        default=defaults.scenario_seed,
+        help=f"Random seed (default: {defaults.scenario_seed}, overridden by YAML)",
     )
     sim.add_argument(
         "--num-reads",
-        dest="num_reads",
         type=int,
-        default=1000,
-        help="Number of fragments to simulate (default: 1000, overridden by YAML)",
+        default=defaults.scenario_fragments,
+        help=f"Number of fragments to simulate (default: {defaults.scenario_fragments}, overridden by YAML)",
     )
     sim.set_defaults(func=sim_command)
 
-    # --- EXPORT --------------------------------------------------------------
-    export = subparsers.add_parser(
-        "export",
-        help="Convert feather output files to TSV or Parquet",
-    )
+
+def _add_export_parser(subparsers) -> None:
+    export = subparsers.add_parser("export", help="Convert feather output files to TSV or Parquet")
     export.add_argument(
-        "output_dir",
-        help="Directory containing .feather output files from rigel quant",
+        "output_dir", help="Directory containing .feather output files from rigel quant"
     )
     export.add_argument(
         "-f",
         "--format",
-        dest="format",
         default="tsv",
         choices=["tsv", "parquet"],
         help="Output format (default: tsv)",
     )
     export.set_defaults(func=export_command)
 
-    # ------------------------------------------------------------------ report
+
+def _add_report_parser(subparsers) -> None:
     report = subparsers.add_parser(
         "report",
         help="Build a self-contained HTML QC report from a rigel quant output directory",
     )
+    report.add_argument("output_dir", help="A rigel quant --output-dir (must contain summary.json)")
     report.add_argument(
-        "output_dir",
-        help="A rigel quant --output-dir (must contain summary.json)",
+        "-o", "--output", help="Output HTML path (default: <output_dir>/report.html)"
     )
-    report.add_argument(
-        "-o",
-        "--output",
-        dest="output",
-        default=None,
-        help="Output HTML path (default: <output_dir>/report.html)",
-    )
-    report.add_argument(
-        "--title",
-        dest="title",
-        default=None,
-        help="Report title (default: 'Rigel QC · <sample>')",
-    )
+    report.add_argument("--title", help="Report title (default: 'Rigel QC · <sample>')")
     report.set_defaults(func=report_command)
-
-    return parser
 
 
 # ---------------------------------------------------------------------------
@@ -1698,12 +1551,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     """CLI entry point registered as ``rigel`` in pyproject.toml."""
-    parser = build_parser()
-    args = parser.parse_args()
-
-    log_level = logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
+    args = build_parser().parse_args()
     logging.basicConfig(
-        level=log_level,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
     sys.exit(args.func(args))

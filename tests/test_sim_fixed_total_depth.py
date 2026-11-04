@@ -4,15 +4,19 @@
 fixed and gDNA is added on top at ``n_gdna = rate x n_rna``, which cannot reach the high-gDNA end of
 the spectrum: a 98 % gDNA library is ``rate = 49``, so 490 M fragments at a 10 M RNA depth. With it
 set, the total is held and ``rate`` decides only the split, as a sequencing run with a fixed budget
-does. Each gate carries a perturbation that shows it can fire.
+does. ``Scenario.build_oracle`` has the same two modes, and refuses a gDNA fraction its mode cannot read. Each gate
+carries a perturbation that shows it can fire.
 """
 
 from __future__ import annotations
 
+
 import pytest
 
-from rigel.sim.orchestrator import resolve_depths
 from rigel.sim.wgs_config import SimulationParams
+
+
+from _sim_grid import resolve_depths
 
 #: A rate ladder from zero to 98 % gDNA. Rates, not fractions: ``f_gdna = rate / (1 + rate)``.
 LADDER = [0.0, 0.010101, 0.052632, 0.111111, 0.333333, 1.0, 3.0, 9.0, 49.0]
@@ -23,7 +27,7 @@ def _params(**kw) -> SimulationParams:
     return SimulationParams(n_rna_fragments=10_000_000, **kw)
 
 
-def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
+def test_the_total_is_conserved_exactly_at_every_rung():
     """``n_rna + n_gdna`` equals the requested total on every rung exactly, not to within rounding
     drift: rungs of different depths cannot be compared, which is the purpose of fixing the total.
 
@@ -35,12 +39,12 @@ def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
         d = resolve_depths(sim, gdna_rate=rate)
         assert d.n_rna + d.n_gdna == TOTAL, f"rate {rate}: {d.n_rna} + {d.n_gdna} != {TOTAL}"
 
-    legacy = _params(n_total_fragments=None)
-    totals = {resolve_depths(legacy, gdna_rate=r).total for r in LADDER}
+    additive = _params(n_total_fragments=None)
+    totals = {resolve_depths(additive, gdna_rate=r).total for r in LADDER}
     assert len(totals) > 1, "the additive path already fixes the total; this mode adds nothing"
 
 
-def test_the_realised_gDNA_FRACTION_tracks_the_rung():
+def test_the_realised_gdna_fraction_tracks_the_rung():
     """The realised gDNA fraction is the requested one, checked against ``rate/(1+rate)``, which is
     what the rate means, not against the label.
 
@@ -60,7 +64,7 @@ def test_the_realised_gDNA_FRACTION_tracks_the_rung():
     assert fracs == sorted(fracs), "the ladder must be monotone"
 
 
-def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
+def test_the_nascent_split_is_inside_the_rna_budget_not_on_top(tmp_path):
     """With nascent enabled the total still holds: nascent RNA comes out of the RNA share, not on
     top of it. The nascent entities are rows of the one RNA multinomial, so the gate is on the engine:
     every fragment the RNA draw assigns, mature or nascent, is one of the ``n_rna`` the budget gave it.
@@ -72,7 +76,7 @@ def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
     from rigel.sim.genome import MutableGenome
     from rigel.sim.wgs_config import GDNASimConfig
     from rigel.sim.wgs_engine import WholeGenomeSimulator
-    from rigel.sim.whole_genome import assign_nrna_to_entities
+    from rigel.sim.transcriptome import assign_nrna_to_entities
     from rigel.transcript import Transcript
     from rigel.types import Interval, Strand
 
@@ -128,24 +132,24 @@ def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
     assert n_off == 0 and m_off == 2000 and m_off > m_on
 
 
-def test_omitting_the_total_leaves_the_LEGACY_path_byte_identical():
+def test_omitting_the_total_gives_the_additive_depths_exactly():
     """The mode is opt-in: a config that omits ``n_total_fragments`` gets the additive depths
     exactly (``n_rna`` is the configured RNA depth and ``n_gdna = round(rate x n_rna)``).
 
     Perturbation: switching the mode on must move the numbers, or the identity is vacuous.
     """
-    legacy = _params(n_total_fragments=None)
+    additive = _params(n_total_fragments=None)
     for rate in LADDER:
-        d = resolve_depths(legacy, gdna_rate=rate)
+        d = resolve_depths(additive, gdna_rate=rate)
         assert d.n_rna == 10_000_000
         assert d.n_gdna == round(rate * 10_000_000)
 
     on = resolve_depths(_params(n_total_fragments=TOTAL), gdna_rate=1.0)
-    off = resolve_depths(legacy, gdna_rate=1.0)
+    off = resolve_depths(additive, gdna_rate=1.0)
     assert (on.n_rna, on.n_gdna) != (off.n_rna, off.n_gdna)
 
 
-def test_a_total_too_small_for_the_rung_RAISES_rather_than_rounding_to_zero():
+def test_a_total_too_small_for_the_rung_raises_rather_than_rounding_to_zero():
     """At rate 49 a 100-fragment total leaves 2 RNA fragments; a smaller one rounds the RNA side to
     zero, and the condition would silently stop being an RNA-seq library, so it raises.
 
@@ -155,3 +159,32 @@ def test_a_total_too_small_for_the_rung_RAISES_rather_than_rounding_to_zero():
         resolve_depths(_params(n_total_fragments=10), gdna_rate=49.0)
     ok = resolve_depths(_params(n_total_fragments=TOTAL), gdna_rate=49.0)
     assert ok.n_rna == 200_000
+
+
+def test_a_scenario_refuses_a_gdna_fraction_it_would_ignore(tmp_path):
+    """``Scenario.build_oracle`` reads ``gdna_fraction`` only on top of a fixed RNA depth (``n_rna_fragments``) and
+    with a ``GDNAConfig`` to draw gDNA from. A fixed total (``n_fragments``) is split by the gDNA config's abundance
+    instead, so a fraction passed there, or without a gDNA config, would simulate a library with no gDNA from a call
+    that asked for some. Both are refused before anything is written.
+
+    Perturbation: the same fraction on a fixed RNA depth with a ``GDNAConfig`` is read, and adds its gDNA fragments.
+    """
+    from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
+
+    sc = Scenario("frac", genome_length=4000, seed=3, work_dir=tmp_path / "sim")
+    sc.add_gene("g1", "+", [{"t_id": "T1", "exons": [(500, 1000), (2000, 2500)], "abundance": 100}])
+    sim = ReadSimConfig(
+        frag_mean=150, frag_std=20, frag_min=80, frag_max=250, read_length=50, seed=3
+    )
+    with pytest.raises(ValueError, match="n_rna_fragments"):
+        sc.build_oracle(
+            n_fragments=100, sim_config=sim, gdna_fraction=0.2, gdna_config=GDNAConfig()
+        )
+    with pytest.raises(ValueError, match="GDNAConfig"):
+        sc.build_oracle(n_rna_fragments=100, sim_config=sim, gdna_fraction=0.2)
+    assert not (tmp_path / "sim" / "index").exists(), "a refused call must write nothing"
+
+    result = sc.build_oracle(
+        n_rna_fragments=100, sim_config=sim, gdna_fraction=0.2, gdna_config=GDNAConfig()
+    )
+    assert result.n_simulated == 120

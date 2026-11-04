@@ -1,9 +1,9 @@
-"""Interval helpers shared by the capture sampler and the probe designer: merging intervals, and projecting a
-genomic block onto a transcript's spliced coordinates."""
+"""Interval helpers shared by the capture sampler and the probe designer: merging intervals, and projecting genomic
+blocks onto a transcript's spliced coordinates."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from ..transcript import Transcript
 from ..types import Strand
@@ -24,31 +24,24 @@ def merge_intervals(intervals: Iterable[tuple[int, int]]) -> list[tuple[int, int
     return merged
 
 
-def project_genomic_block_to_transcript(
-    transcript: Transcript,
-    block_start: int,
-    block_end: int,
-) -> list[tuple[int, int]] | None:
-    """The transcript-space intervals, strand-oriented, that genomic ``[block_start, block_end)`` maps to; ``None``
-    if any base of the block falls outside the transcript's exons."""
+def clip_blocks_to_transcript(
+    transcript: Transcript, blocks: Sequence[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """The parts of genomic ``blocks`` inside ``transcript``'s exons, in strand-oriented transcript coordinates, block
+    by block and exon by exon. A block need not be fully exonic: a probe hanging off an exon edge still binds the
+    bases that are there."""
     tx_len = int(transcript.length or transcript.compute_length())
-    consumed = 0
-    projected: list[tuple[int, int]] = []
-    mapped_bp = 0
-
-    for exon in transcript.exons:
-        exon_len = exon.end - exon.start
-        overlap_start = max(block_start, exon.start)
-        overlap_end = min(block_end, exon.end)
-        if overlap_start < overlap_end:
-            tx_start = consumed + (overlap_start - exon.start)
-            tx_end = consumed + (overlap_end - exon.start)
-            if transcript.strand == Strand.NEG:
-                tx_start, tx_end = tx_len - tx_end, tx_len - tx_start
-            projected.append((tx_start, tx_end))
-            mapped_bp += overlap_end - overlap_start
-        consumed += exon_len
-
-    if mapped_bp != block_end - block_start:
-        return None
-    return sorted(projected)
+    out: list[tuple[int, int]] = []
+    for block_start, block_end in blocks:
+        consumed = 0
+        for exon in transcript.exons:
+            lo = max(block_start, exon.start)
+            hi = min(block_end, exon.end)
+            if lo < hi:
+                tx_start = consumed + (lo - exon.start)
+                tx_end = consumed + (hi - exon.start)
+                if transcript.strand == Strand.NEG:
+                    tx_start, tx_end = tx_len - tx_end, tx_len - tx_start
+                out.append((tx_start, tx_end))
+            consumed += exon.end - exon.start
+    return out

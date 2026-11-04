@@ -13,7 +13,7 @@ import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import ReadSimConfig, Scenario
+from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 SEED = 19
 
@@ -38,8 +38,9 @@ def one_locus(tmp_path_factory):
         ],
     )
     result = scenario.build_oracle(
-        n_fragments=40000,
+        n_rna_fragments=40000,
         gdna_fraction=0.3,
+        gdna_config=GDNAConfig(),
         sim_config=ReadSimConfig(
             frag_mean=220,
             frag_std=50,

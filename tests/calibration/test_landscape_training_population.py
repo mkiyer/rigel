@@ -20,13 +20,14 @@ from types import SimpleNamespace
 import numpy as np
 
 import rigel.calibration.sweep as SW
+from _constants import replaced
 from rigel.config import CONSTANTS
-from rigel.calibration.blocks import SweepCapture
+from rigel.calibration.diagnostics import SweepDiagnostics
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_geometry import g1_locked
 from rigel.calibration.signature import RegionType
-from rigel.native import transfer_rows as R
+from rigel._solve_impl import testing as R
 from _transfer_harness import _ctx_of, _full_policy, _native_passes, _prepared
 
 CAL = sys.modules["rigel.calibration.calibrate"]
@@ -51,9 +52,9 @@ def _expected_has_composition(sweep_inputs, policy, capture):
 
 def test_the_solve_publishes_the_informed_predicate_as_the_solve_used_it(sweep_inputs):
     policy, *_ = _full_policy(sweep_inputs)
-    capture = SweepCapture()
+    capture = SweepDiagnostics()
     out = SW.solve_chain(
-        *sweep_inputs["args"], **sweep_inputs["kw"], policy=policy, _capture=capture
+        *sweep_inputs["args"], **sweep_inputs["kw"], policy=policy, diagnostics=capture
     )
     has_composition = np.asarray(out.has_composition, bool)
     assert has_composition.shape == (int(sweep_inputs["args"][0].n_slots),)
@@ -71,9 +72,9 @@ def test_silence_shrinks_the_informed_set_to_own_evidence_and_certainty(sweep_in
         SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=policy).has_composition,
         bool,
     )
-    cap = SweepCapture()
+    cap = SweepDiagnostics()
     silent = SW.solve_chain(
-        *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=cap
+        *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), diagnostics=cap
     )
     silent_has_composition = np.asarray(silent.has_composition, bool)
     own = has_own_composition_evidence(cap.tau_lam) | g1_locked(cap.free_pos, cap.free_neg)
@@ -123,7 +124,9 @@ def _training_counts(monkeypatch, belief, parts):
         return None
 
     monkeypatch.setattr(CAL, "fit_landscape", spy)
-    monkeypatch.setattr(CAL, "CONSTANTS", CONSTANTS.replaced("calibration.min_training_regions", 1))
+    monkeypatch.setattr(
+        CAL, "CONSTANTS", replaced(CONSTANTS, "calibration.min_training_regions", 1)
+    )
     CAL._fit_gdna_hyperprior(chain, belief, statics, region_arrays, mass, eff)
     return seen
 
@@ -189,7 +192,9 @@ def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):
     parts = _synthetic_population()
     _, belief, *_ = parts
     # the domain (4) passes, the cut population (1) would not
-    monkeypatch.setattr(CAL, "CONSTANTS", CONSTANTS.replaced("calibration.min_training_regions", 4))
+    monkeypatch.setattr(
+        CAL, "CONSTANTS", replaced(CONSTANTS, "calibration.min_training_regions", 4)
+    )
     none = SimpleNamespace(
         f_g=belief.f_g, var_gdna=belief.var_gdna, has_composition=np.zeros(7, bool)
     )
@@ -210,16 +215,6 @@ def test_the_anchor_trains_whatever_the_predicate_says(monkeypatch):
     assert seen["count"].shape == (1,) and seen["anchor"].all() and seen["count"][0] == 0.0
 
 
-def test_a_belief_without_the_predicate_trains_the_old_population(monkeypatch):
-    """An initial belief (`init_beliefs`, no solve yet) carries no predicate, so the selector reads the annotation alone
-    and nothing upstream of the first sweep changes shape."""
-    parts = _synthetic_population()
-    _, belief, *_ = parts
-    old = SimpleNamespace(f_g=belief.f_g, var_gdna=belief.var_gdna, has_composition=None)
-    seen = _training_counts(monkeypatch, old, parts)
-    assert seen["count"].shape == (4,)
-
-
 # ── the E-step on the kernels that have no location ──────────────────────────────────────────────────
 #
 # A region trained at less than one fragment has no location of its own: the estimator centres it at its resolution wall
@@ -238,16 +233,16 @@ def _prev_at_floor(grid_log10):
     return DensityLandscape(log_rho=grid_log10 * np.log(10.0), logP=lp, n_train=1, logP_free=lp)
 
 
-def test_the_estep_moves_a_location_free_kernel_to_the_population_and_leaves_a_counted_one_alone():
+def test_the_estep_moves_a_location_free_kernel_and_leaves_a_counted_one_alone():
     from rigel.calibration import landscape as LS
 
     count = np.array([0.0, 0.4, 30.0, 0.0])
     mass = np.array([0.0, 2.0, 100.0, 0.0])
     eff = np.array([50.0, 50.0, 1000.0, 20000.0])
-    grid = LS._grid(mass, eff)
-    base = LS._poisson_kernels(count, eff, grid)
+    grid = LS.log_rate_grid(mass, eff)
+    base = LS.poisson_kernels(count, eff, grid)
     prev = _prev_at_floor(grid)
-    out = LS._estep_kernels(base.copy(), count, grid, prev)
+    out = LS.estep_kernels(base.copy(), count, grid, prev)
 
     def mean(k):
         return float((k * grid).sum() / k.sum())
@@ -260,7 +255,7 @@ def test_the_estep_moves_a_location_free_kernel_to_the_population_and_leaves_a_c
     # every kernel still has unit mass
     assert np.allclose(out.sum(1), 1.0)
     # no previous landscape: nothing moves
-    assert np.array_equal(LS._estep_kernels(base.copy(), count, grid, None), base)
+    assert np.array_equal(LS.estep_kernels(base.copy(), count, grid, None), base)
 
 
 def test_fit_landscape_without_a_previous_fit_is_the_shipped_fit():

@@ -63,7 +63,7 @@ Nothing in the loop *change calibration → re-run calibration → score against
 | oracle (`<panel>/oracle_cache/`) | five origin partitions per condition (`gdna`, `mrna`, `nrna`, `rna_pos`, `rna_neg`), checked sum-to-full against the scan cache, and the certified `slot_truth.npz` | the same, and nothing else |
 
 `panel.py status` names what is missing, and an instrument fed a stale cache refuses it. ⛔ The scan cache's key
-hashes the deposit rule, not `resolve.cpp`: after a change to which fragments are offered, rebuild with `--force`.
+hashes the deposit rule, not the resolver (`native/resolve/`): after a change to which fragments are offered, rebuild with `--force`.
 
 ## 0a. The test chromosome — where the message policy is developed
 
@@ -207,7 +207,7 @@ what `rigel quant` reads: the annotated transcripts plus the synthetic spans `in
 Capture depletes nascent RNA, and the post-capture lengths and abundances are the truth (`truth_summary.json`). The
 simulator does not do: dispersion beyond Poisson (it can plant a gDNA strand overdispersion, which no panel uses); R1-sense panels
 (`ReadSimConfig.r1_sense` exists, gated in `tests/calibration/test_strand_sense_convention.py`, but
-`orchestrator.run_condition_grid` does not expose it); gDNA on the spike-ins, so `taper_g = 1` is untested.
+`run_condition_grid` in `scripts/sim/_sim_grid.py` does not expose it); gDNA on the spike-ins, so `taper_g = 1` is untested.
 
 ## 2. Building it — `panel.py`, one command per stage
 
@@ -254,7 +254,7 @@ fix it by moving a seed (`TRAPS: identical-paralogs-are-bimodal`).
 | C++ against the executable specification | byte-identical | `tests/native/test_accumulator_spec.py` |
 | one BAM at 1/2/4/8 workers | count banks bit-identical, float64 mass banks within n·ε | `tests/test_scan_order_independence.py` |
 | `Σ region_start_count == deposited`; `deposited + deferred + dropped_* == offered` | exact | the same |
-| the origin partitions sum to the full payload | exact on counts, within the representation on float64 | `tests/calibration/_oracle.py` |
+| the origin partitions sum to the full payload | exact on counts, within the representation on float64 | `scripts/design/_oracle.py` |
 
 **A multimapping fragment is one fragment with several placements** (`DESIGN.md` §4), the rule stated once in the
 specification's `Accumulator.offer` and held three ways: `tests/native/test_multimapper_offer.py` case by case,
@@ -279,7 +279,7 @@ are sparse smoke tests (`TRAPS: a-profile-share-is-a-ranking`). **Read a timing 
 untouched stages drift between sittings, so alternate the arms in one sitting and check the untouched stages read
 1.00. `scripts/profiling/profiler.py` runs the pipeline as a tree of named stages with per-stage peak and held RSS
 (`--set`, `--scan-only`, `--compare`). A native port inside the sweep is held to the transfer gates
-(`tests/calibration/_transfer_harness.py`, against `native.transfer_prepare` and `native.transfer_pass`).
+(`tests/calibration/_transfer_harness.py`, against `_solve_impl.testing`'s `transfer_prepare` and `transfer_pass`).
 
 **Every speed-up, rename or refactor is a proven numeric no-op** (`scripts/design/rename_identity.py`): `--freeze` a
 reference once from the tree a stage starts on, then `--check` each step against it, on a ladder condition and on a

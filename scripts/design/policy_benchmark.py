@@ -31,51 +31,26 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import importlib.util
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[2]
-# the checkout's source only when no rigel is installed: a source tree carries no native extension, so
-# it must never shadow a build (a worktree's own, or the editable install)
-if importlib.util.find_spec("rigel") is None:
-    sys.path.insert(0, str(REPO / "src"))
+from rigel.calibration.calibrate import calibrate
+from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
+from rigel.calibration.splice_graph import FLAG_TERMINUS
+from rigel.config import CalibrationConfig, PipelineConfig
+from rigel.index import TranscriptIndex
+from _scan_cache import calibration_inputs, read_scan_cache
 
-from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.splice_graph import FLAG_TERMINUS  # noqa: E402
-from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
-from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
-from rigel.calibration.splice_graph import (  # noqa: E402
-    build_boundary_flags_array,
-    build_sj_geometry_arrays,
-)
-from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
-from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
-
-from _shared import PANELS, set_field, strandedness  # noqa: E402
+from _shared import PANELS, add_set_option, configured, sibling, strandedness
 
 #: policy name -> the `CalibrationConfig` fields that install it
 POLICIES = {
     "silent": dict(message_policy="silent"),
     "transfer": dict(message_policy="transfer"),
 }
-
-
-def _truth_gdna(truth_dir: Path) -> dict:
-    """The certified per-object gDNA fragment counts, by axis, from `slot_truth.npz`."""
-    truth = dict(np.load(truth_dir / "slot_truth.npz"))
-    out = {}
-    for kind, axis in ((REGION, "region"), (BOUNDARY, "boundary")):
-        is_k = np.asarray(truth["kind"]) == kind
-        obj = np.asarray(truth["obj"], np.int64)[is_k]
-        arr = np.zeros(int(obj.max()) + 1 if obj.size else 0)
-        arr[obj] = np.asarray(truth["n_gdna"], np.float64)[is_k]
-        out[axis] = arr
-    return out
 
 
 def _slot_classes(truth: dict, payload, boundary_flags) -> np.ndarray:
@@ -106,9 +81,23 @@ def _slot_classes(truth: dict, payload, boundary_flags) -> np.ndarray:
     return cls.astype(str)
 
 
-def score_condition(
-    index, region_arrays, sj, boundary_flags, panel_dir, condition, policies, by_class=False, settings=()
-):
+def _class_errors(slots: dict, classes: np.ndarray, region: np.ndarray, boundary: np.ndarray) -> dict:
+    """``{class: (slots, mass, error)}``: one policy's ``|estimate − truth|`` summed per node class."""
+    kind_s = np.asarray(slots["kind"])
+    obj_s = np.asarray(slots["obj"], np.int64)
+    mass_s = np.asarray(slots["count"], np.float64)
+    is_r = kind_s == REGION
+    est = np.zeros(kind_s.shape[0])
+    est[is_r] = region[obj_s[is_r]]
+    est[~is_r] = boundary[obj_s[~is_r]]
+    err = np.abs(est - np.asarray(slots["n_gdna"], np.float64))
+    return {
+        k: (int((classes == k).sum()), float(mass_s[classes == k].sum()), float(err[classes == k].sum()))
+        for k in np.unique(classes)
+    }
+
+
+def score_condition(index, panel_dir, condition, policies, by_class=False, settings=()):
     """One condition, every policy: `sum |estimate - truth|` per axis, in fragments — and, with
     ``by_class``, the same error summed per node class (``rows[name]["classes"]``, each value
     ``(slots, mass, error)``). ``settings`` are ``--set`` specs applied on top of every policy's
@@ -118,30 +107,15 @@ def score_condition(
     # the drained frame: `calibration_inputs` drains at the production seed and builds the production fl
     # models, the frame `slot_truth.npz` is certified in, so estimate and truth count the same fragments
     kw = calibration_inputs(cache, index)
-    payload = kw["payload"]
-    kwargs = dict(
-        region_arrays=region_arrays,
-        strand_model=kw["strand_model"],
-        gdna_fl_pmf=kw["gdna_fl_pmf"],
-        rna_fl_pmf=kw["rna_fl_pmf"],
-        sj=sj,
-        boundary_flags=boundary_flags,
-    )
-    truth = _truth_gdna(truth_dir)
+    truth = sibling("_oracle_arms.py").certified_gdna(truth_dir)
     if by_class:
         slots = dict(np.load(truth_dir / "slot_truth.npz", allow_pickle=True))
-        classes = _slot_classes(slots, payload, boundary_flags)
-        kind_s = np.asarray(slots["kind"])
-        obj_s = np.asarray(slots["obj"], np.int64)
-        truth_s = np.asarray(slots["n_gdna"], np.float64)
-        mass_s = np.asarray(slots["count"], np.float64)
+        classes = _slot_classes(slots, kw["payload"], kw["boundary_flags"])
     rows = {}
     for name in policies:
         started = time.perf_counter()
-        config = PipelineConfig(calibration=dataclasses.replace(CalibrationConfig(), **POLICIES[name]))
-        for spec in settings:
-            config = set_field(config, spec)
-        result = calibrate(payload=payload, config=config.calibration, **kwargs)
+        config = configured(settings, PipelineConfig(calibration=dataclasses.replace(CalibrationConfig(), **POLICIES[name])))
+        result = calibrate(config=config.calibration, **kw)
         region = np.asarray(result.count_gdna_region, np.float64)
         boundary = np.asarray(result.count_gdna_boundary, np.float64)
         rows[name] = dict(
@@ -151,16 +125,83 @@ def score_condition(
         )
         rows[name]["total"] = rows[name]["region"] + rows[name]["boundary"]
         if by_class:
-            is_r = kind_s == REGION
-            est = np.zeros(kind_s.shape[0])
-            est[is_r] = region[obj_s[is_r]]
-            est[~is_r] = boundary[obj_s[~is_r]]
-            err = np.abs(est - truth_s)
-            rows[name]["classes"] = {
-                k: (int((classes == k).sum()), float(mass_s[classes == k].sum()), float(err[classes == k].sum()))
-                for k in np.unique(classes)
-            }
+            rows[name]["classes"] = _class_errors(slots, classes, region, boundary)
     return rows
+
+
+# ── the report ───────────────────────────────────────────────────────────────────────────────────
+
+
+def _print_totals(table: dict, condition: str, policies: list[str], width: int) -> None:
+    """One condition's line: each policy's total, and its ratio to `silent`, the floor."""
+    rows = table[condition]
+    cells = "  ".join(f"{rows[p]['total']:>12,.0f}" for p in policies)
+    ratios = ""
+    if "silent" in policies:
+        floor = rows["silent"]["total"]
+        ratios = "   " + " ".join(
+            f"{p}={rows[p]['total'] / floor:.2f}x"
+            for p in policies
+            if p != "silent" and floor > 0
+        )
+    print(f"{condition:<{width}}  {cells}{ratios}", flush=True)
+
+
+def _print_by_class(table: dict, policies: list[str]) -> None:
+    print("\nby NODE CLASS — slots, mass, then each policy's |err| and its share of that policy's row:")
+    for condition, rows in table.items():
+        print(f"\n{condition}")
+        names = [k for k in sorted(rows[policies[0]]["classes"])]
+        names.sort(key=lambda k: -rows[policies[-1]]["classes"][k][2])
+        print(f"   {'class':<38}{'slots':>8}{'mass':>12}" + "".join(f"{p:>12}{'share':>7}" for p in policies))
+        for k in names:
+            n, mass, _ = rows[policies[0]]["classes"][k]
+            cells = "".join(
+                f"{rows[p]['classes'][k][2]:>12,.0f}"
+                f"{(rows[p]['classes'][k][2] / rows[p]['total'] if rows[p]['total'] else 0):>7.1%}"
+                for p in policies
+            )
+            print(f"   {k:<38}{n:>8,}{mass:>12,.0f}{cells}")
+
+
+def _print_bars(table: dict, policies: list[str]) -> None:
+    """Each policy against `silent` on the two strand halves, counted separately."""
+    print("\nthe two bars, counted separately (never pooled):")
+    # a library in neither strand half (the test panel's ss 0.70) meets neither bar: counted apart
+    apart = sorted({strandedness(c) for c in table} - {"unstranded", "stranded"})
+    for half, want in (("unstranded", "WIN"), ("stranded", "minimal harm"),
+                       *((a, "no bar: apart") for a in apart)):
+        rows = [c for c in table if strandedness(c) == half]
+        if not rows:
+            continue
+        for p in policies:
+            if p == "silent":
+                continue
+            better = sum(table[c][p]["total"] < table[c]["silent"]["total"] for c in rows)
+            worst = max(
+                (table[c][p]["total"] / table[c]["silent"]["total"] for c in rows if table[c]["silent"]["total"] > 0),
+                default=float("nan"),
+            )
+            print(
+                f"   {half:<11} ({want:<13}) {p:>8}: beats silence on {better}/{len(rows)}"
+                f"   worst row {worst:.2f}x"
+            )
+
+
+def _conditions(panel_dir: Path, given) -> list[str]:
+    """The named conditions, else every certified one of the panel."""
+    oracle = panel_dir / "oracle_cache"
+    if not oracle.is_dir():
+        raise SystemExit(
+            f"no oracle caches at {oracle} — build the panel first "
+            f"(`scripts/sim/panel.py status` names the next stage)"
+        )
+    conditions = given or sorted(
+        d.name for d in oracle.iterdir() if (d / "slot_truth.npz").exists()
+    )
+    if not conditions:
+        raise SystemExit(f"no certified conditions under {oracle} (missing slot_truth.npz)")
+    return conditions
 
 
 def main() -> int:
@@ -173,38 +214,16 @@ def main() -> int:
         action="store_true",
         help="also sum each policy's error per node class (stratum, terminus flag, exon reach)",
     )
-    ap.add_argument(
-        "--set",
-        dest="settings",
-        action="append",
-        default=[],
-        metavar="SECTION.FIELD=VALUE",
-        help="override one config field on top of every policy's fields, typed from the field; "
-        "repeatable (e.g. --set calibration.sweep_logodds_step=0.1)",
-    )
+    add_set_option(ap, "override one config field on top of every policy's fields, typed from the field; "
+                       "repeatable (e.g. --set calibration.sweep_logodds_step=0.1)")
     args = ap.parse_args()
 
     for name in args.policies:
         if name not in POLICIES:
             raise SystemExit(f"unknown policy {name!r} — expected any of {sorted(POLICIES)}")
-
     index_dir, panel_dir = PANELS[args.panel]
-    oracle = panel_dir / "oracle_cache"
-    if not oracle.is_dir():
-        raise SystemExit(
-            f"no oracle caches at {oracle} — build the panel first "
-            f"(`scripts/sim/panel.py status` names the next stage)"
-        )
-    conditions = args.conditions or sorted(
-        d.name for d in oracle.iterdir() if (d / "slot_truth.npz").exists()
-    )
-    if not conditions:
-        raise SystemExit(f"no certified conditions under {oracle} (missing slot_truth.npz)")
-
+    conditions = _conditions(panel_dir, args.conditions)
     index = TranscriptIndex.load(str(index_dir))
-    region_arrays = RegionArrays.from_index(index)
-    sj = build_sj_geometry_arrays(index)
-    boundary_flags = build_boundary_flags_array(index)
 
     width = max(len(c) for c in conditions)
     header = f"{'condition':<{width}}  " + "  ".join(f"{p:>12}" for p in args.policies)
@@ -220,28 +239,10 @@ def main() -> int:
 
     table = {}
     for condition in conditions:
-        rows = score_condition(
-            index,
-            region_arrays,
-            sj,
-            boundary_flags,
-            panel_dir,
-            condition,
-            args.policies,
-            by_class=args.by_class,
-            settings=tuple(args.settings),
+        table[condition] = score_condition(
+            index, panel_dir, condition, args.policies, by_class=args.by_class, settings=tuple(args.settings)
         )
-        table[condition] = rows
-        cells = "  ".join(f"{rows[p]['total']:>12,.0f}" for p in args.policies)
-        ratios = ""
-        if "silent" in args.policies:
-            floor = rows["silent"]["total"]
-            ratios = "   " + " ".join(
-                f"{p}={rows[p]['total'] / floor:.2f}x"
-                for p in args.policies
-                if p != "silent" and floor > 0
-            )
-        print(f"{condition:<{width}}  {cells}{ratios}", flush=True)
+        _print_totals(table, condition, args.policies, width)
 
     print("\nper-axis (region / boundary):")
     for condition, rows in table.items():
@@ -250,44 +251,10 @@ def main() -> int:
             for p in args.policies
         )
         print(f"{condition:<{width}}  {detail}")
-
     if args.by_class:
-        print("\nby NODE CLASS — slots, mass, then each policy's |err| and its share of that policy's row:")
-        for condition, rows in table.items():
-            print(f"\n{condition}")
-            names = [k for k in sorted(rows[args.policies[0]]["classes"])]
-            names.sort(key=lambda k: -rows[args.policies[-1]]["classes"][k][2])
-            print(f"   {'class':<38}{'slots':>8}{'mass':>12}" + "".join(f"{p:>12}{'share':>7}" for p in args.policies))
-            for k in names:
-                n, mass, _ = rows[args.policies[0]]["classes"][k]
-                cells = "".join(
-                    f"{rows[p]['classes'][k][2]:>12,.0f}"
-                    f"{(rows[p]['classes'][k][2] / rows[p]['total'] if rows[p]['total'] else 0):>7.1%}"
-                    for p in args.policies
-                )
-                print(f"   {k:<38}{n:>8,}{mass:>12,.0f}{cells}")
-
+        _print_by_class(table, args.policies)
     if "silent" in args.policies and len(args.policies) > 1:
-        print("\nthe two bars, counted separately (never pooled):")
-        # a library in neither strand half (the test panel's ss 0.70) meets neither bar: counted apart
-        apart = sorted({strandedness(c) for c in table} - {"unstranded", "stranded"})
-        for half, want in (("unstranded", "WIN"), ("stranded", "minimal harm"),
-                           *((a, "no bar: apart") for a in apart)):
-            rows = [c for c in table if strandedness(c) == half]
-            if not rows:
-                continue
-            for p in args.policies:
-                if p == "silent":
-                    continue
-                better = sum(table[c][p]["total"] < table[c]["silent"]["total"] for c in rows)
-                worst = max(
-                    (table[c][p]["total"] / table[c]["silent"]["total"] for c in rows if table[c]["silent"]["total"] > 0),
-                    default=float("nan"),
-                )
-                print(
-                    f"   {half:<11} ({want:<13}) {p:>8}: beats silence on {better}/{len(rows)}"
-                    f"   worst row {worst:.2f}x"
-                )
+        _print_bars(table, args.policies)
     seconds = sum(r[p]["seconds"] for r in table.values() for p in args.policies)
     print(f"\n{len(conditions)} condition(s) x {len(args.policies)} policies — {seconds:.1f}s of calibrate")
     return 0

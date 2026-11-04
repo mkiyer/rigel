@@ -9,7 +9,7 @@ silent negative-control transcript.
 import pytest
 from rigel.sim import Scenario
 
-from .conftest import (
+from _scenarios import (
     GDNA_LEVELS,
     STRAND_LEVELS,
     STRESS_COMBOS,

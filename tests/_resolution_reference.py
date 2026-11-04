@@ -5,42 +5,30 @@ Production fragment resolution runs entirely in C++ (``rigel._resolve_impl``'s
 
 - ``make_fragment()`` — a minimal fragment object carrying the three attributes
   the C++ resolver reads
-- ``resolve_fragment()`` — a thin driver that hands such a fragment to
-  ``index.resolver``; it does no resolution of its own
-- ``MergeOutcome`` — the resolver's merge-level codes (``native/constants.h``), named for the
-  gates
+- ``resolve_fragment()`` — a thin driver that hands such a fragment to the
+  resolver's test seam; it does no resolution of its own
+- ``GenomicInterval`` — an aligned block or intron on a reference and strand, the shape a fragment's
+  exons and introns take
 """
 
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
 
-from enum import IntEnum
 from types import SimpleNamespace
+from typing import NamedTuple
+
+from rigel._resolve_impl import testing as resolve_testing
+from rigel.types import Strand
 
 
-# ---------------------------------------------------------------------------
-# The resolver's merge-level codes (`native/constants.h`)
-# ---------------------------------------------------------------------------
+class GenomicInterval(NamedTuple):
+    """An interval on a reference and strand: an aligned block or an observed intron of a fragment."""
 
-
-class MergeOutcome(IntEnum):
-    """Which relaxation level succeeded in progressive set merging.
-
-    During fragment resolution, transcript/gene index sets from
-    individual exon blocks or splice junctions are merged via
-    progressive relaxation:
-
-    0. INTERSECTION — intersection of *all* sets (most specific)
-    1. INTERSECTION_NONEMPTY — intersection of non-empty sets only
-    2. UNION — union of all sets (most sensitive)
-    3. EMPTY — no sets to merge (no hits of this type)
-    """
-
-    INTERSECTION = 0
-    INTERSECTION_NONEMPTY = 1
-    UNION = 2
-    EMPTY = 3
+    ref: str
+    start: int
+    end: int
+    strand: int = Strand.NONE
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +73,10 @@ def make_fragment(exons=(), introns=()):
 def resolve_fragment(frag, index):
     """Resolve a fragment to its compatible transcript set with the C++ resolver.
 
-    Calls ``index.resolver.resolve_fragment(frag)`` (``rigel._resolve_impl``'s
-    ``FragmentResolver``) and returns what it returns, a ``ResolvedFragment`` or
-    ``None``; a fragment with no exon blocks is ``None`` without the call.
+    Calls ``rigel._resolve_impl.testing.resolve_fragment`` on ``index.resolver``, which resolves it as the scan
+    resolves a hit, and returns what it returns, a ``ResolvedFragment`` or ``None``; a fragment with no exon blocks is
+    ``None`` without the call.
     """
     if not frag.exons:
         return None
-    return index.resolver.resolve_fragment(frag)
+    return resolve_testing.resolve_fragment(index.resolver, frag)

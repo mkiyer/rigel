@@ -131,7 +131,7 @@ class StrandModel:
 
     Probabilities are the MLE from the counts, 0.5 when there are none. ``sj_table`` is present on the spliced model
     only, where the 2×2 is its marginal (:meth:`from_sj_table`); the all-exonic diagnostic model has no table. The
-    spliced model's qualification is applied in the C++ scanner (``ResolvedFragment::get_is_strand_qualified``).
+    spliced model's qualification is applied in the C++ scanner (``ResolvedFragment::is_strand_qualified``).
     """
 
     # --- 2×2 raw counts ---
@@ -193,12 +193,12 @@ class StrandModel:
         scaled so that ``(genuine_n_same + 1) / (n_obs + 2)`` is :func:`genuine_sense_fraction`.
 
         ``n_same`` itself where there is no per-sj table, no observation, or no live strand channel (judged on the pooled
-        counts by ``calibration.region_init.strand_discriminability``). Removing junctions at ½ or on the opposite side
+        counts by ``calibration.strand_balance.strand_discriminability``). Removing junctions at ½ or on the opposite side
         only moves κ away from ½, so this never switches a live channel off."""
         n = self.n_observations
         if self.sj_table is None or n == 0:
             return float(self.n_same)
-        from .calibration.region_init import strand_discriminability
+        from .calibration.strand_balance import strand_discriminability
 
         if strand_discriminability((self.n_same + 1.0) / (n + 2.0), n) <= 0.0:
             return float(self.n_same)
@@ -262,13 +262,11 @@ class StrandModel:
         hi = min(1.0, p + z * se)
         return (lo, hi)
 
-    def strand_specificity_ci_epsilon(
-        self, confidence: float = CONSTANTS.qc.strand_ci_confidence
-    ) -> float:
+    def strand_specificity_ci_epsilon(self) -> float:
         """Upper credible limit on the pooled 2×2's minor-orientation rate ``n_minor / n``.
 
-        The ``confidence`` quantile of the Beta(n_minor + 1, n − n_minor + 1) posterior, clamped to [0, 0.5]; 0.5
-        when there are no observations. ``n_minor`` comes from the pooled table, artifacts included, while
+        The ``CONSTANTS.qc.strand_ci_confidence`` quantile of the Beta(n_minor + 1, n − n_minor + 1) posterior, clamped
+        to [0, 0.5]; 0.5 when there are no observations. ``n_minor`` comes from the pooled table, artifacts included, while
         ``strand_specificity`` comes from the genuine junctions, so this bounds ``1 − strand_specificity`` only where
         that fit falls back to the pooled counts. QC only: the strand log line in :func:`rigel.pipeline.run_pipeline`.
         """
@@ -281,7 +279,7 @@ class StrandModel:
         alpha = self.n_minor + 1.0
         beta = (n - self.n_minor) + 1.0
         # UCL on the pooled minor-orientation rate r = n_minor / n at the given confidence.
-        r_ucl = float(betaincinv(alpha, beta, confidence))
+        r_ucl = float(betaincinv(alpha, beta, CONSTANTS.qc.strand_ci_confidence))
         # Clamp to [0, 0.5]: n_minor = min(n_same, n_opposite), so the minor rate is at most 0.5.
         return max(0.0, min(0.5, r_ucl))
 
@@ -378,11 +376,9 @@ class StrandModels:
         """RNA model's observation count."""
         return self.exonic_spliced.n_observations
 
-    def strand_specificity_ci_epsilon(
-        self, confidence: float = CONSTANTS.qc.strand_ci_confidence
-    ) -> float:
+    def strand_specificity_ci_epsilon(self) -> float:
         """The RNA model's :meth:`StrandModel.strand_specificity_ci_epsilon`."""
-        return self.exonic_spliced.strand_specificity_ci_epsilon(confidence)
+        return self.exonic_spliced.strand_specificity_ci_epsilon()
 
     def log_summary(self) -> None:
         """Log a human-readable summary of the trained strand models."""

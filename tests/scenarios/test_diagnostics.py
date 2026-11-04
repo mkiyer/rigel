@@ -1,4 +1,4 @@
-"""Focused end-to-end regression scenarios for particular algorithm behaviours,
+"""Focused end-to-end scenarios for particular algorithm behaviours,
 rather than the full parameter sweeps the other scenario files run: minor-isoform
 count collapse when one isoform is a strict exonic subset of another, read
 retention for unspliced and spliced genes as strand specificity falls, and a
@@ -8,9 +8,11 @@ fragment to RNA and call almost no gDNA.
 
 from rigel.config import EMConfig, PipelineConfig, BamScanConfig
 from rigel.pipeline import run_pipeline
-from rigel.sim import Scenario, run_benchmark
+from rigel.sim import Scenario
 
-from .conftest import sim_config, gdna_config, SIM_SEED, PIPELINE_SEED
+from _benchmark import run_benchmark, simulated_truth
+
+from _scenarios import sim_config, gdna_config, SIM_SEED, PIPELINE_SEED
 
 N_FRAGMENTS = 1000
 GENOME_LENGTH = 10_000
@@ -48,7 +50,7 @@ class TestIsoformCollapse:
         sc = self._make_two_isoform_scenario(tmp_path, 100, 100)
         try:
             result = sc.build_oracle(n_fragments=2000, sim_config=sim_config())
-            gt = result.ground_truth_auto()
+            gt, _ = simulated_truth(result)
             pr = run_pipeline(
                 result.bam_path,
                 result.index,
@@ -83,7 +85,7 @@ class TestIsoformCollapse:
         )
         try:
             result = sc.build_oracle(n_fragments=2000, sim_config=sim_config())
-            gt = result.ground_truth_auto()
+            gt, _ = simulated_truth(result)
             pr = run_pipeline(
                 result.bam_path,
                 result.index,
@@ -140,7 +142,7 @@ class TestUnsplicedLowStrand:
                 n_fragments=2000,
                 sim_config=sim_config(strand_specificity=ss),
             )
-            gt = result.ground_truth_auto()
+            gt, _ = simulated_truth(result)
             pr = run_pipeline(
                 result.bam_path,
                 result.index,
@@ -175,7 +177,7 @@ class TestUnsplicedLowStrand:
                 n_fragments=2000,
                 sim_config=sim_config(strand_specificity=0.65),
             )
-            gt = result.ground_truth_auto()
+            gt, _ = simulated_truth(result)
             pr = run_pipeline(
                 result.bam_path,
                 result.index,
@@ -253,7 +255,7 @@ def _run_diagnostic(
 
 
 class TestGDNADiagnosis:
-    """Regression: a pure-mRNA library must not siphon mRNA into gDNA.
+    """A pure-mRNA library must not siphon mRNA into gDNA.
 
     One 2-exon transcript T1(+) on a 10 kb random genome: exon 1 at [1000, 2000),
     exon 2 at [4000, 5000), intron [2000, 4000). The 4000 bp span is 40% of the

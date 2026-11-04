@@ -81,7 +81,7 @@ def test_contained_is_the_enumerated_start_count(region_len, w):
     assert got == pytest.approx(float(_enumerate_contained(region_len, w)))
 
 
-def test_contained_at_a_region_exactly_one_fragment_long_is_ONE_not_zero():
+def test_contained_at_a_region_exactly_one_fragment_long_is_one_not_zero():
     """The ``+1`` is the discrete count of start positions, not a correction factor. Without it the divisor is 0 when a
     region is one fragment long, and a floor would turn that into an absurd density on every such region of a fine
     partition, where short regions are common.
@@ -148,7 +148,7 @@ def test_crossing_closed_form_equals_the_matrix_brute_force_on_real_valued_reach
     )
 
 
-def test_crossing_at_UNBOUNDED_reach_is_the_mean_length_minus_one():
+def test_crossing_at_unbounded_reach_is_the_mean_length_minus_one():
     """gDNA's template is the chromosome, so it never tapers, and the divisor is ``mu − 1``. Mean fragment length is the
     large-reach limit of the placement formula, not a separate gDNA case: one formula, one code path, no branch on
     component.
@@ -158,7 +158,7 @@ def test_crossing_at_UNBOUNDED_reach_is_the_mean_length_minus_one():
     assert got == pytest.approx(_mean_length(pmf) - 1.0, rel=1e-9)
 
 
-def test_crossing_is_SYMMETRIC_in_the_two_reaches():
+def test_crossing_is_symmetric_in_the_two_reaches():
     """A crossing point does not know which side is which; only the pair matters."""
     pmf = _normal_pmf(200.0, 50.0)
     a = crossing_eff_length(pmf, np.array([120.0]), np.array([300.0]))[0]
@@ -166,7 +166,7 @@ def test_crossing_is_SYMMETRIC_in_the_two_reaches():
     assert a == pytest.approx(b)
 
 
-def test_a_ZERO_reach_gives_ZERO_opportunity_not_a_floor():
+def test_a_zero_reach_gives_zero_opportunity_not_a_floor():
     """An object with no opportunity for a component must emit nothing, never a floored division. A floored divisor
     would turn "this component cannot be here" into a rate, and a slot defaulting to all-gDNA would seed false gDNA into
     its neighbours through the messages.
@@ -176,7 +176,7 @@ def test_a_ZERO_reach_gives_ZERO_opportunity_not_a_floor():
     assert crossing_eff_length(pmf, np.array([500.0]), np.array([0.0]))[0] == 0.0
 
 
-def test_crossing_reproduces_the_MEASURED_taper_table():
+def test_crossing_reproduces_the_measured_taper_table():
     """The taper against values derived outside this module, RNA N(200,50), in two conventions: the first four are
     symmetric (both reaches = R), while the last, at a first exon, is one-sided (short on one side, long on the other);
     reading it as symmetric gives a different number.
@@ -194,7 +194,7 @@ def test_crossing_reproduces_the_MEASURED_taper_table():
     assert one_sided == pytest.approx(50.0, abs=0.1)
 
 
-def test_the_taper_is_a_MULTI_FOLD_error_if_ignored():
+def test_the_taper_is_a_multi_fold_error_if_ignored():
     """At a short reach the correct divisor is a fraction of the mean length, so using the mean would over-divide many
     fold and under-read the density by the same factor."""
     pmf = _normal_pmf(200.0, 50.0)
@@ -365,7 +365,7 @@ def _masked_chromosome() -> RegionArrays:
     )
 
 
-def test_gdnas_observable_crossing_support_is_every_observable_placement_across_the_boundary():
+def test_gdnas_observable_crossing_support_is_every_observable_crossing_placement():
     """:func:`observable_crossing_eff_length` counts, at every boundary, the starts on the chromosome whose
     fragment crosses it and touches no masked base, whatever else it crosses, weighted by the pmf: gDNA's
     template there is the observable stretch the boundary lies in. A boundary with a masked base beside it

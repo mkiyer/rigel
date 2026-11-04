@@ -67,7 +67,7 @@ def test_the_three_component_form_collapses_onto_the_two_component_reference(
     np.testing.assert_allclose(got - got.mean(), ref - ref.mean(), rtol=0, atol=1e-9)
 
 
-def test_PERTURBATION_a_wrong_mixture_rate_BREAKS_the_collapse():
+def test_perturbation_a_wrong_mixture_rate_breaks_the_collapse():
     """The mixture plus-strand rate is ``p = ½·f_g + κ·f₊ + (1−κ)·f₋``. Perturbing the gDNA arm's rate from ½, the
     number that makes gDNA unstranded, must break the collapse."""
     sense, antisense, kappa = 30.0, 10.0, 0.9
@@ -85,7 +85,7 @@ def test_PERTURBATION_a_wrong_mixture_rate_BREAKS_the_collapse():
         np.testing.assert_allclose(got - got.mean(), ref - ref.mean(), rtol=0, atol=1e-9)
 
 
-def test_PERTURBATION_giving_the_dead_strand_mass_BREAKS_the_collapse():
+def test_perturbation_giving_the_dead_strand_mass_breaks_the_collapse():
     """The collapse is specific to the single-strand case: with the RNA split across both strands the two forms must
     part, or the test above would not be testing the special case."""
     sense, antisense, kappa = 30.0, 10.0, 0.9

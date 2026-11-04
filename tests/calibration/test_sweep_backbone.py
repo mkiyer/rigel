@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration import sweep as SW
-from rigel.calibration.blocks import SweepCapture
+from rigel.calibration.diagnostics import SweepDiagnostics
 from rigel.calibration.messages import ChainView
 from _transfer_harness import (
     FORWARD,
@@ -133,7 +133,7 @@ def test_an_empty_table_is_the_two_states_and_nothing_heard():
         assert one.heard[1] and not one.heard[0], f"a table with only {lane} read as nothing heard"
 
 
-def test_every_node_holds_what_each_neighbour_it_has_sent_and_an_open_side_is_no_neighbour():
+def test_every_node_holds_what_each_neighbour_sent_and_an_open_side_is_no_neighbour():
     """After the two passes every interior node holds one level naming its low neighbour and one naming its high.
     ``has_neighbour`` is exactly the chain's links, so the chain's two end nodes read no neighbour on the open side
     (which is not silence), and a level that arrived is not a composition."""
@@ -275,13 +275,22 @@ def test_solve_chain_takes_its_policy_by_name_and_silence_sends_nothing(sweep_in
     from rigel.calibration.messages.silent import SilentPolicy
 
     assert inspect.signature(SW.solve_chain).parameters["policy"].default is inspect.Parameter.empty
-    assert SW._POLICY_KERNEL["silent"] == 0
-    cap = SweepCapture()
+    assert SW.POLICY_KERNEL["silent"] == 0
+    cap = SweepDiagnostics()
     out = SW.solve_chain(
-        *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=cap
+        *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), diagnostics=cap
     )
     assert cap.policy_name == "silent" and cap.from_left is None and cap.lam_rows is None
     assert out.has_composition is not None and "lam_rows_finite" not in cap.backbone_assertions
+
+
+def test_the_kernel_refuses_a_policy_code_it_does_not_know(sweep_inputs, monkeypatch):
+    """The kernel switches on the policy code, so a code it does not know is refused rather than run as one it does."""
+    from rigel.calibration.messages.silent import SilentPolicy
+
+    monkeypatch.setitem(SW.POLICY_KERNEL, "silent", max(SW.POLICY_KERNEL.values()) + 1)
+    with pytest.raises(ValueError, match="unknown policy code"):
+        SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy())
 
 
 def test_the_backbone_does_not_know_what_a_message_is_about():
@@ -289,8 +298,8 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
     policy. If one of these concepts appeared in ``sweep.py``, an operator would have leaked into the backbone.
 
     The test checks identifiers from the AST, not the file's text, since a text search would match a docstring naming
-    these words to say they are absent. ``capture`` has one licensed occurrence, ``_capture``, the diagnostics hook
-    every instrument passes by keyword; hybrid capture appears nowhere.
+    these words to say they are absent. Hybrid capture appears nowhere either: the instruments' record is named
+    ``diagnostics``, never ``capture``.
     """
     import ast
     import inspect
@@ -319,10 +328,7 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
         f"policy concepts leaked into the backbone's identifiers: {leaked}"
     )
     cap = sorted(i for i in ident if "capture" in i)
-    assert cap == ["_capture", "sweepcapture"], (
-        "the only licensed 'capture' words are the diagnostics hook — the parameter — and its record "
-        f"(`blocks.SweepCapture`). Found {cap}"
-    )
+    assert not cap, f"hybrid capture leaked into the backbone's identifiers: {cap}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -341,12 +347,12 @@ def test_the_cube_channel_is_counted_where_a_cube_was_delivered():
 
 
 def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present():
-    """`_solve_regions_logodds_all(cube_rows=...)`: ``None`` and an empty table are byte-identical to the
-    path without the argument; a wall against low ``f_+`` at one AMBIG slot raises that slot's ``f_pos`` and
+    """`psi_solve(cube_rows=...)`: ``None`` and an empty table are byte-identical to the production solve
+    (`solve_regions_logodds`); a wall against low ``f_+`` at one AMBIG slot raises that slot's ``f_pos`` and
     leaves every other slot byte-identical."""
-    from _psi_reference import cube_rows_of
+    from _psi_reference import cube_rows_of, psi_solve
 
-    from rigel.calibration.simplex_logodds import CubeRows, _solve_regions_logodds_all
+    from rigel.calibration.simplex_logodds import CubeRows, solve_regions_logodds
 
     m, K_ = 4, 40
     u_pos = np.array([50.0, 50.0, 50.0, 50.0])
@@ -354,16 +360,16 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
     ap = np.ones(m, bool)
     an = np.array([True, True, False, True])
     kw = dict(kappa=0.99, n_grid=K_, L=10.0)
-    base = _solve_regions_logodds_all(u_pos, u_neg, ap, an, **kw)
+    base = solve_regions_logodds(u_pos, u_neg, ap, an, **kw)
     u = np.linspace(-10.0, 10.0, K_)
     for empty in (None, CubeRows.blank(0, u)):
-        again = _solve_regions_logodds_all(u_pos, u_neg, ap, an, cube_rows=empty, **kw)
+        again = psi_solve(u_pos, u_neg, ap, an, cube_rows=empty, **kw)
         assert np.array_equal(again.gdna_frac, base.gdna_frac)
         assert np.array_equal(again.rna_pos_frac, base.rna_pos_frac)
     # "at least 30 % RNA+": a wall below the density that share implies, n = 100, a_r = 100, ρ_ref = 1
     floor = np.where(u < np.log(0.3), -50.0, 0.0)
     wall = cube_rows_of({1: (floor, None, 100.0, 100.0, 1.0)}, u)
-    walled = _solve_regions_logodds_all(u_pos, u_neg, ap, an, cube_rows=wall, **kw)
+    walled = psi_solve(u_pos, u_neg, ap, an, cube_rows=wall, **kw)
     assert walled.rna_pos_frac[1] > base.rna_pos_frac[1] + 0.05
     for i in (0, 2, 3):
         assert (
@@ -377,7 +383,7 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_a_terminal_receives_nothing_and_the_kernel_is_never_asked_for_the_hop_into_it():
+def test_a_terminal_receives_nothing_and_the_kernel_never_prices_the_hop_into_it():
     """A node marked terminal holds silence from a side it has a neighbour on, and the kernel is never asked for the hop
     into it, so nothing a policy would deliver there can exist. The same pass with no terminal marked delivers its
     level, which shows the mask does the work. What the terminal sends is untouched: its neighbour still receives from
@@ -458,9 +464,9 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
     kw.pop("block_slots", None)  # the capture carries calibrate's; this gate sets its own
 
     def run(block_slots):
-        cap = SweepCapture()
+        cap = SweepDiagnostics()
         out = SW.solve_chain(
-            *sweep_inputs["args"], **kw, policy=policy, block_slots=block_slots, _capture=cap
+            *sweep_inputs["args"], **kw, policy=policy, block_slots=block_slots, diagnostics=cap
         )
         caps[block_slots] = cap
         return _six(out)

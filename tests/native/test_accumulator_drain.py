@@ -15,7 +15,8 @@ import dataclasses
 
 import numpy as np
 import pytest
-from _index_builder import write_fasta
+from _bam_builder import R1_FWD, R2_REV, SECONDARY, record, write_bam
+from _index_builder import build_index
 
 from rigel.scan_payload import ADDITIVE_AXES
 from rigel.types import Strand
@@ -151,7 +152,7 @@ def test_the_drain_consumes_the_bank_and_conserves():
     assert int(accumulator.tally.deposited_lengths.sum()) == accumulator.tally.qc["deposited"]
 
 
-def test_the_drain_leaves_the_ARBITRATION_census_alone():
+def test_the_drain_leaves_the_arbitration_census_alone():
     """``_record_gap_resolution`` sends a size-one spliced set to ``RESOLVED_SPLICED`` and returns early on an
     all-unspliced one, so a drain that let it run would move the census by however many draws picked a spliced path, and
     chosen-∅ fragments would vanish from it. The census must read the same whatever was chosen; the drain's own axis
@@ -218,7 +219,7 @@ def test_the_draw_respects_the_scores_and_is_reproducible():
     assert first.min() >= 0 and first.max() < k, "every choice must be inside its own record's run"
 
 
-def test_the_draw_never_leaks_into_the_NEXT_records_run():
+def test_the_draw_never_leaks_into_the_next_records_run():
     """A draw that overshoots its run's cumulative total would land on the next run's first slot, another fragment's
     hypothesis, with every downstream number still plausible.
 
@@ -245,7 +246,7 @@ def test_the_draw_never_leaks_into_the_NEXT_records_run():
     )
 
 
-def test_an_overshooting_draw_lands_on_a_POSITIVE_hypothesis():
+def test_an_overshooting_draw_lands_on_a_positive_hypothesis():
     """The clamp keeps a choice inside its own run and also off a hypothesis with no mass: a run ending in zero-score
     hypotheses would otherwise hand an overshooting uniform to a candidate the score excluded. Constructed like the leak
     test: each run holds 0.5 of mass on its first two slots and none on its last, so half the uniforms overshoot.
@@ -300,7 +301,7 @@ def test_the_fixture_reaches_all_three_hypotheses_and_they_differ():
     )
 
 
-def test_every_additive_channel_is_named_in_ADDITIVE_AXES():
+def test_every_additive_channel_is_named_in_additive_axes():
     """The drain adds only what ``ADDITIVE_AXES`` names. A channel the accumulator fills but the table omits would go
     short by exactly the drained fragments, and ``pool_lengths`` has no externally checkable sum to show it.
     """
@@ -324,7 +325,35 @@ def test_every_additive_channel_is_named_in_ADDITIVE_AXES():
 # is not.
 
 DRAIN_GENOME = 6_000
-_M, _N = 0, 3
+
+
+def _drain_reads(n_spliced: int, n_ambiguous: int, n_multi: int = 0) -> list:
+    """The drain fixture's records. On each contig, ``n_spliced`` fragments across each of its two sj and
+    ``n_ambiguous`` whose gap is unsequenced; then ``n_multi`` multimappers with one hit per contig (NH 2, the second
+    hit secondary and numbered HI 2), contained in the first exon on both, so held on their placements, not their
+    gap."""
+    reads = []
+    for ref in (0, 1):
+        for k in range(n_spliced):
+            for donor, acceptor in ((1600, 2000), (1700, 1900)):
+                name, cigar = f"sp_{ref}_{donor}_{k}", f"200M{acceptor - donor}N100M"
+                reads += [
+                    record(name, R1_FWD, donor - 200, cigar, acceptor + 100, ref=ref),
+                    record(name, R2_REV, acceptor + 100, "100M", donor - 200, ref=ref),
+                ]
+        for k in range(n_ambiguous):
+            reads += [
+                record(f"amb_{ref}_{k}", R1_FWD, 1500, "100M", 2000, ref=ref),
+                record(f"amb_{ref}_{k}", R2_REV, 2000, "100M", 1500, ref=ref),
+            ]
+    for k in range(n_multi):
+        for ref, hi in ((0, 1), (1, 2)):
+            secondary = SECONDARY if hi == 2 else 0
+            reads += [
+                record(f"mm_{k}", R1_FWD | secondary, 1100, "100M", 1300, ref=ref, nh=2, hi=hi),
+                record(f"mm_{k}", R2_REV | secondary, 1300, "100M", 1100, ref=ref, nh=2, hi=hi),
+            ]
+    return reads
 
 
 def _drain_gtf() -> str:
@@ -342,93 +371,24 @@ def _drain_gtf() -> str:
 @pytest.fixture(scope="module")
 def scanned_two_contigs(tmp_path_factory):
     """Scan a two-contig fixture; return everything the payload-path gates read."""
-    import pysam
-
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.splice_graph import (
         build_sj_arrays,
         build_region_partition_arrays,
     )
     from rigel.config import BamScanConfig
-    from rigel.index import TranscriptIndex
     from rigel.pipeline import scan_and_buffer
 
     base = tmp_path_factory.mktemp("drain_two_contigs")
-    fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {"chr1": DRAIN_GENOME, "chr2": DRAIN_GENOME})
-    gtf.write_text(_drain_gtf())
-    index = TranscriptIndex.load(
-        str(
-            TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
-            or base / "idx"
-        )
+    index = build_index(base, _drain_gtf(), {"chr1": DRAIN_GENOME, "chr2": DRAIN_GENOME})
+
+    # depth on both sj, so neither reads zero and the draw has something to weigh; three ambiguous fragments per
+    # contig, so both banks are non-empty; and four multimappers
+    bam = write_bam(
+        base / "drain.bam",
+        _drain_reads(n_spliced=12, n_ambiguous=3, n_multi=4),
+        {"chr1": DRAIN_GENOME, "chr2": DRAIN_GENOME},
     )
-
-    def read(qname, ref_id, pos, cigar, mate_pos, is_r1):
-        a = pysam.AlignedSegment()
-        a.query_name = qname
-        a.reference_id = ref_id
-        a.reference_start = pos
-        a.mapping_quality = 60
-        a.flag = 0x1 | 0x2 | (0x40 | 0x20 if is_r1 else 0x80 | 0x10)
-        a.cigar = cigar
-        n = sum(length for op, length in cigar if op == _M)
-        a.query_sequence = "A" * n
-        a.query_qualities = pysam.qualitystring_to_array("I" * n)
-        a.next_reference_id = ref_id
-        a.next_reference_start = mate_pos
-        a.set_tags([("NH", 1, "i")])
-        return a
-
-    reads = []
-    for ref_id in (0, 1):
-        # depth on both sj, so neither reads zero and the draw has something to weigh
-        for k in range(12):
-            for donor, acceptor in ((1600, 2000), (1700, 1900)):
-                reads += [
-                    read(
-                        f"sp_{ref_id}_{donor}_{k}",
-                        ref_id,
-                        donor - 200,
-                        [(_M, 200), (_N, acceptor - donor), (_M, 100)],
-                        acceptor + 100,
-                        True,
-                    ),
-                    read(
-                        f"sp_{ref_id}_{donor}_{k}",
-                        ref_id,
-                        acceptor + 100,
-                        [(_M, 100)],
-                        donor - 200,
-                        False,
-                    ),
-                ]
-        # the ambiguous fragments: three per contig, so both banks are non-empty
-        for k in range(3):
-            reads += [
-                read(f"amb_{ref_id}_{k}", ref_id, 1500, [(_M, 100)], 2000, True),
-                read(f"amb_{ref_id}_{k}", ref_id, 2000, [(_M, 100)], 1500, False),
-            ]
-
-    # four multimapping fragments, each with one hit per contig (NH = 2, the second hit secondary and numbered HI = 2),
-    # contained in the first exon on both: held on their placements, not their gap
-    for k in range(4):
-        for ref_id, hi in ((0, 1), (1, 2)):
-            for is_r1, pos, mate in ((True, 1100, 1300), (False, 1300, 1100)):
-                a = read(f"mm_{k}", ref_id, pos, [(_M, 100)], mate, is_r1)
-                if hi == 2:
-                    a.flag |= 0x100
-                a.set_tags([("NH", 2, "i"), ("HI", hi, "i")])
-                reads.append(a)
-    bam = str(base / "drain.bam")
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": "chr1", "LN": DRAIN_GENOME}, {"SN": "chr2", "LN": DRAIN_GENOME}],
-    }
-    with pysam.AlignmentFile(bam, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam, bam)
 
     _s, strand_model, _b, payload = scan_and_buffer(
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
@@ -444,13 +404,13 @@ def scanned_two_contigs(tmp_path_factory):
 
 
 def _drained(scanned_two_contigs, seed=11):
-    from rigel.calibration.fl import build_fl_models
+    from _length_models import payload_fl_models
     from rigel.second_pass import choose_hypotheses, drain, score_held_fragments
 
     payload, region_types, sj, strand_model, regions = scanned_two_contigs
     scores = score_held_fragments(
         payload,
-        fl_models=build_fl_models(payload),
+        fl_models=payload_fl_models(payload),
         rna_sense_frac=strand_model.p_r1_sense,
         regions=regions,
         sj=sj,
@@ -459,7 +419,7 @@ def _drained(scanned_two_contigs, seed=11):
     return payload, drain(payload, choices, region_types=region_types, sj=sj), choices
 
 
-def test_the_fixture_holds_fragments_on_BOTH_contigs(scanned_two_contigs):
+def test_the_fixture_holds_fragments_on_both_contigs(scanned_two_contigs):
     """If everything deferred on reference 0, every per-reference slice would be exercised only where its base offset is
     0."""
     payload = scanned_two_contigs[0]
@@ -472,7 +432,7 @@ def test_the_fixture_holds_fragments_on_BOTH_contigs(scanned_two_contigs):
     )
 
 
-def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs):
+def test_the_drained_payload_conserves_and_the_bank_is_empty(scanned_two_contigs):
     """The same conservation at the payload: the identity, the emptied bank, and both externally checkable sums."""
     before, after, _choices = _drained(scanned_two_contigs)
 
@@ -495,7 +455,7 @@ def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs
     assert before.drain is None
 
 
-def test_the_drain_credits_the_sj_on_the_RIGHT_CONTIG(scanned_two_contigs):
+def test_the_drain_credits_the_sj_on_the_right_contig(scanned_two_contigs):
     """A drained spliced choice must credit a sj slot on its own contig, and chr2's slots are not zero-based, which
     makes the arithmetic visible. It catches two silent failures: sj never installed (every slot stays at pass one's
     value, because an observed intron with no table reads as unannotated), and a slot base of 0 for every reference
@@ -533,7 +493,7 @@ def test_the_drain_credits_the_sj_on_the_RIGHT_CONTIG(scanned_two_contigs):
         )
 
 
-def test_the_drain_is_REPRODUCIBLE_and_the_seed_is_what_moves_it(scanned_two_contigs):
+def test_the_drain_is_reproducible_and_the_seed_is_what_moves_it(scanned_two_contigs):
     """Same payload, same seed: byte-identical on every channel. The drain runs after the worker merge over a
     canonically sorted bank and never sees a thread; this keeps it so."""
     _b, first, choices_a = _drained(scanned_two_contigs, seed=11)
@@ -546,7 +506,7 @@ def test_the_drain_is_REPRODUCIBLE_and_the_seed_is_what_moves_it(scanned_two_con
     assert first.drain == again.drain
 
 
-def test_a_payload_cannot_be_drained_TWICE(scanned_two_contigs):
+def test_a_payload_cannot_be_drained_twice(scanned_two_contigs):
     """The drain consumes the bank, so a second drain would deposit nothing and double the bookkeeping."""
     from rigel.second_pass import drain
 
@@ -557,89 +517,35 @@ def test_a_payload_cannot_be_drained_TWICE(scanned_two_contigs):
     assert len(choices) == 10
 
 
-def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_factory):
+def test_the_drained_payload_is_byte_identical_at_1_2_4_8_workers(tmp_path_factory):
     """Worker independence, composed through the drain.
 
     The deferred bank is worker-independent and the drain runs after the worker merge over its canonical order, so this
     holds by structure; the test catches any change that drains per worker or consumes the queue in append order. It
     compares every additive channel and the choice vector, since identical tallies from different choices would mean the
     draw stopped depending on queue order. The canonical sort itself is tested upstream in the parity and
-    worker-determinism modules; this adds only the composition.
+    worker-determinism modules; this adds only the composition. ``bgzf_threads=0`` gives every thread to a worker, so
+    the thread count is the worker count.
     """
-    import pysam
-
-    from rigel.calibration.fl import build_fl_models
+    from _length_models import payload_fl_models
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.splice_graph import (
         build_sj_arrays,
         build_region_partition_arrays,
     )
     from rigel.config import BamScanConfig
-    from rigel.index import TranscriptIndex
     from rigel.pipeline import scan_and_buffer
     from rigel.second_pass import choose_hypotheses, drain, score_held_fragments
 
     base = tmp_path_factory.mktemp("drain_workers")
-    fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {"chr1": DRAIN_GENOME, "chr2": DRAIN_GENOME})
-    gtf.write_text(_drain_gtf())
-    TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
-    index = TranscriptIndex.load(str(base / "idx"))
+    index = build_index(base, _drain_gtf(), {"chr1": DRAIN_GENOME, "chr2": DRAIN_GENOME})
 
-    def read(qname, ref_id, pos, cigar, mate_pos, is_r1):
-        a = pysam.AlignedSegment()
-        a.query_name = qname
-        a.reference_id = ref_id
-        a.reference_start = pos
-        a.mapping_quality = 60
-        a.flag = 0x1 | 0x2 | (0x40 | 0x20 if is_r1 else 0x80 | 0x10)
-        a.cigar = cigar
-        n = sum(length for op, length in cigar if op == _M)
-        a.query_sequence = "A" * n
-        a.query_qualities = pysam.qualitystring_to_array("I" * n)
-        a.next_reference_id = ref_id
-        a.next_reference_start = mate_pos
-        a.set_tags([("NH", 1, "i")])
-        return a
-
-    # Enough fragments that several chunks and several workers are in play.
-    reads = []
-    for ref_id in (0, 1):
-        for k in range(60):
-            for donor, acceptor in ((1600, 2000), (1700, 1900)):
-                reads += [
-                    read(
-                        f"sp_{ref_id}_{donor}_{k}",
-                        ref_id,
-                        donor - 200,
-                        [(_M, 200), (_N, acceptor - donor), (_M, 100)],
-                        acceptor + 100,
-                        True,
-                    ),
-                    read(
-                        f"sp_{ref_id}_{donor}_{k}",
-                        ref_id,
-                        acceptor + 100,
-                        [(_M, 100)],
-                        donor - 200,
-                        False,
-                    ),
-                ]
-        for k in range(40):
-            reads += [
-                read(f"amb_{ref_id}_{k}", ref_id, 1500, [(_M, 100)], 2000, True),
-                read(f"amb_{ref_id}_{k}", ref_id, 2000, [(_M, 100)], 1500, False),
-            ]
-    bam = str(base / "workers.bam")
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": "chr1", "LN": DRAIN_GENOME}, {"SN": "chr2", "LN": DRAIN_GENOME}],
-    }
-    with pysam.AlignmentFile(bam, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam, bam)
-
+    # enough fragments that several chunks and several workers are in play
+    bam = write_bam(
+        base / "workers.bam",
+        _drain_reads(n_spliced=60, n_ambiguous=40),
+        {"chr1": DRAIN_GENOME, "chr2": DRAIN_GENOME},
+    )
     _, _, region_types = build_region_partition_arrays(index)
     sj = build_sj_arrays(index)
     regions = RegionArrays.from_index(index)
@@ -651,11 +557,13 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
             index,
             # A small chunk so several chunks and workers are in flight; at the default 1 M the whole fixture is one
             # chunk.
-            BamScanConfig(sj_strand_tag="XS", total_threads=threads, fragments_per_chunk=32),
+            BamScanConfig(
+                sj_strand_tag="XS", total_threads=threads, bgzf_threads=0, fragments_per_chunk=32
+            ),
         )
         scores = score_held_fragments(
             payload,
-            fl_models=build_fl_models(payload),
+            fl_models=payload_fl_models(payload),
             rna_sense_frac=strand_model.p_r1_sense,
             regions=regions,
             sj=sj,
@@ -710,7 +618,7 @@ def _score_one(rho, f, s):
     )
 
 
-def test_an_ALL_ZERO_factor_is_UNINFORMATIVE_and_does_not_annihilate_the_others():
+def test_an_all_zero_factor_is_uninformative_and_does_not_annihilate_the_others():
     """Every candidate has zero local traffic but the length term separates them, so an all-zero factor must read as no
     evidence rather than as evidence against everything."""
     scores, undecided = _score_one(rho=[0.0, 0.0], f=[0.0001, 0.0], s=[0.99, 1.0])
@@ -722,7 +630,7 @@ def test_an_ALL_ZERO_factor_is_UNINFORMATIVE_and_does_not_annihilate_the_others(
     assert scores[1] == 0.0, "and the impossible length keeps zero posterior"
 
 
-def test_a_PARTIAL_zero_stays_DECISIVE():
+def test_a_partial_zero_stays_decisive():
     """A zero for some candidates is evidence (that path has no support), so a partial zero stays decisive."""
     scores, undecided = _score_one(rho=[1.0, 0.0], f=[0.5, 0.5], s=[1.0, 1.0])
     assert not undecided
@@ -731,7 +639,7 @@ def test_a_PARTIAL_zero_stays_DECISIVE():
     )
 
 
-def test_a_factor_that_is_CONSTANT_and_positive_already_cancels():
+def test_a_factor_that_is_constant_and_positive_already_cancels():
     """Normalisation makes any constant factor irrelevant, so dropping an all-zero one is consistent with it rather than
     a special case."""
     with_it, _ = _score_one(rho=[2.0, 6.0], f=[0.3, 0.3], s=[1.0, 1.0])
@@ -741,7 +649,7 @@ def test_a_factor_that_is_CONSTANT_and_positive_already_cancels():
     )
 
 
-def test_a_WEAKER_factor_cannot_VETO_what_a_STRONGER_one_left_standing():
+def test_a_weaker_factor_cannot_veto_what_a_stronger_one_left_standing():
     """Factors are applied strongest evidence first, and a weaker one only refines within the survivors.
 
     Traffic favours candidate 0 and the strand term candidate 1, with the length term allowing both. A blind product
@@ -757,14 +665,14 @@ def test_a_WEAKER_factor_cannot_VETO_what_a_STRONGER_one_left_standing():
     )
 
 
-def test_ALL_THREE_factors_absent_is_a_genuine_coin_toss():
+def test_all_three_factors_absent_is_a_genuine_coin_toss():
     """No evidence of any kind means uniform."""
     scores, undecided = _score_one(rho=[0.0, 0.0, 0.0], f=[0.0, 0.0, 0.0], s=[0.0, 0.0, 0.0])
     assert undecided
     assert np.allclose(scores, [1 / 3, 1 / 3, 1 / 3])
 
 
-def test_an_IMPOSSIBLE_LENGTH_cannot_be_CHOSEN_however_much_traffic_favours_it():
+def test_an_impossible_length_cannot_be_chosen_however_much_traffic_favours_it():
     """A length the library never produced cannot be chosen, however much traffic favours it. ``f = 0`` means no
     fragment of this length was observed anywhere in the library, the statement ``max_fragment_length`` makes, read off
     the measured distribution; so a candidate beyond the pmf's support is excluded by evidence, not by a chosen
@@ -795,7 +703,7 @@ def test_an_IMPOSSIBLE_LENGTH_cannot_be_CHOSEN_however_much_traffic_favours_it()
     assert undecided and np.allclose(scores, [0.5, 0.5])
 
 
-def test_factors_that_UNDERFLOW_for_every_candidate_still_decide():
+def test_factors_that_underflow_for_every_candidate_decide():
     """The factors are combined in logs. A product of probabilities and densities can underflow to zero for every
     candidate of a record (a sequence price at many mismatches does), and the zero rule would then read the record as
     uninformative though the factors separate its candidates two to one.
@@ -805,7 +713,7 @@ def test_factors_that_UNDERFLOW_for_every_candidate_still_decide():
     np.testing.assert_allclose(scores, [1.0 / 3.0, 2.0 / 3.0], rtol=1e-12)
 
 
-def test_SURVIVORS_are_weighted_by_LIKELIHOOD_not_tossed_for():
+def test_survivors_are_weighted_by_likelihood_not_tossed_for():
     """The length term leaves two candidates possible and prefers one by two orders of magnitude, while traffic is zero
     for both. Restricting to the survivors and drawing uniformly would pick the far less likely candidate half the time;
     the draw must be weighted by the likelihood, not only narrowed.
@@ -845,7 +753,7 @@ def test_SURVIVORS_are_weighted_by_LIKELIHOOD_not_tossed_for():
 # be silent (pure gDNA) or highly expressed.
 
 
-def test_gDNA_is_STRAND_SYMMETRIC_in_both_orientations():
+def test_gdna_is_strand_symmetric_in_both_orientations():
     """Double-stranded DNA has no sense direction."""
     from rigel.second_pass import strand_terms
 
@@ -859,7 +767,7 @@ def test_gDNA_is_STRAND_SYMMETRIC_in_both_orientations():
         )
 
 
-def test_the_RNA_UNLIKELY_orientation_favours_the_GENOMIC_candidate():
+def test_the_rna_unlikely_orientation_favours_the_genomic_candidate():
     """The orientation term, with the direction protocol-dependent so nothing here hard-codes it. On a dUTP library ``p
     = 0.01``, so a fragment co-oriented with the candidate's strand is the RNA-unlikely case: RNA produces that
     orientation 1 % of the time and DNA half the time, so ∅ is favoured 50:1. Counter-oriented, RNA is favoured only
@@ -884,7 +792,7 @@ def test_the_RNA_UNLIKELY_orientation_favours_the_GENOMIC_candidate():
     assert ct_spliced / ct_genomic == pytest.approx((1.0 - p) / 0.5)
 
 
-def test_the_ORIENTATION_DISCRIMINATION_is_exactly_the_LIBRARY_SPECIFICITY_ODDS():
+def test_the_orientation_discrimination_is_exactly_the_library_specificity_odds():
     """The term's information is the odds ratio between the two orientations, which must equal ``(1 - p) / p``, the
     library's strand-specificity odds, exactly. That makes ∅'s constant irrelevant to the discrimination; a fitted
     global marginal would collapse the odds several fold.
@@ -906,7 +814,7 @@ def test_the_ORIENTATION_DISCRIMINATION_is_exactly_the_LIBRARY_SPECIFICITY_ODDS(
     )
 
 
-def test_an_UNSTRANDED_library_gives_a_NEUTRAL_strand_term():
+def test_an_unstranded_library_gives_a_neutral_strand_term():
     """At ``p = 0.5`` there is no strand information, so every candidate scores 0.5 and the factor cancels, which
     ``combine_factors`` then skips as uninformative."""
     from rigel.second_pass import strand_terms
@@ -918,7 +826,7 @@ def test_an_UNSTRANDED_library_gives_a_NEUTRAL_strand_term():
         assert spliced == pytest.approx(0.5) and genomic == pytest.approx(0.5)
 
 
-def test_an_AMBIGUOUS_implied_strand_says_NOTHING():
+def test_an_ambiguous_implied_strand_says_nothing():
     """One path claimed by both strands names no orientation to compare against, so the spliced candidate cannot be
     scored on strand either and falls back to symmetric."""
     from rigel.second_pass import strand_terms

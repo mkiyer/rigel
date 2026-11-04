@@ -1,6 +1,6 @@
 """Tests for the transfer policy's per-face message builders, every row recomputed on the live toy by a second
 implementation so a policy bug cannot hide. The row constructors and flag predicates are the native ones
-(`native.transfer_rows`), and a rule is applied to a claim by driving one hop of the native pass
+(`_solve_impl.testing`), and a rule is applied to a claim by driving one hop of the native pass
 (`_transfer_harness._rule`).
 
 The intron|exon face: the licence refuses unmeasured population changes; the splice-in face map is monotone and capped
@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from scipy.special import polygamma
 
-from rigel.native import transfer_rows as R
+from rigel._solve_impl import testing as R
 from _transfer_harness import (
     FORWARD,
     LEVEL,
@@ -166,6 +166,14 @@ def test_the_face_map_is_monotone_and_flux_capped():
     np.testing.assert_allclose(le0, lam + shift, rtol=0, atol=1e-9)
 
 
+def _lambda_variance(row, lam) -> float:
+    """The variance in λ of the profile *row* (log weights on the lattice *lam*)."""
+    w = np.exp(row - row.max())
+    w /= w.sum()
+    m = w @ lam
+    return float(w @ (lam * lam) - m * m)
+
+
 def test_the_ingredient_width_adds_the_counting_variance():
     """A Gaussian factor transported through an identity-shaped map must widen by exactly the face's counting variance
     trigamma(n_u+1/2) + trigamma(n_s+1/2), the delta-method width, which an inverted or mis-scaled kernel cannot fake.
@@ -178,14 +186,10 @@ def test_the_ingredient_width_adds_the_counting_variance():
     v = float(polygamma(1, n_u + 0.5) + polygamma(1, n_s + 0.5))
     out = R.transport_row(row, lam, lam.copy(), n_u, n_s)  # identity map isolates the width
 
-    def _var(r):
-        w = np.exp(r - r.max())
-        w /= w.sum()
-        m = w @ lam
-        return float(w @ (lam * lam) - m * m)
-
-    assert _var(row) == pytest.approx(1.0, rel=0.02)
-    assert _var(out) == pytest.approx(1.0 + v, rel=0.02), "the width must add exactly the variance"
+    assert _lambda_variance(row, lam) == pytest.approx(1.0, rel=0.02)
+    assert _lambda_variance(out, lam) == pytest.approx(1.0 + v, rel=0.02), (
+        "the width must add exactly the variance"
+    )
     assert abs(float(out.max())) < 1e-12
 
 
@@ -267,12 +271,6 @@ def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
     def _mode_f(r):
         return float(sig[np.argmax(r)])
 
-    def _var(r):
-        w = np.exp(r - r.max())
-        w /= w.sum()
-        m = w @ lam
-        return float(w @ (lam * lam) - m * m)
-
     deep = R.splice_out_row(
         row_e,
         lam,
@@ -299,7 +297,9 @@ def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
         splice_rate=9.0 / 210.0,
         nodes=MARGINAL_NODES,
     )
-    assert _var(thin) > 3 * _var(deep), "a thin face must deliver a much wider claim"
+    assert _lambda_variance(thin, lam) > 3 * _lambda_variance(deep, lam), (
+        "a thin face must deliver a much wider claim"
+    )
     assert abs(float(deep.max())) < 1e-12 and abs(float(thin.max())) < 1e-12
     assert not R.splice_out_row(
         row_e,
@@ -359,7 +359,7 @@ def test_the_intron_face_carries_the_density_mixture_and_the_face_map(sweep_inpu
     from dataclasses import replace
 
     from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.simplex_logodds import _logodds_grid
+    from rigel.calibration.simplex_logodds import logodds_grid
 
     n_grid = int(sweep_inputs["kw"]["n_grid"])
     window = float(sweep_inputs["kw"]["logodds_window"])
@@ -370,7 +370,7 @@ def test_the_intron_face_carries_the_density_mixture_and_the_face_map(sweep_inpu
     ctx = replace(ctx, has_own_composition=ctx.has_own_composition & _intron_mask(ctx))
     kappa = _kappa_of(sweep_inputs)
     prepared = _prepared(TransferPolicy(kappa=kappa), ctx)
-    lam, _ = _logodds_grid(n_grid, window)
+    lam, _ = logodds_grid(n_grid, window)
     src = np.zeros((ctx.n_slots, len(lam)))
     n_claims = 0
     for b, j in pairs:
@@ -408,7 +408,7 @@ def test_the_intron_face_carries_the_density_mixture_and_the_face_map(sweep_inpu
             assert acc is None, f"exon {e} received a rule it is not licensed for"
 
 
-def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_the_maps(
+def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_the_rules_the_maps(
     sweep_inputs,
 ):
     """The two strand-borne rules, as claims and rules: at every licensed face of a strand-live exon the rule
@@ -416,12 +416,12 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
     recomputed splice-out rows; at every intron|exon pair sharing one strand with a live boundary,
     the rule boundary → intron preserves density odds and the boundary's claim, summed per intron, equals
     the independently recomputed strand rows."""
-    from rigel.calibration.simplex_logodds import _logodds_grid
+    from rigel.calibration.simplex_logodds import logodds_grid
 
     pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     kappa = _kappa_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
+    lam, _ = logodds_grid(n_grid, window)
     prepared = _prepared(pol, ctx)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
@@ -737,31 +737,27 @@ def test_the_level_map_keeps_the_level_and_the_bound_is_vacuous_below_the_total(
     tight = R.level_row(row_b, lam, m, 0.001)
     assert float(sig[np.argmax(tight)]) == pytest.approx(want, abs=0.01)
 
-    def _var(r):
-        w = np.exp(r - r.max())
-        w /= w.sum()
-        mu = w @ lam
-        return float(w @ (lam * lam) - mu * mu)
-
     wide = R.level_row(row_b, lam, m, 0.5)
-    assert _var(wide) > 3 * _var(tight), "the dampening must widen the delivered profile"
+    assert _lambda_variance(wide, lam) > 3 * _lambda_variance(tight, lam), (
+        "the dampening must widen the delivered profile"
+    )
     assert not R.level_row(np.zeros_like(lam), lam, m, 0.1).any(), "a flat profile is vacuous"
     ub = R.level_bound_row(lam, d_b, E_i, T_i, 0.01)
     below = sig * T_i / E_i < d_b  # inside gDNA density below the crossing's total density
     assert np.all(ub[below] == 0.0) and np.all(ub[~below] <= 0.0) and np.any(ub[~below] < 0.0)
 
 
-def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_clear(sweep_inputs):
+def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_once_flags_clear(sweep_inputs):
     """The terminus rules, as claims and rules: at every exon|exon terminus boundary the rule outside exon → boundary
     applied to the exon's claim is the independently recomputed splice-out row with the spliced crossing, and the rule
     boundary → outside exon applied to the boundary's claim is the recomputed face-map row; the rules exist exactly at
     the outside pairs and vanish when the terminus bits are cleared."""
-    from rigel.calibration.simplex_logodds import _logodds_grid
+    from rigel.calibration.simplex_logodds import logodds_grid
 
     pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     kappa = _kappa_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
+    lam, _ = logodds_grid(n_grid, window)
     prepared = _prepared(pol, ctx)
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -841,12 +837,12 @@ def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(
     leaves this pair's message unchanged."""
     import dataclasses as _dc
 
-    from rigel.calibration.simplex_logodds import _logodds_grid
+    from rigel.calibration.simplex_logodds import logodds_grid
 
     pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _with_populated_inside(_ctx_of(sweep_inputs))
     kappa = _kappa_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
+    lam, _ = logodds_grid(n_grid, window)
     prepared = _prepared(pol, ctx)
     expected, served = _expected_level_rows(sweep_inputs, ctx, kappa, lam)
     assert len(served) >= 2, (
@@ -1007,12 +1003,12 @@ def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs
     flank's claim, summed over the two flanks, equals the independently recomputed rows at the
     boundary; the rule boundary → flank applied to the boundary's claim equals the recomputed row at
     each flank — every message blurred by its own pair's disagreement beyond counting."""
-    from rigel.calibration.simplex_logodds import _logodds_grid
+    from rigel.calibration.simplex_logodds import logodds_grid
 
     pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _with_alt_splice_sites(_ctx_of(sweep_inputs))
     kappa = _kappa_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
+    lam, _ = logodds_grid(n_grid, window)
     prepared = _prepared(pol, ctx)
     expected, widths = _expected_alt_splice_rows(sweep_inputs, ctx, kappa, lam)
     assert expected and any(w > 0.0 for w in widths.values()), (

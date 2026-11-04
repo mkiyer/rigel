@@ -1,8 +1,8 @@
 """`rigel.frag_length_model.FragmentLengthModel` in the two shapes production builds: `from_pmf`, the
 scoring and effective-length model built from `calibration.fl`'s pmfs, and the raw-histogram model the
 QC report summarises (`FragmentLengthModel(counts=...)`). Gated: construction, the statistics reported
-(the censored overflow bin excluded where it must be), the effective length implied, the scoring table,
-and the serialization.
+(the censored overflow bin excluded where it must be), the effective length implied and the scoring table.
+How ``summary.json`` reports a model is gated in tests/test_summary_report.py.
 """
 
 import math
@@ -78,18 +78,6 @@ class TestFragmentLengthModelStatistics:
         # the 50th percentile still lands at the in-range bulk.
         assert m.median == 50.0
 
-    def test_overflow_reported_in_to_dict(self):
-        """The censored overflow bin is surfaced as a QC diagnostic."""
-        counts = np.zeros(101, dtype=np.float64)
-        counts[50] = 90.0
-        counts[100] = 10.0
-        m = FragmentLengthModel(max_size=100, counts=counts)  # unfinalized (raw QC view)
-        summ = m.to_dict()["summary"]
-        assert summ["mode"] == 50
-        assert summ["mean"] == pytest.approx(50.0, abs=0.01)
-        assert summ["overflow"]["count"] == pytest.approx(10.0)
-        assert summ["overflow"]["fraction"] == pytest.approx(0.1)
-
 
 class TestFragmentLengthModelEffectiveLength:
     @staticmethod
@@ -127,35 +115,10 @@ class TestFragmentLengthModelEffectiveLength:
         assert actual == pytest.approx(expected)
 
 
-class TestFragmentLengthModelSerialization:
-    @staticmethod
-    def _two_fragments():
-        counts = np.zeros(101, dtype=np.float64)
-        counts[50] = counts[60] = 1.0
-        return FragmentLengthModel(max_size=100, counts=counts)
-
-    def test_to_dict_structure(self):
-        d = self._two_fragments().to_dict()
-        assert "summary" in d
-        assert "histogram" in d
-        assert d["summary"]["n_observations"] == 2
-        assert d["summary"]["max_size"] == 100
-
-    def test_to_dict_histogram_trimmed(self):
-        d = self._two_fragments().to_dict()
-        assert d["histogram"]["range"] == [50, 60]
-        assert len(d["histogram"]["values"]) == 11  # 50 through 60 inclusive
-
-    def test_to_dict_empty_histogram(self):
-        m = FragmentLengthModel(max_size=100)
-        d = m.to_dict()
-        assert d["histogram"]["values"] == []
-
-
 # The report's fragment-length categories come from `FLModels` and are gated in tests/test_summary_report.py.
 
 
-def test_a_RAW_COUNT_model_refuses_a_pmf():
+def test_a_raw_count_model_refuses_a_pmf():
     """A model built from raw counts is a statistics view with no pmf, so asking for one refuses rather
     than returning None."""
     model = FragmentLengthModel(max_size=100, counts=np.ones(101))

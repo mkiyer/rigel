@@ -14,19 +14,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import CONSTANTS, JunctionFitConstants
+from .config import CONSTANTS
 
 
-def genuine_sense_fraction(
-    n_sense, n_total, constants: JunctionFitConstants = CONSTANTS.junction_fit
-) -> float:
+def genuine_sense_fraction(n_sense, n_total) -> float:
     """The genuine junctions' sense fraction κ: the ``Beta(1, 1)`` posterior mean ``(minority + 1) / (reads + 2)`` over
-    the reads the three-class mixture credits to RNA at its maximum (:func:`_genuine_mixture`). Where every junction is
+    the reads the three-class mixture credits to RNA at its maximum (:func:`genuine_mixture`). Where every junction is
     genuine that is exactly ``(n_same + 1) / (n_obs + 2)``; it is never 0."""
     k, n, c, flip = _oriented_groups(n_sense, n_total)
-    _, _, minority, reads, _ = _genuine_mixture(k, n, c, constants)
-    kappa = (minority + 1.0) / (reads + 2.0)
-    return 1.0 - kappa if flip else kappa
+    _, _, minority, reads, _ = genuine_mixture(k, n, c)
+    return _sense_fraction(minority, reads, flip)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,15 +37,12 @@ class JunctionClasses:
     by_fragment: tuple[float, float, float] | None
 
 
-def junction_classes(
-    n_sense, n_total, constants: JunctionFitConstants = CONSTANTS.junction_fit
-) -> JunctionClasses:
+def junction_classes(n_sense, n_total) -> JunctionClasses:
     """:func:`genuine_sense_fraction`'s fit, with the class shares it maximises over: by junction, the shares
     themselves; by fragment, each class's expected reads at the maximum over all the junctions' reads."""
     k, n, c, flip = _oriented_groups(n_sense, n_total)
-    rate, shares, minority, reads, _ = _genuine_mixture(k, n, c, constants)
-    kappa = (minority + 1.0) / (reads + 2.0)
-    kappa = 1.0 - kappa if flip else kappa
+    rate, shares, minority, reads, _ = genuine_mixture(k, n, c)
+    kappa = _sense_fraction(minority, reads, flip)
     if not float(c @ n) > 0.0:
         return JunctionClasses(kappa, None, None)
     lp = _class_log_likelihoods(k, n, rate)
@@ -60,6 +54,13 @@ def junction_classes(
         tuple(float(x) for x in shares),
         tuple(float(x) for x in fragments / fragments.sum()),
     )
+
+
+def _sense_fraction(minority: float, reads: float, flip: bool) -> float:
+    """κ from the RNA classes' expected minority reads and reads: their ``Beta(1, 1)`` posterior mean, turned back to
+    the sense side when the table was oriented by flipping it."""
+    kappa = (minority + 1.0) / (reads + 2.0)
+    return 1.0 - kappa if flip else kappa
 
 
 def _oriented_groups(n_sense, n_total):
@@ -87,11 +88,8 @@ def _class_log_likelihoods(k: np.ndarray, n: np.ndarray, kappa: float) -> np.nda
     )
 
 
-def _genuine_mixture(
-    k: np.ndarray,
-    n: np.ndarray,
-    c: np.ndarray,
-    constants: JunctionFitConstants = CONSTANTS.junction_fit,
+def genuine_mixture(
+    k: np.ndarray, n: np.ndarray, c: np.ndarray
 ) -> tuple[float, np.ndarray, float, float, float]:
     """The three-class binomial mixture's maximum likelihood. Junction group g (``c_g`` junctions with ``k_g`` of
     ``n_g`` reads on the minority side) is genuine RNA (rate κ), a splice artifact (½) or reversed (1 − κ). The class
@@ -101,12 +99,14 @@ def _genuine_mixture(
     and ``reads`` being the RNA classes' expected counts at the maximum."""
     from scipy.optimize import minimize_scalar
 
+    constants = CONSTANTS.junction_fit
+
     def profile(u):
         kappa = 0.5 / (1.0 + float(np.exp(-u)))
         lp = _class_log_likelihoods(k, n, kappa)
         top = lp.max(axis=0)
         f = np.exp(lp - top)
-        value, shares = _class_shares(f, c, constants)
+        value, shares = _class_shares(f, c)
         return value + float(c @ top), shares, f
 
     floor = constants.kappa_floor
@@ -129,42 +129,42 @@ def _genuine_mixture(
     return 0.5 / (1.0 + float(np.exp(-u))), shares, minority, reads, loglik
 
 
-def _class_shares(
-    f: np.ndarray, c: np.ndarray, constants: JunctionFitConstants = CONSTANTS.junction_fit
-) -> tuple[float, np.ndarray]:
+def _class_shares(f: np.ndarray, c: np.ndarray) -> tuple[float, np.ndarray]:
     """``max_w Σ_g c_g·log(Σ_k w_k f_kg)`` over the 3-simplex, and the maximising shares. The objective is concave in
     ``w``, so the KKT conditions are necessary and sufficient: at the maximum ``Σ_g c_g f_kg/(w·f)_g`` equals ``Σc`` for
     every share in use and is at most ``Σc`` for every share at 0. A vertex, then an edge, that meets them is the
-    maximum; only an interior maximum needs the log-barrier ascent. ``f`` is (3, G), each column scaled by its own
-    constant (which only shifts the objective). A candidate on which some junction has no probability scores −∞, so the
-    arithmetic warnings it raises are silenced, never acted on."""
+    maximum (:func:`_boundary_candidates`); only an interior maximum needs the log-barrier ascent
+    (:func:`_interior_maximum`). ``f`` is (3, G), each column scaled by its own constant (which only shifts the
+    objective). A candidate on which some junction has no probability scores −∞, so the arithmetic warnings it raises
+    are silenced, never acted on."""
+    constants = CONSTANTS.junction_fit
     with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
-        return _class_shares_unguarded(f, c, constants)
+
+        def value(w):
+            return float(c @ np.log(w @ f))
+
+        total = float(c.sum())
+        slack = constants.kkt_slack * total
+        candidates = []
+        for w, unused in _boundary_candidates(f, c, constants):
+            mult = f @ (c / (w @ f))
+            if np.all(np.isfinite(mult[unused])) and np.all(mult[unused] <= total + slack):
+                return value(w), w
+            candidates.append(w)
+        candidates.append(_interior_maximum(f, c, value, constants))
+        best = max(candidates, key=value)
+        return value(best), best
 
 
-def _class_shares_unguarded(
-    f: np.ndarray, c: np.ndarray, constants: JunctionFitConstants
-) -> tuple[float, np.ndarray]:
+def _boundary_candidates(f: np.ndarray, c: np.ndarray, constants):
+    """The simplex's boundary maxima, in the order they are tried: each vertex, then on each edge
+    ``t·e_a + (1 − t)·e_b`` whose slope changes sign the root-found maximum, each with the shares it leaves at 0."""
     from scipy.optimize import brentq
 
-    def value(w):
-        return float(c @ np.log(w @ f))
-
-    total = float(c.sum())
-    slack = constants.kkt_slack * total
-
-    def satisfies(w, unused):
-        mult = f @ (c / (w @ f))
-        return bool(np.all(np.isfinite(mult[unused])) and np.all(mult[unused] <= total + slack))
-
-    candidates = []
     for k in range(3):
-        vertex = np.eye(3)[k]
-        if satisfies(vertex, [j for j in range(3) if j != k]):
-            return value(vertex), vertex
-        candidates.append(vertex)
+        yield np.eye(3)[k], [j for j in range(3) if j != k]
     margin = constants.edge_margin
-    for a_, b_, third in ((0, 1, 2), (0, 2, 1), (1, 2, 0)):  # an edge t·e_a + (1 − t)·e_b
+    for a_, b_, third in ((0, 1, 2), (0, 2, 1), (1, 2, 0)):
         dd = f[a_] - f[b_]
 
         def edge_slope(t, dd=dd, a_=a_, b_=b_):
@@ -174,10 +174,14 @@ def _class_shares_unguarded(
             t = brentq(edge_slope, margin, 1.0 - margin, xtol=margin)
             e = np.zeros(3)
             e[a_], e[b_] = t, 1.0 - t
-            if satisfies(e, [third]):
-                return value(e), e
-            candidates.append(e)
-    d = f[:2] - f[2]  # the interior: free coordinates (w0, w1), w2 = 1 − w0 − w1
+            yield e, [third]
+
+
+def _interior_maximum(f: np.ndarray, c: np.ndarray, value, constants) -> np.ndarray:
+    """The interior maximum by a log-barrier ascent over the free coordinates ``(w0, w1)``, ``w2 = 1 − w0 − w1``:
+    Newton's method on the barrier objective, kept strictly inside, the barrier's weight shrinking stage by stage."""
+    total = float(c.sum())
+    d = f[:2] - f[2]
     w = np.full(3, 1.0 / 3.0)
     mu = constants.barrier_start * total
     while True:
@@ -185,7 +189,6 @@ def _class_shares_unguarded(
         def phi(v, mu=mu):
             return value(v) + mu * float(np.log(v).sum())
 
-        # Newton on the barrier objective, kept strictly inside
         for _ in range(constants.newton_steps):
             m = w @ f
             q = d / m
@@ -210,6 +213,4 @@ def _class_shares_unguarded(
         if mu <= constants.barrier_floor:
             break
         mu = max(mu * constants.barrier_shrink, constants.barrier_floor)
-    candidates.append(w)
-    best = max(candidates, key=value)
-    return value(best), best
+    return w

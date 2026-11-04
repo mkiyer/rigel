@@ -9,8 +9,8 @@ from _transfer_harness import BlockContext, _prepared, _rule
 from scipy.special import expit
 from scipy.stats import binom
 
-from rigel.calibration.messages.transfer import TransferPolicy, _Library
-from rigel.calibration.blocks import SweepCapture
+from rigel.calibration.messages.transfer import TransferPolicy, Library
+from rigel.calibration.diagnostics import SweepDiagnostics
 from rigel.calibration.sweep import solve_chain
 
 
@@ -48,7 +48,7 @@ def _context():
 
 
 def _prepare(context, kappa=0.99):
-    return _prepared(TransferPolicy(kappa), context, _Library(0.1, 0.2, True))
+    return _prepared(TransferPolicy(kappa), context, Library(0.1, 0.2, True))
 
 
 @pytest.mark.parametrize("counts", [(9, 0), (5, 4), (0, 9)])
@@ -143,7 +143,7 @@ def test_delivered_evidence_is_invariant_to_incoming_beliefs(sweep_inputs):
         fg = np.where(n_rna > 0, fraction, 1.0)
         share = (1 - fg) / np.maximum(n_rna, 1)
         seeded = replace(belief, f_g=fg, f_pos=share * free_pos, f_neg=share * free_neg)
-        capture = SweepCapture()
+        capture = SweepDiagnostics()
         solve_chain(
             chain,
             statics,
@@ -152,7 +152,7 @@ def test_delivered_evidence_is_invariant_to_incoming_beliefs(sweep_inputs):
             regions,
             **sweep_inputs["kw"],
             policy=policy,
-            _capture=capture,
+            diagnostics=capture,
         )
         rows = {"lam_rows": capture.lam_rows}
         for side in ("from_left", "from_right"):

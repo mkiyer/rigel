@@ -172,7 +172,7 @@ def test_a_strand_undefined_placement_excludes_only_itself():
     )
 
 
-def test_every_placement_excluded_rejects_the_fragment_once_and_names_the_strand_only_when_it_was_the_strand():
+def test_every_placement_excluded_rejects_once_and_names_the_strand_only_if_it_was():
     both_strand = _fresh()
     assert (
         both_strand.offer(
@@ -204,7 +204,7 @@ def test_every_pair_over_the_limit_means_all_stand_and_the_fragment_is_held():
     assert acc.tally.qc["dropped_too_long"] == 0, "nothing is rejected until the drain chooses"
 
 
-def test_one_survivor_across_placements_deposits_at_its_placement_and_leaves_the_gap_census_alone():
+def test_one_survivor_across_placements_deposits_there_and_leaves_the_gap_census():
     """Placement A is over the limit and placement B is a spliced path within it: B alone survives and the fragment
     deposits at B with that hypothesis, leaving the umbrella census untouched. A direct deposit of B would record
     ``gap_resolved_spliced``; a multi-placement fragment never does."""
@@ -231,7 +231,7 @@ def test_one_survivor_across_placements_deposits_at_its_placement_and_leaves_the
     _conserved(offered, 1)
 
 
-def test_two_contained_placements_are_held_whole_in_canonical_order_whatever_the_hit_order():
+def test_two_contained_placements_are_held_whole_in_canonical_order_any_hit_order():
     """The paralog case: a fragment contained in an exon on each reference, nothing to tell them apart.
     Held whole, both placements, each with its unspliced hypothesis, the placements in their own order."""
     a, b = _pl(1, 1100, 1400), _pl(0, 1150, 1450)
@@ -362,7 +362,7 @@ def test_a_record_local_choice_names_a_placement_and_a_hypothesis():
         assert np.array_equal(getattr(drained.tally, name), getattr(direct.tally, name)), name
 
 
-def test_a_drained_choice_over_the_limit_is_rejected_as_too_long_and_still_conserves():
+def test_a_drained_choice_over_the_limit_is_rejected_as_too_long_and_conserves():
     acc = _fresh()
     acc.offer((_pl(0, 100, 1600), _pl(1, 100, 1600)))
     counters = acc.drain([0])

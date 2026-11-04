@@ -189,7 +189,7 @@ class TestBlocksToCigar:
 
 
 class TestWholeGenomeOracleBamOrientation:
-    """Regression tests for the vectorized whole-genome oracle BAM writer."""
+    """The vectorized whole-genome oracle BAM writer."""
 
     def test_bam_seq_matches_reference_for_reverse_flipped_and_gdna_reads(self, tmp_path):
         genome = MutableGenome(length=3000, seed=7, name="ref")
@@ -351,7 +351,7 @@ class TestSequencingErrors:
             sim.close()
         return fasta_path, bam_path
 
-    def test_every_record_carries_NM_and_NM_counts_its_mismatches(self, tmp_path):
+    def test_every_record_carries_nm_and_nm_counts_its_mismatches(self, tmp_path):
         """Perturbation: no NM tag, or NM counted before the errors, or a substitution that may redraw the base it
         replaces (a quarter of the 'errors' are then no error, and NM over-counts)."""
         fasta_path, bam_path = self._simulate(tmp_path, error_rate=0.02)
@@ -369,7 +369,7 @@ class TestSequencingErrors:
         rate = n_mismatches / n_bases
         assert abs(rate - 0.02) < 5 * (0.02 * 0.98 / n_bases) ** 0.5, rate
 
-    def test_an_error_free_read_carries_NM_0(self, tmp_path):
+    def test_an_error_free_read_carries_nm_0(self, tmp_path):
         """Rigel warns of a record without NM, which it reads as 0 edits: the simulator's own BAM must not trip it."""
         _, bam_path = self._simulate(tmp_path, error_rate=0.0)
         with pysam.AlignmentFile(str(bam_path), "rb") as bam:

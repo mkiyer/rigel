@@ -48,98 +48,99 @@ def _capture(summary: SummaryReader) -> dict | None:
 def _verdicts(summary: SummaryReader) -> list[dict]:
     """Headline QC tiles: mapping, strandedness, gDNA, usable fragments, + calibration's capture
     answer when the summary carries one."""
-    out: list[dict] = []
-    qc = CONSTANTS.qc
-    aln = summary["alignment_stats"]
-    frag = summary["fragment_stats"]
-    strand = summary["strand_model"]
-    quant = summary["quantification"]
-
-    # Mapping rate
-    total = aln["total_reads"]
-    mapped = aln["mapped_reads"]
-    mrate = _pct(mapped, total)
-    out.append(
-        {
-            "k": "Mapping rate",
-            "icon": "check",
-            "v": mrate,
-            "fmt": "pct",
-            "s": "good"
-            if mrate >= qc.mapping_rate_good
-            else "warning"
-            if mrate >= qc.mapping_rate_warning
-            else "critical",
-            "n": f"{mapped:,} of {total:,} reads mapped",
-        }
-    )
-
-    # Strandedness: the strand model's own verdict, the one calibration's strand channel reads
-    spec = strand["strand_specificity"]
-    protocol = strand["protocol"]
-    if strand["strand_live"]:
-        s, label = "good", "Reverse (R1−)" if not strand["read1_sense"] else "Forward (R1+)"
-    else:
-        s, label = "warning", "Unstranded"
-    out.append(
-        {
-            "k": "Strandedness",
-            "icon": "arrow",
-            "v": label,
-            "fmt": "text",
-            "s": s,
-            "n": f"{spec * 100:.1f}% strand-specific · {protocol}",
-        }
-    )
-
-    # gDNA contamination
-    gfrac = quant["fraction_gdna"]
-    out.append(
-        {
-            "k": "gDNA contamination",
-            "icon": "warn",
-            "v": gfrac,
-            "fmt": "pct",
-            "s": "good"
-            if gfrac < qc.gdna_fraction_good
-            else "warning"
-            if gfrac < qc.gdna_fraction_warning
-            else "critical",
-            "n": "EM-corrected; incl. unspliced intergenic",
-        }
-    )
-
-    # Usable (genic) fragments
-    ftot = frag["total"]
-    genic = frag["genic"]
-    grate = _pct(genic, ftot)
-    out.append(
-        {
-            "k": "Usable fragments",
-            "icon": "check",
-            "v": genic,
-            "fmt": "count",
-            "s": "good" if grate >= qc.genic_fraction_good else "warning",
-            "n": f"{grate * 100:.1f}% genic of {_si(ftot)}",
-        }
-    )
-
-    # Capture is descriptive: an enriched level is neither good nor bad, so the tile is neutral ("info").
+    tiles = [
+        _mapping_tile(summary),
+        _strandedness_tile(summary),
+        _gdna_tile(summary),
+        _usable_tile(summary),
+    ]
     capture = _capture(summary)
     if capture is not None:
-        if capture["bulk_density"] is None:
-            value, note = "None", "no gDNA landscape: lengths not corrected for capture"
-        elif capture["saturation"] > 1.0:
-            value = f"{capture['saturation']:,.0f}×"
-            note = (
-                f"saturated gDNA level over the bulk ({capture['bulk_density']:.3g} fragments/bp)"
-            )
-        else:
-            value, note = "1×", "one gDNA level: nothing enriched above the bulk"
-        out.append(
-            {"k": "Capture", "icon": "target", "v": value, "fmt": "text", "s": "info", "n": note}
-        )
-    return out
+        tiles.append(_capture_tile(capture))
+    return tiles
+
+
+def _tile(k: str, icon: str, v, fmt: str, s: str, n: str) -> dict:
+    """One headline tile: its label, icon, value and the value's format, status and note."""
+    return {"k": k, "icon": icon, "v": v, "fmt": fmt, "s": s, "n": n}
+
+
+def _grade(value: float, good: float, warning: float, *, higher_is_better: bool) -> str:
+    """``good``, ``warning`` or ``critical``: *value* against the two cuts. A higher-is-better value passes a cut at
+    or above it, a lower-is-better one strictly below it."""
+
+    def passes(cut: float) -> bool:
+        return value >= cut if higher_is_better else value < cut
+
+    if passes(good):
+        return "good"
+    return "warning" if passes(warning) else "critical"
+
+
+def _mapping_tile(summary: SummaryReader) -> dict:
+    qc = CONSTANTS.qc
+    aln = summary["alignment_stats"]
+    total, mapped = aln["total_reads"], aln["mapped_reads"]
+    rate = _pct(mapped, total)
+    status = _grade(rate, qc.mapping_rate_good, qc.mapping_rate_warning, higher_is_better=True)
+    return _tile(
+        "Mapping rate", "check", rate, "pct", status, f"{mapped:,} of {total:,} reads mapped"
+    )
+
+
+def _strandedness_tile(summary: SummaryReader) -> dict:
+    """The strand model's own verdict, the one calibration's strand channel reads."""
+    strand = summary["strand_model"]
+    if strand["strand_live"]:
+        status, label = "good", "Reverse (R1−)" if not strand["read1_sense"] else "Forward (R1+)"
+    else:
+        status, label = "warning", "Unstranded"
+    note = f"{strand['strand_specificity'] * 100:.1f}% strand-specific · {strand['protocol']}"
+    return _tile("Strandedness", "arrow", label, "text", status, note)
+
+
+def _gdna_tile(summary: SummaryReader) -> dict:
+    qc = CONSTANTS.qc
+    fraction = summary["quantification"]["fraction_gdna"]
+    status = _grade(
+        fraction, qc.gdna_fraction_good, qc.gdna_fraction_warning, higher_is_better=False
+    )
+    return _tile(
+        "gDNA contamination",
+        "warn",
+        fraction,
+        "pct",
+        status,
+        "EM-corrected; incl. unspliced intergenic",
+    )
+
+
+def _usable_tile(summary: SummaryReader) -> dict:
+    """The genic fragments, the ones the quantifier can assign to RNA."""
+    frag = summary["fragment_stats"]
+    total, genic = frag["total"], frag["genic"]
+    rate = _pct(genic, total)
+    status = "good" if rate >= CONSTANTS.qc.genic_fraction_good else "warning"
+    return _tile(
+        "Usable fragments",
+        "check",
+        genic,
+        "count",
+        status,
+        f"{rate * 100:.1f}% genic of {_si(total)}",
+    )
+
+
+def _capture_tile(capture: dict) -> dict:
+    """Capture is descriptive: an enriched level is neither good nor bad, so the tile is neutral ("info")."""
+    if capture["bulk_density"] is None:
+        value, note = "None", "no gDNA landscape: lengths not corrected for capture"
+    elif capture["saturation"] > 1.0:
+        value = f"{capture['saturation']:,.0f}×"
+        note = f"saturated gDNA level over the bulk ({capture['bulk_density']:.3g} fragments/bp)"
+    else:
+        value, note = "1×", "one gDNA level: nothing enriched above the bulk"
+    return _tile("Capture", "target", value, "text", "info", note)
 
 
 def _si(n: float) -> str:
@@ -391,7 +392,7 @@ def _calibration(summary: SummaryReader, track) -> dict:
             {"l": f"Regions >{cut:.0%} gDNA", "v": int((gf > cut).sum()), "fmt": "count"}
         )
 
-    ref_table = _reference_table(track) if has_track else []
+    ref_table = reference_table(track) if has_track else []
     return {
         "enrichment_kpis": enrichment_kpis,
         "density_kpis": density_kpis,
@@ -404,7 +405,7 @@ def _calibration(summary: SummaryReader, track) -> dict:
     }
 
 
-def _reference_table(track) -> list:
+def reference_table(track) -> list:
     """Per-reference gDNA summary of every reference, by gDNA count descending (the track facets only the top few).
 
     Rows are ``[ref, n_regions, count_gdna, mean_density, fraction_gdna]``. ``mean_density`` is the reference's gDNA

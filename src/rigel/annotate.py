@@ -35,8 +35,6 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import CONSTANTS
-
 logger = logging.getLogger(__name__)
 
 
@@ -78,14 +76,10 @@ AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT  # 0x25
 AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT  # 0x80
 
 
-def winner_flag(is_synthetic: bool) -> int:
-    """The ZF value of a fragment a transcript won: ``AF_NASCENT`` for a synthetic span, ``AF_ANNOTATED`` for every
-    reference transcript. A gDNA winner is stamped ``AF_GDNA_EM`` at the call site instead."""
-    return AF_NASCENT if is_synthetic else AF_ANNOTATED
-
-
 def winner_flags(is_synthetic: np.ndarray) -> np.ndarray:
-    """:func:`winner_flag` over the winning transcripts' ``is_synthetic`` flags: one ``uint8`` ZF value per winner."""
+    """The ZF value of each fragment a transcript won, from the winners' ``is_synthetic`` flags: ``AF_NASCENT`` for a
+    synthetic span, ``AF_ANNOTATED`` for every reference transcript, as ``uint8``. A gDNA winner is stamped
+    ``AF_GDNA_EM`` at the call site instead."""
     is_synth_b = np.asarray(is_synthetic, dtype=bool)
     return np.where(is_synth_b, AF_NASCENT, AF_ANNOTATED).astype(np.uint8)
 
@@ -143,29 +137,6 @@ class AnnotationTable:
             n_candidates=np.zeros(capacity, dtype=np.int16),
             locus_id=np.full(capacity, -1, dtype=np.int32),
         )
-
-    def add(
-        self,
-        frag_id: int,
-        best_tid: int = -1,
-        best_gid: int = -1,
-        tx_flags: int = AF_UNRESOLVED,
-        posterior: float = 0.0,
-        frag_class: int = -1,
-        n_candidates: int = 0,
-    ) -> None:
-        """Append one annotation row."""
-        idx = self._size
-        if idx >= self.capacity:
-            self._grow()
-        self.frag_ids[idx] = frag_id
-        self.best_tid[idx] = best_tid
-        self.best_gid[idx] = best_gid
-        self.tx_flags[idx] = tx_flags
-        self.posterior[idx] = posterior
-        self.frag_class[idx] = frag_class
-        self.n_candidates[idx] = n_candidates
-        self._size += 1
 
     def add_batch(
         self,
@@ -230,10 +201,6 @@ class AnnotationTable:
             setattr(self, attr, new)
         self.capacity = new_cap
 
-    def _grow(self) -> None:
-        """Double capacity when full."""
-        self._grow_to(max(self.capacity * 2, CONSTANTS.resources.annotation_table_min_growth))
-
     @property
     def size(self) -> int:
         return self._size
@@ -279,7 +246,7 @@ def write_annotated_bam(
     skip_duplicates: bool,
     include_multimap: bool,
     sj_spec: str,
-    locus_id_per_transcript: np.ndarray | None = None,
+    locus_id_per_transcript: np.ndarray,
 ) -> dict:
     """The annotated-BAM pass: stamp every record with assignment tags.
 
@@ -307,9 +274,9 @@ def write_annotated_bam(
     sj_spec : str
         The splice-junction tag spec Pass 1's scanner read with, resolved (``"XS"``, ``"ts"``,
         ``"XS,ts"``, ``"ts,XS"`` or ``"none"``), never ``"auto"``.
-    locus_id_per_transcript : np.ndarray or None
-        int32 array mapping transcript index → locus_id. If provided,
-        used to populate the ZL (locus_id) BAM tag.
+    locus_id_per_transcript : np.ndarray
+        int32 array mapping transcript index → locus_id, the ZL tag of a row the EM did not place in a locus
+        (:func:`_fill_locus_ids`).
 
     Returns
     -------
@@ -325,27 +292,9 @@ def write_annotated_bam(
         skip_duplicates,
         include_multimap,
     )
-
     n = annotations.size
-
-    # ZL: the fragment's own locus from the EM scatter, which carries in-locus gDNA winners. A row still -1, such as
-    # one from the deterministic path that bypasses the EM, falls back to its winning transcript's locus; intergenic
-    # gDNA stays -1.
-    if locus_id_per_transcript is not None:
-        best_tid = annotations.best_tid[:n]
-        from_tid = np.where(
-            best_tid >= 0,
-            locus_id_per_transcript[np.clip(best_tid, 0, None)],
-            -1,
-        )
-        current = annotations.locus_id[:n]
-        annotations.locus_id[:n] = np.where(current >= 0, current, from_tid)
-
+    _fill_locus_ids(annotations, locus_id_per_transcript)
     # The writer takes strings; an unnamed gene (NaN in the index) is written `.`
-    t_ids = _tag_strings(index.t_df["t_id"].values)
-    g_ids = _tag_strings(index.g_df["g_id"].values)
-    g_names = _tag_strings(index.g_df["g_name"].values)
-
     summary = writer.write(
         bam_path,
         output_path,
@@ -358,11 +307,37 @@ def write_annotated_bam(
         annotations.n_candidates[:n],
         annotations.locus_id[:n],
         n,
-        t_ids,
-        g_ids,
-        g_names,
+        _tag_strings(index.t_df["t_id"].values),
+        _tag_strings(index.g_df["g_id"].values),
+        _tag_strings(index.g_df["g_name"].values),
     )
+    _check_against_the_scan(summary, stats, output_path)
+    logger.info(
+        f"[ANNOTATE] Wrote {summary['n_records_written']:,} records to {output_path}: "
+        f"{summary['n_read_pairs']:,} read pairs, as the scan judged them"
+    )
+    return summary
 
+
+def _fill_locus_ids(annotations: AnnotationTable, locus_id_per_transcript: np.ndarray) -> None:
+    """ZL: the fragment's own locus from the EM scatter, which carries in-locus gDNA winners. A row still -1, such as
+    one from the deterministic path that bypasses the EM, falls back to its winning transcript's locus; intergenic
+    gDNA stays -1."""
+    n = annotations.size
+    best_tid = annotations.best_tid[:n]
+    from_tid = np.where(
+        best_tid >= 0,
+        locus_id_per_transcript[np.clip(best_tid, 0, None)],
+        -1,
+    )
+    current = annotations.locus_id[:n]
+    annotations.locus_id[:n] = np.where(current >= 0, current, from_tid)
+
+
+def _check_against_the_scan(summary: dict, stats, output_path: str) -> None:
+    """The annotation pass re-reads the BAM and re-judges every read pair, so it must see what the scan saw: every
+    count in :data:`SAME_AS_THE_SCAN` and every record written. On any difference its BAM is deleted and the run
+    stops."""
     differ = {
         key: (summary[key], getattr(stats, key))
         for key in SAME_AS_THE_SCAN
@@ -380,9 +355,3 @@ def write_annotated_bam(
             )
             + ". The BAM must not change between the two passes."
         )
-    logger.info(
-        f"[ANNOTATE] Wrote {summary['n_records_written']:,} records to {output_path}: "
-        f"{summary['n_read_pairs']:,} read pairs, as the scan judged them"
-    )
-
-    return summary

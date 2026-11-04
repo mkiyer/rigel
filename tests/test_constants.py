@@ -2,7 +2,7 @@
 
 Every section refuses an out-of-range value by name: :data:`BROKEN` breaks every field of every section once, and
 must name every field, so a constant added without a range check fails here. An experiment varies one constant on a
-copy (``Constants.replaced``), never by editing the shipped instance, which is frozen.
+copy (``_constants.replaced``), never by editing the shipped instance, which is frozen.
 """
 
 import ast
@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 import pytest
+from _constants import replaced
 
 from rigel.config import CONSTANTS, Constants
 
@@ -76,7 +77,13 @@ BROKEN = {
         "genome_track_bins": 0,
         "position_mb_decimals": -1,
     },
-    "simulator": {"oversample_ratio": 0.5, "oversample_extra": 0, "probe_length_bp": 0},
+    "simulator": {
+        "oversample_ratio": 0.5,
+        "oversample_extra": 0,
+        "scenario_genome_length": 0,
+        "scenario_seed": -1,
+        "scenario_fragments": 0,
+    },
     "resources": {f.name: 0 for f in dataclasses.fields(CONSTANTS.resources)},
 }
 
@@ -93,12 +100,12 @@ def test_every_constant_has_a_broken_value():
 def test_every_constant_refuses_an_out_of_range_value(section):
     for name, value in BROKEN[section].items():
         with pytest.raises(ValueError, match=name):
-            CONSTANTS.replaced(f"{section}.{name}", value)
+            replaced(CONSTANTS, f"{section}.{name}", value)
 
 
 def test_replaced_changes_one_value_on_a_copy():
     shipped = CONSTANTS.landscape.grid_points
-    changed = CONSTANTS.replaced("landscape.grid_points", shipped + 1)
+    changed = replaced(CONSTANTS, "landscape.grid_points", shipped + 1)
     assert changed.landscape.grid_points == shipped + 1
     assert CONSTANTS.landscape.grid_points == shipped
     assert changed.landscape.knn_scale == CONSTANTS.landscape.knn_scale

@@ -10,7 +10,8 @@ import sys
 import time
 from pathlib import Path
 
-from rigel.sim.whole_genome import parse_yaml_config, run_simulation
+from _sim_config import parse_yaml_config
+from _sim_grid import run_simulation
 
 # the data root the in-repo configs name their paths under (`$RIGEL_RUNS`), as every instrument spells it
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "design"))

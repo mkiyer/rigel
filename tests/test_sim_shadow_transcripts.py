@@ -8,12 +8,15 @@ change (``rigel.sim.read_name.parse_origin``).
 
 from __future__ import annotations
 
+
 import pytest
 
 from rigel.sim.read_name import STRAND_FORWARD, format_rna_name, parse_origin
-from rigel.sim.whole_genome import merge_shadow_transcripts
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
+
+
+from _sim_grid import merge_shadow_transcripts
 
 
 def _tx(t_id, ref, exons, strand=Strand.POS, t_index=-1):

@@ -19,19 +19,19 @@ The toy reference, 0-based half-open:
 
 from __future__ import annotations
 
+from functools import partial
+
 import pandas as pd
 import pysam
 import pytest
-from _index_builder import write_fasta
+from _bam_builder import R1_FWD, R1_REV, R2_FWD, R2_REV, SECONDARY, record, write_bam
+from _index_builder import build_index
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.index import TranscriptIndex
 from rigel.pipeline import run_pipeline, scan_and_buffer
 
 GENOME = 20_000
-R1_FWD, R2_REV = 0x1 | 0x2 | 0x40 | 0x20, 0x1 | 0x2 | 0x80 | 0x10
-R1_REV, R2_FWD = R1_FWD ^ 0x30, R2_REV ^ 0x30  # each strand bit and its mate's flipped
-SECONDARY = 0x100
 SUPPLEMENTARY = 0x800
 
 
@@ -52,61 +52,26 @@ def _gtf(rows) -> str:
 
 
 def _index(base, rows=TOY, n_refs=1):
-    fasta, gtf = base / "g.fa", base / "a.gtf"
-    write_fasta(fasta, {f"chr{i + 1}": GENOME for i in range(n_refs)})
-    gtf.write_text(_gtf(rows))
-    TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
-    return TranscriptIndex.load(str(base / "idx"))
+    return build_index(base, _gtf(rows), {f"chr{i + 1}": GENOME for i in range(n_refs)})
 
 
-def _record(
-    qname, flag, pos, cigar, mate_pos, nh=1, hi=None, xs=None, ts=None, ref=0, nm=0, sa=None
-):
-    a = pysam.AlignedSegment()
-    a.query_name = qname
-    a.flag = flag
-    a.reference_id = ref
-    a.reference_start = pos
-    a.mapping_quality = 60
-    a.cigarstring = cigar
-    n = a.query_length or sum(int(x) for x in __import__("re").findall(r"(\d+)[MIS=X]", cigar))
-    a.query_sequence = "A" * n
-    a.query_qualities = pysam.qualitystring_to_array("I" * n)
-    a.next_reference_id = ref
-    a.next_reference_start = mate_pos
-    tags = [(tag, v, "i") for tag, v in (("NH", nh), ("NM", nm), ("HI", hi)) if v is not None]
-    if xs is not None:
-        tags.append(("XS", xs, "A"))
-    if ts is not None:
-        tags.append(("ts", ts, "A"))
-    if sa is not None:
-        tags.append(("SA", sa, "Z"))
-    a.set_tags(tags)
-    return a
+#: Every record here carries NM (0 unless a test sets it); ``nm=None`` drops the tag.
+_record = partial(record, nm=0)
 
 
 def _pair(qname, f_pos, f_cigar, r_pos, r_cigar, nh=1, hi=None, secondary=False, xs=None, ref=0):
     extra = SECONDARY if secondary else 0
     return [
-        _record(qname, R1_FWD | extra, f_pos, f_cigar, r_pos, nh, hi, xs, ref=ref),
-        _record(qname, R2_REV | extra, r_pos, r_cigar, f_pos, nh, hi, xs, ref=ref),
+        _record(qname, R1_FWD | extra, f_pos, f_cigar, r_pos, nh=nh, hi=hi, xs=xs, ref=ref),
+        _record(qname, R2_REV | extra, r_pos, r_cigar, f_pos, nh=nh, hi=hi, xs=xs, ref=ref),
     ]
 
 
 def _bam(base, records, name="p.bam"):
     """The records, name-sorted, under chr1 and as many further references (chr2, ...) as they name; the index has
     chr1 only."""
-    bam = str(base / name)
     n_refs = 1 + max(r.reference_id for r in records)
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": f"chr{i + 1}", "LN": GENOME} for i in range(n_refs)],
-    }
-    with pysam.AlignmentFile(bam, "wb", header=header) as out:
-        for r in records:
-            out.write(r)
-    pysam.sort("-n", "-o", bam, bam)
-    return bam
+    return write_bam(base / name, records, {f"chr{i + 1}": GENOME for i in range(n_refs)})
 
 
 def _scan(base, index, records, **scan):
@@ -654,8 +619,8 @@ def test_a_chimeric_mate_keeps_a_self_contained_alignment(index, tmp_path):
 
 def test_a_secondary_chimeras_pieces_join_no_other_alignment(index, tmp_path):
     """R1 whole at 1010 with R2 at 1187 (L 277), and R1 also aligned as a secondary chimera: 60 bases at 5000 and its
-    supplementary record at 15000. The pieces were glued onto R1's primary location; now they join nothing, so the
-    fragment spans the pair alone."""
+    supplementary record at 15000. The pieces join no other alignment, so the fragment spans
+    the pair alone."""
     records = [
         _record("sec", R1_FWD, 1010, "100M", 1187, nh=2),
         _record("sec", R2_REV, 1187, "100M", 1010, nh=2),
@@ -991,10 +956,9 @@ def index_blacklist(tmp_path_factory):
     """The toy index with a splice blacklist of two junctions no transcript has, each at anchors up to 50."""
     from _index_builder import rebuild_with_splice_blacklist
 
-    base = tmp_path_factory.mktemp("pairs_blacklist")
-    _index(base)
+    index_dir = _index(tmp_path_factory.mktemp("pairs_blacklist")).index_dir
     rebuild_with_splice_blacklist(
-        base / "idx",
+        index_dir,
         pd.DataFrame(
             {
                 "ref": ["chr1", "chr1"],
@@ -1005,7 +969,7 @@ def index_blacklist(tmp_path_factory):
             }
         ),
     )
-    return TranscriptIndex.load(str(base / "idx"))
+    return TranscriptIndex.load(index_dir)
 
 
 def test_the_rule_reads_the_junctions_the_blacklist_keeps(index_blacklist, tmp_path):

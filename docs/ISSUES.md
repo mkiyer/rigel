@@ -122,8 +122,9 @@ can mask it, so an oracle-prior arm is an intervention, not a ceiling. Instrumen
 `priority: next — the owner's actions before any tag · stage: release · kind: release`
 The build is portable by default, the smoke tests load every native extension, and every wheel and sdist carries
 `THIRD_PARTY_NOTICES.txt`. Left, the owner's:
-- dispatch `ci.yml`, and `publish.yml` with `publish: no`, on the release commit: `_solve_impl` has no Linux/GCC build on
-  record and CI has not passed since it became dispatch-only;
+- dispatch `ci.yml`, and `publish.yml` with `publish: no`, on the release commit: the native code, restructured into
+  `scan/`, `resolve/`, `calibration/`, `testing/` and the `em_*.h` headers, has been built only with clang on macOS
+  arm64, and CI has not passed since it became dispatch-only;
 - the bioconda recipe: the auto-bump bot copies only the version and sha256, so the first PR carries `conda/build.sh` and
   `meta.yaml`'s `additional-platforms` (`linux-aarch64`, `osx-arm64`) by hand;
 - before any cluster quant, check that the production index's `manifest.json` records `sources.alignable_zarr`, or rebuild
@@ -188,7 +189,7 @@ The second pass's drain draws a spliced hypothesis for some true-gDNA fragments,
 deposits (233 records at g50 ss.99 OFF and 1,482 at g98 ss.99 ON, 1.9 % of that channel, on an earlier draw). The leak is
 exact posterior sampling, and a no-leak counterfactual moved calibration's metric by at most −0.60 %, so the harm is the
 certainty claim and no in-solve correction is licensed. The oracle records the leak per bank rather than refusing the
-frame (`tests/calibration/_oracle.py`). To build: `DrainQC` (`scan_payload.py`) records the expected leak, Σ q_null.
+frame (`scripts/design/_oracle.py`). To build: `DrainQC` (`scan_payload.py`) records the expected leak, Σ q_null.
 
 ### the-draw-reads-unique-traffic
 `priority: later · stage: accumulator · kind: gap`
@@ -202,7 +203,7 @@ reference's mappability, or rates that count the held fragments, iterated to a f
 
 ### the-gdna-length-contrast-is-ill-conditioned-on-aligned-input
 `priority: later — what is left needs the STAR rung's own alignable store · stage: calibration · kind: defect`
-`fl._deconvolved_gdna_counts` reads gDNA's length law as a two-pool contrast, g = [(1 − a1)·f0 − (1 − a0)·f1] / (a0 − a1),
+`fl.deconvolved_gdna_counts` reads gDNA's length law as a two-pool contrast, g = [(1 − a1)·f0 − (1 − a0)·f1] / (a0 − a1),
 which amplifies any difference between the pools by 1/(a0 − a1). With the region lengths over the observable genome the
 law is near the simulator's, but on the STAR rung the intergenic purity still reads 0.79 (off capture) and 0.62 (on)
 where the oracle clips at 1: the pericentromeric DNA the aligner places only half of (chr21:10.6–13.0 Mb and
@@ -322,8 +323,9 @@ ss.99 ON.
 
 ### per-transcript-prior-lane
 `priority: later — no candidate mechanism · stage: pre-EM · kind: gap`
-The EM has no per-transcript RNA prior: `rna_prior_weight` is plumbed from `pipeline.py` through `estimator.py` to
-`em_solver.cpp`, nothing in production fills it, and the solver falls back to the EM's own belief. Handed the true weights
+The EM has no per-transcript RNA prior: `rna_prior_weight` is an argument of
+`AbundanceEstimator.run_batch_locus_em_partitioned`, passed to `em_solver.cpp`; `pipeline.py` never passes it, and the
+solver falls back to the EM's own belief. Handed the true weights
 (`quant_accuracy.py --arm oracle_alloc_seed`, an oracle intervention), stranded capture-ON transcript error at g50 falls
 5.50 → 2.07 % of the true RNA. Most of that sits in the proportions among mosaic isoforms that share every object; a
 coverage-derived weight is far worse than the EM's likelihood (5.21 → 53.37 %). The lane and `warm_start='prior'` serve
@@ -358,6 +360,17 @@ of fragments between exact paralogs (SIK1 and SIK1B), part of the g00 rows' inst
 capture-ON rows move only −0.13 to +0.12 points. The repair is explicit regularisation of the poorly determined
 directions with a stable solver run to convergence, decided on the ladder.
 
+### the-x86-e-step-is-scalar
+`priority: later — with the performance session · stage: EM · kind: build`
+The E-step's exponential runs NEON on AArch64 and scalar on every other machine, so an x86-64 build (a Linux cluster's)
+takes the slowest path. The AVX2 and AVX-512 kernels were deleted because no build compiled them: the portable build that
+ships targets baseline x86-64, and the native build that would compile them was never run on x86-64. They are in f871b669
+(`native/fast_exp.h`, `native/simd_detect.h`, and the E-step loop, then in `native/em_solver.cpp` and now in
+`native/em_estep.h`). Reviving them needs an x86-64
+machine and dispatch at load time, since one wheel must run on every x86-64: each kernel built for its own ISA and chosen
+by the CPU it finds. Each must pass `test_fast_exp.py`, state how far it moves the EM's numbers against the scalar path
+(an FMA polynomial does, as NEON's does on AArch64), and be timed in back-to-back pairs.
+
 ### instrument-ledger
 `priority: later — (a) to (c) before the capture-reader session's A/Bs · stage: instruments · kind: instrument`
 What the instruments do wrong or leave out, each fix its own commit with its `--self-test` or a gate:
@@ -380,10 +393,10 @@ ladder rungs; `panel.py --index` does not reach `simulate`.
 
 ### debug-capture-memory-is-unbounded
 `priority: later · stage: instruments · kind: instrument`
-`calibrate(_debug=…)` builds a `SweepCapture` for every sweep with no size or region bound; on the whole human genome it
-reached 25 GB in 20 s. `ruler_vs_truth.py` always passes `_debug` and does not refuse a real index. The fix: `_debug`
-refuses an index whose manifest does not mark a panel, and the capture is bounded to named regions. Until then one
-real-genome job runs at a time.
+`calibrate(diagnostics=…)` fills one `SweepDiagnostics`, overwritten by each sweep, with no size or region bound; on the
+whole human genome a record per sweep reached 25 GB in 20 s, and the one record is still unbounded. `ruler_vs_truth.py` always passes `diagnostics` and
+does not refuse a real index. The fix: `diagnostics` refuses an index whose manifest does not mark a panel, and the
+record is bounded to named regions. Until then one real-genome job runs at a time.
 
 ### latent-defects
 `priority: later · stage: several · kind: defect`
@@ -397,27 +410,19 @@ Correctness defects found by review, each its own commit. MOVES A NUMBER:
 - *calibration:* "has its own composition" is τ > 0 in the transfer kernel and τ > `OWN_EPS` (1e-9) in `solve_kernel.cpp`'s
   landscape-training predicate, so a slot with 0 < τ ≤ 1e-9 sends a claim but trains as composition-free.
 - *pre-EM:* the coverage weight's plateau is min(f, L/2) (`scoring.cpp`) where enumeration gives min(f, L − f) (L = 260,
-  f = 250: 1.93 against 1.02), and its gate restates the formula; it acts through the EM's warm start. At p_sense = ½ the
-  deterministic path books a mismatched fragment as sense, the EM as antisense.
+  f = 250: 1.93 against 1.02), and its gate restates the formula; it acts through the EM's warm start.
 - *EM:* `assign_posteriors` weighs `log(theta + 1e-300)`, so a dead component keeps a posterior of about 1e-300: a
   fractional run writes counts of about 1e-299, and sample mode can hand a fragment to a dead component. Give it −inf.
 - *post-EM:* sample mode's `posterior_mean` is Σp²/Σp, and NaN for a transcript with no EM unit, which the MANUAL does
   not say.
-- *panels:* `Scenario.build_oracle`'s fixed-total branch never reads `gdna_fraction`, so six fixtures simulate no gDNA,
-  among them the reorder gate's (`test_scan_order_independence`).
 - *instruments:* `lift_choices` keys records without the introns and hypotheses the native key holds, so tied records
   that differ in introns pool and oracle truth can replay the wrong one.
 
-LATENT, no current path reaches it: `_resolve_core`'s non-empty-exons precondition is unasserted; `set_sj` narrows to
-int32 unchecked; `--scan-buffer-size` does not bound the native queues; the buffer's finalizer can deadlock joining the
-writer under a logging lock; `FragmentAccumulator::finalize` drops `t_offsets_`'s leading 0; `splice_graph._ref_slices`
-drops exons of unsorted input silently; `level_bound_row`'s `std::max(v, 1e-12)` never binds (delete it, with an assert
-v > 0); `run_parallel` and `ThreadPool` can terminate on a throw; nanobind casts in `em_solver.cpp` and `solve_kernel.cpp`
-can dangle or write to a discarded copy on a dtype mismatch, and `StreamingScorer` has no `keep_alive`; a junction
-efficiency clipped at 0 can leave an `em_effective_length` of about 1e-304; `fast_exp` on an all −inf row is undefined
-behaviour; the annotated writer's `hts_close` is unchecked; a capture entry with neither `enabled:` nor probes yields an
-empty `CaptureConfig`; the scan cache writes in place, not temp-and-rename, and `_payload_from_parts` skips
-`from_dict`'s checks; an arm injecting `rna_sense_frac` without `n_rna_obs` kills the strand channel; `strand_variance`
+LATENT, no current path reaches it: `--scan-buffer-size` does not bound the native queues; `splice_graph._ref_slices`
+drops exons of unsorted input silently; a junction efficiency clipped at 0 can leave an `em_effective_length` of about
+1e-304; a capture entry with neither `enabled:` nor probes yields an empty `CaptureConfig`; the scan cache
+(`scripts/design/_scan_cache.py`) writes in place, not temp-and-rename, and `_payload_from_parts` skips `from_dict`'s
+checks; an arm injecting `rna_sense_frac` without `n_rna_obs` kills the strand channel; `strand_variance`
 (`transfer_rows.h`) carries `(n·f)²` where `n(n−1)·f²` is right, which matters only at od > 0.
 
 ### performance-memory-bounded-solve
@@ -428,29 +433,19 @@ on an older tree): 125 s — calibrate 39.5, quant 33.7, the scan 28.4, the seco
 combiner, 355,180 calls on 2–4-element arrays; the landscape fits, about 5 s; the sweeps' 24.0 s, where the blur's loop
 interchange saves 1.5 s at the price of a summation-order change (the owner's call). The scan and the index load are at
 their floor. Numeric no-ops left, each proven with `rename_identity.py --bam`: `build_region_partition_arrays` runs 3+
-times per run and `build_sj_arrays` twice; `--annotated-bam` calls `add` per fragment; the EM clears `local_map` per locus
-and allocates per E-step; the scan copies `gap_introns` per hit; the solve builds whole cubes for slots it discards.
+times per run and `build_sj_arrays` twice; the EM clears `local_map` per locus and allocates per E-step; the solve builds whole cubes
+for slots it discards.
 Instrument: `profiling/profiler.py`.
 
 ### hygiene-ledger
 `priority: later · stage: several · kind: hygiene`
 What the reviews left, each its own commit, proven a numeric no-op unless marked:
-- Duplicated geometry: `second_pass.placement_abundance` re-derives the deposit's segments, crossings and containing
-  region in Python beside the native ones; `solve_one_block` and `transfer_prepare` each wire the chain; SQUAREM's VBEM
-  and MAP branches (about 150 lines) differ only in the weight, the floor and the normalisation.
 - Recomputed outputs: `loci.feather` rebuilds the annotated count as max(rna_total − count_nascent, 0) + count_unambig
-  behind a clamp (`estimator.py`), the nascent table re-codes the TPM denominator, and an `is_synthetic` fallback serves
-  only a test mock; removing them moves ulps.
-- Test-only or dead surface: the resolver's `merge_criteria` and `MC_*` codes; the vendored `_cgranges_impl` extension,
-  compiled and shipped though nothing calls it; the native solve's `lgamma` binding and named temporaries (retiring them moves ulps and needs a golden
-  re-record).
-- Gates that check less than their name: `test_gdna_sweep_zero_gdna_pin_and_monotone` checks no monotonicity; the
-  scan-worker exception gate runs one worker; the blacklist-load gate asserts a size Python sets; the report test's
-  synthesized summary omits `sj_blacklist_size` and `sj_blacklist_loaded`; the log-odds window's single source is ungated.
-- Constants: the native kernels' own constants are named in their translation units, not gathered in
-  `native/constants.h`; `rigel sim`'s CLI restates `Scenario`'s defaults; `FragmentLengthModel.to_dict` rounds inline.
-- Build: `_solve_impl` builds with `-g` only, since `-march=native` and IPO turn on FMA contraction on x86-64 and move
-  numbers; two CMakeLists comments say otherwise.
+  behind a clamp (`estimator.py`), and the nascent table re-codes the TPM denominator; removing them moves ulps.
+  `gdna_opportunity.contained_opportunity` and `sj_opportunity._ramp_sum` compute the same Σ(ℓ − w + 1)₊ with different
+  float arithmetic; one home moves ulps in the gDNA length law.
+- Constants: the simulator's default seed, `CONSTANTS.simulator.scenario_seed`, is restated as 42 in `ReadSimConfig`,
+  `MutableGenome` and `SimulationParams`.
 
 ## OPEN — parked
 
@@ -513,7 +508,7 @@ isoform assignments rest on shared fragments alone.
 `priority: parked — watch · stage: calibration · kind: risk`
 gDNA's two-pool length contrast survives capture by a degeneracy: the shared-contaminant assumption is false under
 capture, and it is safe only because the intergenic pool is depleted, not impure, so `a_0` clips to 1 and the algebra
-collapses to `g = f_0` (`fl._deconvolved_gdna_counts`). A panel that put RNA into intergenic space would break it silently.
+collapses to `g = f_0` (`fl.deconvolved_gdna_counts`). A panel that put RNA into intergenic space would break it silently.
 The one-sided off-target rate (`gdna_density.one_sided_rate`, fitted on intergenic and intron counts) leans on the same
 purity: RNA spread over intergenic space lifts it (a toy fixed point 202 bp against 217), and intron regions beside probes
 are capture-enriched because probes overhang exon edges (g05 ON on the test chromosome: pure intron seeds at a median 1.89× the

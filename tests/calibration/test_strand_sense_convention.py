@@ -46,8 +46,7 @@ def _strand_model(strand_specificity: float, *, r1_sense: bool = False):
     for gene, strand, transcripts in GENES:
         scenario.add_gene(gene, strand, transcripts)
     result = scenario.build_oracle(
-        n_fragments=4000,
-        gdna_fraction=0.0,  # every fragment is mature RNA of known strand
+        n_fragments=4000,  # no gDNA: every fragment is mature RNA of known strand
         sim_config=ReadSimConfig(
             frag_mean=220,
             frag_std=40,
@@ -67,7 +66,7 @@ def _strand_model(strand_specificity: float, *, r1_sense: bool = False):
 
 
 @pytest.mark.parametrize("simulated", [1.0, 0.75, 0.5])
-def test_strand_specificity_RECOVERS_the_simulated_parameter(simulated):
+def test_strand_specificity_recovers_the_simulated_parameter(simulated):
     """``StrandModel.strand_specificity = max(p_r1_sense, p_r1_antisense)`` is direction-agnostic, like
     ``ReadSimConfig.strand_specificity``, so the fit recovers the simulator's knob across the fidelity range. This is
     the right comparison; comparing the knob against ``rna_sense_frac`` would not be.
@@ -81,7 +80,7 @@ def test_strand_specificity_RECOVERS_the_simulated_parameter(simulated):
     )
 
 
-def test_the_simulator_emits_an_R1_ANTISENSE_library_so_the_SENSE_fraction_is_LOW():
+def test_the_simulator_emits_an_r1_antisense_library_so_the_sense_fraction_is_low():
     """``p_r1_sense`` is ``P(align_strand == the sj's strand)``. The simulator emits R1-antisense (dUTP-style), so a
     perfectly stranded library has a sense fraction of ~0, not ~1; ``StrandModel``'s own docstring gives ≈0.05 for
     TruSeq dUTP and ≈0.95 for KAPA. So ``rna_sense_frac ≈ 0.01`` on a "0.99 stranded" simulated library is correct, and
@@ -97,7 +96,7 @@ def test_the_simulator_emits_an_R1_ANTISENSE_library_so_the_SENSE_fraction_is_LO
     assert not model.read1_sense, "read1_sense must report an R1-antisense protocol as such"
 
 
-def test_rna_sense_frac_IS_p_r1_sense_and_is_therefore_ALSO_low():
+def test_rna_sense_frac_is_p_r1_sense_and_is_therefore_also_low():
     """`rna_sense_frac` is the Beta posterior mean of exactly ``p_r1_sense``: the same quantity, direction and
     convention, needing no sign flip. The second pass scores an unspliced fragment's competing strand hypotheses with
     ``P(align_strand agrees | RNA)``, which is this number.
@@ -117,7 +116,7 @@ def test_rna_sense_frac_IS_p_r1_sense_and_is_therefore_ALSO_low():
     [(False, 0.0), (True, 1.0)],
     ids=["R1-antisense (TruSeq dUTP)", "R1-sense (KAPA Stranded)"],
 )
-def test_the_suite_can_produce_EITHER_protocol_direction(r1_sense, want_p_r1_sense):
+def test_the_suite_can_produce_either_protocol_direction(r1_sense, want_p_r1_sense):
     """``ReadSimConfig.r1_sense`` is the protocol's direction: the engine's base emission is R1-antisense (dUTP) and
     ``r1_sense=True`` emits R1-sense (KAPA Stranded). Both are parametrised, since an R1-sense-only test would pass if
     the direction were hard-wired the other way; the pair tests the switch. ``strand_specificity`` is the fidelity about
@@ -135,7 +134,7 @@ def test_the_suite_can_produce_EITHER_protocol_direction(r1_sense, want_p_r1_sen
     assert abs(model.strand_specificity - 1.0) < TOLERANCE
 
 
-def test_the_two_protocols_are_EXACT_MIRRORS_at_an_IMPERFECT_fidelity():
+def test_the_two_protocols_are_exact_mirrors_at_an_imperfect_fidelity():
     """At ``strand_specificity = 1.0`` the two protocols read 0.0 and 1.0, as any pair of hard-wired opposites would. At
     an imperfect fidelity the mirror is a much narrower target::
 
@@ -203,7 +202,7 @@ def _deconvolve(*, r1_sense: bool):
     return true_f_gdna, calibration
 
 
-def test_the_DECONVOLUTION_recovers_the_SAME_BIOLOGY_under_EITHER_protocol():
+def test_the_deconvolution_recovers_the_same_biology_under_either_protocol():
     """A protocol is a labelling convention, so the biology recovered must not depend on which one was used. The two
     libraries are the same fragments with R1 and R2 exchanged: the gDNA/RNA separation must come out the same while
     ``rna_sense_frac``, which is the protocol, mirrors. The true gDNA fraction here is high, so there is much to get
@@ -251,7 +250,6 @@ def _r1_orientation(*, r1_sense: bool, strand_specificity: float = 0.8):
         scenario.add_gene(gene, strand, transcripts)
     result = scenario.build_oracle(
         n_fragments=2000,
-        gdna_fraction=0.0,
         sim_config=ReadSimConfig(
             frag_mean=220,
             frag_std=40,
@@ -272,7 +270,7 @@ def _r1_orientation(*, r1_sense: bool, strand_specificity: float = 0.8):
     return out
 
 
-def test_the_two_protocols_are_a_PER_FRAGMENT_mirror_not_merely_a_statistical_one():
+def test_the_two_protocols_are_a_per_fragment_mirror_not_merely_a_statistical_one():
     """The mirror is per fragment, not only statistical. The totals test above (``p_r1_sense`` mirroring, fidelity and
     observation count matching) would also pass an implementation that drew the direction as a different fidelity
     instead of inverting the mask::

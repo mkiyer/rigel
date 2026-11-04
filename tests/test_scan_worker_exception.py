@@ -6,8 +6,10 @@ The scan runs in a child process: an exception that escapes a ``std::thread`` ca
 The throw site is the fragment buffer's uint16 ``read_length`` column. A ``D`` operation advances the
 reference inside one aligned block, so a read with a 70,000 bp deletion makes an unspliced intergenic
 fragment whose aligned length does not fit in 16 bits. It is the first read name in the BAM, and the
-ordinary pairs after it, one read-name batch each on one worker, outnumber the input queue's capacity,
-so the reader finishes only if the failing worker releases it.
+ordinary pairs after it, one read-name batch each, outnumber the input queue's capacity. On one worker the
+reader finishes only if the failing worker releases it; on several, the others drain the queue while one
+holds the error, and the scan must still stop and raise it. Each run records the worker count the native
+scan was handed, so a scan quietly run on one worker cannot stand in for several.
 """
 
 from __future__ import annotations
@@ -16,73 +18,64 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
+from _bam_builder import R1_FWD, R2_REV, record, write_bam
+from _index_builder import build_index
+
 GENOME_LENGTH = 100_000
 N_TRAILING_PAIRS = 64
 
 
 def _build_inputs(tmp_path):
-    import pysam
-
-    from rigel.index import TranscriptIndex
-
-    fasta, gtf = tmp_path / "g.fa", tmp_path / "a.gtf"
-    fasta.write_text(">chr1\n" + "A" * GENOME_LENGTH + "\n")
-    pysam.faidx(str(fasta))
-    gtf.write_text(
+    gtf = (
         'chr1\ttest\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n'
         'chr1\ttest\texon\t501\t700\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n'
     )
-    index_dir = tmp_path / "idx"
-    TranscriptIndex.build(str(fasta), str(gtf), str(index_dir), write_tsv=False)
-
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": "chr1", "LN": GENOME_LENGTH}],
-    }
-
-    def _read(qname, pos, mate_pos, cigar, is_r1):
-        a = pysam.AlignedSegment()
-        a.query_name = qname
-        a.reference_id = 0
-        a.reference_start = pos
-        a.mapping_quality = 60
-        a.flag = 0x1 | (0x40 if is_r1 else 0x80) | (0x20 if is_r1 else 0x10)
-        a.cigar = cigar
-        a.query_sequence = "A" * 100
-        a.query_qualities = pysam.qualitystring_to_array("I" * 100)
-        a.next_reference_id = 0
-        a.next_reference_start = mate_pos
-        a.set_tags([("NH", 1, "i")])
-        return a
+    index_dir = build_index(tmp_path, gtf, {"chr1": GENOME_LENGTH}).index_dir
 
     # R1 covers [1000, 71100) as one block (50M 70000D 50M); R2 lies inside it.
     reads = [
-        _read("long", 1000, 71000, [(0, 50), (2, 70_000), (0, 50)], True),
-        _read("long", 71000, 1000, [(0, 100)], False),
+        record("long", R1_FWD, 1000, "50M70000D50M", 71000),
+        record("long", R2_REV, 71000, "100M", 1000),
     ]
     for k in range(N_TRAILING_PAIRS):
         pos = 80_000 + 200 * k
-        reads.append(_read(f"pair{k:03d}", pos, pos + 100, [(0, 100)], True))
-        reads.append(_read(f"pair{k:03d}", pos + 100, pos, [(0, 100)], False))
-    bam_path = tmp_path / "long.bam"
-    with pysam.AlignmentFile(str(bam_path), "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
+        reads += [
+            record(f"pair{k:03d}", R1_FWD, pos, "100M", pos + 100),
+            record(f"pair{k:03d}", R2_REV, pos + 100, "100M", pos),
+        ]
+    bam_path = write_bam(tmp_path / "long.bam", reads, {"chr1": GENOME_LENGTH})
     return bam_path, index_dir
 
 
-def test_worker_exception_propagates_to_python(tmp_path):
+@pytest.mark.parametrize("n_workers", [1, 4])
+def test_worker_exception_propagates_to_python(tmp_path, n_workers):
     bam_path, index_dir = _build_inputs(tmp_path)
     script = textwrap.dedent(f"""
+        import sys
+
+        import rigel.pipeline as pipeline
         from rigel.config import BamScanConfig
         from rigel.index import TranscriptIndex
-        from rigel.pipeline import scan_and_buffer
 
+        native_scanner = pipeline._native_scanner
+
+        class Recording:
+            def __init__(self, scanner):
+                self.scanner = scanner
+
+            def scan(self, *args, **kwargs):
+                print(f"native scan n_workers={{kwargs['n_workers']}}", file=sys.stderr, flush=True)
+                return self.scanner.scan(*args, **kwargs)
+
+        pipeline._native_scanner = lambda index, scan: Recording(native_scanner(index, scan))
         index = TranscriptIndex.load({str(index_dir)!r})
         # a limit above the 70,100-bp molecule, so the pair is a hit and the buffer, not the length rule, refuses it
-        scan = BamScanConfig(total_threads=1, read_name_batch_size=1, max_frag_length=100_000)
-        assert scan.resolved_scan_threads() == (1, 0)
-        scan_and_buffer({str(bam_path)!r}, index, scan)
+        scan = BamScanConfig(
+            total_threads={n_workers}, bgzf_threads=0, read_name_batch_size=1, max_frag_length=100_000
+        )
+        assert scan.resolved_scan_threads() == ({n_workers}, 0)
+        pipeline.scan_and_buffer({str(bam_path)!r}, index, scan)
     """)
     proc = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
@@ -91,6 +84,7 @@ def test_worker_exception_propagates_to_python(tmp_path):
         f"the child exited with {proc.returncode} (a negative code is a signal); stderr:\n"
         f"{proc.stderr}"
     )
+    assert f"native scan n_workers={n_workers}" in proc.stderr, proc.stderr
     assert (
         "RuntimeError: Fragment buffer column 'read_length' cannot store value 70100 as uint16"
         in proc.stderr

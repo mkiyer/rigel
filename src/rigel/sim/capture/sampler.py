@@ -34,7 +34,7 @@ from ...observable import true_runs, unknown_bases
 from ...transcript import Transcript
 from ...types import Strand
 from ..bam import transcript_to_genomic_blocks
-from ..intervals import merge_intervals
+from ..intervals import clip_blocks_to_transcript, merge_intervals
 from .config import CaptureConfig
 
 logger = logging.getLogger(__name__)
@@ -194,7 +194,9 @@ class CaptureSampler:
             return [(int(i), int(karr[i])) for i in hit]
         return [(i, str(k)) for i, k in enumerate(keys) if str(k) in masks]
 
-    def _blocked(self, space: str, key: int | str, eff_len: int, width: int) -> np.ndarray | None:
+    def blocked_starts(
+        self, space: str, key: int | str, eff_len: int, width: int
+    ) -> np.ndarray | None:
         """The starts in ``[0, eff_len)`` whose fragment of ``width`` overlaps an unknown base, as merged
         ``[start, end)`` runs; ``None`` when there are none."""
         runs = self._unknown.get(space, {}).get(self._norm(space, key))
@@ -213,7 +215,7 @@ class CaptureSampler:
         width = int(frag_len)
         out = np.maximum(0, lengths - width + 1)
         for i, key in self._masked_among(space, keys):
-            blocked = self._blocked(space, key, int(out[i]), width)
+            blocked = self.blocked_starts(space, key, int(out[i]), width)
             if blocked is not None:
                 out[i] -= int((blocked[:, 1] - blocked[:, 0]).sum())
         return out
@@ -228,7 +230,7 @@ class CaptureSampler:
             sel = np.flatnonzero(run_keys == kp)
             if not sel.size:
                 continue
-            blocked = self._blocked(space, key, int(eff[kp]), width)
+            blocked = self.blocked_starts(space, key, int(eff[kp]), width)
             if blocked is None:
                 continue
             rs, re, ro = run_start[sel], run_end[sel], run_offset[sel]
@@ -244,7 +246,7 @@ class CaptureSampler:
         self, space: str, key: int | str, eff_len: int, frag_len: int, size: int, rng
     ) -> np.ndarray:
         """Uniform draws over the admissible starts: the k-th admissible start, k uniform."""
-        blocked = self._blocked(space, key, eff_len, frag_len)
+        blocked = self.blocked_starts(space, key, eff_len, frag_len)
         if blocked is None:
             return rng.integers(0, eff_len, size=size, dtype=np.int64)
         free = np.concatenate(([0], blocked.ravel(), [eff_len])).reshape(-1, 2)
@@ -414,7 +416,7 @@ class CaptureSampler:
         return result.copy()
 
     def _run_landscape(self, positions, starts, ends, eff, width):
-        """The capture landscape over merged probe runs: `partition_array` sums it per key and `_extra_landscape` reads
+        """The capture landscape over merged probe runs: `partition_array` sums it per key and `binding_landscape` reads
         its nonzero positions, so the effective length and the start distribution cannot disagree.
 
         Returns ``(buffer, run_offset, run_start, run_first, positions)``, or ``None`` if nothing is live. The buffer
@@ -508,7 +510,7 @@ class CaptureSampler:
         if not self.enabled or self.config.binding_per_base <= 0:
             return self._uniform_starts(space, key, eff_len, frag_len, count, rng)
 
-        extra_starts, raw_weights = self._extra_landscape(space, key, seq_len, frag_len)
+        extra_starts, raw_weights = self.binding_landscape(space, key, seq_len, frag_len)
         raw_total = float(raw_weights.sum())
         baseline_mass = self.config.off_target_weight * n_free
         extra_mass = self.config.binding_per_base * raw_total
@@ -544,11 +546,13 @@ class CaptureSampler:
         frag_start: int,
         frag_len: int,
     ) -> float:
-        """Return the unnormalized sampling weight for a concrete fragment."""
+        """The unnormalised sampling weight of one concrete fragment: the weight model written fragment by fragment,
+        the reference the vectorised landscape (:meth:`partition_array`, :meth:`sample_starts`) is checked against.
+        The simulator itself never calls it."""
         eff_len = int(seq_len) - int(frag_len) + 1
         if eff_len <= 0 or frag_start < 0 or frag_start >= eff_len:
             return 0.0
-        blocked = self._blocked(space, key, eff_len, frag_len)
+        blocked = self.blocked_starts(space, key, eff_len, frag_len)
         if (
             blocked is not None
             and ((blocked[:, 0] <= frag_start) & (frag_start < blocked[:, 1])).any()
@@ -558,7 +562,7 @@ class CaptureSampler:
             return self.config.off_target_weight
         frag_end = frag_start + frag_len
         score = 0
-        for interval in self._get_intervals(space, key):
+        for interval in self.probe_intervals(space, key):
             overlap = min(frag_end, interval.end) - max(frag_start, interval.start)
             if overlap >= self.config.min_overlap:
                 score = max(score, overlap)
@@ -665,7 +669,7 @@ class CaptureSampler:
         hi = max(b[1] for b in blocks)
         for t_idx in self._transcripts_overlapping(ref, lo, hi):
             transcript = self.transcripts[int(t_idx)]
-            landed = _clip_blocks_to_transcript(transcript, blocks)
+            landed = clip_blocks_to_transcript(transcript, blocks)
             if not landed:
                 continue
             for start, end in merge_intervals(landed):
@@ -680,14 +684,15 @@ class CaptureSampler:
             if interval is not None:
                 self._gdna_intervals[ref].append(interval)
 
-    def _get_intervals(self, space: str, key: int | str) -> list[ProbeInterval]:
+    def probe_intervals(self, space: str, key: int | str) -> list[ProbeInterval]:
+        """The probe parts mapped onto one template: a transcript row in ``"mrna"``, a reference in ``"gdna"``."""
         if space == "mrna":
             return self._mrna_intervals.get(int(key), [])
         if space == "gdna":
             return self._gdna_intervals.get(str(key), [])
         raise ValueError(f"unknown capture coordinate space: {space!r}")
 
-    def _extra_landscape(
+    def binding_landscape(
         self,
         space: str,
         key: int | str,
@@ -703,7 +708,7 @@ class CaptureSampler:
         if eff_len <= 0:
             return empty
 
-        intervals = self._get_intervals(space, key)
+        intervals = self.probe_intervals(space, key)
         if not intervals:
             return empty
         ordered = sorted(intervals, key=lambda i: (i.start, i.end))
@@ -825,25 +830,3 @@ def _clip_interval(start: int, end: int, length: int) -> ProbeInterval | None:
     if end <= start:
         return None
     return ProbeInterval(start, end)
-
-
-def _clip_blocks_to_transcript(
-    transcript: Transcript, blocks: Sequence[tuple[int, int]]
-) -> list[tuple[int, int]]:
-    """The parts of genomic ``blocks`` inside ``transcript``'s exons, in strand-oriented transcript coordinates. A
-    block need not be fully exonic: a probe hanging off an exon edge still binds the bases that are there."""
-    tx_len = int(transcript.length or transcript.compute_length())
-    out: list[tuple[int, int]] = []
-    for block_start, block_end in blocks:
-        consumed = 0
-        for exon in transcript.exons:
-            lo = max(block_start, exon.start)
-            hi = min(block_end, exon.end)
-            if lo < hi:
-                tx_start = consumed + (lo - exon.start)
-                tx_end = consumed + (hi - exon.start)
-                if transcript.strand == Strand.NEG:
-                    tx_start, tx_end = tx_len - tx_end, tx_len - tx_start
-                out.append((tx_start, tx_end))
-            consumed += exon.end - exon.start
-    return out

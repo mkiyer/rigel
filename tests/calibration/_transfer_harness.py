@@ -3,10 +3,10 @@
 It holds one real `solve_chain` call captured from a calibrate run on the toy, so every test re-runs the sweep with a
 different policy on byte-identical inputs, plus the containers the tests read the kernel's tables through and the
 drivers they share: the builders on one block's context, whole passes and single hops of the native pass, and the solve.
-The kernel is the one implementation (`native/transfer_kernel.h`, run per block by `native/solve_kernel.cpp`); the
-bindings `transfer_prepare`, `transfer_pass` and `transfer_solve` run it on tables the call allocates, and the
-containers here (`RowTable`, `Faces`, `LevelLane`, `Received`, `Levels`) hold and index those arrays and compute
-nothing. Not a test module: `capture_sweep_inputs` is what each test module's ``sweep_inputs`` fixture returns, and
+The kernel is the one implementation (`native/transfer_kernel.h`, run per block by `native/solve_kernel.cpp`); its test
+bindings `transfer_prepare`, `transfer_pass` and `transfer_solve` (`_solve_impl.testing`) run it on tables the call
+allocates, and the containers here (`RowTable`, `Faces`, `LevelLane`, `Received`, `Levels`) hold and index those
+arrays and compute nothing. Not a test module: `capture_sweep_inputs` is what each test module's ``sweep_inputs`` fixture returns, and
 nothing here asserts.
 """
 
@@ -20,14 +20,13 @@ from typing import NamedTuple
 import numpy as np
 
 import rigel.calibration.sweep as SW
-from rigel.calibration.blocks import SweepCapture, view_fields
-from rigel.calibration.messages import ChainView
+from rigel.calibration.diagnostics import SweepDiagnostics
+from rigel.calibration.messages import ChainView, view_fields
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
-from rigel.calibration.region_init import strand_discriminability
 from rigel.calibration.simplex_logodds import CubeRows
-from rigel._solve_impl import transfer_pass, transfer_prepare, transfer_solve
-from rigel.native import transfer_rows
+from rigel.calibration.strand_balance import strand_discriminability
+from rigel._solve_impl.testing import outside_flank, transfer_pass, transfer_prepare, transfer_solve
 
 #: the five kinds of composition rule a directed face can carry (``NONE``: the face has no rule and the level lane
 #: serves it), the kernel's `transfer_rows.h` constants
@@ -127,10 +126,6 @@ class Faces:
         self.tables = tables
         for k in ("kind", "row", "row2", "n_u", "n_s", "a_b", "a_x", "width", "var", "rows"):
             setattr(self, k, tables[k])
-
-    @property
-    def n_rows(self) -> int:
-        return int(self.rows.shape[0])
 
     def any(self) -> bool:
         return bool((self.kind != NONE).any())
@@ -482,7 +477,7 @@ def capture_sweep_inputs(tmp_path_factory):
         calibrate_mod.solve_chain = orig
     assert grabbed, "the spy never fired"
     chain, statics, geometry, belief, region_arrays, kw = grabbed[0]
-    kw = {k: v for k, v in kw.items() if k not in ("policy", "_capture")}
+    kw = {k: v for k, v in kw.items() if k not in ("policy", "diagnostics")}
     return dict(
         args=(chain, statics, geometry, belief, region_arrays),
         kw=kw,
@@ -589,10 +584,10 @@ def _ctx_of(si) -> BlockContext:
     """The actual backbone context, including observed own-evidence availability."""
     chain, statics, geometry, _, ra = si["args"]
     kw = si["kw"]
-    cap = SweepCapture()
-    SW.solve_chain(*si["args"], **kw, policy=SilentPolicy(), _capture=cap)
+    cap = SweepDiagnostics()
+    SW.solve_chain(*si["args"], **kw, policy=SilentPolicy(), diagnostics=cap)
     disc = strand_discriminability(float(kw["rna_sense_frac"]), float(kw.get("n_rna_obs", 0.0)))
-    structure = SW._structure(chain, ra)
+    structure = SW.slot_structure(chain, ra)
     return BlockContext(
         **view_fields(chain, statics, geometry, structure),
         n_grid=int(kw["n_grid"]),
@@ -799,7 +794,6 @@ def _with_populated_inside(ctx):
     inside twice as dense as what crosses its boundary, for the policy and the independent recompute alike. The no-claim
     bound binds only when the inside is denser than its boundary's crossing; otherwise the rule rightly says nothing, so
     the density is set rather than left to the simulated draw."""
-    R = transfer_rows
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
@@ -815,7 +809,7 @@ def _with_populated_inside(ctx):
         lo, hi = left[b], right[b]
         if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
             continue
-        _o, i = R.outside_flank(int(flags[b]), int(lo), int(hi))
+        _o, i = outside_flank(int(flags[b]), int(lo), int(hi))
         if i is None:
             continue
         cnt[i] = next(fills)

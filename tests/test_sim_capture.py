@@ -19,16 +19,17 @@ import pytest
 
 from rigel.sim.annotation import GeneBuilder
 from rigel.sim.capture import CaptureConfig, CaptureSampler
-from rigel.sim.capture.design import design_capture_probe_intervals, write_random_capture_probes
 from rigel.sim.capture.sampler import ProbeInterval
 from rigel.sim.genome import MutableGenome, random_dna_array
-from rigel.sim.manifest import condition_dir_name
-from rigel.sim.orchestrator import capture_paired_condition_seed
 from rigel.sim.wgs_config import GDNASimConfig, SimulationParams
 from rigel.sim.wgs_engine import WholeGenomeSimulator
-from rigel.sim.whole_genome import parse_yaml_config
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
+
+
+from _sim_config import parse_yaml_config
+from _sim_grid import capture_paired_condition_seed, condition_dir_name
+from design_suite_probes import design_capture_probe_intervals, write_random_capture_probes
 
 
 def _transcript(
@@ -70,7 +71,7 @@ def test_transcript_probe_weights_match_overlap_example(tmp_path):
     assert sampler.fragment_weight("mrna", 0, 2000, 1480, 200) == pytest.approx(121.0)
 
 
-def test_a_split_probe_binds_every_template_through_ONE_contiguous_part(tmp_path):
+def test_a_split_probe_binds_every_template_through_one_contiguous_part(tmp_path):
     """A probe across a splice junction is one contiguous 60-mer only in a transcript that holds the
     junction; everywhere else (gDNA, the nascent entity, which is a single-exon transcript over the span,
     or an isoform that lacks the junction) it is two separate parts, and a fragment hybridises through
@@ -98,7 +99,7 @@ def test_a_split_probe_binds_every_template_through_ONE_contiguous_part(tmp_path
         sampler.fragment_weight("nrna", 0, 400, 70, 280)
 
 
-def test_gdna_and_cdna_bind_the_SAME_half_of_a_split_probe_alike(tmp_path):
+def test_gdna_and_cdna_bind_the_same_half_of_a_split_probe_alike(tmp_path):
     """Hybridisation does not know what a molecule is: a gDNA fragment and a cDNA fragment of an
     isoform that lacks the junction hold the same 20 bases of the probe's first part, and weigh the
     same. Only a molecule holding the junction can bind the probe whole."""
@@ -250,7 +251,7 @@ def test_parse_yaml_capture_config(tmp_path):
     assert cfg.capture.min_overlap == 4
 
 
-def test_a_capture_key_the_loader_does_not_know_is_REFUSED(tmp_path):
+def test_a_capture_key_the_loader_does_not_know_is_refused(tmp_path):
     """Ignored, an unknown key would read as applied: a config carrying ``gdna_split_penalty``, which
     the loader does not know, would claim a setting the simulation never used."""
     probes = tmp_path / "probes.tsv"
@@ -425,7 +426,6 @@ def test_random_probe_writer_outputs_bed12_for_sj_spanning_probe(tmp_path):
         probe_length=120,
         probe_density=1.0,
         seed=7,
-        bed_path=bed,
     )
 
     assert result.bed_path == bed
@@ -451,7 +451,6 @@ def test_random_probe_writer_masks_shared_isoform_sequence_by_abundance(tmp_path
         probe_length=100,
         probe_density=1.0,
         seed=7,
-        bed_path=bed,
     )
 
     rows = [line.split("\t") for line in probes.read_text().splitlines()[1:]]
@@ -671,7 +670,7 @@ class TestAgainstBruteForce:
                     f"key {key} ({name}) at w={frag_len}"
                 )
 
-    def test_a_split_probes_parts_are_never_SUMMED(self) -> None:
+    def test_a_split_probes_parts_are_never_summed(self) -> None:
         """A fragment over both parts of a split probe binds the better part, not their sum. This is
         the case the gDNA space is made of, so the gate reads a fragment long enough to hold both."""
         intervals = LAYOUTS[SPLIT_LAYOUT]
@@ -975,7 +974,7 @@ class TestCaptureMovesTheLengthMarginal:
             assert values["n_gdna"] == 20_000, label
             assert values["n_rna"] == 20_000, label
 
-    def test_g_s3_gdna_mean_length_rises_under_capture(self, arms):
+    def test_gdna_mean_length_rises_under_capture(self, arms):
         """Strictly greater. Byte-identical arms are the falsification."""
         off, on = arms["off"]["gdna"], arms["on"]["gdna"]
         assert on > off, f"gDNA mean length {off:.2f} (off) -> {on:.2f} (on)"
@@ -985,7 +984,7 @@ class TestCaptureMovesTheLengthMarginal:
         off, on = arms["off"]["rna"], arms["on"]["rna"]
         assert on > off, f"RNA mean length {off:.2f} (off) -> {on:.2f} (on)"
 
-    def test_g_s5_the_gdna_to_rna_length_gap_narrows_under_capture(self, arms):
+    def test_the_gdna_to_rna_length_gap_narrows_under_capture(self, arms):
         """`mu_g - mu_r` is the only thing that would let fragment length identify composition: at
         equal component means it carries exactly zero information at any depth."""
         gap_off = abs(arms["off"]["gdna"] - arms["off"]["rna"])
@@ -1011,8 +1010,8 @@ class TestCaptureMovesTheLengthMarginal:
         assert share_below(histograms["on"], 100) < share_below(histograms["off"], 100)
 
 
-class TestTheConditionalWasAlreadyRight:
-    """A regression guard rather than a falsification.
+class TestTheOnProbeConditional:
+    """A guard rather than a falsification.
 
     "On-target gDNA is longer than off-target" holds even when capture is not length-selective at
     all, because the conditional is right either way: at a fixed width, the probability of landing on
@@ -1099,7 +1098,7 @@ def test_the_simulators_transcripts_carry_the_aliases_the_index_recorded(tmp_pat
     """`load_transcripts_from_index` is the simulator's transcriptome, and the probe loader resolves a dropped
     duplicate through the kept transcript's aliases, so the loader must restore them from the index."""
     from rigel.index import TranscriptIndex
-    from rigel.sim.whole_genome import load_transcripts_from_index
+    from rigel.sim.transcriptome import load_transcripts_from_index
 
     fasta = tmp_path / "genome.fa"
     fasta.write_text(">chr1\n" + "ACGT" * 500 + "\n")

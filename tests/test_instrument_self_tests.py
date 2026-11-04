@@ -3,21 +3,16 @@
 A `scripts/design/` instrument's `--self-test` perturbs every one of its own comparators, with no I/O, and requires
 each to fire. A self-test nothing invokes goes stale silently, so this file runs each in-process on every suite run
 and asserts the count of gates as well as the pass: losing a perturbation fails. In-process, not a subprocess, so an
-import error surfaces as itself and the shared sibling loader is proved to find the instruments' helpers.
+import error surfaces as itself and the instruments' imports of their sibling helpers are proved to resolve.
 """
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import io
-import sys
 from contextlib import redirect_stdout
-from pathlib import Path
 
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-DESIGN = ROOT / "scripts" / "design"
 
 #: ``(stem, gates, the line the instrument prints when they all fire)``. Re-derive a count from the
 #: instrument's own output rather than adjusting it here: a self-test that quietly lost a case reads
@@ -28,19 +23,9 @@ INSTRUMENTS = [
 ]
 
 
-def _load(stem: str):
-    path = DESIGN / f"{stem}.py"
-    sys.path.insert(0, str(DESIGN))
-    spec = importlib.util.spec_from_file_location(stem, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[stem] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 @pytest.mark.parametrize("stem,gates,fired", INSTRUMENTS, ids=[i[0] for i in INSTRUMENTS])
-def test_every_self_test_perturbation_still_fires(stem, gates, fired):
-    module = _load(stem)
+def test_every_self_test_perturbation_fires(stem, gates, fired):
+    module = importlib.import_module(stem)
     buf = io.StringIO()
     with redirect_stdout(buf):
         rc = module.self_test()

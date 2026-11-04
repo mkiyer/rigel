@@ -40,7 +40,7 @@ from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import run_pipeline  # noqa: E402
 
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, RUNS  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, ORACLE_BAM, RUNS  # noqa: E402
 
 DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_mid_capture_off"
 REFERENCE = RUNS / "arms" / "rename_identity_reference.json"
@@ -83,7 +83,7 @@ def capture(suite: Path, index_dir: Path, condition: str, bam: Path | None = Non
 
     ``bam`` names any BAM directly (a real library); without it the BAM is the panel condition's oracle.
     """
-    bam = str(bam) if bam is not None else str(suite / condition / "sim_oracle.bam")
+    bam = str(bam) if bam is not None else str(suite / condition / ORACLE_BAM)
     index = TranscriptIndex.load(str(index_dir))
     base = PipelineConfig()
     cfg = dataclasses.replace(

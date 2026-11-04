@@ -51,6 +51,41 @@ def _check_unit_interval(value: float, name: str, *, open_upper: bool = False) -
         raise ValueError(f"CalibrationResult.{name} must be in {bound}; got {v}.")
 
 
+#: The per-object arrays on each axis, each checked against its own axis length (:func:`_check_axis_array`).
+_REGION_ARRAYS = (
+    "count_gdna_region",
+    "count_rna_region",
+    "gdna_region_eff_len",
+    "gdna_frac_region",
+    "rna_pos_frac_region",
+    "rna_neg_frac_region",
+    "gdna_capture_efficiency_region",
+)
+_BOUNDARY_ARRAYS = (
+    "count_gdna_boundary",
+    "count_rna_boundary",
+    "count_rna_spliced_boundary",
+    "boundary_mass_per_crossing",
+    "boundary_spliced_mass_per_crossing",
+    "gdna_boundary_eff_len",
+    "gdna_boundary_conserved_len",
+    "gdna_frac_boundary",
+    "rna_pos_frac_boundary",
+    "rna_neg_frac_boundary",
+    "gdna_capture_efficiency_boundary",
+)
+_SJ_ARRAYS = ("count_rna_sj", "sj_mass_per_crossing")
+#: The three-way composition on both axes: fractions, so bounded by 1.
+_FRACTIONS = (
+    "gdna_frac_region",
+    "rna_pos_frac_region",
+    "rna_neg_frac_region",
+    "gdna_frac_boundary",
+    "rna_pos_frac_boundary",
+    "rna_neg_frac_boundary",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class CalibrationResult:
     """Deconvolved gDNA / RNA mass on the region and contiguous-boundary axes, the sj flux, the two
@@ -153,47 +188,32 @@ class CalibrationResult:
     n_sj: int
 
     def __post_init__(self) -> None:
-        ceiling = (
-            1.0 + CONSTANTS.calibration.fraction_tolerance
-        )  # a fraction's upper bound, with rounding
         for axis in ("n_regions", "n_boundaries", "n_sj"):
             if int(getattr(self, axis)) < 0:
                 raise ValueError(
                     f"CalibrationResult.{axis} must be >= 0; got {getattr(self, axis)}."
                 )
+        for names, axis in (
+            (_REGION_ARRAYS, self.n_regions),
+            (_BOUNDARY_ARRAYS, self.n_boundaries),
+            (_SJ_ARRAYS, self.n_sj),
+        ):
+            for name in names:
+                _check_axis_array(getattr(self, name), name, axis)
+        self._check_fractions()
+        self._check_capture()
+        if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
+            raise ValueError(
+                "CalibrationResult.gdna_density_global must be finite and >= 0; "
+                f"got {self.gdna_density_global}."
+            )
+        _check_unit_interval(self.rna_sense_frac, "rna_sense_frac")
 
-        for name in (
-            "count_gdna_region",
-            "count_rna_region",
-            "gdna_region_eff_len",
-            "gdna_frac_region",
-            "rna_pos_frac_region",
-            "rna_neg_frac_region",
-        ):
-            _check_axis_array(getattr(self, name), name, self.n_regions)
-        for name in (
-            "count_gdna_boundary",
-            "count_rna_boundary",
-            "count_rna_spliced_boundary",
-            "boundary_mass_per_crossing",
-            "boundary_spliced_mass_per_crossing",
-            "gdna_boundary_eff_len",
-            "gdna_boundary_conserved_len",
-            "gdna_frac_boundary",
-            "rna_pos_frac_boundary",
-            "rna_neg_frac_boundary",
-        ):
-            _check_axis_array(getattr(self, name), name, self.n_boundaries)
-
-        # each component is a fraction, bounded by 1; closure holds by construction (ψ's ``compose``)
-        for name in (
-            "gdna_frac_region",
-            "rna_pos_frac_region",
-            "rna_neg_frac_region",
-            "gdna_frac_boundary",
-            "rna_pos_frac_boundary",
-            "rna_neg_frac_boundary",
-        ):
+    def _check_fractions(self) -> None:
+        """Each composition component is a fraction, bounded by 1 up to rounding; closure holds by construction (ψ's
+        ``compose``)."""
+        ceiling = 1.0 + CONSTANTS.calibration.fraction_tolerance
+        for name in _FRACTIONS:
             arr = np.asarray(getattr(self, name), dtype=np.float64)
             if np.any(arr > ceiling):
                 i = int(np.flatnonzero(arr > ceiling)[0])
@@ -201,18 +221,11 @@ class CalibrationResult:
                     f"CalibrationResult.{name} is a fraction and must not exceed 1; index {i} is "
                     f"{float(arr[i])!r}."
                 )
-        for name in ("count_rna_sj", "sj_mass_per_crossing"):
-            _check_axis_array(getattr(self, name), name, self.n_sj)
-        _check_axis_array(
-            self.gdna_capture_efficiency_region, "gdna_capture_efficiency_region", self.n_regions
-        )
-        # finite and non-negative (the axis check): a relative yield against the bulk, with no upper bound
+
+    def _check_capture(self) -> None:
+        """The capture reading: a relative yield against the bulk (finite, non-negative, no upper bound), exactly 1
+        everywhere when there is no bulk density, and a saturation level of at least the bulk itself."""
         c = np.asarray(self.gdna_capture_efficiency_region, dtype=np.float64)
-        _check_axis_array(
-            self.gdna_capture_efficiency_boundary,
-            "gdna_capture_efficiency_boundary",
-            self.n_boundaries,
-        )
         cb = np.asarray(self.gdna_capture_efficiency_boundary, dtype=np.float64)
         if self.gdna_bulk_density is None and (
             np.any(c != 1.0) or np.any(cb != 1.0) or self.gdna_capture_saturation != 1.0
@@ -234,12 +247,6 @@ class CalibrationResult:
                 "CalibrationResult.gdna_capture_saturation must be finite and >= 1 (the bulk itself); "
                 f"got {self.gdna_capture_saturation}."
             )
-        if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
-            raise ValueError(
-                "CalibrationResult.gdna_density_global must be finite and >= 0; "
-                f"got {self.gdna_density_global}."
-            )
-        _check_unit_interval(self.rna_sense_frac, "rna_sense_frac")
 
     # ── the conserved sj mass: the third axis in fragment units ──
 

@@ -1,22 +1,22 @@
 """The deposit-behaviour digest's fixture, run against the executable specification rather than the C++.
 
-``rigel.scan_cache.deposit_digest`` computes the cache key's behavioural half from the native accumulator, because the
-key must certify what the production scanner deposited. This module runs the same fixture over the specification, for
-two tests:
+``deposit_digest`` in ``scripts/design/_scan_cache.py`` computes the cache key's behavioural half from the native
+accumulator, because the key must certify what the production scanner deposited. This module runs the same fixture over
+the specification, for two tests:
 
 * the two must produce the same digest, or the key certifies an artifact nothing writes;
 * the specification's rule can be perturbed in-process, which the compiled one cannot, so this is how a changed deposit
   rule is shown to move the digest.
 
-The fixture is duplicated on purpose, and the agreement test catches drift; importing the src fixture would let both
-sides share any mistake in it.
+The fixture is duplicated on purpose, and the agreement test catches drift; importing the cache module's fixture would let
+both sides share any mistake in it.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-#: Same geometry as ``rigel.scan_cache.deposit_digest``: two annotated sj, a short region whose far
+#: Same geometry as ``_scan_cache.deposit_digest``: two annotated sj, a short region whose far
 #: boundary a fragment may or may not reach, and regions wide enough that containment is reachable.
 REGION_BOUNDS = [0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400]
 REGION_TYPES = [0, 2, 2, 1, 2, 2, 1, 2]
@@ -37,8 +37,8 @@ FRAGMENTS = (
 
 
 def reference_deposit_digest(accumulator_cls, partition_cls) -> str:
-    """The digest over the specification, byte-compatible with ``scan_cache.deposit_digest``."""
-    from rigel.scan_cache import _digest, _schema_names
+    """The digest over the specification, byte-compatible with ``_scan_cache.deposit_digest``."""
+    from _scan_cache import _digest, _schema_names
 
     partition = partition_cls.from_region_bounds(
         [REGION_BOUNDS], region_types=[REGION_TYPES], sj=SJ

@@ -49,7 +49,7 @@ def test_fit_is_deterministic():
 
 def test_the_row_tiles_move_no_bit(monkeypatch):
     """The kernels are built and summed a row tile at a time, and the tile's height is a resource setting
-    (`simplex_logodds._block_rows`), so it must not change the order of any addition: a population spanning several
+    (`simplex_logodds.block_rows`), so it must not change the order of any addition: a population spanning several
     tiles, fitted and refitted (the refit's E-step runs tile by tile), gives the same bits at a one-row tile, an odd
     tile, the shipped tile and one tile for the whole population."""
     rng = np.random.default_rng(5)
@@ -65,13 +65,13 @@ def test_the_row_tiles_move_no_bit(monkeypatch):
     def fit(prev=None):
         return fit_landscape(count, mass, eff, var, anchor=anchor, prev=prev)
 
-    shipped = LS._block_rows(CONSTANTS.landscape.grid_points, np.dtype(np.float64).itemsize)
+    shipped = LS.block_rows(CONSTANTS.landscape.grid_points, np.dtype(np.float64).itemsize)
     assert n > 2 * shipped, "the shipped tile must split the population, or the gate tests one tile"
     assert (count < 1.0).sum() > 100, "the refit's E-step must act on location-free kernels"
     first = fit()
     refit = fit(prev=first)
     for rows in (1, 7, 333, n):
-        monkeypatch.setattr(LS, "_block_rows", lambda cells, itemsize, rows=rows: rows)
+        monkeypatch.setattr(LS, "block_rows", lambda cells, itemsize, rows=rows: rows)
         for got, want in ((fit(), first), (fit(prev=first), refit)):
             for field in ("log_rho", "logP", "logP_free"):
                 a, b = getattr(got, field), getattr(want, field)
@@ -174,7 +174,7 @@ def test_knn_width_is_the_exact_kth_nearest_neighbour_distance():
             continue
         d = np.abs(a[:, None] - a[None, :])
         d.sort(1)
-        assert np.allclose(knn_widths(a, 0.0, 1.0), d[:, k])
+        assert np.allclose(knn_widths(a, 0.0) / CONSTANTS.landscape.knn_scale, d[:, k])
 
 
 def test_knn_width_widens_as_the_sample_thins():
@@ -217,11 +217,11 @@ def test_the_kernels_arm_is_numpys_interpolation_of_the_curve_to_the_bit():
 
     from _psi_reference import gdna_arm
 
-    from rigel.calibration.simplex_logodds import _logodds_grid
+    from rigel.calibration.simplex_logodds import logodds_grid
 
     count, mass, eff, var = _two_mode()
     ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
-    lam, _fg = _logodds_grid(101, 10.0)
+    lam, _fg = logodds_grid(101, 10.0)
     rng = np.random.default_rng(7)
     m = 40
     # two masses below the guard, one opportunity below it, and one heavy slot on a short opportunity that
@@ -274,7 +274,7 @@ def test_the_landscape_keeps_its_own_density_beside_the_padded_one():
 # ── the census: the bulk and the enriched basins ───────────────────────────────────────────────────────
 
 
-def test_split_basins_names_the_largest_basin_depleted_and_returns_only_the_basins_above_it():
+def test_split_basins_names_the_largest_depleted_and_returns_only_those_above_it():
     """Depleted is the largest-mass basin; the basins returned beside it are those strictly above it, so a smaller basin
     below the depleted one is never an enriched candidate, and a density whose largest basin is the top one has nothing
     above it."""
@@ -370,7 +370,7 @@ def _walls_around_a_tail(seed=0, n_long=20_000, n_dep=200, n_short=600, n_tail=1
     return ls
 
 
-def test_walls_around_a_handful_of_exons_lift_nothing_and_the_exons_read_their_own_level():
+def test_walls_around_a_few_exons_lift_nothing_and_the_exons_read_their_own_level():
     """A sparse real library's shape, through the estimator: the walls' mass goes to the bulk in the E-step, and the
     twelve exons are a basin of a few parts in ten thousand. Read by the capture reader, nothing without evidence is
     lifted (a 40 bp sliver with no fragment reads the bulk to a part in a thousand, a 100 kb intron with none reads it

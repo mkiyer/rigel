@@ -10,7 +10,6 @@ from ..transcript import Transcript
 from ..types import Interval, Strand
 
 from .genome import MutableGenome
-from .splice_motif import place_intron_motif
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +47,27 @@ def check_transcript_keys(gene_id: str, tdef: dict) -> None:
             + (f"unknown key(s) {unknown}" if unknown else f"missing {missing}")
             + f"; a transcript takes {sorted(TRANSCRIPT_KEYS)}"
         )
+
+
+def write_splice_motif(
+    genome: MutableGenome, intron_start: int, intron_end: int, strand: Strand
+) -> None:
+    """Write one intron's canonical splice-site dinucleotides into *genome*, as read on the plus strand: ``GT`` at
+    the intron's 5' end and ``AG`` at its 3' end on ``+``, their reverse complements ``CT`` / ``AC`` on ``-``. Raises
+    on an intron shorter than 4 bp, or a strand that is neither."""
+    if intron_end - intron_start < 4:
+        raise ValueError(
+            f"Intron ({intron_start},{intron_end}) too short for splice motifs "
+            f"(length {intron_end - intron_start} < 4)"
+        )
+    if strand == Strand.POS:
+        donor, acceptor = "GT", "AG"
+    elif strand == Strand.NEG:
+        donor, acceptor = "CT", "AC"
+    else:
+        raise ValueError(f"cannot inject splice motifs for strand {strand!r}")
+    genome.edit(intron_start, donor)
+    genome.edit(intron_end - 2, acceptor)
 
 
 class GeneBuilder:
@@ -117,10 +137,8 @@ class GeneBuilder:
             exons = sorted(Interval(s, e) for s, e in raw_exons)
             self._validate_exons(t_id, exons)
 
-            for i in range(1, len(exons)):
-                intron_start = exons[i - 1].end
-                intron_end = exons[i].start
-                self._inject_splice_motif(intron_start, intron_end, strand)
+            for left, right in zip(exons, exons[1:]):
+                write_splice_motif(self.genome, left.end, right.start, strand)
 
             self._specs.append(
                 _TranscriptSpec(
@@ -158,12 +176,6 @@ class GeneBuilder:
                     f"({exons[i - 1].start},{exons[i - 1].end}) vs "
                     f"({exons[i].start},{exons[i].end})"
                 )
-
-    # -- Splice motif injection -----------------------------------------------
-
-    def _inject_splice_motif(self, intron_start: int, intron_end: int, strand: Strand) -> None:
-        """Write one intron's splice-site dinucleotides (:func:`place_intron_motif`, which raises below 4 bp)."""
-        place_intron_motif(self.genome.edit, intron_start, intron_end, strand)
 
     # -- Output ---------------------------------------------------------------
 

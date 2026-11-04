@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import operator
 import os
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -440,7 +440,7 @@ class PipelineConfig:
 # Every number an algorithm, a quality check or a resource budget depends on, each documented once with why it has
 # its value. The code reads them by name (``CONSTANTS.landscape.grid_points``) and never restates one. They are not
 # run settings: a change to any of them is a change to the method. An experiment varies one on a copy
-# (:meth:`Constants.replaced`), never by editing a module.
+# (``dataclasses.replace``), never by editing a module.
 
 
 @dataclass(frozen=True)
@@ -769,6 +769,12 @@ class QcConstants:
             position_mb_decimals=self.position_mb_decimals >= 0,
         )
 
+    def examples(self, names) -> str:
+        """*names* as an error or warning lists them: the first :attr:`report_examples`, and how many more."""
+        names = list(names)
+        k = self.report_examples
+        return ", ".join(names[:k]) + (f" and {len(names) - k:,} more" if len(names) > k else "")
+
 
 @dataclass(frozen=True)
 class SimulatorConstants:
@@ -779,16 +785,21 @@ class SimulatorConstants:
     oversample_ratio: float = 1.5
     oversample_extra: int = 10
 
-    #: The capture-probe designer's default bait length in bp (``sim.capture.design``) — a standard
-    #: hybrid-capture bait.
-    probe_length_bp: int = 120
+    #: A ``rigel sim`` scenario's defaults where neither its YAML nor the command line sets them (``sim.Scenario``):
+    #: a genome length (bp) and a fragment count small enough that a scenario builds in seconds, and a seed, whose value
+    #: is arbitrary: any fixed one makes the scenario reproducible.
+    scenario_genome_length: int = 5000
+    scenario_seed: int = 42
+    scenario_fragments: int = 1000
 
     def __post_init__(self) -> None:
         _check_ranges(
             self,
             oversample_ratio=self.oversample_ratio >= 1.0,
             oversample_extra=self.oversample_extra >= 1,
-            probe_length_bp=self.probe_length_bp >= 1,
+            scenario_genome_length=self.scenario_genome_length >= 1,
+            scenario_seed=self.scenario_seed >= 0,
+            scenario_fragments=self.scenario_fragments >= 1,
         )
 
 
@@ -809,11 +820,11 @@ class ResourceConstants:
     spill_queue_chunks: int = 2
 
     #: Cache-tiling target for the row-tiled fits (the landscape's kernels, the capture efficiency), as a working-set
-    #: size; ``simplex_logodds._block_rows`` turns it into rows. It orders no addition: the landscape adds every row
+    #: size; ``simplex_logodds.block_rows`` turns it into rows. It orders no addition: the landscape adds every row
     #: into its group's sum in row order, whatever the tile.
     solve_block_bytes: int = 1 << 20
 
-    #: The bytes per grid cell the capture efficiency's row tile is sized for (``_block_rows``'s itemsize): two float64
+    #: The bytes per grid cell the capture efficiency's row tile is sized for (``block_rows``'s itemsize): two float64
     #: arrays' worth, while a tile holds four at once (the expectation, its log-likelihood, the alternative's log
     #: weight and its weight) and a temporary fifth at its peak, so a tile peaks at about two and a half times
     #: ``solve_block_bytes``. A resource choice, not a measured optimum. It sets the tile height and no bit: every
@@ -829,10 +840,9 @@ class ResourceConstants:
     alignable_window_bp: int = 10_000_000
 
     #: The per-fragment annotation table is sized to the buffered fragment count plus this padding, and never
-    #: below the minimum capacity; it doubles when full, by at least the minimum growth.
+    #: below the minimum capacity; it doubles when full.
     annotation_table_padding: int = 1024
     annotation_table_min_capacity: int = 4096
-    annotation_table_min_growth: int = 1024
 
     #: GTF parsing logs progress every this many exon features.
     gtf_log_interval: int = 100_000
@@ -867,13 +877,6 @@ class Constants:
     qc: QcConstants = field(default_factory=QcConstants)
     simulator: SimulatorConstants = field(default_factory=SimulatorConstants)
     resources: ResourceConstants = field(default_factory=ResourceConstants)
-
-    def replaced(self, dotted: str, value) -> "Constants":
-        """A copy with one value changed, named ``"section.field"`` — how an experiment or a test varies one
-        constant without editing a module. The section re-validates."""
-        section_name, _, field_name = dotted.partition(".")
-        section = getattr(self, section_name)
-        return replace(self, **{section_name: replace(section, **{field_name: value})})
 
 
 def _check_ranges(section, **ok: bool) -> None:

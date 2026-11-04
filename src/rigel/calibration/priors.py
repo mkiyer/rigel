@@ -30,7 +30,7 @@ class LocusPriors:
     gdna_eff_len: np.ndarray  # capture-contracted effective length of the gDNA component
 
 
-def _region_locus_shares(
+def region_locus_shares(
     region_arrays: "RegionArrays",
     multi_loci: "list[MultiLocus]",
     n_loci: int,
@@ -38,7 +38,7 @@ def _region_locus_shares(
     """``(region_idx, locus_idx, share)``: each region's fractional overlap with each ``MultiLocus`` block.
 
     The overlaps are normalised across the loci a region touches; a region overlapping no locus (intergenic) emits
-    nothing. They are returned as triples so the boundary projection (:func:`_boundary_locus_shares`) reuses them
+    nothing. They are returned as triples so the boundary projection (:func:`boundary_locus_shares`) reuses them
     rather than re-deriving the overlap.
     """
     r_idx: list[int] = []
@@ -46,8 +46,29 @@ def _region_locus_shares(
     weight: list[float] = []
     if n_loci == 0:
         return (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.float64))
+    blocks_by_ref = _blocks_by_ref(multi_loci)
+    starts = np.asarray(region_arrays.start, dtype=np.int64)
+    ends = np.asarray(region_arrays.end, dtype=np.int64)
+    for ref_id in range(int(region_arrays.n_refs)):
+        blocks = blocks_by_ref.get(ref_id)
+        if not blocks:
+            continue
+        for r, shares in _ref_region_shares(
+            ref_id, blocks, starts, ends, region_arrays.ref_offsets
+        ):
+            for lid, share in shares.items():
+                r_idx.append(r)
+                l_idx.append(lid)
+                weight.append(share)
+    return (
+        np.asarray(r_idx, dtype=np.int64),
+        np.asarray(l_idx, dtype=np.int64),
+        np.asarray(weight, dtype=np.float64),
+    )
 
-    # Group locus blocks by reference, sorted ascending by start.
+
+def _blocks_by_ref(multi_loci: "list[MultiLocus]") -> dict[int, list[tuple[int, int, int]]]:
+    """Every non-empty locus block as ``(start, end, multi_locus_id)``, grouped by reference and sorted by start."""
     blocks_by_ref: dict[int, list[tuple[int, int, int]]] = {}
     for ml in multi_loci:
         lid = int(ml.multi_locus_id)
@@ -58,69 +79,51 @@ def _region_locus_shares(
                 )
     for blocks in blocks_by_ref.values():
         blocks.sort()
+    return blocks_by_ref
 
-    starts = np.asarray(region_arrays.start, dtype=np.int64)
-    ends = np.asarray(region_arrays.end, dtype=np.int64)
-    for ref_id in range(int(region_arrays.n_refs)):
-        blocks = blocks_by_ref.get(ref_id)
-        if not blocks:
-            continue
-        # Each block overlaps one contiguous run of regions, `[first, last)` (`overlapping_region_runs`). A region's
-        # blocks are visited in sorted-block order, so every float sum has a fixed order and only overlapping pairs
-        # are touched.
-        b_start = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
-        b_end = np.fromiter((b[1] for b in blocks), dtype=np.int64, count=len(blocks))
-        first, last = overlapping_region_runs(
-            np.full(len(blocks), ref_id, dtype=np.int64),
-            b_start,
-            b_end,
-            starts,
-            ends,
-            region_arrays.ref_offsets,
-        )
-        width = np.maximum(last - first, 0)
-        pair_block = np.repeat(np.arange(len(blocks), dtype=np.int64), width)
-        pair_region = np.repeat(first, width) + (
-            np.arange(int(width.sum()), dtype=np.int64) - np.repeat(np.cumsum(width) - width, width)
-        )
-        order = np.argsort(pair_region, kind="stable")
-        pair_region, pair_block = pair_region[order], pair_block[order]
-        cut = np.flatnonzero(np.diff(pair_region)) + 1
-        for run in np.split(np.arange(pair_region.size), cut):
-            if run.size == 0:
-                continue
-            r = int(pair_region[run[0]])
-            r_start = int(starts[r])
-            r_end = int(ends[r])
-            r_len = r_end - r_start
-            if r_len <= 0:
-                continue
-            raw: dict[int, float] = {}
-            for j in pair_block[run]:
-                bs, be, lid = blocks[int(j)]
-                overlap = min(be, r_end) - max(bs, r_start)
-                if overlap > 0:
-                    raw[lid] = raw.get(lid, 0.0) + overlap / r_len
-            total = sum(raw.values())
-            if total <= 0.0:
-                continue
-            for lid, raw_share in raw.items():
-                r_idx.append(r)
-                l_idx.append(lid)
-                weight.append(raw_share / total)
-    return (
-        np.asarray(r_idx, dtype=np.int64),
-        np.asarray(l_idx, dtype=np.int64),
-        np.asarray(weight, dtype=np.float64),
+
+def _ref_region_shares(ref_id: int, blocks, starts, ends, ref_offsets):
+    """``(region, {locus: share})`` for each of one reference's regions a block overlaps, in region order.
+
+    Each block overlaps one contiguous run of regions, ``[first, last)`` (`overlapping_region_runs`). A region's blocks
+    are visited in sorted-block order, so every float sum has a fixed order and only overlapping pairs are touched.
+    """
+    b_start = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
+    b_end = np.fromiter((b[1] for b in blocks), dtype=np.int64, count=len(blocks))
+    first, last = overlapping_region_runs(
+        np.full(len(blocks), ref_id, dtype=np.int64), b_start, b_end, starts, ends, ref_offsets
     )
+    width = np.maximum(last - first, 0)
+    pair_block = np.repeat(np.arange(len(blocks), dtype=np.int64), width)
+    pair_region = np.repeat(first, width) + (
+        np.arange(int(width.sum()), dtype=np.int64) - np.repeat(np.cumsum(width) - width, width)
+    )
+    order = np.argsort(pair_region, kind="stable")
+    pair_region, pair_block = pair_region[order], pair_block[order]
+    cut = np.flatnonzero(np.diff(pair_region)) + 1
+    for run in np.split(np.arange(pair_region.size), cut):
+        if run.size == 0:
+            continue
+        r = int(pair_region[run[0]])
+        r_start, r_end = int(starts[r]), int(ends[r])
+        r_len = r_end - r_start
+        if r_len <= 0:
+            continue
+        raw: dict[int, float] = {}
+        for j in pair_block[run]:
+            bs, be, lid = blocks[int(j)]
+            overlap = min(be, r_end) - max(bs, r_start)
+            if overlap > 0:
+                raw[lid] = raw.get(lid, 0.0) + overlap / r_len
+        total = sum(raw.values())
+        if total > 0.0:
+            yield r, {lid: raw_share / total for lid, raw_share in raw.items()}
 
 
-def _boundary_locus_shares(
+def boundary_locus_shares(
     region_arrays: "RegionArrays",
-    multi_loci: "list[MultiLocus]",
+    region_shares: tuple[np.ndarray, np.ndarray, np.ndarray],
     n_loci: int,
-    *,
-    region_shares: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(edge_idx, locus_idx, share)``: a locus's boundaries are the boundaries that touch its regions.
 
@@ -137,14 +140,9 @@ def _boundary_locus_shares(
     regions in different multi-loci), which carries no mass: a fragment crossing it would be a candidate in both loci,
     and the union-find would have merged them. Its shares are therefore not renormalised.
 
-    ``region_shares`` takes :func:`_region_locus_shares`'s triples when the caller already holds them, so the overlap
-    is computed once on the pipeline's path.
+    ``region_shares`` is :func:`region_locus_shares`'s triples, so the overlap is computed once.
     """
-    r_idx, l_idx, w = (
-        _region_locus_shares(region_arrays, multi_loci, n_loci)
-        if region_shares is None
-        else region_shares
-    )
+    r_idx, l_idx, w = region_shares
     lo, hi = boundary_region_indices(np.asarray(region_arrays.ref_id))
     if r_idx.size == 0 or lo.size == 0:
         return (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.float64))
@@ -184,26 +182,7 @@ def _boundary_locus_shares(
     return (uniq // np.int64(n_loci), uniq % np.int64(n_loci), out)
 
 
-def _project_regions_to_loci(
-    region_arrays: "RegionArrays",
-    multi_loci: "list[MultiLocus]",
-    n_loci: int,
-    arrays: dict[str, np.ndarray],
-) -> dict[str, np.ndarray]:
-    """Overlap-weighted projection of per-REGION arrays to per-locus sums.
-
-    Regions only. The crossing axis is projected by :func:`_boundary_locus_shares`, because a boundary is a
-    first-class object and is not carried by a region.
-    """
-    out = {name: np.zeros(n_loci, dtype=np.float64) for name in arrays}
-    r_idx, l_idx, w = _region_locus_shares(region_arrays, multi_loci, n_loci)
-    for name, arr in arrays.items():
-        if r_idx.size:
-            np.add.at(out[name], l_idx, w * np.asarray(arr, dtype=np.float64)[r_idx])
-    return out
-
-
-def _sum_by_locus(
+def sum_by_locus(
     idx: np.ndarray, lid: np.ndarray, share: np.ndarray, values: np.ndarray, n_loci: int
 ) -> np.ndarray:
     """``float64[n_loci]`` — ``Σ share · values[idx]``, the one weighted scatter both axes use."""
@@ -220,8 +199,8 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior inputs from the calibration result.
 
-    A locus collects its regions by genomic overlap (:func:`_region_locus_shares`) and its boundaries by touching those
-    regions (:func:`_boundary_locus_shares`)::
+    A locus collects its regions by genomic overlap (:func:`region_locus_shares`) and its boundaries by touching those
+    regions (:func:`boundary_locus_shares`)::
 
         gdna_count = Σ_regions share(r,L)·gdna_mass_region[r] + Σ_boundaries share(e,L)·gdna_mass_boundary[e]·q[e]
 
@@ -264,16 +243,14 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
     n_loci = len(multi_loci)
-    r_idx, r_lid, r_w = _region_locus_shares(region_arrays, multi_loci, n_loci)
-    e_idx, e_lid, e_w = _boundary_locus_shares(
-        region_arrays, multi_loci, n_loci, region_shares=(r_idx, r_lid, r_w)
-    )
+    r_idx, r_lid, r_w = region_locus_shares(region_arrays, multi_loci, n_loci)
+    e_idx, e_lid, e_w = boundary_locus_shares(region_arrays, (r_idx, r_lid, r_w), n_loci)
 
     def by_region(values):
-        return _sum_by_locus(r_idx, r_lid, r_w, values, n_loci)
+        return sum_by_locus(r_idx, r_lid, r_w, values, n_loci)
 
     def by_boundary(values):
-        return _sum_by_locus(e_idx, e_lid, e_w, values, n_loci)
+        return sum_by_locus(e_idx, e_lid, e_w, values, n_loci)
 
     # the gDNA count: the region term is already a fragment count; the crossing term is converted by the
     # accumulator's own mass-per-crossing at the boundary

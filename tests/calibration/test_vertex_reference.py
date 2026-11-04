@@ -24,14 +24,15 @@ from _psi_reference import (
     lse,
     posterior_median_fg,
     psi_cube,
+    psi_solve,
     row_at,
     strand_loglik_mixture,
 )
 from scipy.special import expit, log_expit
 
 from rigel.calibration import simplex_logodds as SL
-from rigel.calibration.simplex_logodds import _logodds_grid, _solve_regions_logodds_all
-from rigel.native import transfer_rows as R
+from rigel.calibration.simplex_logodds import logodds_grid, solve_regions_logodds
+from rigel._solve_impl import testing as R
 
 #: κ = ½ exactly, no overdispersion, no fitted priors. On that substrate the strand term is bit-flat, so only the
 #: message under test and ψ's reference speak about λ, isolating the reference without ablating anything. The lattice is
@@ -56,7 +57,7 @@ def _solve(**over):
     u_pos, u_neg, ap, an = _regions(n)
     kw = dict(_BASE)
     kw.update(over)
-    return np.asarray(_solve_regions_logodds_all(u_pos, u_neg, ap, an, **kw).gdna_frac, np.float64)
+    return np.asarray(psi_solve(u_pos, u_neg, ap, an, **kw).gdna_frac, np.float64)
 
 
 def _lam(f):
@@ -66,7 +67,7 @@ def _lam(f):
 
 def _rows(fn, n: int = 2):
     """``n`` copies of one claim as a λ-row on the coarse solve grid, the socket every message uses."""
-    lam, _ = _logodds_grid(int(_BASE["n_grid"]), float(_BASE["L"]))
+    lam, _ = logodds_grid(int(_BASE["n_grid"]), float(_BASE["L"]))
     row = np.asarray(fn(lam), np.float64)
     return dict(row_logprior=np.tile(row[None, :], (n, 1)))
 
@@ -89,7 +90,7 @@ def _msg_lam(lam_t, p):
 # ── G1: the price law ───────────────────────────────────────────────────────────────────────────────
 
 
-def test_G1_a_log_f_g_message_buys_log_odds_only_LOGARITHMICALLY_in_its_precision():
+def test_g1_a_log_f_g_message_buys_log_odds_only_logarithmically_in_its_precision():
     """Sweep the message precision over four decades and regress ``λ`` on ``log₁₀ p``: the slope must be ``½·ln 10``, so
     the vertex costs ``e²`` in precision per nat. An object at ``p ≈ 10`` sits at ``λ ≈ 1.5`` (``f_g ≈ 0.82``), and no
     achievable depth closes the gap, because ``p`` is at best linear in the count while ``λ`` is logarithmic in ``p``.
@@ -103,7 +104,7 @@ def test_G1_a_log_f_g_message_buys_log_odds_only_LOGARITHMICALLY_in_its_precisio
     assert float(_solve(**_msg_up(10.0))[0]) < 0.95, _solve(**_msg_up(10.0))[0]
 
 
-def test_G1b_the_price_law_is_the_SAME_at_the_other_vertex():
+def test_g1b_the_price_law_is_the_same_at_the_other_vertex():
     """``f_g → 0`` is bounded by the gDNA half of the same constant, so the slope in ``|λ|`` must match G1's: one
     constant, two signs."""
     lam_of = {e: float(_lam(_solve(**_msg_dn(10.0**e))[0])) for e in (2, 3, 4, 5, 6)}
@@ -115,12 +116,12 @@ def test_G1b_the_price_law_is_the_SAME_at_the_other_vertex():
 # ── G2: the reference is the only slope in the tail ──────────────────────────────────────────────────
 
 
-def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent():
+def test_g2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent():
     """ψ built on the λ grid with a claim written on ``log f_g``: every non-reference term is flat in the far tail (κ=½
     makes the strand term bit-flat; the message's gradient decays as ``e^{−2λ}``), so ``dψ/dλ`` must equal
     ``−JEFFREYS_REF``. ψ is called (`psi_cube`, the solver's own cube), not reimplemented.
     """
-    lam, _fg = _logodds_grid(1024, 10.0)
+    lam, _fg = logodds_grid(1024, 10.0)
     u_pos, u_neg, ap, an = _regions(1)
     psi, _fp, _fn, _tau = psi_cube(
         u_pos,
@@ -150,12 +151,12 @@ def _with_exponents(msg: dict, c_g: float, c_r: float) -> dict:
     arm itself does. The assertions demand a move, not merely a difference, so an ablation that never reached ψ fails
     them.
     """
-    lam, _ = _logodds_grid(int(_BASE["n_grid"]), float(_BASE["L"]))
+    lam, _ = logodds_grid(int(_BASE["n_grid"]), float(_BASE["L"]))
     shift = jeffreys_arms(lam, c_g - 0.5, c_r - 0.5)
     return dict(row_logprior=np.asarray(msg["row_logprior"], np.float64) + shift[None, :])
 
 
-def test_G3_each_half_of_the_constant_holds_ONE_vertex_and_is_NEGLIGIBLE_at_the_other():
+def test_g3_each_half_of_the_constant_holds_one_vertex_negligible_at_the_other():
     """Each half of the constant holds one vertex, so one fix covers both. ``C·log(1−f_g)`` is the only term bounding
     ``f_g → 1``: deleting it must move that answer by a full nat of log-odds while barely touching ``f_g → 0``, and
     symmetrically for the other half, with two claims per half.
@@ -187,7 +188,7 @@ def test_G3_each_half_of_the_constant_holds_ONE_vertex_and_is_NEGLIGIBLE_at_the_
 # ── G4: softening the reference is a weak, bounded lever ────────────────────────────────────────────
 
 
-def test_G4_softening_the_reference_moves_lambda_MONOTONICALLY_and_by_a_BOUNDED_step():
+def test_g4_softening_the_reference_moves_lambda_monotonically_and_by_a_bounded_step():
     """``λ* = ½·log(p/C)`` predicts that halving ``C`` buys only ``½·ln 2 = 0.35`` nats, so softening the reference is a
     weak lever, and ``C → 0`` would make ψ improper. Checked as monotone and bounded rather than an exact step: the
     message's residual curvature and the other half's term add an offset that does not cancel across ``C``.
@@ -206,7 +207,7 @@ def test_G4_softening_the_reference_moves_lambda_MONOTONICALLY_and_by_a_BOUNDED_
 # ── G5: the control; on λ, the same claim is honoured at par ─────────────────────────────────────────
 
 
-def test_G5_the_SAME_claim_delivered_on_lambda_is_honoured_AT_PAR():
+def test_g5_the_same_claim_delivered_on_lambda_is_honoured_at_par():
     """``f_g = 1 − 1e-4`` is ``λ = +9.21``, which the ``L = 10`` grid represents exactly. Delivered on the λ axis the
     claim is honoured; delivered on ``log f_g`` (same claim, same precision) it is not. So the vertex is reachable and
     the lattice is not the limit: the coordinate is the price.
@@ -227,7 +228,7 @@ _L = 10.0
 
 
 def _solve_composition(u_pos, u_neg, *, kappa, allow_pos, allow_neg, n_grid=60):
-    d = _solve_regions_logodds_all(
+    d = solve_regions_logodds(
         np.asarray(u_pos, np.float64),
         np.asarray(u_neg, np.float64),
         np.asarray(allow_pos, bool),
@@ -274,12 +275,12 @@ def test_the_composition_closes_exactly_on_every_solved_slot(kappa, allow_pos, a
     assert f_g.max() > 0.0 and (f_pos + f_neg).max() > 0.0, (f_g.max(), (f_pos + f_neg).max())
 
 
-def test_the_old_read_out_did_not_close_and_the_gap_was_the_skew():
+def test_the_read_out_closes_the_simplex_where_three_read_outs_miss_by_the_skew():
     """A composition assembled from three independent read-outs (``f_g`` from the median, the RNA total from the
     posterior mean) misses the simplex by exactly ``median − mean``. The posterior mean is recoverable from the shipped
     output: the RNA total is ``1 − f_g``, so the three-read-out RNA total is ``1 − E[f_g]``.
     """
-    lam, fg = _logodds_grid(60, _L)
+    lam, fg = logodds_grid(60, _L)
     u_pos, u_neg = np.array([27.0, 9.0, 3.0]), np.array([3.0, 1.0, 0.0])
     psi = psi_cube(
         u_pos,
@@ -370,7 +371,7 @@ def test_the_ambig_tilt_share_stays_a_share():
 
 def test_a_zero_count_slot_publishes_no_data_rather_than_a_composition():
     """A slot with no fragments, or with neither strand admissible, is not dispatched to either ψ solve; it publishes
-    ``(0, 0, 0)``, meaning "no data" rather than a composition, and `region_init` replaces it with the signature-binary
+    ``(0, 0, 0)``, meaning "no data" rather than a composition, and `init_beliefs` replaces it with the signature-binary
     init, which is a simplex point. So closure is asserted over solved slots only.
     """
     f_g, f_pos, f_neg = _solve_composition(
@@ -400,7 +401,7 @@ def _theta_case(n: float, fg_true: float, tau_true: float, K: int = 41):
     fpos = (1 - fg_true) * (1 + tau_true) / 2
     fneg = (1 - fg_true) * (1 - tau_true) / 2
     p = 0.5 * fg_true + _THETA_KAPPA * fpos + (1 - _THETA_KAPPA) * fneg
-    lam, _fg = _logodds_grid(K, 10.0)
+    lam, _fg = logodds_grid(K, 10.0)
     args = (
         np.array([n * p]),
         np.array([n * (1 - p)]),
@@ -480,7 +481,7 @@ def test_the_theta_marginal_matches_adaptive_quadrature_at_every_depth(n, fg_tru
 def _solve_case(args, cube_rows=None, n_grid: int = 101, n_tilt=None):
     """One `_theta_case` slot through the dispatcher, the reference composition its own."""
     u_pos, u_neg, ap, an, fgr, fpr, fnr = args
-    return _solve_regions_logodds_all(
+    return psi_solve(
         u_pos,
         u_neg,
         ap,
@@ -499,9 +500,9 @@ def _solve_case(args, cube_rows=None, n_grid: int = 101, n_tilt=None):
 def test_the_derived_node_count_is_converged():
     """K_t = 2T/π + 1 = 24 is the node count at which the trapezoid error on the window falls below e^{−T}: the read-out
     at 24 nodes equals the read-out at 60 to 1e−6 on a 500k-fragment slot at an interior tilt. There is no other θ
-    count: the config has no tilt knob and ψ's module no tilt lattice; the dispatcher's ``n_tilt`` exists for this test.
+    count: the config has no tilt knob and ψ's module no tilt lattice; the test driver's ``n_tilt`` exists for this test.
     """
-    assert SL._TILT_NODES == 24
+    assert SL.TILT_NODES == 24
     args, _kw = _theta_case(500_000.0, 0.1, 0.6)
     a = _solve_case(args)
     b = _solve_case(args, n_tilt=60)
@@ -543,8 +544,8 @@ def test_without_strand_information_the_nodes_are_the_whole_domain():
     args, kw = _theta_case(1000.0, 0.2, 0.3)
     kw["kappa"] = 0.5
     _psi_, _fp, _fn, tau = psi_cube(*args, ambig=True, **kw)
-    lattice = np.sin(np.linspace(-0.5 * np.pi, 0.5 * np.pi, SL._TILT_NODES))
-    mixed = tau[..., : SL._TILT_NODES]  # the continuum's columns; the two atoms follow
+    lattice = np.sin(np.linspace(-0.5 * np.pi, 0.5 * np.pi, SL.TILT_NODES))
+    mixed = tau[..., : SL.TILT_NODES]  # the continuum's columns; the two atoms follow
     assert np.allclose(np.broadcast_to(lattice, mixed.shape), mixed, atol=1e-14)
 
 
@@ -578,7 +579,7 @@ def test_the_three_tilt_hypotheses_carry_equal_reference_weight():
     args, kw = _theta_case(1000.0, 0.2, 0.3)
     kw["kappa"] = 0.5
     psi, _fp, _fn, tau = psi_cube(*args, ambig=True, **kw)
-    assert psi.shape[2] == SL._TILT_NODES + 2 and tau.shape[2] == SL._TILT_NODES + 2
+    assert psi.shape[2] == SL.TILT_NODES + 2 and tau.shape[2] == SL.TILT_NODES + 2
     assert np.all(tau[..., -2] == 1.0) and np.all(tau[..., -1] == -1.0)
     mixed = lse(psi[..., :-2], axis=2)
     assert np.allclose(mixed, psi[..., -2], atol=1e-9, rtol=0.0)
@@ -604,7 +605,7 @@ def test_a_delivered_level_on_a_strand_rules_the_other_strands_pure_hypothesis_o
     unwitnessed = _solve_case(args, n_grid=41)
     witnessed = _solve_case(
         args,
-        cube_rows=cube_rows_of({0: (None, floor, 3000.0, 1000.0, 0.5)}, _logodds_grid(41, 10.0)[0]),
+        cube_rows=cube_rows_of({0: (None, floor, 3000.0, 1000.0, 0.5)}, logodds_grid(41, 10.0)[0]),
         n_grid=41,
     )
     assert float(witnessed.gdna_frac[0]) < float(unwitnessed.gdna_frac[0]) - 0.05

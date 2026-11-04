@@ -108,7 +108,7 @@ def _simulate_gdna(tmp_path, fasta, transcripts, *, genomic_refs, n_gdna, seed=1
 
 
 class TestGenomicReferenceSet:
-    def test_g_s1_no_gdna_on_an_rna_only_reference(self, tmp_path, mixed_reference):
+    def test_no_gdna_on_an_rna_only_reference(self, tmp_path, mixed_reference):
         """An absolute count, from the read names, and the target is exactly 0."""
         fasta, transcripts, _lengths = mixed_reference
         origins = _simulate_gdna(
@@ -122,7 +122,7 @@ class TestGenomicReferenceSet:
         on_spike = [origin for origin in gdna if origin.ref == SPIKE_REF]
         assert on_spike == [], f"{len(on_spike)} gDNA fragments on an RNA-only reference"
 
-    def test_g_s2_every_genomic_reference_carries_gdna(self, tmp_path, mixed_reference):
+    def test_every_genomic_reference_carries_gdna(self, tmp_path, mixed_reference):
         """At least two genomic references, each with a non-zero deposit census."""
         fasta, transcripts, _lengths = mixed_reference
         origins = _simulate_gdna(
@@ -138,7 +138,7 @@ class TestGenomicReferenceSet:
         assert set(per_ref) == set(GENOMIC_REFS), f"gDNA reference census: {per_ref}"
         assert all(count > 0 for count in per_ref.values()), per_ref
 
-    def test_g_s6_no_gdna_fragment_runs_past_its_own_reference(self, tmp_path, mixed_reference):
+    def test_no_gdna_fragment_runs_past_its_own_reference(self, tmp_path, mixed_reference):
         """A 400 bp molecule cannot come from a 273 bp contig."""
         fasta, transcripts, lengths = mixed_reference
         origins = _simulate_gdna(

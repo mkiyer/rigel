@@ -2,9 +2,10 @@
 
 An instrument runs as ``python scripts/design/<name>.py``, so ``scripts/design/`` is not a package and a
 sibling cannot be imported by name: ``sibling("_oracle_arms.py")`` loads the file beside this one once and
-shares the module. The module also holds the data root and the panels' paths, ``set_field`` (the one
-``SECTION.FIELD=VALUE`` parser behind every ``--set``), the override fields, the stratum readers, the pool
-ledger and the subprocess sharder behind every ``--jobs``.
+shares the module. The module also holds the data root and the panels' paths, a panel's conditions and its
+oracle cache, ``set_field`` (the one ``SECTION.FIELD=VALUE`` parser behind every ``--set``) and the option
+that feeds it, the override fields, the strata and the release scope, the pool ledger, the subprocess
+sharder behind every ``--jobs`` and the self-tests' refusal check.
 
 Usage::
 
@@ -21,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import typing
 from pathlib import Path
 
@@ -34,6 +36,9 @@ RUNS = Path(os.environ.get("RIGEL_RUNS") or Path.home() / "Downloads" / "rigel_r
 DEFAULT_SUITE = RUNS / "suite" / "ladder"
 DEFAULT_INDEX = RUNS / "suite" / "rigel_index"
 
+#: Where an instrument's scratch work goes by default (split BAMs, shards): ``$RIGEL_SCRATCH``, else ``/tmp``.
+SCRATCH = Path(os.environ.get("RIGEL_SCRATCH", "/tmp"))
+
 #: the substrates, each: (index dir, the panel dir holding `scan_cache/` and `oracle_cache/`)
 PANELS = {
     "test": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios"),
@@ -42,6 +47,26 @@ PANELS = {
     "test_sparse": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_sparse"),
     "ladder": (DEFAULT_INDEX, DEFAULT_SUITE),
 }
+
+#: The simulator's own alignments, every read placed where it was drawn: a condition directory is one that
+#: holds this BAM, and it is the input every instrument reads by default.
+ORACLE_BAM = "sim_oracle.bam"
+
+
+def panel_conditions(suite: Path, names=None) -> list[str]:
+    """``names`` when any are given, else every condition under ``suite``: each directory holding
+    :data:`ORACLE_BAM`, sorted."""
+    if names:
+        return list(names)
+    return sorted(p.name for p in Path(suite).iterdir() if (p / ORACLE_BAM).is_file())
+
+
+def oracle_cache_dir(suite: Path, given: Path | None = None) -> Path | None:
+    """``given``, else ``<suite>/oracle_cache`` when that directory exists, else ``None``."""
+    if given is None and (Path(suite) / "oracle_cache").is_dir():
+        return Path(suite) / "oracle_cache"
+    return given
+
 
 #: The mass arrays ``OracleTruth.override_masses`` replaces. Named here so the ``noop`` gate can re-inject
 #: exactly this set from the shipped result and demand byte-identity: an override of a field nothing reads
@@ -56,6 +81,19 @@ OVERRIDE_FIELDS = (
 )
 
 
+def check_override_fields(override: dict) -> None:
+    """Refuse an ``override_masses`` result that does not write exactly :data:`OVERRIDE_FIELDS`, so the
+    oracle arm differs from the shipped one in the deconvolution alone and the ``noop`` gate tests the set
+    the arm replaces."""
+    missing = set(OVERRIDE_FIELDS) - set(override)
+    extra = set(override) - set(OVERRIDE_FIELDS)
+    if missing or extra:
+        raise RuntimeError(
+            f"override_masses no longer writes OVERRIDE_FIELDS: missing={sorted(missing)} "
+            f"extra={sorted(extra)}."
+        )
+
+
 #: The strand axis's two halves, keyed by the strand specificity a condition name spells (``_ss_0.50_``). A
 #: library between them is in neither half: the test panel's ss 0.70 rows are a stratum of their own, never
 #: pooled into a half whose bar they would move.
@@ -68,6 +106,10 @@ STRATA = (
     ("unstranded", "capture OFF"),
     ("unstranded", "capture ON"),
 )
+
+#: The stratum reported on every benchmark but outside the release scope; the other three of
+#: :data:`STRATA` are in scope.
+DEFERRED = ("unstranded", "capture ON")
 
 
 def strandedness(cond: str) -> str:
@@ -90,10 +132,28 @@ def strata(conds) -> list[tuple[str, str]]:
     return [*STRATA, *sorted({stratum(c) for c in conds} - set(STRATA))]
 
 
+def scope(st) -> str:
+    """A stratum's release scope: ``DEFERRED`` for :data:`DEFERRED`, ``IN SCOPE`` for the rest of
+    :data:`STRATA`, and ``APART`` for a stratum in neither strand half."""
+    st = tuple(st)
+    if st == DEFERRED:
+        return "DEFERRED"
+    return "IN SCOPE" if st in STRATA else "APART"
+
+
 def is_zero_gdna(cond: str) -> bool:
     """``g00``, the zero-gDNA control. Truth is exactly 0, so every gDNA fragment in the prior there is a
     false positive with nothing to cancel it, and a relative change is unbounded. Read per condition."""
     return "_g00_" in cond
+
+
+def stratum_selections(conds, label=" x ".join) -> list[tuple[str, typing.Callable[[str], bool]]]:
+    """``(label(stratum), predicate)`` for every stratum among ``conds`` (:func:`strata`), the predicate
+    selecting its conditions with the zero-gDNA control excluded: the rows a per-stratum table prints."""
+    return [
+        (label(st), lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
+        for st in strata(conds)
+    ]
 
 
 def pool_ledger(condition_dir: Path) -> dict:
@@ -106,6 +166,16 @@ def pool_ledger(condition_dir: Path) -> dict:
     summary = json.loads((Path(condition_dir) / "truth_summary.json").read_text())
     counts = summary["origin_counts"]
     return {k: float(counts.get(k, 0.0)) for k in ("gdna", "mrna", "nrna")}
+
+
+def capture_label(cond: str) -> str:
+    """``on`` or ``off``: the label of the condition's capture config in a panel manifest."""
+    return "on" if cond.endswith("_capture_on") else "off"
+
+
+def capture_config(manifest: dict, cond: str) -> dict:
+    """The capture config a panel manifest records under the condition's label (:func:`capture_label`)."""
+    return next(c["config"] for c in manifest["capture_configs"] if c["label"] == capture_label(cond))
 
 
 def run_shards(script: Path, names: list, jobs: int, scratch: Path, shard_args) -> list[Path]:
@@ -137,6 +207,15 @@ def run_shards(script: Path, names: list, jobs: int, scratch: Path, shard_args) 
     return outs
 
 
+def run_json_shards(script: Path, names: list, jobs: int, work_dir: Path, shard_args) -> list[dict]:
+    """:func:`run_shards` in a directory of this run's own under ``work_dir``, for an instrument whose shard
+    writes its rows as one JSON list: every shard's rows, merged in shard order."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=work_dir, prefix="shards_") as td:
+        outs = run_shards(script, names, jobs, Path(td), shard_args)
+        return [row for out in outs for row in json.loads(out.read_text())]
+
+
 def set_args(settings) -> list[str]:
     """``--set`` specs as the command-line arguments a shard is handed."""
     return [arg for spec in settings for arg in ("--set", spec)]
@@ -151,6 +230,23 @@ def sibling(name: str):
         sys.modules[key] = module
         spec.loader.exec_module(module)
     return sys.modules[key]
+
+
+def add_set_option(ap, help: str) -> None:
+    """The repeatable ``--set SECTION.FIELD=VALUE`` option, collected into ``args.settings``."""
+    ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
+                    help=help)
+
+
+def configured(settings, base=None):
+    """``base``, the shipped ``PipelineConfig`` by default, with every ``--set`` spec applied in order."""
+    if base is None:
+        from rigel.config import PipelineConfig
+
+        base = PipelineConfig()
+    for spec in settings:
+        base = set_field(base, spec)
+    return base
 
 
 def set_field(cfg, spec: str):
@@ -192,3 +288,12 @@ def set_field(cfg, spec: str):
     return dataclasses.replace(
         cfg, **{section_name: dataclasses.replace(section, **{field_name: value})}
     )
+
+
+def refuses(fn, *args, exc=SystemExit) -> bool:
+    """Whether ``fn(*args)`` raises ``exc``: a self-test's check that a gate fires."""
+    try:
+        fn(*args)
+    except exc:
+        return True
+    return False

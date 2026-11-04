@@ -25,7 +25,7 @@
 #   · `g05`, the low-gDNA × capture-on corner where real libraries live (0 < rate ≤ 0.10 with capture on).
 #
 # The depth model fixes `n_total_fragments` and lets the rate decide only the split
-# (`rigel.sim.orchestrator.resolve_depths`, gated by `tests/test_sim_fixed_total_depth.py`), as a sequencing run
+# (`resolve_depths` in `scripts/sim/_sim_grid.py`, gated by `tests/test_sim_fixed_total_depth.py`), as a sequencing run
 # has a fixed budget that contamination divides. The RNA side thins as gDNA rises, so per-transcript accuracy
 # degrades at the top of the ladder; that is a property of such libraries. With f_gdna = rate / (1 + rate):
 #

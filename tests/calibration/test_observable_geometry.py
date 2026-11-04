@@ -17,9 +17,9 @@ import pysam
 import pytest
 from _index_builder import MINI_GTF, build_test_index
 
-from rigel.calibration.calibrate import _gdna_boundary_conserved_len
 from rigel.calibration.effective_length import (
     UNBOUNDED_REACH,
+    conserved_cut_shares,
     contained_eff_length,
     crossing_eff_length,
     observable_contained_eff_length,
@@ -194,9 +194,11 @@ def test_with_nothing_masked_every_function_is_its_plain_forms_number_to_the_bit
     np.testing.assert_array_equal(
         observable_crossing_eff_length(ra, pmf), np.full(n_boundaries, unbounded)
     )
-    np.testing.assert_array_equal(
-        observable_cut_shares(ra, pmf), _gdna_boundary_conserved_len(ra, pmf)
+    lo, hi = boundary_region_indices(ra.ref_id)
+    left, right = conserved_cut_shares(
+        pmf, ra.region_size_bp[lo], ra.region_size_bp[hi], UNBOUNDED_REACH, UNBOUNDED_REACH
     )
+    np.testing.assert_array_equal(observable_cut_shares(ra, pmf), left + right)
     # the pools over whole regions: contained by each region's type, crossing by its flanks' sorted pair
     width = pmf.shape[0] - 1
     types = coarse_type_array(ra.signature)

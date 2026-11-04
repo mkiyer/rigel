@@ -18,7 +18,8 @@ def truncated_normal_frag_lengths(
 ) -> np.ndarray:
     """Sample ``n`` integer fragment lengths: a ``Normal(mean, std)`` draw rounded to the nearest integer,
     truncated to ``[frag_min, frag_max]`` (inclusive), by rejection against ``rng``. The draw must round, not
-    truncate toward zero, for `whole_genome.fl_pmf` to state the law drawn."""
+    truncate toward zero, so that the law drawn is the rounded normal's mass at each integer, truncated: the closed
+    form the instruments integrate."""
     if frag_min > frag_max:
         raise ValueError(
             f"The fragment-length window [{frag_min}, {frag_max}] holds no length, so no fragment can be "

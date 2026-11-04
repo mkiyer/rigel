@@ -223,91 +223,104 @@ def build_splice_graph(
     by_ref = _ref_slices(ex.ref)
     intr = _introns_of(ex)
     intr_by_ref = _ref_slices(intr[0])
-
-    n_rows, e_rows = [], []
+    region_parts, edge_parts = [], []
     region_base = 0
     for name, length in reflen.items():
         if length == 0:
             continue
         rows = by_ref.get(name, EMPTY_I64)
         i_rows = intr_by_ref.get(name, EMPTY_I64)
-        # ── 1. the region_bound set ────────────────────────────────────────────────────────────────────────
-        region_bounds = np.unique(
-            np.concatenate([ex.start[rows], ex.end[rows], np.array([0, length], np.int64)])
-        )
-        starts, ends = region_bounds[:-1], region_bounds[1:]
-        n = starts.shape[0]
+        regions, edges = _reference_graph(name, length, ex, rows, intr, i_rows, region_base)
+        region_parts.append(regions)
+        edge_parts.append(edges)
+        region_base += len(regions)
+    return _assemble(region_parts, edge_parts)
 
-        # ── 2. the 4-bit signature, by difference arrays over the region index ──────────────────────
-        sig = np.zeros(n, np.uint8)
-        for bit, iv_s, iv_e in _signature_intervals(ex, rows, intr, i_rows):
-            if iv_s.size == 0:
-                continue
-            d = np.zeros(n + 1, np.int32)
-            np.add.at(d, np.searchsorted(region_bounds, iv_s), 1)
-            np.add.at(d, np.searchsorted(region_bounds, iv_e), -1)
-            sig |= np.where(np.cumsum(d)[:-1] > 0, bit, 0).astype(np.uint8)
 
-        n_rows.append(
-            pd.DataFrame(
-                {
-                    "region_id": np.arange(region_base, region_base + n, dtype=np.int64),
-                    "ref_name": name,
-                    "start": starts,
-                    "end": ends,
-                    "length": ends - starts,
-                    "signature": sig,
-                }
-            )
-        )
+def _reference_graph(name, length, ex: _Exons, rows, intr, i_rows, region_base: int):
+    """One reference's ``(regions, edges)`` frames, region ids offset by ``region_base``.
 
-        # ── 3. contiguous boundaries: the flags at each interior interface, and no reach ─────────────
-        pos = region_bounds[1:-1]  # the n-1 interior interfaces
-        flags = np.zeros(pos.shape[0], np.uint16)
-        if pos.size:
-            for arr, bit in _terminus_and_splice_events(ex, rows, intr, i_rows):
-                if arr.size:
-                    hit = np.searchsorted(pos, arr)
-                    ok = (hit < pos.size) & (pos[np.clip(hit, 0, max(pos.size - 1, 0))] == arr)
-                    np.bitwise_or.at(flags, hit[ok], bit)
-
-        # ── 4. sj boundaries: one per distinct (intron_start, intron_end, strand) ────────────────
-        j_src, j_dst, j_strand, j_reach = _sj_edges(region_bounds, intr, i_rows, name)
-
-        src = np.concatenate([np.arange(n - 1, dtype=np.int64), j_src]) + region_base
-        dst = np.concatenate([np.arange(1, n, dtype=np.int64), j_dst]) + region_base
-        kind = np.concatenate(
-            [
-                np.full(max(n - 1, 0), EDGE_KIND_CONTIGUOUS, np.uint8),
-                np.full(j_src.size, EDGE_KIND_SJ, np.uint8),
-            ]
-        )
-        strand = np.concatenate([np.zeros(max(n - 1, 0), np.int8), j_strand])
-        allflags = np.concatenate([flags, np.zeros(j_src.size, np.uint16)])
-        # A contiguous row's reach columns hold 0: the one reader of a reach takes the sj rows.
-        reach = {
-            k: np.concatenate([np.zeros(pos.shape[0], np.int64), v]) for k, v in j_reach.items()
+    Every exon endpoint and both reference ends are region bounds. A contiguous boundary sits at each interior
+    interface and carries its structural flags; there is one sj boundary per distinct ``(intron_start, intron_end,
+    strand)``. A contiguous row's reach columns hold 0: the one reader of a reach takes the sj rows.
+    """
+    region_bounds = np.unique(
+        np.concatenate([ex.start[rows], ex.end[rows], np.array([0, length], np.int64)])
+    )
+    starts, ends = region_bounds[:-1], region_bounds[1:]
+    n = starts.shape[0]
+    regions = pd.DataFrame(
+        {
+            "region_id": np.arange(region_base, region_base + n, dtype=np.int64),
+            "ref_name": name,
+            "start": starts,
+            "end": ends,
+            "length": ends - starts,
+            "signature": _signatures(region_bounds, ex, rows, intr, i_rows),
         }
-        e_rows.append(
-            pd.DataFrame(
-                {
-                    "src": src,
-                    "dst": dst,
-                    "kind": kind,
-                    "strand": strand,
-                    "flags": allflags,
-                    **{k: v.astype(np.int32) for k, v in reach.items()},
-                }
-            )
-        )
-        region_base += n
+    )
+    pos = region_bounds[1:-1]  # the n-1 interior interfaces
+    flags = _contiguous_flags(pos, ex, rows, intr, i_rows)
+    j_src, j_dst, j_strand, j_reach = _sj_edges(region_bounds, intr, i_rows, name)
+    n_contiguous = max(n - 1, 0)
+    edges = pd.DataFrame(
+        {
+            "src": np.concatenate([np.arange(n - 1, dtype=np.int64), j_src]) + region_base,
+            "dst": np.concatenate([np.arange(1, n, dtype=np.int64), j_dst]) + region_base,
+            "kind": np.concatenate(
+                [
+                    np.full(n_contiguous, EDGE_KIND_CONTIGUOUS, np.uint8),
+                    np.full(j_src.size, EDGE_KIND_SJ, np.uint8),
+                ]
+            ),
+            "strand": np.concatenate([np.zeros(n_contiguous, np.int8), j_strand]),
+            "flags": np.concatenate([flags, np.zeros(j_src.size, np.uint16)]),
+            **{
+                k: np.concatenate([np.zeros(pos.shape[0], np.int64), v]).astype(np.int32)
+                for k, v in j_reach.items()
+            },
+        }
+    )
+    return regions, edges
 
+
+def _signatures(region_bounds, ex: _Exons, rows, intr, i_rows) -> np.ndarray:
+    """Each region's 4-bit signature, by difference arrays over the region index."""
+    n = region_bounds.shape[0] - 1
+    sig = np.zeros(n, np.uint8)
+    for bit, iv_s, iv_e in _signature_intervals(ex, rows, intr, i_rows):
+        if iv_s.size == 0:
+            continue
+        d = np.zeros(n + 1, np.int32)
+        np.add.at(d, np.searchsorted(region_bounds, iv_s), 1)
+        np.add.at(d, np.searchsorted(region_bounds, iv_e), -1)
+        sig |= np.where(np.cumsum(d)[:-1] > 0, bit, 0).astype(np.uint8)
+    return sig
+
+
+def _contiguous_flags(pos, ex: _Exons, rows, intr, i_rows) -> np.ndarray:
+    """The structural flags at each interior interface ``pos``: a bit is set where one of its events falls."""
+    flags = np.zeros(pos.shape[0], np.uint16)
+    if not pos.size:
+        return flags
+    for arr, bit in _terminus_and_splice_events(ex, rows, intr, i_rows):
+        if arr.size:
+            hit = np.searchsorted(pos, arr)
+            ok = (hit < pos.size) & (pos[np.clip(hit, 0, max(pos.size - 1, 0))] == arr)
+            np.bitwise_or.at(flags, hit[ok], bit)
+    return flags
+
+
+def _assemble(region_parts, edge_parts) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The references' frames as one graph: boundaries in ``(src, kind, dst, strand)`` order, ids by row."""
     regions_df = (
-        pd.concat(n_rows, ignore_index=True) if n_rows else pd.DataFrame(columns=REGION_COLUMNS)
+        pd.concat(region_parts, ignore_index=True)
+        if region_parts
+        else pd.DataFrame(columns=REGION_COLUMNS)
     )
     edges_df = (
-        pd.concat(e_rows, ignore_index=True)
-        if e_rows
+        pd.concat(edge_parts, ignore_index=True)
+        if edge_parts
         else pd.DataFrame(columns=BOUNDARY_COLUMNS[1:])
     )
     if len(edges_df):
@@ -504,17 +517,25 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     annotation. The build passes transcripts; the load path does not, since rebuilding them is slow at human scale.
     """
     reflen = {str(k): int(v) for k, v in ref_lengths.items()}
+    ref = regions_df["ref_name"].astype(str).to_numpy()
+    # The reference slices come once from the run boundaries; a per-reference string comparison over every row would
+    # dominate the validation.
+    slices = _ref_slices(ref)
+    _check_regions(regions_df, reflen, slices)
+    _check_boundaries(regions_df, edges_df, ref, slices)
+    if transcripts is not None:
+        _validate_against_transcripts(transcripts, reflen, regions_df, edges_df)
+
+
+def _check_regions(regions_df, reflen: dict[str, int], slices: dict) -> None:
+    """I1 (the regions tile each reference exactly), I2 (ids are row order) and I3a (the signature's range)."""
     nid = regions_df["region_id"].to_numpy(np.int64)
     start = regions_df["start"].to_numpy(np.int64)
     end = regions_df["end"].to_numpy(np.int64)
     length = regions_df["length"].to_numpy(np.int64)
     sig = regions_df["signature"].to_numpy(np.uint8)
-    ref = regions_df["ref_name"].astype(str).to_numpy()
-
-    # I2 — ids are 0..n-1 in row order
     if not np.array_equal(nid, np.arange(nid.size, dtype=np.int64)):
         raise ValueError("I2: region_id is not 0..n-1 in row order. Rebuild the index.")
-    # I3a — signature range (I3b, the independent recomputation, needs the transcripts)
     if nid.size and int(sig.max()) >= N_SIGNATURES:
         raise ValueError(f"I3: signature {int(sig.max())} out of range. Rebuild the index.")
     if not np.array_equal(length, end - start):
@@ -522,9 +543,6 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     if nid.size and int(length.min()) <= 0:
         raise ValueError("I1: a region has non-positive length. Rebuild the index.")
 
-    # I1 — regions tile each reference exactly. The reference slices come once from the run boundaries; a per-reference
-    # string comparison over every row would dominate the validation.
-    slices = _ref_slices(ref)
     for name, L in reflen.items():
         sl = slices.get(name)
         if sl is None:
@@ -541,6 +559,11 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     if len(slices) != sum(1 for _n, L in reflen.items() if L > 0):
         raise ValueError("I1: region rows are not grouped contiguously by reference.")
 
+
+def _check_boundaries(regions_df, edges_df, ref, slices: dict) -> None:
+    """I5 (a boundary stays on its reference), I7 (the contiguous boundaries are the adjacent pairs), I8 (``src <
+    dst``) and I12 (row order is the sorted id order), then the sj boundaries (:func:`_check_sj_boundaries`)."""
+    n_regions = len(regions_df)
     src = edges_df["src"].to_numpy(np.int64)
     dst = edges_df["dst"].to_numpy(np.int64)
     kind = edges_df["kind"].to_numpy(np.uint8)
@@ -551,14 +574,14 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
         raise ValueError("I8: a boundary has src >= dst; genomic order is not a topological order.")
     if src.size and not np.all(ref[src] == ref[dst]):
         raise ValueError("I5: a boundary crosses references.")
-    # I12 — row order is the id order
     if not np.array_equal(edges_df["edge_id"].to_numpy(np.int64), np.arange(src.size)):
         raise ValueError("I12: edge_id is not the row index.")
     if src.size > 1:
         # (src, kind, dst, strand) packed into one int64 key that must strictly increase. Strand is in it because it is
         # in the order; without it two strand-coincident sj would read as a duplicate.
-        n_regions_ = max(nid.size, 1)
-        key = ((src * 2 + kind.astype(np.int64)) * n_regions_ + dst) * 4 + estrand.astype(np.int64)
+        key = ((src * 2 + kind.astype(np.int64)) * max(n_regions, 1) + dst) * 4 + estrand.astype(
+            np.int64
+        )
         if not np.all(np.diff(key) > 0):
             raise ValueError(
                 "I12: boundaries are not sorted by (src, kind, dst, strand), or a duplicate exists."
@@ -568,47 +591,59 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     c = kind == EDGE_KIND_CONTIGUOUS
     if not np.all(dst[c] == src[c] + 1):
         raise ValueError("I7: a CONTIGUOUS boundary is not between adjacent regions.")
-    # the expected count comes from `slices`, for the same reason as in I1
-    n_expected = nid.size - len(slices)
+    n_expected = n_regions - len(slices)
     if int(c.sum()) != n_expected:
         raise ValueError(f"I7: {int(c.sum())} contiguous boundaries, expected {n_expected}.")
     if np.any(estrand[c] != 0):
         raise ValueError("I7: a CONTIGUOUS boundary carries a strand.")
 
-    # I5/I6 — sj land on interfaces, one row per distinct (ref, donor, acceptor, strand)
     j = kind == EDGE_KIND_SJ
     if j.any():
-        if not np.all(np.isin(estrand[j], [Strand.POS, Strand.NEG])):
-            raise ValueError("I6: a SJ boundary has an invalid strand.")
-        # A strand-coincident sj pair is biologically impossible (splice motifs are not palindromic: GT..AG
-        # reverse-complements to CT..AC), so one means the annotation is wrong. It warns rather than raises because the
-        # graph handles it correctly: strand is in the sort key, so the two boundaries stay distinct and ordered.
-        pair = src[j] * max(nid.size, 1) + dst[j]
-        _u, _cnt = np.unique(pair, return_counts=True)
-        n_coincident = int((_cnt > 1).sum())
-        if n_coincident:
-            warnings.warn(
-                f"{n_coincident} strand-coincident splice junction(s): the same (donor, acceptor) "
-                f"annotated on BOTH strands. This is biologically impossible — splice motifs are "
-                f"non-palindromic (a GT..AG intron reverse-complements to CT..AC) — so the source "
-                f"annotation is likely wrong. The graph keeps them as distinct boundaries and is correct "
-                f"either way.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        key = np.stack([src[j], dst[j], estrand[j].astype(np.int64)], axis=1)
-        if np.unique(key, axis=0).shape[0] != key.shape[0]:
-            raise ValueError("I6: a (donor, acceptor, strand) sj appears more than once.")
-        # I9 — both endpoints carry that strand's exon bit
-        for s, bit in ((Strand.POS, BIT_EXON_POS), (Strand.NEG, BIT_EXON_NEG)):
-            m = j & (estrand == s)
-            if m.any() and not (np.all(sig[src[m]] & bit) and np.all(sig[dst[m]] & bit)):
-                raise ValueError(f"I9: a strand-{int(s)} sj endpoint lacks its exon bit.")
+        sig = regions_df["signature"].to_numpy(np.uint8)
+        _check_sj_boundaries(src[j], dst[j], estrand[j], sig, n_regions)
 
-    # the annotation checks: I3b signature recomputed, I4 interfaces are the events, I11 every transcript walks,
-    # I13 flags are the events
-    if transcripts is not None:
-        _validate_against_transcripts(transcripts, reflen, regions_df, edges_df)
+
+def _check_sj_boundaries(src, dst, strand, sig, n_regions: int) -> None:
+    """I5/I6 (the sj land on interfaces, one row per distinct ``(donor, acceptor, strand)``) and I9 (both endpoints
+    carry that strand's exon bit)."""
+    if not np.all(np.isin(strand, [Strand.POS, Strand.NEG])):
+        raise ValueError("I6: a SJ boundary has an invalid strand.")
+    # A strand-coincident sj pair is biologically impossible (splice motifs are not palindromic: GT..AG
+    # reverse-complements to CT..AC), so one means the annotation is wrong. It warns rather than raises because the
+    # graph handles it correctly: strand is in the sort key, so the two boundaries stay distinct and ordered.
+    _u, _cnt = np.unique(src * max(n_regions, 1) + dst, return_counts=True)
+    n_coincident = int((_cnt > 1).sum())
+    if n_coincident:
+        warnings.warn(
+            f"{n_coincident} strand-coincident splice junction(s): the same (donor, acceptor) "
+            f"annotated on BOTH strands. This is biologically impossible — splice motifs are "
+            f"non-palindromic (a GT..AG intron reverse-complements to CT..AC) — so the source "
+            f"annotation is likely wrong. The graph keeps them as distinct boundaries and is correct "
+            f"either way.",
+            RuntimeWarning,
+            stacklevel=4,
+        )
+    key = np.stack([src, dst, strand.astype(np.int64)], axis=1)
+    if np.unique(key, axis=0).shape[0] != key.shape[0]:
+        raise ValueError("I6: a (donor, acceptor, strand) sj appears more than once.")
+    for s, bit in ((Strand.POS, BIT_EXON_POS), (Strand.NEG, BIT_EXON_NEG)):
+        m = strand == s
+        if m.any() and not (np.all(sig[src[m]] & bit) and np.all(sig[dst[m]] & bit)):
+            raise ValueError(f"I9: a strand-{int(s)} sj endpoint lacks its exon bit.")
+
+
+@dataclass(frozen=True, slots=True)
+class _Reference:
+    """One reference's slice of the graph and of the annotation, for the annotation checks: its name and length, its
+    region rows ``m`` (the first is ``base``) with their bounds, and its exon and intron rows."""
+
+    name: str
+    length: int
+    m: np.ndarray
+    base: int
+    region_bounds: np.ndarray
+    rows: np.ndarray
+    i_rows: np.ndarray
 
 
 def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> None:
@@ -631,7 +666,6 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
     cm = kind == EDGE_KIND_CONTIGUOUS
     csrc = src[cm]  # already ascending: boundaries sort by (src, kind, dst, strand)
     cflags = edges_df["flags"].to_numpy(np.uint16)[cm]
-
     n_regions = ref.size
     jm = kind == EDGE_KIND_SJ
     jkey = np.sort((src[jm] * n_regions + dst[jm]) * 4 + estrand[jm].astype(np.int64))
@@ -641,93 +675,118 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
         m = slices.get(name)
         if m is None:
             continue
-        base, region_bounds = int(m[0]), np.concatenate([start[m], end[m][-1:]])
-
-        # I4 — the interior interfaces are exactly the annotation events
-        rows = by_ref.get(name, EMPTY_I64)
-        i_rows = intr_by_ref.get(name, EMPTY_I64)
-        events = (
-            np.unique(np.concatenate([ex.start[rows], ex.end[rows]])) if rows.size else EMPTY_I64
+        r = _Reference(
+            name=name,
+            length=L,
+            m=m,
+            base=int(m[0]),
+            region_bounds=np.concatenate([start[m], end[m][-1:]]),
+            rows=by_ref.get(name, EMPTY_I64),
+            i_rows=intr_by_ref.get(name, EMPTY_I64),
         )
-        events = events[(events > 0) & (events < L)]
-        interior = end[m[:-1]] if m.size > 1 else EMPTY_I64
-        if not np.array_equal(np.unique(interior), events):
-            extra = np.setdiff1d(interior, events).size
-            missing = np.setdiff1d(events, interior).size
+        _check_interfaces_are_events(r, ex, end)
+        _check_signatures_recomputed(r, ex, intr, start, end, sig)
+        _check_flags_are_events(r, ex, intr, end, csrc, cflags)
+        _check_exon_ends_are_interfaces(r, ex)
+        _check_introns_are_sj(r, intr, jkey, n_regions)
+
+
+def _check_interfaces_are_events(r: _Reference, ex: _Exons, end) -> None:
+    """I4 — the interior interfaces are exactly the annotation events."""
+    events = (
+        np.unique(np.concatenate([ex.start[r.rows], ex.end[r.rows]])) if r.rows.size else EMPTY_I64
+    )
+    events = events[(events > 0) & (events < r.length)]
+    interior = end[r.m[:-1]] if r.m.size > 1 else EMPTY_I64
+    if not np.array_equal(np.unique(interior), events):
+        extra = np.setdiff1d(interior, events).size
+        missing = np.setdiff1d(events, interior).size
+        raise ValueError(
+            f"I4: reference {r.name!r} interior interfaces are not exactly the annotation events "
+            f"({extra} extra, {missing} missing)."
+        )
+
+
+def _check_signatures_recomputed(r: _Reference, ex: _Exons, intr, start, end, sig) -> None:
+    """I3b — recompute the signature from each region's midpoint by direct interval containment, a different algorithm
+    from the builder's difference sweep. Every interval endpoint is a region bound, so a region is homogeneous and its
+    midpoint decides it."""
+    m = r.m
+    mid = (start[m] + end[m]) // 2
+    want = np.zeros(mid.size, np.uint8)
+    for bit, iv_s, iv_e in _signature_intervals(ex, r.rows, intr, r.i_rows):
+        if iv_s.size:
+            # covered iff #(start <= mid) > #(end <= mid), for half-open [start, end)
+            n_started = np.searchsorted(np.sort(iv_s), mid, side="right")
+            n_ended = np.searchsorted(np.sort(iv_e), mid, side="right")
+            want |= np.where(n_started > n_ended, bit, 0).astype(np.uint8)
+    if not np.array_equal(want, sig[m]):
+        k = int(np.flatnonzero(want != sig[m])[0])
+        raise ValueError(
+            f"I3: reference {r.name!r} region {int(m[k])} [{int(start[m][k])}, "
+            f"{int(end[m][k])}) has signature {int(sig[m][k])}, recomputed {int(want[k])}."
+        )
+
+
+def _check_flags_are_events(r: _Reference, ex: _Exons, intr, end, csrc, cflags) -> None:
+    """I13 — each structural bit is set at exactly the positions that generate it, in both directions, for all eight
+    bits, including a class with no event on this reference. The converse of I4 does not hold bit-wise: the interface
+    between bookended exons of one transcript (a zero-length intron) carries no flag."""
+    m = r.m
+    if m.size <= 1:
+        return
+    interior = end[m[:-1]]
+    at = np.zeros(interior.size, np.uint16)
+    e_of_region = np.searchsorted(csrc, m[:-1])
+    hit = (e_of_region < csrc.size) & (
+        csrc[np.clip(e_of_region, 0, max(csrc.size - 1, 0))] == m[:-1]
+    )
+    at[hit] = cflags[e_of_region[hit]]
+    for arr, bit in _events_independently(ex, r.rows, intr, r.i_rows):
+        want = np.isin(interior, arr)
+        got = (at & bit) != 0
+        if not np.array_equal(want, got):
+            k = int(np.flatnonzero(want != got)[0])
             raise ValueError(
-                f"I4: reference {name!r} interior interfaces are not exactly the annotation events "
-                f"({extra} extra, {missing} missing)."
+                f"I13: reference {r.name!r} position {int(interior[k])} "
+                f"{'is missing' if want[k] else 'wrongly carries'} flag bit {int(bit):#06x}."
             )
 
-        # I3b — recompute the signature from each region's midpoint by direct interval containment, a different
-        # algorithm from the builder's difference sweep. Every interval endpoint is a region bound, so a region is
-        # homogeneous and its midpoint decides it.
-        mid = (start[m] + end[m]) // 2
-        want = np.zeros(mid.size, np.uint8)
-        for bit, iv_s, iv_e in _signature_intervals(ex, rows, intr, i_rows):
-            if iv_s.size:
-                # covered iff #(start <= mid) > #(end <= mid), for half-open [start, end)
-                n_started = np.searchsorted(np.sort(iv_s), mid, side="right")
-                n_ended = np.searchsorted(np.sort(iv_e), mid, side="right")
-                want |= np.where(n_started > n_ended, bit, 0).astype(np.uint8)
-        if not np.array_equal(want, sig[m]):
-            k = int(np.flatnonzero(want != sig[m])[0])
+
+def _check_exon_ends_are_interfaces(r: _Reference, ex: _Exons) -> None:
+    """I11a — every annotated exon boundary lands exactly on a region interface."""
+    if not r.rows.size:
+        return
+    bounds = r.region_bounds
+    for arr, what in ((ex.start[r.rows], "start"), (ex.end[r.rows], "end")):
+        hit = np.searchsorted(bounds, arr)
+        bad = (hit >= bounds.size) | (bounds[np.clip(hit, 0, bounds.size - 1)] != arr)
+        if bad.any():
             raise ValueError(
-                f"I3: reference {name!r} region {int(m[k])} [{int(start[m][k])}, "
-                f"{int(end[m][k])}) has signature {int(sig[m][k])}, recomputed {int(want[k])}."
+                f"I11: reference {r.name!r} has {int(bad.sum())} exon {what}s that are not region "
+                f"interfaces (first at {int(arr[bad][0])})."
             )
 
-        # I13 — each structural bit is set at exactly the positions that generate it, in both directions, for all
-        # eight bits, including a class with no event on this reference. The converse of I4 does not hold bit-wise: the
-        # interface between bookended exons of one transcript (a zero-length intron) carries no flag.
-        if m.size > 1:
-            interior = end[m[:-1]]
-            at = np.zeros(interior.size, np.uint16)
-            e_of_region = np.searchsorted(csrc, m[:-1])
-            hit = (e_of_region < csrc.size) & (
-                csrc[np.clip(e_of_region, 0, max(csrc.size - 1, 0))] == m[:-1]
-            )
-            at[hit] = cflags[e_of_region[hit]]
-            for arr, bit in _events_independently(ex, rows, intr, i_rows):
-                want = np.isin(interior, arr)
-                got = (at & bit) != 0
-                if not np.array_equal(want, got):
-                    k = int(np.flatnonzero(want != got)[0])
-                    raise ValueError(
-                        f"I13: reference {name!r} position {int(interior[k])} "
-                        f"{'is missing' if want[k] else 'wrongly carries'} flag bit {int(bit):#06x}."
-                    )
 
-        # I11a — every annotated exon boundary lands exactly on a region interface
-        if rows.size:
-            for arr, what in ((ex.start[rows], "start"), (ex.end[rows], "end")):
-                hit = np.searchsorted(region_bounds, arr)
-                bad = (hit >= region_bounds.size) | (
-                    region_bounds[np.clip(hit, 0, region_bounds.size - 1)] != arr
-                )
-                if bad.any():
-                    raise ValueError(
-                        f"I11: reference {name!r} has {int(bad.sum())} exon {what}s that are not region "
-                        f"interfaces (first at {int(arr[bad][0])})."
-                    )
-
-        # I11b — every annotated intron is realised by a SJ boundary on that strand
-        if i_rows.size:
-            a, b, st = intr[1][i_rows], intr[2][i_rows], intr[3][i_rows].astype(np.int64)
-            js = base + np.searchsorted(region_bounds, a) - 1
-            jd = base + np.searchsorted(region_bounds, b)
-            want = (js * n_regions + jd) * 4 + st
-            if jkey.size == 0:
-                miss = np.ones(want.shape, bool)
-            else:
-                pos = np.searchsorted(jkey, want)
-                miss = (pos >= jkey.size) | (jkey[np.clip(pos, 0, jkey.size - 1)] != want)
-            if miss.any():
-                k = int(np.flatnonzero(miss)[0])
-                raise ValueError(
-                    f"I11: reference {name!r} has {int(miss.sum())} annotated introns with no SJ "
-                    f"boundary (first [{int(a[k])}, {int(b[k])}) strand {int(st[k])})."
-                )
+def _check_introns_are_sj(r: _Reference, intr, jkey, n_regions: int) -> None:
+    """I11b — every annotated intron is realised by a SJ boundary on that strand."""
+    if not r.i_rows.size:
+        return
+    a, b, st = intr[1][r.i_rows], intr[2][r.i_rows], intr[3][r.i_rows].astype(np.int64)
+    js = r.base + np.searchsorted(r.region_bounds, a) - 1
+    jd = r.base + np.searchsorted(r.region_bounds, b)
+    want = (js * n_regions + jd) * 4 + st
+    if jkey.size == 0:
+        miss = np.ones(want.shape, bool)
+    else:
+        pos = np.searchsorted(jkey, want)
+        miss = (pos >= jkey.size) | (jkey[np.clip(pos, 0, jkey.size - 1)] != want)
+    if miss.any():
+        k = int(np.flatnonzero(miss)[0])
+        raise ValueError(
+            f"I11: reference {r.name!r} has {int(miss.sum())} annotated introns with no SJ "
+            f"boundary (first [{int(a[k])}, {int(b[k])}) strand {int(st[k])})."
+        )
 
 
 # ---------------------------------------------------------------------------

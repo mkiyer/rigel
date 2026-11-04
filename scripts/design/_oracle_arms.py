@@ -1,8 +1,9 @@
-"""The oracle cache and the per-object scorer, shared by `calibration_vs_oracle.py` (the scorer) and
-`calibration_oracle.py --build` (the cache). A helper module, so it has no row on the shelf.
+"""The oracle cache, the certified per-object truth and the per-object scorer, shared by the truth-scoring
+instruments. A helper module, so it has no row on the shelf.
 
 T is the production accumulator run on the BAM split by origin, asserted to sum to the full payload in the drained
-frame. `load_or_build_oracle` is the one place the per-origin caches are built.
+frame. `load_or_build_oracle` is the one place the per-origin caches are built and `oracle_parts` the one place they
+are read; `certified_gdna` reads the per-object gDNA truth `calibration_oracle.py` certifies.
 
 Gate: ``tests/calibration/test_oracle_arms.py``.
 """
@@ -10,7 +11,6 @@ Gate: ``tests/calibration/test_oracle_arms.py``.
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,17 +18,16 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "calibration"))
-
 from _oracle import (  # noqa: E402
     ORIGINS,
     RNA_STRAND_ORIGINS,
     OracleTruth,
-    _split_bam,
+    split_by_origin,
     split_rna_by_transcript_strand,
 )
+from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.pipeline import scan_and_buffer  # noqa: E402
-from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
+from _scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
 
 #: The two axes ``CalibrationResult`` deconvolves; the sj axis is pure RNA and has nothing to score.
 AXES = ("region", "boundary")
@@ -119,6 +118,27 @@ def check_same_basis(name: str, arm, full_substrate) -> None:
             )
 
 
+def oracle_parts(cache_root, condition: str, index, origins=ORIGINS, scan=None) -> dict:
+    """``{origin: payload}``: one condition's cached pass-one partitions, each refused by ``read_scan_cache`` unless
+    it describes this index (and ``scan``, when given)."""
+    root = Path(cache_root) / condition
+    return {k: read_scan_cache(root / k, index, scan).payload for k in origins}
+
+
+def certified_gdna(oracle_dir: Path) -> dict[str, np.ndarray]:
+    """The certified per-object gDNA fragment counts in ``<oracle_dir>/slot_truth.npz``, by axis (``region``,
+    ``boundary``)."""
+    truth = dict(np.load(Path(oracle_dir) / "slot_truth.npz"))
+    out = {}
+    for kind, axis in ((REGION, "region"), (BOUNDARY, "boundary")):
+        is_k = np.asarray(truth["kind"]) == kind
+        obj = np.asarray(truth["obj"], np.int64)[is_k]
+        arr = np.zeros(int(obj.max()) + 1 if obj.size else 0)
+        arr[obj] = np.asarray(truth["n_gdna"], np.float64)[is_k]
+        out[axis] = arr
+    return out
+
+
 def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payload, cache_root,
                          lift=None, force=False):
     """T, from a per-origin cache when one is valid, otherwise split, scan, and populate it.
@@ -130,11 +150,9 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
     # ``full_payload`` is the drained whole and ``lift`` the drain's record; an empty ``lift`` drains nothing
     lift = lift or {}
     scan = pipeline_config.scan
-    dirs = {k: Path(cache_root) / tag / k for k in ORIGINS}
     if not force:
         try:
-            parts = {k: read_scan_cache(dirs[k], index, scan).payload for k in ORIGINS}
-            truth = OracleTruth.from_cached_parts(full_payload, parts, lift)
+            truth = OracleTruth.from_cached_parts(full_payload, oracle_parts(cache_root, tag, index, scan=scan), lift)
         except (FileNotFoundError, KeyError, ScanCacheKeyError):
             pass  # no cache, or it does not describe this index/scan: rebuild it below
         else:
@@ -142,38 +160,34 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
             ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
             return truth
 
-    paths, read_counts = _split_bam(bam, Path(work_dir), tag)
+    paths, read_counts = split_by_origin(bam, Path(work_dir), tag)
     parts = {}
     for origin in ORIGINS:
         _stats, strand_model, _buf, payload = scan_and_buffer(paths[origin], index, scan)
         parts[origin] = payload
         # a part records the BAM it was split from, since the split file is scratch
-        write_scan_cache(dirs[origin], payload=payload, strand_model=strand_model, index=index,
+        write_scan_cache(Path(cache_root) / tag / origin, payload=payload, strand_model=strand_model, index=index,
                          bam=bam, scan_config=scan)
     ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root, force=force)
     # the cache stays pass one (write_scan_cache refuses a drained payload); the truth is lifted as on a hit
     return OracleTruth.from_cached_parts(full_payload, parts, lift, read_counts)
 
 
-def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root, force=False) -> bool:
+def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root, force=False) -> None:
     """Cache the RNA reads split by transcript strand (``rna_pos`` / ``rna_neg``) beside the three ``ORIGINS``
-    partitions, for the per-component truth. Skips the work when both load, unless ``force``; returns True if it
-    built them.
+    partitions, for the per-component truth. Skips the work when both load, unless ``force``.
     """
-    dirs = {k: Path(cache_root) / tag / k for k in RNA_STRAND_ORIGINS}
     if not force:
         try:
-            for k in RNA_STRAND_ORIGINS:
-                read_scan_cache(dirs[k], index, scan)
-            return False
+            oracle_parts(cache_root, tag, index, RNA_STRAND_ORIGINS, scan)
+            return
         except (FileNotFoundError, KeyError, ScanCacheKeyError):
             pass
     paths, _counts = split_rna_by_transcript_strand(bam, Path(work_dir), tag)
     for key in RNA_STRAND_ORIGINS:
         _stats, strand_model, _buf, payload = scan_and_buffer(paths[key], index, scan)
-        write_scan_cache(dirs[key], payload=payload, strand_model=strand_model, index=index,
+        write_scan_cache(Path(cache_root) / tag / key, payload=payload, strand_model=strand_model, index=index,
                          bam=bam, scan_config=scan)  # the BAM it was split from
-    return True
 
 
 def library_f_gdna(result) -> float:

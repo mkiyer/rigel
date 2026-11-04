@@ -41,6 +41,8 @@ class FragmentLengthModel:
             self._total_weight: float = float(self.counts.sum())
         self._log_prob: np.ndarray | None = None
         self._prob: np.ndarray | None = None
+        # the log-probability the scorer decays a length past ``max_size`` from; 0 until finalized
+        self._tail_base: float = 0.0
         self._finalized: bool = False
         # Lazy cache for _build_eff_len_cache(), populated on the first call on a finalized model.
         self._cdf_cache: np.ndarray | None = None
@@ -121,7 +123,7 @@ class FragmentLengthModel:
         """Weighted mean of the in-range fragment lengths; 0.0 when there are none.
 
         The overflow bin is right-censored, so counting it as a point mass at ``max_size`` would bias the mean toward
-        the ceiling; it is excluded, and ``to_dict()`` reports it as ``overflow``.
+        the ceiling; it is excluded, and reported on its own (:attr:`overflow_count`).
         """
         w = self.counts[: self.max_size]
         total = float(w.sum())
@@ -236,43 +238,3 @@ class FragmentLengthModel:
 
         np.maximum(eff, min_value, out=eff)
         return eff
-
-    # ------------------------------------------------------------------
-    # Serialization
-    # ------------------------------------------------------------------
-
-    def to_dict(self) -> dict:
-        """JSON-serializable summary: the statistics and the histogram trimmed of empty tail bins. ``mean``, ``std``
-        and ``mode`` describe the in-range lengths; the censored tail is ``summary.overflow`` (count and fraction)."""
-        nonzero = np.nonzero(self.counts)[0]
-        if len(nonzero) > 0:
-            lo, hi = int(nonzero[0]), int(nonzero[-1])
-            hist_range = [lo, hi]
-            hist_values = [float(v) for v in self.counts[lo : hi + 1]]
-        else:
-            hist_range = [0, 0]
-            hist_values = []
-
-        total = self.total_weight
-        overflow = self.overflow_count
-
-        return {
-            "summary": {
-                "n_observations": int(self.n_observations),
-                "total_weight": float(round(total, 2)),
-                "max_size": int(self.max_size),
-                "mean": float(round(self.mean, 2)),
-                "std": float(round(self.std, 2)),
-                "median": float(round(self.median, 2)),
-                "mode": int(self.mode),
-                # right-censored lengths (>= max_size), excluded from mean / std / mode
-                "overflow": {
-                    "count": float(round(overflow, 2)),
-                    "fraction": float(round(overflow / total, 6)) if total > 0 else 0.0,
-                },
-            },
-            "histogram": {
-                "range": hist_range,
-                "values": hist_values,
-            },
-        }

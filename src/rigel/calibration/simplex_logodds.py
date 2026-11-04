@@ -19,7 +19,7 @@ The facts that shape the solve:
    ``½·log f_g + ½·log(1−f_g)`` for every slot class, with no endpoint singularity.
 3. At fixed λ the strand term is Gaussian in τ with a θ peak narrowing as ``n^{−½}``, so ψ places its θ nodes across
    each ``(slot, λ)``'s own peak and weights them by the trapezoid rule (``tilt_window`` in ``psi_kernel.h``). The
-   marginal is exact at every depth with the derived node count ``_TILT_NODES``.
+   marginal is exact at every depth with the derived node count ``TILT_NODES``.
 4. A both-strand slot's tilt hypotheses are {pure +, pure −, mixed} at equal reference weight (the tilt atom): ψ
    carries two columns at ``τ = ±1`` beside the continuum, whose weights carry ``−log π``. A held RNA level on one
    strand (a :class:`CubeRows` profile) witnesses that strand's RNA and rules out the other strand's atom.
@@ -47,12 +47,12 @@ from .region_chain import RegionDeconv
 # Public surface consumed by sweep / messages / region_geometry.
 __all__ = [
     "CubeRows",
-    "_logodds_grid",
-    "_solve_regions_logodds_all",
+    "logodds_grid",
+    "solve_regions_logodds",
 ]
 
 
-def _block_rows(cells_per_row: int, itemsize: int) -> int:
+def block_rows(cells_per_row: int, itemsize: int) -> int:
     return max(
         1, CONSTANTS.resources.solve_block_bytes // max(1, int(cells_per_row) * int(itemsize))
     )
@@ -63,7 +63,7 @@ def _block_rows(cells_per_row: int, itemsize: int) -> int:
 # would let L set the prior strength. With a fitted landscape the low end can bind: ψ reads the curve at
 # log rho = log f_c + log M − log E, and on a gDNA-poor library σ(−L) can sit above the density the prior points at.
 # `landscape.required_logodds_window` derives the window that demand needs.
-def _logodds_grid(n_grid: int, L: float):
+def logodds_grid(n_grid: int, L: float):
     """The fixed log-odds lattice: ``λ`` uniform on ``[−L, L]`` (``K = n_grid`` points, ascending) and
     the matching ``f_g = σ(λ)`` (also ascending). Returns ``(lam, fg)``, each length ``K``."""
     lam = np.linspace(-float(L), float(L), int(n_grid))
@@ -153,112 +153,39 @@ _T_NATS = -np.log(np.finfo(np.float64).eps)
 # The node count that resolves the peak inside its window: the interior window is ``2√(2T)·σ_θ`` wide and the
 # trapezoid rule's error on a Gaussian at spacing ``h`` is ``2·e^{−2π²(σ_θ/h)²}``, below ``e^{−T}`` once
 # ``h ≤ σ_θ·π√2/√T``, so ``K_t − 1 ≥ 2T/π``.
-_TILT_NODES = int(np.ceil(2.0 * _T_NATS / np.pi)) + 1
+TILT_NODES = int(np.ceil(2.0 * _T_NATS / np.pi)) + 1
 
 
-def _cube_args(cube_rows, u) -> dict:
-    """The delivered rows as ψ's kernel takes them — the table's arrays, or an empty table's on this grid."""
-    if cube_rows is None:
-        return CubeRows.blank(0, u).kernel_args()
-    if cube_rows.u.shape != u.shape or not np.array_equal(cube_rows.u, u):
-        raise ValueError("the delivered rows are not on the solve grid")
-    return cube_rows.kernel_args()
-
-
-def _reference_composition(allow_pos, allow_neg, fg_ref, fpos_ref, fneg_ref):
-    """The per-slot composition the strand variance is frozen at: the incoming belief where the sweep supplies one,
-    else ``f_g = ½`` with the other ½ split among the live strands. It sets the precision, not the location."""
+def reference_composition(allow_pos, allow_neg):
+    """The per-slot composition the strand variance is frozen at: ``f_g = ½`` with the other ½ split among the live
+    strands. It sets the precision, not the location."""
     ap, an = np.asarray(allow_pos, bool), np.asarray(allow_neg, bool)
-    if fg_ref is None or fpos_ref is None or fneg_ref is None:
-        nlive = ap.astype(np.float64) + an.astype(np.float64)
-        half = np.where(nlive > 0.0, 0.5 / np.maximum(nlive, 1.0), 0.0)
-        return np.full(ap.shape[0], 0.5), np.where(ap, half, 0.0), np.where(an, half, 0.0)
-    return (
-        np.ascontiguousarray(fg_ref, np.float64),
-        np.ascontiguousarray(fpos_ref, np.float64),
-        np.ascontiguousarray(fneg_ref, np.float64),
-    )
+    nlive = ap.astype(np.float64) + an.astype(np.float64)
+    half = np.where(nlive > 0.0, 0.5 / np.maximum(nlive, 1.0), 0.0)
+    return np.full(ap.shape[0], 0.5), np.where(ap, half, 0.0), np.where(an, half, 0.0)
 
 
-def _prior(rows, K: int):
-    """A per-slot ``(m, K)`` log-prior row array on the solve grid as the kernel reads it, or ``None``."""
-    if rows is None:
-        return None
-    rows = np.ascontiguousarray(rows, np.float64)
-    if rows.ndim != 2 or rows.shape[1] != K:
-        raise ValueError(
-            f"a ψ prior must be (m, K) on the solve grid; got {rows.shape} for K = {K}"
-        )
-    return rows
-
-
-def _arm(gdna_prior, gdna_support, m: int):
-    """The fitted gDNA arm as the kernel takes it, ``(log_rho, logP, mass, eff)``, or ``None`` for the reference alone.
-
-    ``(log_rho, logP)`` is the landscape's curve, a density in log-rate, and ``(mass, eff)`` the per-slot support it
-    is read on; ψ evaluates it at each cell's ``log ρ_c = log f_g + log M − log E``, ends held constant. Both arrive as
-    arrays, never as the landscape, which sits in a higher layer.
-    """
-    if gdna_prior is None:
-        if gdna_support is not None:
-            raise ValueError(
-                "a gDNA support without a curve: the arm is the curve read on the support"
-            )
-        return None
-    if gdna_support is None:
-        raise ValueError("the fitted gDNA arm needs its per-slot support (mass, eff) to be read on")
-    log_rho, logP = (np.ascontiguousarray(a, np.float64) for a in gdna_prior)
-    mass, eff = (np.ascontiguousarray(a, np.float64) for a in gdna_support)
-    if log_rho.ndim != 1 or log_rho.shape != logP.shape or log_rho.shape[0] < 1:
-        raise ValueError("the gDNA arm's curve must be two (G,) arrays")
-    if mass.shape != (m,) or eff.shape != (m,):
-        raise ValueError(
-            f"the gDNA arm's support must be (mass, eff) of shape ({m},); got {mass.shape} and {eff.shape}"
-        )
-    return log_rho, logP, mass, eff
-
-
-def _solve_regions_logodds_all(
-    u_pos,
-    u_neg,
-    allow_pos,
-    allow_neg,
-    *,
-    kappa,
-    n_grid,
-    L: float,
-    gdna_prior=None,
-    gdna_support=None,
-    row_logprior=None,
-    fg_ref=None,
-    fpos_ref=None,
-    fneg_ref=None,
-    cube_rows=None,
-    n_tilt: int | None = None,
-    n_threads: int = 1,
+def solve_regions_logodds(
+    u_pos, u_neg, allow_pos, allow_neg, *, kappa, n_grid, L: float, n_threads: int = 1
 ) -> RegionDeconv:
-    """Solve ψ for every slot of a block that admits a strand and carries a fragment, in one native call.
+    """Solve ψ on its reference alone for every slot that admits a strand and carries a fragment, in one native call.
 
     Each slot is solved on its own ``(λ, θ)`` cube (``native/psi_kernel.h``) and read out as ``f_g``, the posterior
     median of the θ-marginal λ posterior; ``f_pos``/``f_neg``, its image on the admissible strands; and
     ``Var(log f_g)``, a grid moment over the λ marginal. Slots with no count report 0. Because every slot is solved on
     its own, the result is the same for any block split and any thread count.
 
-    All arrays are length ``m``. ``gdna_prior`` is the landscape's curve ``(log_rho, logP)`` and ``gdna_support`` the
-    per-slot ``(mass, eff)`` it is read on (:func:`_arm`). ``row_logprior`` is the policy's delivered composition
-    rows, ``(m, K)`` on the λ grid; ``cube_rows`` is the RNA level lanes' delivery (:class:`CubeRows`). The strand
-    variance is frozen at ``fg_ref``/``fpos_ref``/``fneg_ref`` (:func:`_reference_composition`), so the count sets
-    precision, not composition. ``n_tilt`` defaults to ``_TILT_NODES``; ``n_threads`` is the kernel's thread budget
-    (0 is every core).
+    All arrays are length ``m``. There is no fitted gDNA arm and no delivered row, and the strand variance is frozen at
+    :func:`reference_composition`, so the count sets precision, not composition. ``n_threads`` is the kernel's thread
+    budget (0 is every core).
     """
     u_pos = np.ascontiguousarray(u_pos, np.float64)
     u_neg = np.ascontiguousarray(u_neg, np.float64)
     m = u_pos.shape[0]
     ap, an = np.ascontiguousarray(allow_pos, bool), np.ascontiguousarray(allow_neg, bool)
-    fg_ref, fpos_ref, fneg_ref = _reference_composition(ap, an, fg_ref, fpos_ref, fneg_ref)
-    signal = (u_pos + u_neg) > 0.0
-    slots = np.flatnonzero((ap | an) & signal).astype(np.int64)
-    lam, _fg = _logodds_grid(int(n_grid), L)
+    fg_ref, fpos_ref, fneg_ref = reference_composition(ap, an)
+    slots = np.flatnonzero((ap | an) & ((u_pos + u_neg) > 0.0)).astype(np.int64)
+    lam, _fg = logodds_grid(int(n_grid), L)
     out = {k: np.zeros(m) for k in ("fg", "fp", "fn", "vg")}
     if slots.size:
         psi_solve(
@@ -272,10 +199,10 @@ def _solve_regions_logodds_all(
             fneg_ref=fneg_ref,
             kappa=float(kappa),
             lam=lam,
-            gdna=_arm(gdna_prior, gdna_support, m),
-            row_logprior=_prior(row_logprior, lam.shape[0]),
-            **_cube_args(cube_rows, lam),
-            n_tilt=int(_TILT_NODES if n_tilt is None else n_tilt),
+            gdna=None,
+            row_logprior=None,
+            **CubeRows.blank(0, lam).kernel_args(),
+            n_tilt=TILT_NODES,
             out_fg=out["fg"],
             out_fpos=out["fp"],
             out_fneg=out["fn"],
