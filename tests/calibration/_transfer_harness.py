@@ -1,13 +1,14 @@
-"""The shared harness of the transfer policy's gate files (`test_transfer_*.py`): ONE real
-`solve_chain` call captured from a calibrate run on the toy — the backbone-parity pattern, so every
-gate re-runs the sweep with a different policy on byte-identical inputs — plus the containers the gates
-read the kernel's tables through and the drivers they share: the builders on one block's context, whole
-passes and single hops of the native pass, the solve. The kernel is the ONE implementation
-(`native/transfer_kernel.h`, run per block by `native/solve_kernel.cpp`); the bindings `transfer_prepare`,
-`transfer_pass` and `transfer_solve` run it on tables the call allocates, and the containers here —
-`RowTable`, `Faces`, `LevelLane`, `Received`, `Levels` — hold and index those arrays and compute nothing.
-Not a test module: `capture_sweep_inputs` is what each gate file's ``sweep_inputs`` fixture returns, and
-nothing here asserts."""
+"""The shared harness of the transfer policy's test modules (`test_transfer_*.py`).
+
+It holds one real `solve_chain` call captured from a calibrate run on the toy, so every test re-runs the sweep with a
+different policy on byte-identical inputs, plus the containers the tests read the kernel's tables through and the
+drivers they share: the builders on one block's context, whole passes and single hops of the native pass, and the solve.
+The kernel is the one implementation (`native/transfer_kernel.h`, run per block by `native/solve_kernel.cpp`); the
+bindings `transfer_prepare`, `transfer_pass` and `transfer_solve` run it on tables the call allocates, and the
+containers here (`RowTable`, `Faces`, `LevelLane`, `Received`, `Levels`) hold and index those arrays and compute
+nothing. Not a test module: `capture_sweep_inputs` is what each test module's ``sweep_inputs`` fixture returns, and
+nothing here asserts.
+"""
 
 from __future__ import annotations
 
@@ -25,10 +26,11 @@ from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_init import strand_discriminability
 from rigel.calibration.simplex_logodds import CubeRows
-from rigel.native import transfer_pass, transfer_prepare, transfer_rows, transfer_solve
+from rigel._solve_impl import transfer_pass, transfer_prepare, transfer_solve
+from rigel.native import transfer_rows
 
-#: the five KINDS of composition rule a directed face can carry (``NONE``: the face has no rule and the
-#: level lane serves it) — the kernel's `transfer_rows.h` constants
+#: the five kinds of composition rule a directed face can carry (``NONE``: the face has no rule and the level lane
+#: serves it), the kernel's `transfer_rows.h` constants
 NONE, FORWARD, TRANSPORT, SPLICE_OUT, EDGE, LEVEL = range(6)
 RULE_NAMES = ("none", "forward", "transport", "splice_out", "edge", "level")
 
@@ -38,8 +40,8 @@ _FIELD = {"gdna": "level_gdna", "pos": "level_rna_pos", "neg": "level_rna_neg"}
 
 
 def side_of(s: int, i: int) -> int:
-    """The side of ``i`` a hop from ``s`` arrives on: ``0`` from its LEFT neighbour (the forward pass),
-    ``1`` from its RIGHT (the backward pass)."""
+    """The side of ``i`` a hop from ``s`` arrives on: ``0`` from its left neighbour (the forward pass), ``1`` from its
+    right (the backward pass)."""
     return 0 if s < i else 1
 
 
@@ -56,9 +58,9 @@ class BlockContext(ChainView):
 
 
 class RowTable:
-    """OPTIONAL ROWS over the nodes as the kernel keeps them: an ``(n, K)`` matrix (or ``(n, 2, K)`` for a
-    row per directed face) and a presence mask; ``t[i]`` is the row or ``None``, ``t[i] = row`` writes it
-    and marks it present, ``t[i] = None`` clears it. The matrix is unfilled where the mask is False."""
+    """Optional rows over the nodes as the kernel keeps them: an ``(n, K)`` matrix (or ``(n, 2, K)`` for a row per
+    directed face) and a presence mask; ``t[i]`` is the row or ``None``, ``t[i] = row`` writes it and marks it present,
+    ``t[i] = None`` clears it. The matrix is unfilled where the mask is False."""
 
     __slots__ = ("rows", "mask")
 
@@ -94,8 +96,8 @@ class FaceRule(NamedTuple):
 
 
 class Faces:
-    """The composition rules as TYPED TABLES over ``(destination, side)`` — the kernel's ``faces`` dict:
-    ``kind``, the scalar parameters, ``row`` / ``row2`` as indices into the row store ``rows``."""
+    """The composition rules as typed tables over ``(destination, side)``, the kernel's ``faces`` dict: ``kind``, the
+    scalar parameters, and ``row`` / ``row2`` as indices into the row store ``rows``."""
 
     def __init__(self, lam, left, right, tables: dict | None = None):
         n = int(np.asarray(left).shape[0])
@@ -161,11 +163,11 @@ class Faces:
 
 
 class LevelLane:
-    """ONE population's LEVEL LANE as the kernel keeps it — its faces and two-sided faces per
-    ``(destination, side)``, every node's emptiness, own level, witness count and opportunity, the other
-    column where the strand channel is live, the junction flux levels per ``(exon, side)`` in a row store
-    with an index, and the flux witnesses. Built from the kernel's ``lanes`` dict (`from_kernel`) or by
-    hand from arrays, and handed back to the pass and the solve as that dict (`as_kernel`)."""
+    """One population's level lane as the kernel keeps it: its faces and two-sided faces per ``(destination, side)``,
+    every node's emptiness, own level, witness count and opportunity, the other column where the strand channel is live,
+    the junction flux levels per ``(exon, side)`` in a row store with an index, and the flux witnesses. Built from the
+    kernel's ``lanes`` dict (`from_kernel`) or by hand from arrays, and handed back to the pass and the solve as that
+    dict (`as_kernel`)."""
 
     def __init__(
         self,
@@ -266,9 +268,9 @@ class LevelLane:
 
 @dataclass(slots=True)
 class Levels:
-    """One population's LEVEL lane as RECEIVED: row ``i`` is the level node ``i`` holds on this lane from
-    one side after a pass, or nothing (``present[i]`` False); ``count`` and ``opportunity`` the witness of
-    the last full node the claim passed through; the RNA witness where ``has_witness``."""
+    """One population's level lane as received: row ``i`` is the level node ``i`` holds on this lane from one side after
+    a pass, or nothing (``present[i]`` False); ``count`` and ``opportunity`` are the witness of the last full node the
+    claim passed through; the RNA witness where ``has_witness``."""
 
     present: np.ndarray
     profile: np.ndarray
@@ -305,9 +307,9 @@ class Levels:
 
 @dataclass(slots=True)
 class Received:
-    """What every node RECEIVED from one side after one pass, as a table: the backbone's neighbour bit,
-    the composition where ``has_composition``, and the three level lanes. The two states where a node
-    heard nothing: SILENCE (a neighbour, nothing present) and NO NEIGHBOUR (an open side)."""
+    """What every node received from one side after one pass, as a table: the backbone's neighbour bit, the composition
+    where ``has_composition``, and the three level lanes. A node heard nothing in two states: silence (a neighbour,
+    nothing present) and no neighbour (an open side)."""
 
     has_neighbour: np.ndarray
     has_composition: np.ndarray
@@ -372,9 +374,9 @@ class Delivered(NamedTuple):
 
 
 class Prepared:
-    """One block's tables as the kernel built them — every node's own claim (`RowTable`), the rules per
-    directed face (`Faces`), the lanes by population — with the pass and the solve run on them through the
-    bindings. Built by `_prepared` from a context, or by hand (`hand_built`)."""
+    """One block's tables as the kernel built them (every node's own claim (`RowTable`), the rules per directed face
+    (`Faces`), the lanes by population), with the pass and the solve run on them through the bindings. Built by
+    `_prepared` from a context, or by hand (`hand_built`)."""
 
     def __init__(self, tables: dict, left, right, free_pos, free_neg):
         self.tables = tables
@@ -407,9 +409,9 @@ class Prepared:
         return dict(self.tables, lanes={name: ln.as_kernel() for name, ln in self.lanes.items()})
 
     def run_pass(self, received: Received, seq, nbr, terminal, *, backward: bool) -> None:
-        """PHASE 1 on the table in one native call: for every destination in ``seq`` (chain order) whose
-        neighbour ``nbr[i] >= 0`` and which is not a terminal, the recipient receives what its neighbour
-        sends. ``backward`` names the pass; the tables say the rest."""
+        """Phase 1 on the table in one native call: for every destination in ``seq`` (chain order) whose neighbour
+        ``nbr[i] >= 0`` and which is not a terminal, the recipient receives what its neighbour sends. ``backward`` names
+        the pass; the tables say the rest."""
         transfer_pass(
             self._tables(),
             received.as_kernel(),
@@ -419,7 +421,7 @@ class Prepared:
         )
 
     def solve(self, from_left: Received, from_right: Received) -> Delivered:
-        """PHASE 2, the policy's half: the two held tables into ψ's two channels."""
+        """Phase 2, the policy's half: the two held tables into ψ's two channels."""
         live, rows, cube = transfer_solve(
             self._tables(),
             from_left.as_kernel(),
@@ -434,9 +436,9 @@ class Prepared:
 
 
 def capture_sweep_inputs(tmp_path_factory):
-    """ONE real `solve_chain` call captured from a calibrate run on the toy — the backbone-parity
-    pattern: every gate re-runs the sweep with a different policy on byte-identical inputs. Each gate
-    file wraps this in its own module-scoped ``sweep_inputs`` fixture."""
+    """One real `solve_chain` call captured from a calibrate run on the toy, so every test re-runs the sweep with a
+    different policy on byte-identical inputs. Each test module wraps this in its own module-scoped ``sweep_inputs``
+    fixture."""
     from _prior_toy import build_toy
 
     toy = build_toy(tmp_path_factory)
@@ -502,9 +504,8 @@ def _run(si, policy):
 
 
 def _expected_pairs(si):
-    """The intron|exon pairs derived INDEPENDENTLY of the policy (its falsification power):
-    a BOUNDARY whose one flank is an exon REGION and whose other flank is an intron REGION
-    that admits RNA."""
+    """The intron|exon pairs derived independently of the policy: a boundary whose one flank is an exon region and whose
+    other flank is an intron region that admits RNA."""
     from rigel.calibration.signature import coarse_type_array
 
     chain, statics, _geometry, _belief, region_arrays = si["args"]
@@ -551,10 +552,9 @@ def _two_sided(lane, s, x) -> bool:
 
 
 def _prepared(pol, ctx, library=None) -> Prepared:
-    """The kernel's builders on ``ctx`` — the whole chain as one block, in every gate here — with the
-    library reduced over that same context unless one is given, exactly as the backbone pairs the two."""
+    """The kernel's builders on ``ctx`` (the whole chain as one block, in every test here), with the library reduced
+    over that same context unless one is given, as the backbone pairs the two."""
     lib = pol.library(ctx) if library is None else library
-    kappa = pol.kappa
     tables = transfer_prepare(
         lam=np.linspace(-float(ctx.logodds_window), float(ctx.logodds_window), int(ctx.n_grid)),
         is_boundary=np.ascontiguousarray(ctx.is_boundary, bool),
@@ -577,8 +577,7 @@ def _prepared(pol, ctx, library=None) -> Prepared:
         eff_gdna=np.ascontiguousarray(ctx.eff_gdna, np.float64),
         eff_rna=np.ascontiguousarray(ctx.eff_rna, np.float64),
         has_own_composition=np.ascontiguousarray(ctx.has_own_composition, bool),
-        has_strand=kappa is not None,
-        kappa=0.0 if kappa is None else kappa,
+        kappa=pol.kappa,
         rho_gdna=0.0 if lib is None else float(lib.rho_gdna),
         rho_rna=0.0 if lib is None else float(lib.rho_rna),
         split_live=False if lib is None else bool(lib.split_live),
@@ -615,17 +614,16 @@ def _intron_mask(ctx):
 
 
 def _dead_boundaries(ctx):
-    """The context with every BOUNDARY's strand channel declared dead and every region's intact."""
+    """The context with every boundary's strand channel declared dead and every region's intact."""
     live = np.asarray(ctx.has_own_composition, bool).copy()
     live[np.asarray(ctx.is_boundary, bool)] = False
     return dataclasses.replace(ctx, has_own_composition=live)
 
 
 def _hop(prepared: Prepared, s, i, received=None) -> Received:
-    """ONE hop of the native pass — the recipient ``i`` receives from ``s`` (its neighbour on that side):
-    the face's composition rule on what ``s`` sends, and every lane face into ``i`` — on ``received``, a
-    fresh table when none is given, so what ``s`` holds is whatever the caller wrote into row ``s``.
-    Returns the table."""
+    """One hop of the native pass: the recipient ``i`` receives from ``s`` (its neighbour on that side) the face's
+    composition rule on what ``s`` sends, and every lane face into ``i``, on ``received`` (a fresh table when none is
+    given), so what ``s`` holds is whatever the caller wrote into row ``s``. Returns the table."""
     n, K = len(prepared.own), prepared.own.rows.shape[1]
     if received is None:
         received = Received.empty(n, K)
@@ -642,10 +640,10 @@ _KEEP = object()
 
 
 def _rule(prepared: Prepared, s, i, *, own=_KEEP, held=None):
-    """The composition rule at the face into ``i`` from ``s``, applied to what ``s`` sends: its own claim
-    — or ``own``, a substituted row, or ``None`` for no claim — composed with ``held``, what it holds from
-    its far side (a row, or nothing). One hop of the native pass on a fresh table; the row ``i``
-    receives, max-normalised, or ``None`` for no claim."""
+    """The composition rule at the face into ``i`` from ``s``, applied to what ``s`` sends: its own claim (or ``own``, a
+    substituted row, or ``None`` for no claim) composed with ``held``, what it holds from its far side (a row, or
+    nothing). One hop of the native pass on a fresh table; returns the row ``i`` receives, max-normalised, or ``None``
+    for no claim."""
     table = prepared.own
     kept_mask, kept_row = bool(table.mask[s]), table.rows[s].copy()
     if own is not _KEEP:
@@ -686,8 +684,8 @@ def fuse(parts):
 
 
 def intersect(bounds):
-    """Two or more bounds on ONE density combine by INTERSECTION: the pointwise minimum of their
-    log-profiles, max-normalised — bounds intersect, they do not multiply (the oracle)."""
+    """Two or more bounds on one density combine by intersection: the pointwise minimum of their log-profiles,
+    max-normalised (the oracle)."""
     out = np.asarray(bounds[0], np.float64)
     for b in bounds[1:]:
         out = np.minimum(out, np.asarray(b, np.float64))
@@ -713,9 +711,9 @@ _ROWS_OF = {"composition": "has_composition", "profile": "present"}
 
 
 def _leaves(a, b, prefix=""):
-    """Every array of two `Received` tables side by side, as ``(name, x, y)``, a row matrix restricted
-    to the rows ``a``'s bits say are present — the matrices are allocated unfilled, so an absent row is
-    not compared; the bits themselves are leaves and are compared whole."""
+    """Every array of two `Received` tables side by side, as ``(name, x, y)``, a row matrix restricted to the rows
+    ``a``'s bits say are present (the matrices are allocated unfilled, so an absent row is not compared); the bits
+    themselves are compared whole."""
     for f in dataclasses.fields(a):
         x, y = getattr(a, f.name), getattr(b, f.name)
         if dataclasses.is_dataclass(x):
@@ -729,9 +727,8 @@ def _leaves(a, b, prefix=""):
 
 
 def _drive(prepared: Prepared, ctx):
-    """The backbone's own contract, reproduced: the two passes and the solve, which receives the two
-    tables. Returns ``(rows, from_left, from_right)`` — the delivered rows (zeros when the policy is
-    silent) and the tables."""
+    """The backbone's own contract, reproduced: the two passes and the solve, which receives the two tables. Returns
+    ``(rows, from_left, from_right)``: the delivered rows (zeros when the policy is silent) and the tables."""
     from_left, from_right = _native_passes(prepared, ctx)
     msg = prepared.solve(from_left, from_right)
     rows = (
@@ -782,7 +779,7 @@ def _rna(prepared) -> dict:
 
 
 def _strand_intron(ctx, name):
-    """The PER-STRAND intron test the lane uses: a region that admits ``s`` and carries no exon of ``s``."""
+    """The per-strand intron test the lane uses: a region that admits ``s`` and carries no exon of ``s``."""
     is_bnd = np.asarray(ctx.is_boundary, bool)
     free = np.asarray(ctx.free_pos if name == "pos" else ctx.free_neg, bool)
     exon_s = np.asarray(ctx.exon_pos if name == "pos" else ctx.exon_neg, bool)
@@ -796,14 +793,12 @@ def _held_rna(held, x, field):
 
 
 def _with_populated_inside(ctx):
-    """The toy's inside pieces are EMPTY (shorter than a fragment: no contained fragment, a contained
-    opportunity below one base), so the level rule serves nothing there and a gate on the bare toy proves
-    nothing. A context is data: populate the two inside slots with consistent counts (both strand
-    channels live, so the step's spread is fitted from two pairs) and a contained opportunity that makes
-    each inside twice as dense as what crosses its boundary, for the policy and the independent recompute
-    alike. Denser is what the level rule's no-claim bound needs to bind: an inside no denser than its
-    boundary's crossing is bounded above nowhere on the grid, and the rule then rightly says nothing — a
-    fixed opportunity left that to the simulated draw, and one draw put the boundary above the inside."""
+    """The toy's inside pieces are empty (shorter than a fragment: no contained fragment, a contained opportunity below
+    one base), so the level rule serves nothing there. This populates the two inside slots with consistent counts (both
+    strand channels live, so the step's spread is fitted from two pairs) and a contained opportunity that makes each
+    inside twice as dense as what crosses its boundary, for the policy and the independent recompute alike. The no-claim
+    bound binds only when the inside is denser than its boundary's crossing; otherwise the rule rightly says nothing, so
+    the density is set rather than left to the simulated draw."""
     R = transfer_rows
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -815,7 +810,7 @@ def _with_populated_inside(ctx):
     live = np.asarray(ctx.has_own_composition, bool).copy()
     fills = iter(
         [(20.0, 180.0), (80.0, 120.0), (25.0, 175.0), (70.0, 130.0)]
-    )  # two pairs that DISAGREE
+    )  # two pairs that disagree
     for b in np.flatnonzero(is_bnd):
         lo, hi = left[b], right[b]
         if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
@@ -837,9 +832,9 @@ def _with_populated_inside(ctx):
 
 
 def _with_alt_splice_sites(ctx):
-    """The toy carries no alternative splice site: turn its two exon|exon terminus boundaries into a
-    DONOR (intron to the right) and an ACCEPTOR (intron to the left) with a route flux each, and
-    populate the pieces beyond them — a context is data; the policy and the recompute read the same."""
+    """The toy has no alternative splice site: turn its two exon|exon terminus boundaries into a donor (intron to the
+    right) and an acceptor (intron to the left) with a route flux each, and populate the pieces beyond them; the policy
+    and the recompute read the same context."""
     from rigel.calibration.splice_graph import FLAG_ACCEPTOR_NEG, FLAG_DONOR_POS, FLAG_TERMINUS
 
     base = _with_populated_inside(ctx)

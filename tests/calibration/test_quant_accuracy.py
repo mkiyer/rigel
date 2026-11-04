@@ -1,14 +1,10 @@
-"""Falsification gates for ``scripts/design/quant_accuracy.py`` — the end-to-end accuracy table and
-the prior-injection ceiling above it.
+"""Tests for ``scripts/design/quant_accuracy.py``: the end-to-end accuracy table and the prior-injection ceiling above
+it.
 
-The instrument answers two questions with one scorer: how accurate is the tool, and how much of that
-error would a PERFECT calibration prior remove. Both answers are differences between an estimate and a
-truth column, so every way of getting them wrong produces a *plausible* number — the wrong truth
-column, an injection that never fired, a false-positive channel that is invisible because the rows are
-filtered out before scoring. These gates are those ways.
-
-Each gate carries its own perturbation: a gate that has never been watched to fire has not been
-written yet.
+The instrument answers two questions with one scorer: how accurate the tool is, and how much of that error a perfect
+calibration prior would remove. Both answers are differences between an estimate and a truth column, so every way of
+getting them wrong produces a plausible number: the wrong truth column, an injection that never fired, a false-positive
+channel filtered out before scoring. Each test covers one of those.
 """
 
 from __future__ import annotations
@@ -23,7 +19,7 @@ import pandas as pd
 import pytest
 
 from rigel.config import EMConfig, PipelineConfig
-from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
+from _prior_toy import build_toy
 
 _MODULES: dict = {}
 
@@ -53,40 +49,7 @@ QA = _load_sibling("quant_accuracy.py")
 @pytest.fixture(scope="module")
 def toy(tmp_path_factory):
     """A contaminated toy: three genes, staggered isoforms, gDNA at 1x the RNA fragment count."""
-    wd = tmp_path_factory.mktemp("qa_sim")
-    sc = Scenario("qa", genome_length=9000, seed=17, work_dir=wd)
-    sc.add_gene(
-        "g1",
-        "+",
-        [
-            {"t_id": "t1", "exons": [(600, 1100), (1800, 2300)], "abundance": 60},
-            {"t_id": "t1b", "exons": [(1000, 1100), (1800, 1900)], "abundance": 30},
-        ],
-    )
-    sc.add_gene("g2", "-", [{"t_id": "t2", "exons": [(4000, 4500), (5200, 5700)], "abundance": 40}])
-    sc.add_gene(
-        "g3",
-        "+",
-        [
-            {"t_id": "t3", "exons": [(6600, 7100), (7800, 8300)], "abundance": 25},
-            {"t_id": "t3b", "exons": [(6600, 7100), (7400, 7440), (7800, 8300)], "abundance": 12},
-        ],
-    )
-    return sc.build_oracle(
-        n_rna_fragments=4000,
-        gdna_fraction=1.0,
-        nrna_abundance=15.0,
-        sim_config=ReadSimConfig(
-            frag_mean=180,
-            frag_std=30,
-            frag_min=80,
-            frag_max=400,
-            read_length=90,
-            strand_specificity=0.99,
-            seed=17,
-        ),
-        gdna_config=GDNAConfig(abundance=0.0, frag_mean=240, frag_std=45),
-    )
+    return build_toy(tmp_path_factory)
 
 
 @pytest.fixture(scope="module")
@@ -102,11 +65,10 @@ def toy_oracle(toy, tmp_path_factory):
     )
 
 
-def _run(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
-    """One full ``run_pipeline`` under one arm; returns ``(PipelineResult, fired)``.
-
-    The seed is the instrument's, which is the shipped one. With the default ``assignment_mode="sample"``
-    the hard assignment is a draw, and without one seed the byte-identity gate below could never pass.
+def _run(toy, arm, oracle, seed=EMConfig().seed):
+    """One full ``run_pipeline`` under one arm; returns ``(PipelineResult, fired)``. The seed is the instrument's, the
+    shipped one: under the default ``assignment_mode="sample"`` the hard assignment is a draw, so byte-identity needs
+    one seed.
     """
     from rigel.pipeline import run_pipeline
 
@@ -120,25 +82,20 @@ def _run(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
     return result, fired
 
 
-def _quant(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
+def _quant(toy, arm, oracle, seed=EMConfig().seed):
     """:func:`_run`'s transcript table; returns ``(counts_df, fired)``."""
     result, fired = _run(toy, arm, oracle, seed)
     return result.estimator.get_counts_df(toy.index), fired
 
 
-# ── GATE 1: noop is byte-identical END TO END, and the wrapper really ran ────────────────────────
+# ── Gate 1: noop is byte-identical end to end, and the wrapper really ran ────────────────────────
 
 
 def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipeline(toy, toy_oracle):
-    """TRAPS: byte-identity-gate, and this is the harness's own falsification. The injection reaches
-    the EM, whose per-locus draw is order-sensitive; if the wrapper perturbed anything at all — even
-    the order a float was summed in — every ``oracle`` number would be that perturbation plus the
-    effect.
-
-    ``noop`` is not an early return: it builds O in full and discards it, so this gate covers the
-    whole wrapper path and not an ``if`` (TRAPS: could-the-arm-have-fired). The perturbation runs the
-    real ``oracle`` arm and asserts the EM's gDNA count moves and the result stops matching, proving
-    the comparison could have failed.
+    """The injection reaches the EM, whose per-locus draw is order-sensitive, so a wrapper that perturbed anything (even
+    a summation order) would add that perturbation to every ``oracle`` number. ``noop`` is not an early return: it
+    builds O in full and discards it, so this covers the whole wrapper path. The real ``oracle`` arm must then move the
+    EM's gDNA count and break the match, showing the comparison can fail.
     """
     base_result, base_fired = _run(toy, "base", None)
     noop_result, noop_fired = _run(toy, "noop", toy_oracle)
@@ -146,17 +103,11 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
     base = base_result.estimator.get_counts_df(toy.index)
     noop = noop_result.estimator.get_counts_df(toy.index)
 
-    # Two standards, and they are the numeric convention. Every count column is integer-derived and
-    # must match exactly, because integer addition is associative. `posterior_mean` is float-derived
-    # and wanders by a few ulp (~1e-15) between identical runs, because the conserved-mass banks are
-    # float64 and the per-worker merge order is a data-dependent race.
-    #
-    # The tolerance is derived and gated, not chosen: it sits ~6 orders above that spread (headroom
-    # for a library far deeper than this toy, since re-association scales with the number of
-    # additions) and ~6 orders below the injection it must catch (taking the oracle's gDNA count
-    # moves `posterior_mean` by ~1e-3 relative here) — and the perturbation arm below proves it is
-    # still tight enough, because the oracle arm must break the comparison.
-    # The tool is not bit-reproducible, so tests validate within a tolerance rather than on bits.
+    # Two standards. Every count column is integer-derived and must match exactly, since integer addition is
+    # associative. `posterior_mean` is float-derived and varies by a few ulp between identical runs, because the
+    # conserved-mass banks are float64 and the per-worker merge order varies. The tolerance sits far above that spread
+    # (with headroom for deeper libraries, since re-association error grows with the number of additions) and far below
+    # the injection it must catch, and the oracle arm below shows it is tight enough.
     exact = [c for c in base.columns if c != "posterior_mean"]
 
     def compare(other):
@@ -173,10 +124,9 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
     )
 
     perturbed_result, _ = _run(toy, "oracle", toy_oracle)
-    # The witness is the EM's gDNA count, not the transcript `count` column. On this toy the mass the
-    # oracle's gDNA count moves lands between gDNA and nascent RNA (the loci table's `count_gdna` moves
-    # by 7 and 9 fragments on two of the three loci); the annotated transcripts move by under one fragment
-    # (fractional: t1 +0.95), which one seeded draw over five transcripts need not flip.
+    # The witness is the EM's gDNA count, not the transcript `count` column: on this toy the mass the oracle's gDNA
+    # count moves lands between gDNA and nascent RNA, while the annotated transcripts move by under one fragment, which
+    # one seeded draw need not flip.
     assert not perturbed_result.estimator.get_loci_df(toy.index)["count_gdna"].equals(base_gdna), (
         "taking the oracle's gDNA count changed no locus's gDNA count on a contaminated toy — the "
         "injection does not reach the EM and every ceiling this script reports would be zero"
@@ -186,15 +136,9 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
 
 
 def test_base_IS_the_shipped_config_and_a_pinned_arm_reproduces_itself(toy):
-    """A property every A/B above depends on. ``base`` must be the configuration that ships, so the
-    instrument's seed is the shipped one, and two runs of one arm must return one answer, or no arm
-    comparison here is attributable.
-
-    Re-recorded 2026-09-25: this used to assert that the SHIPPED config did not reproduce itself —
-    ``EMConfig.seed`` defaulted to ``None`` — and it fired, as it said it would, the day the default
-    became fixed (``tests/test_scan_order_independence.py`` now gates the shipped defaults).
+    """``base`` must be the shipped configuration, so the instrument's seed is the shipped one, and two runs of one arm
+    must return one answer, or no arm comparison is attributable.
     """
-    assert QA.DEFAULT_EM_SEED == EMConfig().seed, "`base` would not be the configuration that ships"
     a, _ = _quant(toy, "base", None)
     b, _ = _quant(toy, "base", None)
     assert np.array_equal(a["count"].to_numpy(), b["count"].to_numpy()), (
@@ -205,12 +149,10 @@ def test_base_IS_the_shipped_config_and_a_pinned_arm_reproduces_itself(toy):
 def test_an_injection_that_never_fires_RAISES_rather_than_reporting_no_effect(
     tmp_path, monkeypatch
 ):
-    """TRAPS: an-ablation-that-never-ran. "The perfect prior changed nothing" is a publishable
-    conclusion, so the one thing that must not be able to produce it is a wrapper that was never
-    called — which happens for real when ``quant_from_buffer`` returns early on an empty unit set.
-
-    ``run_pipeline`` is stubbed to a no-op, which is exactly the shape of that early return: the
-    pipeline completes, the wrapper is installed, and ``assemble_priors`` is never reached.
+    """ "The perfect prior changed nothing" is a publishable conclusion, so a wrapper that was never called must not be
+    able to produce it; that happens when ``quant_from_buffer`` returns early on an empty unit set. ``run_pipeline`` is
+    stubbed to a no-op, the shape of that early return: the pipeline completes, the wrapper is installed, and
+    ``assemble_priors`` is never reached.
     """
     cond = tmp_path / "c1"
     cond.mkdir()
@@ -224,24 +166,18 @@ def test_an_injection_that_never_fires_RAISES_rather_than_reporting_no_effect(
         QA.run_condition("oracle", tmp_path, None, "c1", PipelineConfig(), tmp_path)
 
 
-# ── GATE 3: the truth column is the REALISED fragment count, not the molar abundance ─────────────
+# ── Gate 3: the truth column is the realised fragment count, not the molar abundance ─────────────
 
 
 def test_the_scorer_reads_the_realised_fragment_column_and_refuses_the_molar_table(tmp_path):
-    """The panel ships two truth tables and they are different quantities. A condition's
-    ``truth_abundances.tsv`` gives the realised OBSERVED fragment count (``observed_mrna_fragments``)
-    beside the pre-capture MOLAR abundance (``pre_capture_mrna_abundance``); the suite-level
-    ``truth_abundances_nrna_<label>.tsv`` gives the molar abundance alone, as ``mrna_abundance``.
-    Scoring a fragment estimate against a molar truth charges the tool for hybrid capture, which it
-    never claims to invert.
+    """The panel ships two truth tables holding different quantities. A condition's ``truth_abundances.tsv`` gives the
+    realised observed fragment count (``observed_mrna_fragments``) beside the pre-capture molar abundance
+    (``pre_capture_mrna_abundance``); the suite-level ``truth_abundances_nrna_<label>.tsv`` gives the molar abundance
+    alone, as ``mrna_abundance``. Scoring a fragment estimate against a molar truth would charge the tool for hybrid
+    capture, which it never claims to invert.
 
-    Both tables are written here by the simulator's own writers and read as the instrument reads them.
-    The scorer must score the realised count exactly, must refuse the molar table rather than score it,
-    and must see a molar truth in the realised column (the same shape, a different unit) as error, so
-    a future edit that reaches for the wrong file or the wrong column cannot pass quietly.
-
-    Perturbation: the scorer reading ``pre_capture_mrna_abundance`` misses the exact score, and reading
-    ``mrna_abundance`` cannot read the condition's table at all.
+    Both tables are written by the simulator's own writers and read as the instrument reads them. The scorer must score
+    the realised count exactly, refuse the molar table, and see a molar truth placed in the realised column as error.
     """
     from rigel.sim.truth import write_molar_truth, write_post_capture_truth
     from rigel.transcript import Transcript
@@ -300,15 +236,14 @@ def test_the_scorer_reads_the_realised_fragment_column_and_refuses_the_molar_tab
     )
 
 
-# ── GATE 4: the two false-positive channels are separated, and neither hides ─────────────────────
+# ── Gate 4: the two false-positive channels are separated, and neither hides ─────────────────────
 
 
 def test_false_positive_and_false_negative_mass_are_separate_and_reconcile():
-    """``fp_mass`` (estimate on a transcript the simulator gave zero fragments) and ``fn_mass``
-    (real RNA assigned nowhere) are different failures with different fixes, and a single ``Σ|Δ|``
-    cannot separate them. The perturbation flips one transcript from silent to expressed and asserts
-    its mass moves out of ``fp_mass`` — a scorer that keyed on the estimate rather than on the truth
-    would keep it there.
+    """``fp_mass`` (estimate on a transcript the simulator gave zero fragments) and ``fn_mass`` (real RNA assigned
+    nowhere) are different failures with different fixes, which a single ``Σ|Δ|`` cannot separate. Flipping one
+    transcript from silent to expressed must move its mass out of ``fp_mass``; a scorer keyed on the estimate rather
+    than the truth would keep it there.
     """
     truth = pd.DataFrame(
         {"transcript_id": ["a", "b", "c"], "observed_mrna_fragments": [100.0, 0.0, 50.0]}
@@ -337,10 +272,9 @@ def test_false_positive_and_false_negative_mass_are_separate_and_reconcile():
 
 
 def test_the_GENE_row_collapses_isoform_ambiguity_and_still_sees_real_gene_error():
-    """The gene row exists to answer "is the surviving transcript error isoform ambiguity, or
-    something else?" — and it can only answer that if swapping mass BETWEEN a gene's own isoforms is
-    invisible to it while moving mass OUT of the gene is not. Both halves are asserted here, because a
-    gene scorer that saw neither would also report zero on the first case.
+    """The gene row answers "is the remaining transcript error isoform ambiguity, or something else?", which it can only
+    do if moving mass between a gene's own isoforms is invisible to it while moving mass out of the gene is not. Both
+    halves are asserted, since a scorer that saw neither would also report zero on the first.
     """
     truth = pd.DataFrame(
         {
@@ -369,15 +303,10 @@ def test_the_GENE_row_collapses_isoform_ambiguity_and_still_sees_real_gene_error
 
 
 def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_not():
-    """``n_intergenic`` counts fragments that reached no locus; they never enter the EM, so
-    ``gdna_em_count`` excludes them. Off capture, gDNA is genome-uniform and more than half of it is
-    intergenic, so a library gDNA fraction that leaves them out of the numerator while RNA stays in
-    the denominator reads far low against truth and fabricates a systematic off-capture EM
-    under-call that does not exist.
-
-    The fixture reproduces that shape and asserts both views: the deliverable includes the
-    intergenic fragments, the EM-only diagnostic does not, and they must not be equal — otherwise
-    one of the two is not being computed.
+    """``n_intergenic`` counts fragments that reached no locus; they never enter the EM, so ``gdna_em_count`` excludes
+    them. Off capture gDNA is genome-uniform and more than half of it is intergenic, so a library gDNA fraction that
+    drops them from the numerator while RNA stays in the denominator reads far low against truth. The deliverable
+    includes the intergenic fragments, the EM-only diagnostic does not, and the two must differ.
     """
     mrna, gdna_em, intergenic = 5_000_000.0, 2_330_992.0, 2_601_271.0
     quant = pd.DataFrame({"transcript_id": ["a"], "count": [mrna]})
@@ -385,9 +314,7 @@ def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_n
     summary = {"origin_counts": {"gdna": 5_000_000, "mrna": 5_000_000, "nrna": 0}}
     lib = QA.score_library(result, quant, summary)
 
-    # the expectations are DERIVED from the fixture's own inputs, never pasted from a run: a number
-    # copied off a real condition describes that condition's mRNA total and not this fixture's, and
-    # then fails for a reason that has nothing to do with the behaviour under test.
+    # The expectations are derived from the fixture's own inputs, never pasted from a run.
     want_deliverable = (gdna_em + intergenic) / (mrna + gdna_em + intergenic)
     want_em_only = gdna_em / (mrna + gdna_em)
     assert lib["gdna_frac_true"] == pytest.approx(0.5)
@@ -395,14 +322,14 @@ def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_n
         "the deliverable fraction is not counting intergenic fragments as gDNA"
     )
     assert lib["gdna_em_frac_est"] == pytest.approx(want_em_only)
-    # and the defect's own signature: the EM-only view reads far LOW against a truth of 0.5
+    # the EM-only view reads far low against a truth of 0.5
     assert want_em_only < 0.33 and want_deliverable > 0.49
     assert lib["gdna_frac_est"] != pytest.approx(lib["gdna_em_frac_est"]), (
         "the two views are equal, so one of them is not being computed — the whole point is that "
         "they differ by exactly the population the EM never sees"
     )
 
-    # the perturbation: with NO intergenic fragments the two views must coincide exactly
+    # with no intergenic fragments the two views must coincide exactly
     same = QA.score_library(
         _FakeResult(synthetic_count=0.0, gdna_em_count=2_330_992.0, n_intergenic=0.0),
         quant,
@@ -427,7 +354,7 @@ class _FakeStats:
 
 
 class _FakeResult:
-    """Enough of a ``PipelineResult`` for ``score_library`` — the four numbers it reads."""
+    """Enough of a ``PipelineResult`` for ``score_library``: the four numbers it reads."""
 
     def __init__(self, synthetic_count, gdna_em_count, n_intergenic):
         self.estimator = _FakeEstimator(synthetic_count, gdna_em_count)
@@ -449,9 +376,9 @@ def test_every_intergenic_fragment_is_gdna_in_the_library_split():
 
 
 def test_the_count_metrics_do_not_move_when_the_length_model_does():
-    """TRAPS: price-the-halves-separately. The count rows must be free of the fragment-length model,
-    or this instrument would silently price the length models too and neither number would be
-    attributable. The perturbation changes one transcript's effective length by 100x."""
+    """The count rows must be free of the fragment-length model, or the instrument would price the length models too and
+    neither number would be attributable. Changing one transcript's effective length by 100x must not move them.
+    """
     truth = pd.DataFrame({"transcript_id": ["a", "b"], "observed_mrna_fragments": [100.0, 50.0]})
     quant = pd.DataFrame(
         {
@@ -472,13 +399,12 @@ def test_the_count_metrics_do_not_move_when_the_length_model_does():
     )
 
 
-# ── GATE 5: a missing condition is a refusal, never a quiet average ──────────────────────────────
+# ── Gate 5: a missing condition is a refusal, never a quiet average ──────────────────────────────
 
 
 def test_the_report_REFUSES_arms_with_different_row_sets(tmp_path):
-    """TRAPS: byte-identity-gate — an arm with zero rows scores "all identical" when the comparison
-    loops over one arm's keys. Here the equivalent is a shard that died: the surviving rows would
-    aggregate into a stratum total that reads like a complete panel."""
+    """A shard that died would leave surviving rows that aggregate into a stratum total reading like a complete panel,
+    so arms with different row sets are refused."""
     import json
 
     full = tmp_path / "full.jsonl"
@@ -496,8 +422,7 @@ def test_the_report_REFUSES_arms_with_different_row_sets(tmp_path):
             "mard": 0.0,
             "gdna_frac_true": 0.5,
             "gdna_frac_est": 0.5,
-            # the pool-level fields table ⑥ reads. They are part of the `library` row's real schema,
-            # so a fixture without them was testing the report against a row shape that never ships.
+            # the pool-level fields table ⑥ reads, part of the `library` row's real schema
             "gdna_est": 1.0,
             "gdna_true": 1.0,
             "nrna_est": 0.0,
@@ -516,17 +441,14 @@ def test_the_report_REFUSES_arms_with_different_row_sets(tmp_path):
         QA.report([full, short])
 
 
-# ── GATE 6: a missing oracle cache is a refusal, never an invented truth ─────────────────────────
+# ── Gate 6: a missing oracle cache is a refusal, never an invented truth ─────────────────────────
 
 
 def test_a_missing_or_stale_oracle_cache_ABORTS(toy, tmp_path):
-    """The oracle arms exist to inject truth. Falling back to anything else — a rescan under a
-    different scan config, an empty payload — would inject something else under the name ``oracle``.
-    ``read_scan_cache`` already refuses a payload whose ``reach_digest`` does not describe this index;
-    this asserts the refusal is propagated rather than swallowed. Stale: sum-to-full is checked against
+    """The oracle arms exist to inject truth, so falling back to anything else (a rescan under a different scan config,
+    an empty payload) would inject something else under the name ``oracle``. ``read_scan_cache`` refuses a payload whose
+    ``reach_digest`` does not describe this index; this checks the refusal propagates. Sum-to-full is checked against
     the condition's live scan cache, so partitions of another scan are refused.
-
-    PERTURBATION: read the full payload from anywhere but ``<suite>/scan_cache/<tag>``.
     """
     import _oracle_arms
 
@@ -561,11 +483,9 @@ def test_a_missing_or_stale_oracle_cache_ABORTS(toy, tmp_path):
 
 
 def test_an_oracle_part_records_the_BAM_it_was_SPLIT_from(toy, tmp_path):
-    """An oracle part is scanned from a split file in a scratch directory named for its condition, which
-    the next build of a same-named condition, in any panel, overwrites. The part is a function of the BAM
-    it was split from, so that is the BAM its cache records, and a reused split file cannot refuse it.
-
-    PERTURBATION: record the split file (``bam=paths[origin]``) in ``load_or_build_oracle``.
+    """An oracle part is scanned from a split file in a scratch directory named for its condition, which the next build
+    of a same-named condition, in any panel, overwrites. The part is a function of the BAM it was split from, so its
+    cache records that BAM, and a reused split file is refused.
     """
     import _oracle_arms
 
@@ -588,10 +508,10 @@ def test_an_oracle_part_records_the_BAM_it_was_SPLIT_from(toy, tmp_path):
         read_scan_cache(part, toy.index, scan)
 
 
-# ── GATE 7: the ruler arm hands the EM the lengths it names, and its noop is inert ──────────────────
+# ── Gate 7: the ruler arm hands the EM the lengths it names, and its noop is inert ──────────────────
 
 
-def _quant_ruler(toy, arm, factor, seed=QA.DEFAULT_EM_SEED):
+def _quant_ruler(toy, arm, factor, seed=EMConfig().seed):
     """One full ``run_pipeline`` with the EM's effective lengths under ``install_ruler_arm``."""
     from rigel.pipeline import run_pipeline
 
@@ -606,12 +526,11 @@ def _quant_ruler(toy, arm, factor, seed=QA.DEFAULT_EM_SEED):
 
 
 def test_the_ruler_arm_hands_the_EM_the_lengths_it_names_and_its_noop_is_inert(toy):
-    """The arm's claim is that the EM divided by ``fl × factor``, so the gate reads the EM's own published
-    length (``em_effective_length``) rather than the wrapper's return value — a length dropped between the
-    wrapper and the solver would leave the wrapper healthy (TRAPS: could-the-arm-have-fired). The factor
-    differs between isoforms of one gene, the shape that moves a split, so the arm must move the counts;
-    the noop builds the same factor and hands back the shipped lengths, so it must reproduce ``base`` by
-    the noop gate's own two standards. On this capture-OFF toy the shipped lengths are the plain ones."""
+    """The arm claims the EM divided by ``fl × factor``, so the test reads the EM's own published length
+    (``em_effective_length``) rather than the wrapper's return value, which would stay healthy if the length were
+    dropped before the solver. The factor differs between isoforms of one gene, so the arm must move the counts; the
+    noop builds the same factor and hands back the shipped lengths, so it must reproduce ``base`` by the noop test's two
+    standards. On this capture-OFF toy the shipped lengths are the plain ones."""
     base, _ = _quant(toy, "base", None)
     ids = toy.index.t_df["t_id"].to_numpy()
     factor = np.where(np.isin(ids, ["t1b", "t3b"]), 0.25, 1.0)
@@ -637,10 +556,9 @@ def test_the_ruler_arm_hands_the_EM_the_lengths_it_names_and_its_noop_is_inert(t
 
 
 def test_the_ruler_guard_refuses_an_arm_that_could_not_have_measured():
-    """The arm must move the lengths wherever the truth differs from the shipped ruler, its noop must not
-    move them at all, and a shrinkage that never ran is no measurement. Where the truth IS the shipped
-    ruler — capture-OFF, the plain length on both sides — the arm is the identity and says so rather than
-    refusing."""
+    """The arm must move the lengths wherever the truth differs from the shipped ruler, its noop must not move them, and
+    a shrinkage that never ran is no measurement. Where the truth is the shipped ruler (capture-OFF: the plain length on
+    both sides) the arm is the identity and says so rather than refusing."""
     fired = dict(n=1, ruler=1, max_abs_delta=3.0, truth_delta=3.0)
     QA.check_ruler_arm("c", "oracle_ruler", fired)
     QA.check_ruler_arm("c", "oracle_ruler", dict(fired, max_abs_delta=0.0, truth_delta=0.0))
@@ -653,11 +571,10 @@ def test_the_ruler_guard_refuses_an_arm_that_could_not_have_measured():
 
 
 def test_the_capture_truth_is_anchored_on_the_fully_probed_class():
-    """The shipped ruler's convention is a fully probed transcript at 1 and every other one below it, so
-    the simulator's factor is divided by the fully probed class's median; a transcript with no length is
-    the identity; and with no probed class at all (capture-OFF) every factor is exactly 1. The fixture's
-    median over every transcript (~5.5) is not the probed class's (10), so an anchor read off the wrong
-    pool is visible."""
+    """The shipped ruler's convention puts a fully probed transcript at 1 and every other below it, so the simulator's
+    factor is divided by the fully probed class's median; a transcript with no length is the identity; and with no
+    probed class (capture-OFF) every factor is exactly 1. The fixture's median over every transcript differs from the
+    probed class's, so an anchor read off the wrong pool shows."""
     factor = np.array([10.0, 10.0, 12.0, 1.0, 2.0, 3.0, np.nan])
     probed = np.array([1.0, 0.95, 0.92, 0.0, 0.1, 0.2, 0.0])
     plain = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 0.0])
@@ -667,13 +584,13 @@ def test_the_capture_truth_is_anchored_on_the_fully_probed_class():
     assert np.array_equal(off, np.ones(4))
 
 
-# ── GATE 8: arms scored under different assignment modes are refused, never compared ──────────────
+# ── Gate 8: arms scored under different assignment modes are refused, never compared ──────────────
 
 
 def test_the_report_REFUSES_arms_scored_under_different_assignment_modes(tmp_path):
-    """``--set em.assignment_mode=fractional`` changes every count, so a fractional arm beside a sampled
-    one would report the mode's effect as the arm's. Every row carries its mode, and the report refuses a
-    mix — a file written before the stamp existed counts as a different mode, not as agreement."""
+    """``--set em.assignment_mode=fractional`` changes every count, so a fractional arm beside a sampled one would
+    report the mode's effect as the arm's. Every row carries its mode and the report refuses a mix; a row without the
+    stamp counts as a different mode."""
     row = dict(
         condition="gdna_g05_ss_0.99_nrna_mid_capture_on", axis="transcript", count_abs_err=1.0
     )
@@ -687,16 +604,16 @@ def test_the_report_REFUSES_arms_scored_under_different_assignment_modes(tmp_pat
         QA.report([a, b])
 
 
-# ── the markdown report — what a release is judged on ────────────────────────────────────────────
+# ── the markdown report: what a release is judged on ────────────────────────────────────────────
 #
-# The report RENDERS numbers the arm files already hold, so every way of getting it wrong produces a
-# plausible-looking table: the wrong gDNA column, a ratio invented where the truth is zero, a pool
-# silently folded into another. These gates are those ways.
+# The report renders numbers the arm files already hold, so every way of getting it wrong produces a plausible-looking
+# table: the wrong gDNA column, a ratio invented where the truth is zero, a pool folded into another. These tests cover
+# those.
 
 
 def _arm_rows(tmp_path, **over):
-    """One condition, three axes, written as an arm jsonl. The numbers are chosen so that every
-    quantity the report derives is distinguishable from every other."""
+    """One condition, three axes, written as an arm jsonl, with numbers chosen so every quantity the report derives is
+    distinguishable from every other."""
     cond = "gdna_g50_ss_0.99_nrna_mid_capture_off"
     lib = {
         "condition": cond,
@@ -709,7 +626,7 @@ def _arm_rows(tmp_path, **over):
         "nrna_true": 1_000.0,
         "rna_est": 4_900.0,
         "rna_true": 5_100.0,
-        #: EM-only. The comparable total is this PLUS the intergenic fragments.
+        #: EM-only. The comparable total is this plus the intergenic fragments.
         "gdna_est": 2_000.0,
         "n_intergenic_gdna": 3_100.0,
         "gdna_true": 4_900.0,
@@ -754,13 +671,9 @@ def _render(tmp_path, **over):
 
 
 def test_the_report_scores_gDNA_INCLUDING_the_intergenic_fragments(tmp_path):
-    """⛔ The failure this exists for. ``gdna_est`` is the EM's number and EXCLUDES fragments that
-    reached no locus, while ``gdna_true`` counts every gDNA fragment there was. Off capture the
-    intergenic half is the larger one, so a report that prints ``gdna_est`` against that truth
-    understates the estimate by more than half and reads as a catastrophic under-call that is not
-    there. The comparable estimate is ``gdna_est + n_intergenic_gdna``.
-
-    Perturbation: rendering ``gdna_est`` alone prints 2,000 and a −59.2 % error.
+    """``gdna_est`` is the EM's number and excludes fragments that reached no locus, while ``gdna_true`` counts every
+    gDNA fragment. Off capture the intergenic share is the larger one, so printing ``gdna_est`` against that truth would
+    read as a large under-call that is not there. The comparable estimate is ``gdna_est + n_intergenic_gdna``.
     """
     md = _render(tmp_path)
     assert "5,100" in md, "the gDNA estimate did not include the intergenic fragments"
@@ -769,21 +682,17 @@ def test_the_report_scores_gDNA_INCLUDING_the_intergenic_fragments(tmp_path):
 
 
 def test_a_percent_error_is_REFUSED_where_the_truth_is_zero(tmp_path):
-    """The `g00` rung's true gDNA count is exactly 0, and a percent error there would invent a scale
-    (TRAPS: a-ratio-cannot-carry-zero). The raw count is the whole of the answer; the ratio is `n/a`.
-
-    Perturbation: dividing anyway yields `inf %` on every zero-gDNA row.
-    """
+    """The `g00` rung's true gDNA count is exactly 0, and a percent error there would invent a scale. The raw count is
+    the whole answer; the ratio is `n/a`."""
     md = _render(tmp_path, gdna_true=0.0)
     assert "n/a" in md
     assert "inf" not in md.lower() and "nan %" not in md.lower()
 
 
 def test_the_three_pools_are_reported_APART_and_the_synthetic_one_by_name(tmp_path):
-    """The split is on ``is_synthetic``, and the report must say so where a reader will see it: a
-    single-exon ANNOTATED transcript (``is_single_exon``) belongs to the
-    ANNOTATED pool (TRAPS: nrna-does-not-mean-synthetic). Folding the two RNA pools together would hide
-    the false-positive channel the nascent row exists to expose."""
+    """The split is on ``is_synthetic``, and the report must say so: a single-exon annotated transcript
+    (``is_single_exon``) belongs to the annotated pool. Folding the two RNA pools together would hide the false-positive
+    channel the nascent row exposes."""
     md = _render(tmp_path)
     assert "SYNTHETIC entities only" in md
     assert "is_synthetic`, never `is_single_exon" in md
@@ -792,10 +701,9 @@ def test_the_three_pools_are_reported_APART_and_the_synthetic_one_by_name(tmp_pa
 
 
 def test_the_transcript_and_gene_sections_score_the_ANNOTATED_POOL_ALONE(tmp_path):
-    """The transcript table a user reads holds no synthetic entity — ``get_counts_df`` drops them —
-    so the transcript and gene truth must equal the library's ANNOTATED truth and not the RNA total.
-    Scoring against ``rna_true`` instead would silently credit the tool for nascent mass that is not
-    in the table at all."""
+    """The transcript table a user reads holds no synthetic entity (``get_counts_df`` drops them), so the transcript and
+    gene truth must equal the library's annotated truth, not the RNA total; scoring against ``rna_true`` would credit
+    the tool for nascent mass not in the table."""
     md = _render(tmp_path)
     qa = _load_sibling("quant_accuracy.py")
     src, cond = _arm_rows(tmp_path)
@@ -806,9 +714,8 @@ def test_the_transcript_and_gene_sections_score_the_ANNOTATED_POOL_ALONE(tmp_pat
 
 
 def test_every_table_in_the_report_is_RECTANGULAR(tmp_path):
-    """A ragged markdown table renders as a wrong table rather than as an error, and the escaped
-    pipes in a `Σ|Δ|` header are cell CONTENT — counting them as delimiters put phantom columns in
-    every separator row, which is the defect this gate was written on."""
+    """A ragged markdown table renders as a wrong table rather than an error, and the escaped pipes in a `Σ|Δ|` header
+    are cell content, not delimiters."""
     md = _render(tmp_path)
     for block in md.split("\n\n"):
         lines = [x for x in block.splitlines() if x.startswith("|")]
@@ -819,9 +726,8 @@ def test_every_table_in_the_report_is_RECTANGULAR(tmp_path):
 
 
 def test_the_DEFERRED_stratum_is_MARKED_wherever_it_appears(tmp_path):
-    """Unstranded × capture-ON is reported on every benchmark and is never a development target, and
-    it carries most of the error — so a reader who does not see the mark will read a pooled total as
-    the tool's accuracy (TRAPS: never-pool-the-strata)."""
+    """Unstranded × capture-ON is reported on every benchmark, is never a development target, and carries most of the
+    error, so a reader who misses the mark would read a pooled total as the tool's accuracy."""
     qa = _load_sibling("quant_accuracy.py")
     lib, tx, gene = (json.loads(x) for x in _arm_rows(tmp_path)[0].read_text().splitlines())
     for r in (lib, tx, gene):
@@ -835,12 +741,9 @@ def test_the_DEFERRED_stratum_is_MARKED_wherever_it_appears(tmp_path):
 
 
 def test_the_report_does_NOT_present_a_column_that_cannot_fire(tmp_path):
-    """``fn_mass`` needs an estimate of EXACTLY zero. Under fractional assignment a posterior
-    essentially never is, so it reads 0.0 on every condition of every arm — and a column of zeros
-    beside "false-negative mass" reads as a perfect score for something that was never measured
-    (TRAPS: could-the-arm-have-fired). ``count_under`` is the live quantity and is reported instead.
-
-    Perturbation: restoring the ``false-negative mass`` column prints 11 here and 0 on the panel.
+    """``fn_mass`` needs an estimate of exactly zero, which a posterior under fractional assignment essentially never
+    is, so it reads 0.0 everywhere, and a column of zeros labelled "false-negative mass" would read as a perfect score
+    for something never measured. ``count_under`` is the live quantity and is reported instead.
     """
     md = _render(tmp_path)
     assert "false-negative" not in md.split("## 2.")[1], "a column that cannot fire was reported"
@@ -849,13 +752,9 @@ def test_the_report_does_NOT_present_a_column_that_cannot_fire(tmp_path):
 
 
 def test_the_report_does_NOT_call_the_truth_table_s_ROW_COUNT_a_transcript_count(tmp_path):
-    """The truth table carries one row per SYNTHETIC nascent entity as well as per annotated
-    transcript — on the ladder, 6,919 of 15,669 — and those rows are zero on BOTH sides, so they
-    enter no figure. Printing the row count as "transcripts" claims thousands of perfectly scored
-    transcripts that were never scored. The scored sets are ``expressed`` and ``detected``.
-
-    Perturbation: printing ``n_tx`` puts 10 in the transcript row and 4 in the gene row here, and
-    15,669 / 9,385 on the panel.
+    """The truth table carries one row per synthetic nascent entity as well as per annotated transcript, and those rows
+    are zero on both sides, so they enter no figure. Printing the row count as "transcripts" would claim thousands of
+    scored transcripts that were never scored. The scored sets are ``expressed`` and ``detected``.
     """
     md = _render(tmp_path)
     body = md.split("## 2.")[1]
@@ -891,12 +790,9 @@ def _gdna_pool_blocks(md: str) -> dict:
 
 
 def test_every_gDNA_RUNG_is_labelled_from_its_truth_not_from_a_map_of_known_rungs(tmp_path):
-    """The level column came from a hand map of the ladder's four rung tokens, so a panel with any
-    other rung (the test chromosome's ``g25``, the depth panels' ``g001`` and ``g01``) raised and no
-    report was written. It is read off the row's own truth, ``gdna_frac_true``.
-
-    Perturbation: the hand map raises ``KeyError`` on ``g25``; a label read from the name's digits
-    prints ``g001`` as 1 %.
+    """The level column is read off the row's own truth, ``gdna_frac_true``, so a panel with any rung (the test
+    chromosome's ``g25``, the depth panels' ``g001`` and ``g01``) gets a report. A hand map of the ladder's rung tokens
+    would raise on ``g25``, and digits read from the name would print ``g001`` as 1 %.
     """
     rungs = {"g00": (0.0, "0 %"), "g001": (0.001, "0.1 %"), "g05": (0.0500004, "5 %"),
              "g25": (0.25, "25 %"), "g98": (0.98, "98 %")}  # fmt: skip
@@ -909,14 +805,10 @@ def test_every_gDNA_RUNG_is_labelled_from_its_truth_not_from_a_map_of_known_rung
 
 
 def test_a_strand_specificity_in_NEITHER_half_is_reported_APART_never_pooled(tmp_path):
-    """ss 0.50 is the unstranded half and ss 0.99 the stranded half, and they are judged against
-    different bars (TRAPS: never-pool-the-strata). The test panel's ss 0.70 is neither, and it was
-    filed as unstranded, so its rows moved the half a policy must win on. One definition
-    (`_shared.strandedness`) serves every instrument; a name that spells no specificity raises
-    rather than landing in a half.
-
-    Perturbation: ``"stranded" if "ss_0.99" in cond else "unstranded"`` files the 0.70 row under
-    ``unstranded × capture OFF`` and prints no stratum of its own.
+    """ss 0.50 is the unstranded half and ss 0.99 the stranded half, judged against different bars. The test panel's ss
+    0.70 is neither, so it is reported apart rather than moving the half a policy must win on. One definition
+    (`_shared.strandedness`) serves every instrument, and a name that spells no specificity raises rather than landing
+    in a half.
     """
     shared = importlib.import_module("_shared")
     assert shared.strandedness("gdna_g50_ss_0.50_nrna_mid_capture_on") == "unstranded"
@@ -939,14 +831,13 @@ def test_a_strand_specificity_in_NEITHER_half_is_reported_APART_never_pooled(tmp
     )
 
 
-# ── GATE 16: the allocation arm's weights must reach every transcript the simulator gave RNA ──────
+# ── Gate 16: the allocation arm's weights must reach every transcript the simulator gave RNA ──────
 
 
 def _alloc_truth_table():
-    """Two annotated transcripts and the SYNTHETIC span of each of their genes, as the simulator
-    writes them: a synthetic span's fragments are ``observed_nrna_fragments`` on its OWN row, and its
-    ``observed_mrna_fragments`` is zero because a synthetic span emits no mature RNA. A single-exon annotated
-    transcript carries both columns."""
+    """Two annotated transcripts and the synthetic span of each of their genes, as the simulator writes them: a
+    synthetic span's fragments are ``observed_nrna_fragments`` on its own row, and its ``observed_mrna_fragments`` is
+    zero because a synthetic span emits no mature RNA. A single-exon annotated transcript carries both columns."""
     return pd.DataFrame(
         {
             "transcript_id": ["t_spliced", "t_single_exon", "nrna_gene_a", "nrna_gene_b"],
@@ -967,21 +858,12 @@ class _AllocIndex:
 
 
 def test_the_allocation_arm_does_NOT_hand_a_weight_of_ZERO_to_an_RNA_EMITTING_transcript():
-    """⛔ THE ARM MUST WEIGH EVERY RNA COMPONENT, AND A SYNTHETIC SPAN IS ONE (`EQUATIONS.md` §9b).
+    """The arm must weigh every RNA component, and a synthetic span is one.
 
-    ``--arm oracle_alloc*`` claims to hand the EM the true per-transcript allocation. Reading a MATURE
-    column alone gives every synthetic nascent entity a weight of exactly zero — on the ladder, 6,919
-    of 15,669 rows and all 150,432 nascent fragments — which is not a true allocation but the retired
-    ``alpha = 0`` rule (`ISSUES: nascent-gets-no-rna-prior`, CLOSED) wearing an oracle's name. The arm
-    then reads as "a perfect allocation removes the nascent over-call", when what removed it was
-    suppressing the component (TRAPS: could-the-arm-have-fired).
-
-    The invariant is structural and needs no number: a transcript the simulator gave RNA fragments
-    must receive a POSITIVE weight, and one it gave none must receive zero.
-
-    Perturbation: reading ``observed_mrna_fragments`` alone zeroes both synthetic-span rows here, and on the
-    ladder turns the arm into a re-run of ``alpha = 0`` — its nascent estimate tracks the
-    pre-restoration baseline to within 15 % on every in-scope condition.
+    ``--arm oracle_alloc_seed`` claims to hand the EM the true per-transcript allocation. Reading a mature column alone
+    would give every synthetic nascent entity a weight of zero, which is not a true allocation but a suppression of the
+    component, and the arm would then appear to remove the nascent over-call. A transcript the simulator gave RNA
+    fragments must receive a positive weight, and one it gave none must receive zero.
     """
     truth = _alloc_truth_table()
     index = _AllocIndex(truth["transcript_id"])
@@ -998,12 +880,9 @@ def test_the_allocation_arm_does_NOT_hand_a_weight_of_ZERO_to_an_RNA_EMITTING_tr
 
 
 def test_the_allocation_weights_REFUSE_a_truth_table_that_carries_no_nascent_column():
-    """A truth table with a mature column and no nascent one cannot express a synthetic span's
-    allocation, so the arm refuses rather than silently weighting every synthetic span at zero. The
-    suite-level molar table is refused too: its ``mrna_abundance`` / ``nrna_abundance`` pair is
-    molecules, not the fragments a condition realised.
-
-    Perturbation: a fallback to the ``mrna_abundance`` + ``nrna_abundance`` pair weights by molecules."""
+    """A truth table with a mature column and no nascent one cannot express a synthetic span's allocation, so the arm
+    refuses rather than weighting every synthetic span at zero. The suite-level molar table is refused too: its
+    ``mrna_abundance`` / ``nrna_abundance`` pair counts molecules, not the fragments a condition realised."""
     truth = _alloc_truth_table().drop(columns=["observed_nrna_fragments"])
     with pytest.raises(SystemExit, match="nascent"):
         QA.truth_weights(truth, _AllocIndex(truth["transcript_id"]))
@@ -1014,7 +893,7 @@ def test_the_allocation_weights_REFUSE_a_truth_table_that_carries_no_nascent_col
         QA.truth_weights(molar, _AllocIndex(molar["transcript_id"]))
 
 
-# ── GATE: an aligned input, scored against the same truth, its aligner's losses counted ────────────
+# ── an aligned input, scored against the same truth, its aligner's losses counted ────────────
 
 
 def _templates(bam_path):
@@ -1057,14 +936,12 @@ def _origin_counts(groups):
 
 
 def test_the_aligner_loss_counts_UNMAPPED_TEMPLATES_by_their_true_origin(toy, tmp_path):
-    """An aligned input is scored against the simulator's truth, which counts every fragment it drew, so a
-    row read from it must carry what the aligner left out, by origin: on the ladder's suite genome about a
-    fifth of the gDNA is drawn over N runs no aligner can place, and read against the full truth that reads
-    as Rigel's error. A template is lost only when NONE of its records is mapped: one mate placed is the
-    aligner's delivery and Rigel's to judge.
-
-    Perturbation: counting records instead of templates, or a template lost when any record is unmapped,
-    or the origin read from anything but the read name, each moves the counts."""
+    """An aligned input is scored against the simulator's truth, which counts every fragment it drew, so a row read from
+    it must carry what the aligner left out, by origin: on the ladder's suite genome part of the gDNA is drawn over N
+    runs no aligner can place, and read against the full truth that would look like Rigel's error. A template is lost
+    only when none of its records is mapped; one placed mate is the aligner's delivery and Rigel's to judge. Counting
+    records instead of templates, or reading the origin from anything but the read name, would move the counts.
+    """
     from rigel.sim.read_name import parse_origin
 
     header, groups = _templates(toy.bam_path)
@@ -1087,11 +964,9 @@ def test_the_aligner_loss_counts_UNMAPPED_TEMPLATES_by_their_true_origin(toy, tm
 
 
 def test_an_aligned_BAM_that_is_not_the_simulators_is_REFUSED(toy, tmp_path):
-    """The aligned input must hold the simulator's templates, each once and in one group: a template
-    missing (a truncated alignment) or split into two runs of records (an input that is not collated)
-    would shift the aligner's losses silently.
-
-    Perturbation: dropping the completeness check lets both through."""
+    """The aligned input must hold the simulator's templates, each once and in one group: a missing template (a
+    truncated alignment) or one split into two runs of records (an input that is not collated) would shift the aligner's
+    losses silently."""
     header, groups = _templates(toy.bam_path)
     counts = _origin_counts(groups)
     short = _write(tmp_path / "short.bam", header, groups[:-1])
@@ -1105,11 +980,9 @@ def test_an_aligned_BAM_that_is_not_the_simulators_is_REFUSED(toy, tmp_path):
 
 
 def test_another_input_BAM_is_scored_by_the_BASE_arm_alone_and_must_exist(tmp_path):
-    """The oracle arms inject truth built from the simulator's own alignments (the oracle cache), so on
-    another input their substitution would be another scan's: refused. A condition without the named BAM
-    is refused by name before anything runs, never scored as a shorter panel.
-
-    Perturbation: dropping either refusal lets an oracle arm read an aligned BAM, or a partial panel through."""
+    """The oracle arms inject truth built from the simulator's own alignments (the oracle cache), so on another input
+    their substitution would be another scan's and is refused. A condition without the named BAM is refused by name
+    before anything runs, never scored as a shorter panel."""
     for c in ("c1", "c2"):
         (tmp_path / c).mkdir()
         (tmp_path / c / QA.ORACLE_BAM).write_bytes(b"")

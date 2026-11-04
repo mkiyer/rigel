@@ -1,10 +1,9 @@
 """The locus-EM harness the estimator tests drive.
 
 `_make_locus_em_data` builds the per-locus arrays the native EM consumes from a compact description of
-units and their count columns; `_run_and_assign` runs one EM and returns the mRNA / nRNA / gDNA totals it
-assigned. A plain harness rather than a fixture, so a test composes it with whatever index and priors it
-needs — and a module of its own, because importing `conftest` by name is ambiguous once a sub-directory
-has one.
+units and their count columns; `_run_and_assign` runs one EM and returns the totals it assigned. A plain harness
+rather than a fixture, so a test composes it with whatever index and priors it needs, and a module of its own,
+because importing `conftest` by name is ambiguous once a sub-directory has one.
 """
 
 from __future__ import annotations
@@ -39,13 +38,13 @@ def _make_locus_em_data(
     Parameters
     ----------
     t_indices_per_unit : list[list[int]]
-        GLOBAL mRNA transcript indices per unit.
+        Global transcript indices per unit.
     rc : AbundanceEstimator or None
         If provided, used for unambig_counts.
     include_nrna : bool
         If True, units are marked as unspliced (``is_spliced=False``).
-        Nothing is appended for nascent RNA: synthetic nRNA transcripts are
-        ordinary transcripts, listed among a unit's candidates like any other.
+        Nothing is appended for nascent RNA: synthetic spans are ordinary
+        transcripts, listed among a unit's candidates like any other.
     include_gdna : bool
         If True, units are unspliced with finite ``gdna_log_liks``, so the
         locus EM appends a gDNA candidate to each, and ``gdna_prior_count``
@@ -116,7 +115,8 @@ def _make_locus_em_data(
 
 
 def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterations=10):
-    """Run batch locus EM via the partitioned path. Returns pool_counts dict.
+    """Run batch locus EM via the partitioned path. Returns the totals assigned: ``mrna`` (every transcript's EM
+    count), ``nrna`` (the synthetic spans') and ``gdna``.
 
     Accepts either the tuple form (em_data, loci, gdna_prior_count) separately,
     or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
@@ -130,7 +130,7 @@ def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterati
     # Partition ScoredFragments into per-locus LocusPartition objects
     partitions = partition_and_free(em_data, loci)
 
-    # Build the 7-tuples and transcript index lists expected by C++
+    # Build the 8-tuples and transcript index lists expected by C++
     partition_tuples = [
         (
             p.offsets,
@@ -140,6 +140,7 @@ def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterati
             p.count_cols,
             p.is_spliced,
             p.gdna_log_liks,
+            p.intergenic_log_liks,
         )
         for p in [partitions[i] for i in range(len(loci))]
     ]

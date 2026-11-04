@@ -1,15 +1,9 @@
-"""Load the ``rigel quant`` report substrate into a structured bundle.
+"""Load the report substrate from a ``rigel quant`` output directory.
 
-The substrate is what the report reads from a ``rigel quant`` output directory:
-
-* ``summary.json`` — the lean run manifest, read eagerly.
-* the companion feather tables the report draws (``fragment_lengths``,
-  ``gene_quant``, ``calibration_track``) — read lazily on first access, so a
-  report only pays I/O and memory for the tables it actually uses.
-
-Only ``summary.json`` is required; a missing companion table empties the
-charts and tables drawn from it. The report reads the summary only through
-:class:`SummaryReader`, and only the keys :data:`SUMMARY_KEYS` lists.
+The substrate is ``summary.json``, read eagerly, and the feather tables the report draws (``fragment_lengths``,
+``gene_quant``, ``calibration_track``), read lazily on first access. Only ``summary.json`` is required; a missing
+table empties what is drawn from it. The report reads the summary only through :class:`SummaryReader`, and only the
+keys :data:`SUMMARY_KEYS` lists.
 """
 
 from __future__ import annotations
@@ -21,16 +15,13 @@ from pathlib import Path
 
 import pandas as pd
 
-# The summary.json schema this builder targets is the one its writer writes,
-# ``cli.SUMMARY_SCHEMA_VERSION``, read at call time and never restated here. Reports still build on
-# other versions, but a mismatch is surfaced as a warning banner.
+# The schema this builder targets is the writer's ``cli.SUMMARY_SCHEMA_VERSION``. A report still builds on another
+# version, behind a warning banner.
 from .. import cli
 
-#: Every ``summary.json`` key the report reads, by section, with the value a summary without it reads: the one
-#: list. The reads are tolerant, so a summary of another schema version still builds a report behind the warning
-#: banner; that is also why a key renamed or misspelled here would read its default without a sound, and
-#: ``tests/test_report.py`` holds every one to what the schema-4 writer writes. ``""`` is the top level and
-#: ``fragment_length.*`` each fragment-length category.
+#: Every ``summary.json`` key the report reads, by section, with the default a summary without it reads. ``""`` is
+#: the top level and ``fragment_length.*`` each fragment-length category. The reads are tolerant, so a key misspelt
+#: here reads its default silently.
 SUMMARY_KEYS: dict[str, dict] = {
     "": {
         "schema_version": None,
@@ -107,10 +98,9 @@ SUMMARY_KEYS: dict[str, dict] = {
 
 
 class SummaryReader:
-    """``summary.json`` as the report reads it. A section reads as exactly the keys :data:`SUMMARY_KEYS` lists for
-    it, each the summary's own value or, where the summary holds none, the listed default; a missing or ``null``
-    section reads as all defaults. A section or a key the list does not name raises ``KeyError``, so the report
-    cannot read one the list leaves out."""
+    """``summary.json`` as the report reads it. A section reads as exactly the keys :data:`SUMMARY_KEYS` lists, each
+    the summary's value or the listed default; a missing or ``null`` section reads as all defaults. A section or key
+    the list does not name raises ``KeyError``."""
 
     def __init__(self, summary: dict):
         self._summary = summary
@@ -149,9 +139,8 @@ class SubstrateError(Exception):
 class ReportSubstrate:
     """Everything the report builder needs from a quant output directory.
 
-    ``summary`` is loaded up front; the feather tables are lazy ``cached_property``
-    accessors that read from ``output_dir`` on first use and return ``None`` when
-    the file is absent.
+    ``summary`` is loaded up front; each feather table is a ``cached_property`` read on first use, ``None`` when the
+    file is absent.
     """
 
     output_dir: Path
@@ -168,7 +157,7 @@ class ReportSubstrate:
         except Exception as exc:  # pragma: no cover - corrupt file is unusual
             raise SubstrateError(f"Could not read {path.name}: {exc}") from exc
 
-    # -- tables the report currently consumes --
+    # -- tables the report draws --
     @cached_property
     def fragment_lengths(self) -> pd.DataFrame | None:
         return self._feather("fragment_lengths.feather")
@@ -193,10 +182,8 @@ class ReportSubstrate:
 
 
 def load_substrate(output_dir: str | Path) -> ReportSubstrate:
-    """Load the report substrate from a ``rigel quant`` output directory.
-
-    Reads ``summary.json`` and checks which companion tables are present (for
-    warnings); the tables themselves load lazily on first access.
+    """Load the report substrate from a ``rigel quant`` output directory: read ``summary.json`` and warn about a
+    schema mismatch or a missing fragment-length table. The tables load lazily.
 
     Raises
     ------

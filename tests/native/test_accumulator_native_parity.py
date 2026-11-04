@@ -1,23 +1,18 @@
 """The native accumulator against the executable specification, byte for byte.
 
-``test_accumulator_spec.py`` says what the deposit rule IS; this module says the C++ implements that
-exact rule and no neighbouring one. The same fragments go into both accumulators and every array, every
-dtype and every QC counter must agree — first over a named battery with one entry per branch of the
-deposit, then over ten thousand random fragments across the whole coordinate space, with parity asserted
-after each one so a divergence is located to a single fragment rather than to a summed array. The
-deferred queue is part of it: a fragment whose gap has more than one surviving explanation is held WHOLE
-for the second pass, so the two languages must agree not only on the tally but on which fragments were
-held and with which hypotheses. That bank is the only one that is a list rather than a sum — every
-other is a per-object sum (uint32 counts, float64 fractions and masses) that both languages add in
-the same fragment order, so each must match exactly — so it is compared through the canonical
-flattening the specification itself defines (:meth:`Tally.deferred_arrays`). The field list is read
-off ``dataclasses.fields(Tally)`` rather than written out here, so a new channel joins this gate
-automatically and a binding that has not grown the matching property fails loudly. The comparison is
-driven through the binding rather than through ``AccumulatorPayload`` because the payload is a
-whole-scan object over a multi-reference partition and this compares one deposit rule on one reference;
-the payload's own carriage of the same banks is gated by ``tests/test_accumulator_payload.py``. The
-import is plain, so a missing or stale extension is a hard error rather than a silent skip: a gate that
-can quietly not run is worse than no gate. Specification: ``_accumulator_reference.py``.
+``test_accumulator_spec.py`` states what the deposit rule is; this module checks that the C++ implements exactly that
+rule. The same fragments go into both accumulators, and every array, dtype and QC counter must agree: first over a named
+battery with one entry per branch of the deposit, then over ten thousand random fragments, with parity asserted after
+each so a divergence is located to one fragment.
+
+Every bank but one is a per-object sum (uint32 counts, float64 fractions and masses) that both languages add in the same
+fragment order, so each must match exactly. The deferred queue (fragments whose gap has more than one surviving
+explanation, held whole for the second pass) is a list, so it is compared through the specification's canonical
+flattening, :meth:`Tally.deferred_arrays`. The field list is read off ``dataclasses.fields(Tally)``, so a new channel
+joins the comparison automatically and a binding missing the matching property fails. The comparison goes through the
+binding rather than ``AccumulatorPayload``, which is a whole-scan, multi-reference object, because this compares one
+deposit rule on one reference. The import is plain, so a missing or stale extension is an error, not a skip.
+Specification: ``_accumulator_reference.py``.
 """
 
 from __future__ import annotations
@@ -49,13 +44,12 @@ from ._accumulator_reference import (
 # types   intergenic, exon, exon, intron, exon, intergenic
 #
 # So: boundary 1 has {intergenic, exon} flanks (a splash pool), boundary 3 has {intron, exon} (the
-# other), n2 is a 1 bp region that a fragment can span, and the annotated sj [201, 900) SWALLOWS
+# other), n2 is a 1 bp region that a fragment can span, and the annotated sj [201, 900) swallows
 # boundary 4.
 #
-# THREE sj, not one, and the count is load-bearing. With a single annotated sj no fragment can use two,
-# so a "credit only the leftmost sj" rule is invisible to this gate — a perturbation implementing it
-# passes every case. [100,200) and [201,900) are separated by the 1 bp exon n2, so one fragment can
-# legitimately use both; [400,900) shares an acceptor with [201,900) but sits on the other strand, so
+# Three sj, because with a single annotated sj no fragment can use two, and a "credit only the
+# leftmost sj" rule would pass. [100,200) and [201,900) are separated by the 1 bp exon n2, so one
+# fragment can use both; [400,900) shares an acceptor with [201,900) but sits on the other strand, so
 # the strand filter has something to discriminate that coordinates alone cannot.
 
 REGION_BOUNDS = [0, 100, 200, 201, 400, 900, 1000]
@@ -63,16 +57,12 @@ TYPES = [0, 2, 2, 1, 2, 0]
 
 MAX_LENGTH = 1000
 
-#: NOT ZERO, and that is the point. Every deferred record is stamped with the reference it came from,
-#: because the second pass replays it through ``deposit`` onto that reference's region-bound axis — a
-#: wrong stamp drains one chromosome's coordinates onto another's partition. The native accumulator has
-#: to be TOLD which reference it is: it is described by its bound positions alone and has no other way
-#: to know.
-#:
-#: PERTURBATION: with ``REF = 0`` a hardcoded ``0`` stamp passes the entire suite, because a
-#: single-reference fixture cannot tell a correct stamp from a constant one. So the fixture's reference
-#: is 3, and the leading three references contribute no bounds at all — which is legal, and exercises
-#: the per-reference offset arithmetic that goes negative when written as a plain subtraction.
+#: Not zero, on purpose. Every deferred record is stamped with its source reference, because the second pass replays it
+#: through ``deposit`` onto that reference's region-bound axis; a wrong stamp would drain one chromosome's coordinates
+#: onto another's partition. The native accumulator knows its reference only because it is told. A single-reference
+#: fixture at ``REF = 0`` cannot tell a correct stamp from a constant, so the fixture's reference is 3, and the leading
+#: three references contribute no bounds, which is legal and exercises per-reference offset arithmetic that would go
+#: negative as a plain subtraction.
 REF = 3
 
 #: The partition's reference list: three empty references, then the real one at index ``REF``.
@@ -86,11 +76,10 @@ SJ = [
 ]
 
 
-#: Tally fields that are not ndarrays, and how the SPECIFICATION says to compare each. Every one is
-#: read off the reference, so there is no second definition of the comparison — ``deferred`` in
-#: particular is a list of records for readability and is compared through the canonical flattening the
-#: reference itself specifies. A new non-array field that is not listed here fails the assertion in
-#: :func:`_assert_parity` rather than quietly dropping out of the gate.
+#: Tally fields that are not ndarrays, and how the specification says to compare each. Each comparison is read off the
+#: reference, so there is no second definition: ``deferred`` in particular is a list of records, compared through the
+#: reference's canonical flattening. An unlisted non-array field fails the assertion in :func:`_assert_parity` rather
+#: than dropping out of the comparison.
 _NON_ARRAY_FIELDS = {
     "qc": lambda tally: dict(tally.qc),
     "gap_resolution": lambda tally: dict(tally.gap_resolution),
@@ -101,11 +90,9 @@ _NON_ARRAY_FIELDS = {
 def _pair(max_length: int = MAX_LENGTH, sj=SJ):
     """A reference accumulator and a native one over the same single-reference partition.
 
-    The native sj CSR is taken FROM THE REFERENCE'S OWN ``Partition`` rather than rebuilt here. That is
-    deliberate: the agreement between ``Partition.from_region_bounds`` and the index builder
-    ``build_sj_arrays`` is a DIFFERENT contract, already pinned by
-    ``test_the_csr_slot_order_matches_the_reference_accumulator``. Feeding both sides one CSR isolates
-    the thing this module is for — the deposit rule.
+    The native sj CSR is taken from the reference's own ``Partition`` rather than rebuilt here. Agreement between
+    ``Partition.from_region_bounds`` and the index builder ``build_sj_arrays`` is a separate contract tested elsewhere;
+    feeding both sides one CSR isolates the deposit rule.
     """
     partition = Partition.from_region_bounds(
         _REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF, sj=sj
@@ -126,15 +113,9 @@ def _pair(max_length: int = MAX_LENGTH, sj=SJ):
 
 
 def _deposit_both(reference, native, label: str, **kw) -> None:
-    """Deposit one fragment into both, then assert full parity while the fragment is still named.
-
-    Comparing after EVERY fragment rather than at the end is what makes a failure legible: the first
-    disagreement names the case that caused it instead of a summed array that no longer says which
-    deposit went wrong.
-
-    The hypothesis set defaults to the specification's own ``UNSPLICED_ONLY`` rather than to a literal
-    written here, so both sides receive the SAME objects and there is no second spelling of "a fragment
-    with nothing to arbitrate".
+    """Deposit one fragment into both, then assert full parity while the fragment is still named, so the first
+    disagreement names the case that caused it. The hypothesis set defaults to the specification's own
+    ``UNSPLICED_ONLY``, so both sides receive the same objects.
     """
     kw.setdefault("hypotheses", UNSPLICED_ONLY)
     want = reference.deposit(REF, **kw)
@@ -187,11 +168,11 @@ def _assert_parity(reference, native, label: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# the named battery — one entry per branch of the deposit, and per bug it has had
+# the named battery: one entry per branch of the deposit
 # ---------------------------------------------------------------------------
 
-#: Hypotheses, named, so the cases below read as what they mean. ``()`` — cut nothing — is the GENOMIC
-#: hypothesis and needs no flag: the gap is real template, so the molecule is gDNA or unspliced RNA.
+#: Hypotheses, named, so the cases below read as what they mean. ``()`` (cut nothing) is the genomic hypothesis and
+#: needs no flag: the gap is real template, so the molecule is gDNA or unspliced RNA.
 GENOMIC = GapHypothesis()
 LONG_SJ = GapHypothesis(((201, 900),), sj_strand=Strand.POS)
 SHORT_SJ = GapHypothesis(((100, 200),), sj_strand=Strand.POS)
@@ -199,8 +180,8 @@ NEG_SJ = GapHypothesis(((400, 900),), sj_strand=Strand.NEG)
 INTRONIC_PATH = GapHypothesis(((201, 400),), sj_strand=Strand.POS)
 BOTH_SJ = GapHypothesis(((100, 200), (201, 900)), sj_strand=Strand.POS)
 
-#: ``(label, deposit kwargs)``. Ordered so that a fragment which changes state (the QC counters, the
-#: sj bank, the deferred queue) is followed by one that reads it, and every case names what it is FOR.
+#: ``(label, deposit kwargs)``. Ordered so that a fragment which changes state (the QC counters, the sj bank, the
+#: deferred queue) is followed by one that reads it, and every case says what it tests.
 CASES: list[tuple[str, dict]] = [
     ("contained in an exonic region", dict(start=150, end=190)),
     ("contained, intergenic region (a gDNA pool)", dict(start=10, end=90)),
@@ -287,7 +268,7 @@ CASES: list[tuple[str, dict]] = [
         "two sj credited, one annotated one not",
         dict(start=150, end=950, observed_introns=[(201, 900), (110, 120)], sj_strand=Strand.POS),
     ),
-    # ── EVERY annotated sj a path uses is credited, not just the leftmost ───────────────────────
+    # ── every annotated sj a path uses is credited, not just the leftmost ───────────────────────
     (
         "TWO annotated sj on one path -> BOTH credited",
         dict(start=50, end=950, observed_introns=[(100, 200), (201, 900)], sj_strand=Strand.POS),
@@ -324,10 +305,9 @@ CASES: list[tuple[str, dict]] = [
         dict(start=350, end=950, observed_introns=[(400, 900)], sj_strand=Strand.NONE),
     ),
     ("the whole reference", dict(start=0, end=1000)),
-    # ── the hypothesis set: ONE survivor deposits, TWO OR MORE are held WHOLE ─────────────────────────
+    # ── the hypothesis set: one survivor deposits, two or more are held whole ─────────────────────────
     #
-    # These are what the arbitration is. Everything above carries the unspliced hypothesis alone, so
-    # every one of them is the degenerate case — which is the general case, not a branch.
+    # Everything above carries the unspliced hypothesis alone, the degenerate case of the same rule.
     (
         "ONE implied path -> deposits, and its intron is cut from L",
         dict(start=150, end=950, hypotheses=(LONG_SJ,)),
@@ -386,9 +366,9 @@ CASES: list[tuple[str, dict]] = [
         "a two-intron path against a one-intron path -> deferred; the PREFIX must not compare equal",
         dict(start=50, end=950, hypotheses=(BOTH_SJ, SHORT_SJ)),
     ),
-    # The order contract: a fragment can fail several ways and must count exactly ONCE. A fragment with
-    # no genome strand is not recoverable by the second pass — that pass resolves which PATH — so the
-    # strand rejection wins over the deferral, and the clipped-away fragment never reaches arbitration.
+    # A fragment can fail several ways and must count exactly once. A fragment with no genome strand cannot be recovered
+    # by the second pass, which resolves only the path, so the strand rejection wins over the deferral, and a
+    # clipped-away fragment never reaches arbitration.
     (
         "STRAND-UNDEFINED beats the deferral: not held, and not counted as held",
         dict(start=50, end=950, align_strand=Strand.NONE, hypotheses=(LONG_SJ, SHORT_SJ)),
@@ -401,10 +381,9 @@ CASES: list[tuple[str, dict]] = [
 
 
 def test_the_battery_is_byte_identical_and_reaches_every_arbitration_OUTCOME():
-    """The battery, deposited into one accumulator pair in order so the state accumulates, parity
-    asserted after every case; and its non-vacuity. Byte-identity over a bank nothing ever wrote is
-    free: with the hypothesis cases removed the deferred queue stays empty and the gap census stays
-    all-zero, so the whole arbitration half of the deposit would be compared only against zeros.
+    """The battery, deposited in order into one accumulator pair so state accumulates, with parity asserted after every
+    case. It also checks that the deferred queue and the gap census are non-empty, since byte-identity over banks
+    nothing wrote compares only zeros.
     """
     reference, native = _pair()
     _assert_parity(reference, native, "empty")
@@ -419,11 +398,9 @@ def test_the_battery_is_byte_identical_and_reaches_every_arbitration_OUTCOME():
 
 
 def test_the_fragment_length_limit_agrees_including_the_pool_histogram_width():
-    """``max_length`` gates ``L`` *and* sizes the pool histograms, so it must agree on both.
-
-    It is also the ONE hypothesis filter, which is why the arbitration cases belong here rather than in
-    the battery above: at the default limit of 1000 the reference's own span cannot exceed it, so the
-    filter is unreachable and "the genomic hypothesis was ruled out by length" cannot be exercised at all.
+    """``max_length`` gates ``L`` and sizes the pool histograms, so it must agree on both. It is also the one hypothesis
+    filter, so the arbitration cases that need it live here: at the default limit of 1000 the reference's span cannot
+    exceed it, and "the genomic hypothesis was ruled out by length" would be unreachable.
     """
     reference, native = _pair(max_length=120)
     for label, kw in [
@@ -435,8 +412,8 @@ def test_the_fragment_length_limit_agrees_including_the_pool_histogram_width():
             "long span, short L: the limit is on L, never the span",
             dict(start=150, end=950, observed_introns=[(201, 900)], sj_strand=Strand.POS),
         ),
-        # "if the genomic span exceeds the limit, assume it is RNA" is not a separate rule: the genomic
-        # hypothesis's L IS the span, so the ordinary filter deletes it and the spliced path stands alone.
+        # "if the genomic span exceeds the limit, it is RNA" is not a separate rule: the genomic hypothesis's L is the
+        # span, so the ordinary filter deletes it and the spliced path stands alone.
         (
             "the GENOMIC hypothesis is over the limit -> filtered, the spliced one deposits",
             dict(start=150, end=340, hypotheses=(GapHypothesis(((201, 300),)), GENOMIC)),
@@ -445,8 +422,8 @@ def test_the_fragment_length_limit_agrees_including_the_pool_histogram_width():
             "EVERY hypothesis over the limit -> the survivors stand and TOO_LONG counts them",
             dict(start=150, end=400, hypotheses=(GapHypothesis(((201, 220),)),)),
         ),
-        # The filter emptying the set must keep ALL of them, not one: two hypotheses that are both too
-        # long are still two answers, so the fragment is deferred rather than silently deposited or dropped.
+        # When the filter would empty the set it keeps all of them: two hypotheses that are both too long are still two
+        # answers, so the fragment is deferred rather than deposited or dropped.
         (
             "every hypothesis over the limit AND there are two -> deferred, not TOO_LONG",
             dict(start=0, end=1000, hypotheses=(GapHypothesis(((201, 220),)), GENOMIC)),
@@ -456,13 +433,9 @@ def test_the_fragment_length_limit_agrees_including_the_pool_histogram_width():
 
 
 def test_region_of_pos_agrees_everywhere_including_outside_the_reference():
-    """``region_of_pos`` is public, so its clamp is reachable even though ``deposit`` cannot reach it.
-
-    Inside ``deposit`` the clamp is dead by construction — the path is clipped to
-    ``[region_bounds.front(), region_bounds.back())`` first, so neither end can fall outside, and a
-    perturbation removing the upper clamp passes the rest of this module for exactly that reason. But
-    the method is bound, a caller may pass anything, and out of range it would index one past the last
-    region. So it is pinned here rather than left to the branch that cannot exercise it.
+    """``region_of_pos`` is public, so its clamp is reachable even though ``deposit`` cannot reach it: inside
+    ``deposit`` the path is clipped to ``[region_bounds.front(), region_bounds.back())`` first. A caller may pass
+    anything, and out of range the method would index one past the last region.
     """
     reference, native = _pair()
     region_bounds = np.asarray(REGION_BOUNDS, dtype=np.int64)
@@ -508,15 +481,13 @@ def test_a_reference_with_no_sj_table_agrees():
 
 
 def test_the_deferred_RECORD_carries_the_fragment_WHOLE_and_the_two_agree_on_it():
-    """The bank the second pass reads, field by field, in one place.
-
-    Asserted against literals as well as against the reference. The generic comparison above says the
-    two languages agree; it cannot say they agree on the RIGHT thing, and a bank that stored the
-    UNCLIPPED extent, or dropped the hypotheses that the length filter removed, would satisfy it.
+    """The bank the second pass reads, field by field. Asserted against literals as well as the reference: parity alone
+    cannot catch a bank that both sides store wrongly, such as the unclipped extent, or one that drops the hypotheses
+    the length filter removed.
     """
     reference, native = _pair(max_length=1000)
-    # Clipped at the reference start, so `start` must be 0 and not -50; and a third hypothesis is over no
-    # limit here, so all three are retained — the record holds what was OFFERED, not what survived.
+    # Clipped at the reference start, so `start` must be 0 and not -50; and the third hypothesis is over no limit here,
+    # so all three are retained: the record holds what was offered, not what survived.
     _deposit_both(
         reference,
         native,
@@ -548,16 +519,9 @@ def test_the_deferred_RECORD_carries_the_fragment_WHOLE_and_the_two_agree_on_it(
 
 
 def test_TWO_accumulators_STAMP_THEIR_OWN_REFERENCE():
-    """The discriminating arm for the ``ref`` stamp, and it exists because nothing else caught it.
-
-    PERTURBATION: replacing ``ref_id_`` with a literal ``0`` in the deferred append passes the entire
-    suite otherwise, because every other fixture is single-reference or happens to defer only on
-    reference 0. A constant is indistinguishable from a correct value until two accumulators with
-    different ids are compared side by side, which is what this does.
-
-    The scan path builds one Accumulator per reference and hands each its own index, so this is the
-    unit of that contract: the same fragment offered to two accumulators must come back stamped
-    differently.
+    """Two accumulators with different ids must stamp the same fragment differently. Every other fixture is
+    single-reference or defers only on reference 0, so a constant stamp would pass them. The scan builds one Accumulator
+    per reference and hands each its own index; this is the unit of that contract.
     """
     held = {}
     for ref in (0, REF):
@@ -576,16 +540,14 @@ def test_TWO_accumulators_STAMP_THEIR_OWN_REFERENCE():
 
 
 # ---------------------------------------------------------------------------
-# the randomised arm — where an off-by-one that no named case reaches shows up
+# the randomised battery: where an off-by-one no named case reaches shows up
 # ---------------------------------------------------------------------------
 
 
 def _random_hypotheses(rng, interesting) -> tuple[GapHypothesis, ...]:
-    """0–3 hypotheses over the interesting coordinate set, plus a biased shot at the genomic one.
-
-    Duplicate paths, prefix paths and empty paths all occur, which is what exercises the deferred queue's
-    canonical SORT — the one place in the tally where order is observable and therefore the one place
-    where a comparator can be subtly wrong.
+    """0–3 hypotheses over the interesting coordinate set, plus a biased shot at the genomic one. Duplicate, prefix and
+    empty paths all occur, which exercises the deferred queue's canonical sort, the one place in the tally where order
+    is observable.
     """
     out = []
     for _ in range(int(rng.integers(0, 4))):
@@ -610,15 +572,10 @@ def _random_hypotheses(rng, interesting) -> tuple[GapHypothesis, ...]:
 
 
 def test_ten_thousand_random_fragments_are_byte_identical():
-    """The arm that actually finds things.
-
-    A named battery tests the cases someone thought of. This one walks the whole coordinate space,
-    including positions that are region bounds, positions one base either side of a bound, empty and
-    reversed extents, and introns that overlap in every configuration. The seed is fixed, so a failure
-    is reproducible and a fix is verifiable.
-
-    Parity is asserted on the accumulated tally at the end AND on each fragment's outcome as it goes, so
-    a divergence is located to one fragment rather than to a summed array.
+    """The named battery tests the cases someone thought of; this one walks the coordinate space, including region
+    bounds, positions one base either side of a bound, empty and reversed extents, and introns overlapping in every
+    configuration. The seed is fixed so a failure is reproducible. Parity is asserted on each fragment's outcome as it
+    goes and on the accumulated tally at the end.
     """
     reference, native = _pair()
     rng = np.random.default_rng(0)
@@ -637,10 +594,9 @@ def test_ten_thousand_random_fragments_are_byte_identical():
         observed = []
         for _ in range(int(rng.integers(0, 4))):
             a = int(rng.choice(interesting))
-            # Half the ends are drawn from the interesting set too, so that a random intron can
-            # actually LAND on an annotated sj. Drawing the end as `a + U(0, 400)` alone cannot reach
-            # the 699 bp sj at all, which leaves the whole annotated-lookup branch to the named cases.
-            # The pair is deliberately left unsorted, so reversed and zero-length introns occur.
+            # Half the ends are drawn from the interesting set too, so a random intron can land on an annotated sj; `a +
+            # U(0, 400)` alone cannot reach the 699 bp sj. The pair is left unsorted, so reversed and zero-length
+            # introns occur.
             b = (
                 int(rng.choice(interesting))
                 if rng.random() < 0.5
@@ -666,18 +622,13 @@ def test_ten_thousand_random_fragments_are_byte_identical():
 
 
 def test_the_batched_sj_lookup_IS_the_scalar_rule_the_second_pass_used_to_keep():
-    """`sj_edge_ids` answers many introns at once, and the second pass reads it instead of carrying its
-    own copy of the rule in Python.
+    """`sj_edge_ids` answers many introns at once, and the second pass reads it instead of keeping its own copy of the
+    rule in Python.
 
-    The oracle is that copy, written out here — the two endpoints must be region bounds, the CSR is
-    walked from the donor, and the strand filter applies ONLY when the motif is definite — because the
-    shipped Python was deleted when the loop started asking the kernel. What is asserted is that the two
-    agree on every case the fixture can pose: the three annotated junctions at their own strand, at the
-    opposite strand, and at NONE; the strand-discriminating pair that shares an acceptor; endpoints that
-    are not region bounds at all; and a reversed pair.
-
-    PERTURBATION: an oracle that applies the strand filter to a NONE motif disagrees on three rows, and
-    one that skips the acceptor check disagrees on the reversed pair.
+    The oracle here is that rule written out: both endpoints must be region bounds, the CSR is walked from the donor,
+    and the strand filter applies only when the motif is definite. The two must agree on every case the fixture can
+    pose: the three annotated junctions at their own strand, the opposite strand and NONE; the strand-discriminating
+    pair that shares an acceptor; endpoints that are not region bounds; and a reversed pair.
     """
     _, native = _pair()
     partition = Partition.from_region_bounds(
@@ -716,7 +667,7 @@ def test_the_batched_sj_lookup_IS_the_scalar_rule_the_second_pass_used_to_keep()
     got = np.asarray(native.sj_edge_ids(starts=starts, ends=ends, sj_strand=motifs), dtype=np.int64)
     want = np.array([oracle(*c) for c in cases], dtype=np.int64)
     assert np.array_equal(got, want), dict(zip(cases, zip(got.tolist(), want.tolist())))
-    # not vacuous: the grid must find junctions AND miss some, or it proves nothing
+    # the grid must find junctions and miss some, or it proves nothing
     assert (want >= 0).any() and (want < 0).any()
     # and the empty call is legal, because a fragment set with no implied intron reaches it
     assert (
@@ -732,16 +683,11 @@ def test_the_batched_sj_lookup_IS_the_scalar_rule_the_second_pass_used_to_keep()
 
 
 def test_the_per_worker_merge_is_bit_identical_at_any_shard_count():
-    """The reason every count channel is an integer.
-
-    Integer addition is associative, so sharding the same corpus K ways and merging must reproduce the
-    single-accumulator answer EXACTLY, on any machine and at any thread count. A float count channel
-    does not have that property, and a per-cell difference across worker counts propagates to the
-    calibration output — the same BAM giving different answers on different machines.
-
-    The deferred queue is the one bank this is NOT free for. It is a list, so concatenating per-worker
-    queues gives a different byte sequence at 1, 2, 4 and 8 workers with identical contents. The export
-    sorts on the record's own content, and that is what this asserts.
+    """Integer addition is associative, so sharding the same corpus K ways and merging must reproduce the
+    single-accumulator answer exactly, on any machine and at any thread count; that is why every count channel is an
+    integer. A float count would let the same BAM give different calibration output on different machines. The deferred
+    queue is a list, so concatenated per-worker queues differ in order across worker counts; the export sorts on each
+    record's own content, and this asserts it.
     """
     corpus = [{"hypotheses": UNSPLICED_ONLY, **kw} for _, kw in CASES] * 3
     _, whole = _pair()
@@ -774,9 +720,8 @@ def test_the_per_worker_merge_is_bit_identical_at_any_shard_count():
                         assert got[key] == expected, f"{n_shards} shards: {field.name}[{key!r}]"
                 continue
             got, want = getattr(merged, field.name), getattr(whole, field.name)
-            # Integer banks bit-identical (integer addition is associative); float64 fractions to
-            # within the representation, because the merge re-associates their sums. See
-            # `tests/test_scan_order_independence.py`.
+            # Integer banks bit-identical (integer addition is associative); float64 fractions within the
+            # representation, because the merge re-associates their sums.
             if getattr(want, "dtype", None) == np.float64:
                 assert np.allclose(
                     got, want, rtol=want.size * float(np.finfo(np.float64).eps), atol=0.0
@@ -790,10 +735,8 @@ def test_the_per_worker_merge_is_bit_identical_at_any_shard_count():
 
 
 def _exported(native) -> dict:
-    """Every bank the binding exports, COPIED.
-
-    The array properties are views into the C++ storage, so a snapshot that kept them would move with
-    the accumulator it is meant to pin and compare equal to anything.
+    """Every bank the binding exports, copied. The array properties are views into the C++ storage, so a snapshot that
+    kept them would move with the accumulator and compare equal to anything.
     """
     out = {}
     for field in dataclasses.fields(Tally):
@@ -826,16 +769,10 @@ def _assert_unchanged(before: dict, after: dict, label: str) -> None:
 def test_an_accumulator_merging_ITSELF_is_refused_before_ANY_bank_is_touched():
     """``merge_from`` refuses ``other is this`` before anything else.
 
-    Every other precondition holds trivially between an accumulator and itself, so nothing else stops
-    the merge: every bank would double, and the held-record bank would be appended to itself, which once
-    it holds a record is a loop that reads the vector it grows and never ends.
-
-    Two arms, and their order is the point. The first holds NO record, so its self-merge cannot hang:
-    without the refusal it doubles every bank and returns, and the test fails cleanly before the second
-    arm, which holds records (the case that hangs), is reached.
-
-    PERTURBATION: deleting the refusal fails the first arm with DID NOT RAISE; moving it anywhere below
-    the first bank merge fails the first arm's unchanged-banks assertion.
+    Every other precondition holds trivially between an accumulator and itself, so without the refusal every bank would
+    double, and the held-record bank, appended to itself, would loop forever once it holds a record. The first case
+    holds no record, so a missing refusal fails cleanly there (banks doubled) before the second case, which would hang,
+    is reached.
     """
     single = [(label, kw) for label, kw in CASES if len(kw.get("hypotheses", UNSPLICED_ONLY)) < 2]
     for label, corpus, holds_records in (
@@ -847,7 +784,7 @@ def test_an_accumulator_merging_ITSELF_is_refused_before_ANY_bank_is_touched():
             accumulator.deposit(**{"hypotheses": UNSPLICED_ONLY, **kw})
         held = dict(accumulator.deferred)["start"].size
         assert (held > 0) == holds_records, f"{label}: {held} records held"
-        # not vacuous: the census, the first bank merged, has something a doubling would change
+        # the census, the first bank merged, has something a doubling would change
         assert dict(accumulator.qc)["deposited"] > 0
         assert any(dict(accumulator.gap_resolution).values()), f"{label}: an all-zero census"
 
@@ -858,19 +795,12 @@ def test_an_accumulator_merging_ITSELF_is_refused_before_ANY_bank_is_touched():
 
 
 def test_a_merge_across_two_WIDTHS_is_refused_before_ANY_bank_is_touched():
-    """``merge_from`` checks ``max_length`` with every other precondition, before it merges anything.
+    """``merge_from`` checks ``max_length`` with every other precondition, before merging anything.
 
-    ``max_length`` is the width of the pool and deposited-length histograms. A width check placed after
-    the bank merges threw on a half-merged accumulator — the census, the held records and every region,
-    boundary and sj bank already summed — and an ``other`` NARROWER than ``this`` was read past the end
-    of its deposited-length histogram before the check was reached. So a refusal must leave every bank
-    ``this`` exports exactly as it was, whichever side is wider.
-
-    The WIDER ``other`` comes first on purpose: with the check misplaced it fails on the half-merge
-    alone, before the narrower arm can read out of bounds.
-
-    PERTURBATION: moving the ``max_length`` check back below the bank merges fails the unchanged-banks
-    assertion on the first arm; deleting it lets the first arm merge without raising.
+    ``max_length`` is the width of the pool and deposited-length histograms. A check placed after the bank merges would
+    throw on a half-merged accumulator, and an ``other`` narrower than ``this`` would be read past the end of its
+    histogram first. So a refusal must leave every exported bank exactly as it was, whichever side is wider. The wider
+    ``other`` comes first so a misplaced check fails on the half-merge before the narrower case can read out of bounds.
     """
     for other_length in (MAX_LENGTH + 500, 120):
         _, this = _pair()
@@ -878,7 +808,7 @@ def test_a_merge_across_two_WIDTHS_is_refused_before_ANY_bank_is_touched():
         for _label, kw in CASES:
             this.deposit(**{"hypotheses": UNSPLICED_ONLY, **kw})
             other.deposit(**{"hypotheses": UNSPLICED_ONLY, **kw})
-        # not vacuous: `other` holds what a half-merge would have summed into `this` first
+        # `other` holds what a half-merge would have summed into `this` first
         assert dict(other.qc)["deposited"] > 0
         assert dict(other.deferred)["start"].size > 0
 
@@ -891,24 +821,15 @@ def test_a_merge_across_two_WIDTHS_is_refused_before_ANY_bank_is_touched():
 
 
 def test_an_EMPTY_hypothesis_set_is_the_UNSPLICED_ONLY_set_and_does_not_CRASH():
-    """A regression gate for a hard segfault.
-
-    The executable specification defaults ``hypotheses`` to :data:`UNSPLICED_ONLY`, on the grounds that
-    the degenerate case is the general case rather than a branch. The native binding has NO default, so
-    a caller writing the natural ``hypotheses=()`` offers an EMPTY set — and an empty set walks
-    straight past the ``survivors.size() > 1`` deferral into ``survivors.front()`` on an empty vector.
-
-    Nothing reaches it from production, because the scanner always offers the genomic path, which is
-    exactly why it survives: it is unreachable from every code path the suite exercises and it crashes
-    the moment anyone constructs an accumulator directly.
-
-    The assertion is not "does not crash" — a crash fails the test anyway. It is that an empty set
-    means the SAME THING as the specification's default, so both must deposit identically.
+    """The specification defaults ``hypotheses`` to :data:`UNSPLICED_ONLY`; the native binding has no default, so a
+    caller writing ``hypotheses=()`` offers an empty set. An empty set must mean the same thing as the specification's
+    default and deposit identically, rather than reach ``survivors.front()`` on an empty vector. Production never offers
+    one (the scanner always offers the genomic path), so only a direct caller can reach it.
     """
     reference, native = _pair()
     kw = dict(start=10, end=90, observed_introns=(), align_strand=int(Strand.POS))
 
-    want = reference.deposit(REF, **kw)  # the reference's own default IS UNSPLICED_ONLY
+    want = reference.deposit(REF, **kw)  # the reference's own default is UNSPLICED_ONLY
     got = native.deposit(**kw, hypotheses=())
     assert got == want.value, f"empty hypotheses: native {got!r} != reference {want.value!r}"
 
@@ -919,16 +840,12 @@ def test_an_EMPTY_hypothesis_set_is_the_UNSPLICED_ONLY_set_and_does_not_CRASH():
 
 
 def test_a_GENERATOR_of_hypotheses_is_the_same_fragment_as_the_tuple():
-    """The binding reads ``hypotheses`` in ONE pass, so a one-shot iterable marshals as its tuple does.
+    """The binding reads ``hypotheses`` in one pass, so a one-shot iterable marshals as its tuple does.
 
-    A second pass over a generator sees nothing, and an empty hypothesis set deposits as the unspliced
-    fragment alone (the test above): an implied intron goes uncut, a fragment that must be held is
-    deposited, nothing says so, and ``length_under`` answers 0 for every index. So the specification
-    receives each case's tuple and the native accumulator a generator over it, and the two must stay
-    byte-identical; and ``length_under`` must give the tuple's length under every hypothesis.
-
-    PERTURBATION: restoring the reservation pass over ``hypotheses`` ahead of the fill fails the
-    parity on the first case (its implied intron is not cut), and ``length_under`` returns 0.
+    A second pass over a generator would see nothing, and an empty set deposits as the unspliced fragment alone: an
+    implied intron would go uncut, a fragment that must be held would be deposited, and ``length_under`` would answer 0.
+    So the specification receives each case's tuple and the native accumulator a generator over it; the two must stay
+    byte-identical, and ``length_under`` must give the tuple's length under every hypothesis.
     """
     reference, native = _pair()
     lengths = []
@@ -950,6 +867,6 @@ def test_a_GENERATOR_of_hypotheses_is_the_same_fragment_as_the_tuple():
                 f"{listed} from the tuple"
             )
             lengths.append(listed)
-    # not vacuous: two-path fragments were held, and the lengths compared are not all zero
+    # two-path fragments were held, and the lengths compared are not all zero
     assert reference.tally.qc["deferred_undetermined_gap"] > 0
     assert any(length > 0 for length in lengths)

@@ -1,22 +1,15 @@
-"""Simulator read names: the one definition of the ground truth every simulated fragment carries.
-
-The simulator writes each fragment's origin into its read name, and this module owns that format in
-both directions: :func:`format_rna_name` and :func:`format_gdna_name` build a name, and
-:func:`parse_origin` reads one back. The three forms are::
+"""Simulator read names: each fragment's ground-truth origin, built by :func:`format_rna_name` and
+:func:`format_gdna_name` and read back by :func:`parse_origin`. The three forms are::
 
     mature RNA    {t_id}:{start}-{end}:{strand}:{index}
     nascent RNA   nrna_{t_id}:{start}-{end}:{strand}:{index}
     gDNA          gdna:{ref}:{start}-{end}:{strand}:{index}
 
-``start``-``end`` is the fragment's 0-based half-open interval: on the transcript's own 5'-to-3'
-sequence for RNA (a nascent fragment's template is a single-exon nRNA entity), on reference ``ref``
-for gDNA. ``strand`` is one letter of the alphabet ``f`` / ``r``: for RNA the transcript's strand
-(``r`` for a minus-strand transcript, ``f`` for any other), for gDNA the fragment's genomic strand.
-``index`` counts the writer's fragments in decimal: within an RNA row, and across the gDNA chunks one
-writer emits. A FASTQ header adds a leading ``@`` and a ``/1`` or ``/2`` mate suffix, which the parser
-strips.
-
-Truth-table writing, and the helpers that count parsed origins, live in :mod:`truth`.
+``start``-``end`` is the fragment's 0-based half-open interval: on the transcript's own 5'-to-3' sequence for RNA
+(a nascent fragment's template is a single-exon nRNA entity), on reference ``ref`` for gDNA. ``strand`` is ``f`` or
+``r``: the transcript's strand for RNA (``r`` for minus, ``f`` otherwise), the fragment's genomic strand for gDNA.
+``index`` counts the writer's fragments: within an RNA row, and across one writer's gDNA chunks. A FASTQ header's
+leading ``@`` and ``/1`` or ``/2`` suffix are stripped by the parser.
 """
 
 from __future__ import annotations
@@ -66,8 +59,8 @@ class Origin:
 def format_rna_name(
     t_id: str, start: int, end: int, strand: str, index: int, *, nascent: bool
 ) -> str:
-    """The read name of an RNA fragment over ``[start, end)`` of transcript ``t_id``'s sequence;
-    ``nascent`` names a fragment of an nRNA entity's nascent row."""
+    """The read name of an RNA fragment over ``[start, end)`` of transcript ``t_id``'s sequence; ``nascent`` marks a
+    fragment of an nRNA entity's nascent row."""
     lead = f"{NASCENT_PREFIX}{t_id}" if nascent else t_id
     return f"{lead}:{start}-{end}:{strand}:{index}"
 
@@ -102,10 +95,8 @@ def _parse_index(text: str) -> int | None:
 def parse_origin(qname: str) -> Origin:
     """Parse a simulator FASTQ/BAM read name into a structured origin.
 
-    The interval, strand and index fields never contain ``:``, so the name is split from the right
-    and the leading field — a transcript id, or ``gdna:{ref}`` — may itself contain ``:``. A strand
-    outside the alphabet is refused (``ValueError``): the simulator never writes one, so a name that
-    carries one is not the simulator's.
+    The name is split from the right, since only the leading field (a transcript id, or ``gdna:{ref}``) may
+    contain ``:``. A strand outside ``f`` / ``r`` raises ``ValueError``: such a name is not the simulator's.
     """
     qname = _normalize_qname(qname)
     parts = qname.rsplit(":", 3)

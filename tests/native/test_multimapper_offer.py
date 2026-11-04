@@ -1,13 +1,12 @@
-"""``Accumulator.offer`` — one fragment, several placements — in the SPECIFICATION, case by case.
+"""``Accumulator.offer`` (one fragment, several placements) in the specification, case by case.
 
-A multimapping fragment is one molecule with several alignments, each on its own reference with its own
-gap hypotheses. The rule (``_accumulator_reference.Accumulator.offer``): a placement excluded by its
-strand or its clip excludes itself alone; identical placements are one; one placement remaining goes
-through ``deposit`` bit for bit; several remaining are arbitrated as the UNION of their (placement,
-hypothesis) pairs under the one length filter, one survivor deposits at its placement, more are held
-WHOLE as ``deferred_multiple_placements``; the drain re-enters ``deposit`` at the chosen placement with
-the chosen hypothesis alone. Every case here is a brute-force statement of that rule on a two-reference
-partition, so the native ``AccumulatorSet::offer`` can be held to it array by array
+A multimapping fragment is one molecule with several alignments, each on its own reference with its own gap hypotheses.
+The rule (``_accumulator_reference.Accumulator.offer``): a placement excluded by its strand or its clip excludes only
+itself; identical placements are one; a single remaining placement goes through ``deposit`` bit for bit; several
+remaining are arbitrated as the union of their (placement, hypothesis) pairs under the one length filter, a single
+survivor deposits at its placement, and more are held whole as ``deferred_multiple_placements``; the drain re-enters
+``deposit`` at the chosen placement with the chosen hypothesis alone. Each case is a brute-force statement of that rule
+on a two-reference partition, so the native ``AccumulatorSet::offer`` can be held to it array by array
 (``test_accumulator_native_parity.py``).
 """
 
@@ -102,7 +101,7 @@ def _conserved(acc: Accumulator, offered: int) -> None:
     assert total == offered, f"the identity does not close: {qc} against {offered} offered"
 
 
-# ── ONE PLACEMENT IS `deposit`, BIT FOR BIT ────────────────────────────────────────────────────────
+# ── One placement is `deposit`, bit for bit ────────────────────────────────────────────────────────
 
 ONE_PLACEMENT_CASES = [
     ("contained in an exon", _pl(1, 1100, 1400)),
@@ -149,7 +148,7 @@ def test_the_one_placement_battery_reaches_every_outcome_it_claims():
     }
 
 
-# ── THE EXCLUSIONS ─────────────────────────────────────────────────────────────────────────────────
+# ── The exclusions ─────────────────────────────────────────────────────────────────────────────────
 
 
 def test_identical_placements_are_one_placement():
@@ -192,12 +191,12 @@ def test_every_placement_excluded_rejects_the_fragment_once_and_names_the_strand
     _conserved(mixed, 1)
 
 
-# ── THE UNION ARBITRATION ──────────────────────────────────────────────────────────────────────────
+# ── The union arbitration ──────────────────────────────────────────────────────────────────────────
 
 
 def test_every_pair_over_the_limit_means_all_stand_and_the_fragment_is_held():
-    """Two contiguous placements of 1,500 bp, both over the 1,000 bp limit: the filter would empty the
-    union, so every pair stands and the fragment is held with both — exactly the gap rule's clause."""
+    """Two contiguous placements of 1,500 bp, both over the 1,000 bp limit: the filter would empty the union, so every
+    pair stands and the fragment is held with both, as the gap rule says."""
     acc = _fresh()
     assert acc.offer((_pl(0, 100, 1600), _pl(1, 100, 1600))) is DepositOutcome.DEFERRED_PLACEMENTS
     assert len(acc.tally.deferred) == 1 and acc.tally.deferred[0].n_placements == 2
@@ -206,9 +205,9 @@ def test_every_pair_over_the_limit_means_all_stand_and_the_fragment_is_held():
 
 
 def test_one_survivor_across_placements_deposits_at_its_placement_and_leaves_the_gap_census_alone():
-    """Placement A is over the limit, placement B is a spliced path within it: B alone survives, the
-    fragment deposits at B with that hypothesis, and the umbrella census is not touched — a direct
-    deposit of B would have recorded ``gap_resolved_spliced``; a multi-placement fragment never does."""
+    """Placement A is over the limit and placement B is a spliced path within it: B alone survives and the fragment
+    deposits at B with that hypothesis, leaving the umbrella census untouched. A direct deposit of B would record
+    ``gap_resolved_spliced``; a multi-placement fragment never does."""
     too_long = _pl(0, 100, 1600)
     spliced = _pl(1, 1400, 2150, hypotheses=(WIDE,))
     offered, direct = _fresh(), _fresh()
@@ -267,12 +266,12 @@ def test_the_held_placement_carries_the_clipped_extent():
     assert [(p.ref, p.start, p.end) for p in held.placements] == [(0, 0, 400), (1, 3800, 4000)]
 
 
-# ── THE FLATTENING ─────────────────────────────────────────────────────────────────────────────────
+# ── The flattening ─────────────────────────────────────────────────────────────────────────────────
 
 
 def test_the_bank_flattens_with_a_placement_level_and_round_trips():
-    """A one-placement gap record beside a two-placement record: three offset levels, every per-placement
-    array holding exactly what the per-fragment array held before placements existed."""
+    """A one-placement gap record beside a two-placement record: three offset levels, each per-placement array holding
+    what the per-fragment array would hold."""
     acc = _fresh()
     acc.deposit(0, 1500, 2100, hypotheses=(WIDE, NARROW, GENOMIC))  # held on its gap, one placement
     acc.offer((_pl(1, 1100, 1400), _pl(0, 1150, 1450)))  # held on its placements
@@ -317,7 +316,7 @@ def test_the_canonical_order_does_not_depend_on_deposit_order():
     _assert_same(forward, backward, "deposit order")
 
 
-# ── THE DRAIN ──────────────────────────────────────────────────────────────────────────────────────
+# ── The drain ──────────────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("choice,ref", [(0, 0), (1, 1)])

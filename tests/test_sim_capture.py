@@ -72,11 +72,11 @@ def test_transcript_probe_weights_match_overlap_example(tmp_path):
 
 def test_a_split_probe_binds_every_template_through_ONE_contiguous_part(tmp_path):
     """A probe across a splice junction is one contiguous 60-mer only in a transcript that holds the
-    junction; everywhere else — gDNA, the NASCENT ENTITY (a single-exon transcript over the span, the
-    index's nRNA row), an isoform that lacks the junction — it is two separate parts, and a fragment
-    hybridises through one contiguous stretch, so it binds the better part and never the sum. There is
-    no penalty beyond that geometry: the part it does hold binds as it would for any molecule
-    (owner, 2026-09-19). Here the probe is 20 bases in the first exon and 40 in the second."""
+    junction; everywhere else (gDNA, the nascent entity, which is a single-exon transcript over the span,
+    or an isoform that lacks the junction) it is two separate parts, and a fragment hybridises through
+    one contiguous stretch, so it binds the better part and never the sum. There is no penalty beyond
+    that geometry: the part it does hold binds as it would for any molecule. Here the probe is 20 bases
+    in the first exon and 40 in the second."""
     probes = tmp_path / "sj_probe.tsv"
     probes.write_text("transcript_id\tstart\tend\nT\t80\t140\n")
     transcript = _transcript("T", [(100, 200), (400, 500)])
@@ -93,7 +93,7 @@ def test_a_split_probe_binds_every_template_through_ONE_contiguous_part(tmp_path
     assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(41.0)
     # the entity: transcript coordinate 70 of its 400-bp span is genomic 170, the same fragment
     assert sampler.fragment_weight("mrna", 1, 400, 70, 280) == pytest.approx(41.0)
-    # there is no per-transcript nascent space: the entity IS a transcript row
+    # there is no per-transcript nascent space: the entity is a transcript row
     with pytest.raises(ValueError):
         sampler.fragment_weight("nrna", 0, 400, 70, 280)
 
@@ -120,9 +120,9 @@ def test_gdna_and_cdna_bind_the_SAME_half_of_a_split_probe_alike(tmp_path):
 
 
 def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path):
-    """A probe maps to compatible transcripts by GENOMIC overlap: any isoform, any gene, either
-    strand — and to gDNA. A sibling isoform sharing the probed exon, a single-exon
-    transcript of another gene under the probe on the OPPOSITE strand, and a nascent entity spanning it
+    """A probe maps to compatible transcripts by genomic overlap: any isoform, any gene, either
+    strand, and to gDNA. A sibling isoform sharing the probed exon, a single-exon
+    transcript of another gene under the probe on the opposite strand, and a nascent entity spanning it
     all carry the probe; a transcript whose exons miss it does not."""
     probes = tmp_path / "probes.tsv"
     probes.write_text("transcript_id\tstart\tend\nT1\t20\t80\n")  # genomic [120, 180) of T1
@@ -251,8 +251,8 @@ def test_parse_yaml_capture_config(tmp_path):
 
 
 def test_a_capture_key_the_loader_does_not_know_is_REFUSED(tmp_path):
-    """Ignored, an unknown key would read as applied — a config still carrying the retired
-    ``gdna_split_penalty`` would simulate the new physics while its YAML claimed the old."""
+    """Ignored, an unknown key would read as applied: a config carrying ``gdna_split_penalty``, which
+    the loader does not know, would claim a setting the simulation never used."""
     probes = tmp_path / "probes.tsv"
     probes.write_text("T1\t10\t130\n")
     config = tmp_path / "sim.yaml"
@@ -277,9 +277,9 @@ def test_a_capture_key_the_loader_does_not_know_is_REFUSED(tmp_path):
     ids=["format", "name", "scenarios"],
 )
 def test_a_capture_alias_is_refused_only_the_canonical_key_is_read(tmp_path, body, key):
-    """`format` for `probe_format`, `name` for `label` and `scenarios` for `configs` were aliases no
-    config used. A second spelling of a key lets one config carry both, with only one of them applied,
-    so each is an unknown key. PERTURBATION: restoring any of the three aliases fails this gate."""
+    """A second spelling of a key lets one config carry both, with only one of them applied, so
+    `format` for `probe_format`, `name` for `label` and `scenarios` for `configs` are each an unknown
+    key. Perturbation: restoring any of the three aliases fails this gate."""
     probes = tmp_path / "probes.tsv"
     probes.write_text("T1\t10\t130\n")
     config = tmp_path / "sim.yaml"
@@ -528,7 +528,7 @@ def brute_force_partition(
     binding_per_base: float,
     min_overlap: int,
 ) -> float:
-    """The definition, spelled out: for every start, the fragment's best overlap with ONE contiguous
+    """The definition, spelled out: for every start, the fragment's best overlap with one contiguous
     probe part, summed over starts. A fragment hybridises through one contiguous stretch, so separate
     parts — of different probes, or of one probe split across an intron — never add."""
     total = 0.0
@@ -554,10 +554,9 @@ def make_sampler(intervals_by_key: dict[int, list[ProbeInterval]], **overrides) 
         min_overlap=overrides.get("min_overlap", 1),
     )
     # Built through the real `__init__`, never `__new__`: only the probe intervals are then injected,
-    # which is the one thing this fixture exists to control. Bypassing the constructor and hand-setting
-    # a few attributes instead means any state `__init__` later gains is simply ABSENT here, so the
-    # whole file fails with `AttributeError` while the sampler works perfectly in production
-    # (`TRAPS: a-gate-that-reconstructs` — a fixture that rebuilds its subject tests the rebuild).
+    # which is the one thing this fixture exists to control. A fixture that bypasses the constructor
+    # and hand-sets a few attributes tests its own rebuild: any state `__init__` gains is absent here,
+    # and the whole file fails with `AttributeError` while the sampler works in production.
     sampler = CaptureSampler(config, transcripts=(), ref_lengths={}, enabled=True)
     sampler._mrna_intervals = intervals_by_key
     return sampler
@@ -650,8 +649,8 @@ class TestAgainstBruteForce:
         assert actual == pytest.approx(expected, rel=1e-12, abs=1e-9)
 
     def test_a_multi_key_pool_matches_enumeration_key_by_key(self) -> None:
-        """The batched path shares ONE buffer across keys. A key writing outside its own slice, or a
-        rank colliding between keys, only shows up with several keys of DIFFERENT lengths at once."""
+        """The batched path shares one buffer across keys. A key writing outside its own slice, or a
+        rank colliding between keys, only shows up with several keys of different lengths at once."""
         names = list(BATCHABLE_LAYOUTS)
         intervals_by_key = {i: LAYOUTS[name] for i, name in enumerate(names)}
         sampler = make_sampler(intervals_by_key)
@@ -716,8 +715,8 @@ class TestPartitionArray:
         np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-9)
 
     def test_a_key_absent_from_the_call_does_not_leak_into_another(self) -> None:
-        """`partition_array` may be called with a SUBSET of keys — the live-abundance filter does
-        exactly that. A key left out must not shift the buffer slices of the keys left in."""
+        """`partition_array` may be called with a subset of keys, as the live-abundance filter does.
+        A key left out must not shift the buffer slices of the keys left in."""
         intervals_by_key = {
             0: LAYOUTS["three probes, dense"],
             1: LAYOUTS["two probes, far apart"],
@@ -750,12 +749,11 @@ class TestNoUnboundedCache:
     """
 
     def test_no_per_call_state_accumulates_across_fragment_lengths(self) -> None:
-        """One dict is allowed to hold one entry per WIDTH, and the rule is stricter than "no
-        growth" about the thing that actually costs the memory. A cache keyed per call grows without
-        ever being read; `_partition_memo` is read back by every later condition sharing the capture
-        panel, and it is bounded because a different template population CLEARS it. So every OTHER
-        dict must not grow, and the memo must be bounded by the number of distinct widths rather
-        than by the number of calls.
+        """One dict may hold one entry per width. A cache keyed per call grows without ever being
+        read; `_partition_memo` is read back by every later condition sharing the capture panel, and
+        it is bounded because a different template population clears it. So every other dict must not
+        grow, and the memo must be bounded by the number of distinct widths rather than by the number
+        of calls.
         """
         sampler = make_sampler({i: LAYOUTS["three probes, dense"] for i in range(40)})
         lengths = np.full(40, SEQ_LEN, dtype=np.int64)
@@ -775,12 +773,12 @@ class TestNoUnboundedCache:
             "the memo holds exactly one entry per width"
         )
 
-        # REPEATING the same sweep must add NOTHING — that is what makes it a cache rather than a leak
+        # repeating the same sweep must add nothing: that is what makes it a cache rather than a leak
         for frag_len in widths:
             sampler.partition_array("mrna", range(40), lengths, frag_len)
         assert len(sampler._partition_memo) == len(widths), "a repeat sweep must be pure cache hits"
 
-        # and a DIFFERENT template population must not accumulate beside the first
+        # and a different template population must not accumulate beside the first
         other = np.full(40, SEQ_LEN + 1, dtype=np.int64)
         for frag_len in widths:
             sampler.partition_array("mrna", range(40), other, frag_len)
@@ -790,7 +788,7 @@ class TestNoUnboundedCache:
 
     def test_the_memo_returns_what_recomputation_would(self) -> None:
         """A cache that returns a stale or aliased vector is worse than no cache. Every width is
-        compared against a freshly-built sampler's answer, and the returned array must be a COPY (a
+        compared against a freshly-built sampler's answer, and the returned array must be a copy (a
         caller mutating its result must not poison the memo)."""
         layout = {i: LAYOUTS["three probes, dense"] for i in range(4)}
         cached_sampler = make_sampler(layout)
@@ -813,7 +811,7 @@ class TestNoUnboundedCache:
             assert grown <= 1, f"{name} grew by {grown} entries across 300 fragment lengths"
 
 
-# ── Hybrid capture selects for LENGTH, and it has to do so in the marginal ──────────────────────
+# ── Hybrid capture selects for length, and it has to do so in the marginal ──────────────────────
 #
 # Hybrid capture works by hybridisation of probes to sequence. A short fragment presents less
 # sequence to hybridise, binds less well, and is captured less efficiently, so capture selects for
@@ -823,7 +821,7 @@ class TestNoUnboundedCache:
 # because the short tail it removes is disproportionately gDNA. The failure these gates guard is
 # drawing the length marginal first, capture-blind, then computing a capture-aware per-template
 # opportunity ``total_eff(w)`` and discarding it by normalising within each length: capture can then
-# move only WHERE a fragment lands, never WHETHER its length survives, and the post-capture truth
+# move only where a fragment lands, never whether its length survives, and the post-capture truth
 # summaries come out identical to the pre-capture ones. What must hold instead is
 # ``f_post(w) ∝ f_pre(w) · total_eff(w)``. The selection gates are directional and carry no
 # threshold, because choosing a magnitude would be inventing the capture efficiency curve, which the
@@ -870,9 +868,8 @@ def _panel_transcript(t_id, ref, exons, abundance) -> Transcript:
 def panel(tmp_path_factory):
     """Two 200 kb genomic references carrying 24 transcripts, half of them on a probe panel.
 
-    Sized so the geometry is the pilot's rather than a toy's: a probe run is a small neighbourhood
-    inside a large template, which is the regime in which capture's length preference is a real
-    reweighting instead of a boundary effect.
+    Sized so a probe run is a small neighbourhood inside a large template, the regime in which
+    capture's length preference is a real reweighting instead of a boundary effect.
     """
     tmp_path = tmp_path_factory.mktemp("capture_length")
     rng = np.random.default_rng(11)
@@ -938,15 +935,15 @@ def _mrna_lengths(simulator, n: int) -> dict[int, int]:
 
 @pytest.fixture(scope="module")
 def arms(panel):
-    """``{"off"|"on": {"gdna": mean, "rna": mean}}`` — capture is the ONLY thing varied.
+    """``{"off"|"on": {"gdna": mean, "rna": mean}}``: capture is the only thing varied.
 
     Each pool gets its own freshly seeded simulator, and that is what makes this an A/B. A
     simulator's first use of its RNG is the pre-capture length draw, so a fresh instance per pool
-    means both arms draw the SAME pre-capture lengths and every difference downstream is
+    means both arms draw the same pre-capture lengths and every difference downstream is
     attributable to capture. Measuring both pools from one instance does not: the gDNA pool consumes
     a different amount of RNG in each arm, so the RNA draw that follows it differs between the arms
-    by accident. PERTURBATION: removing the reweighting from the RNA pool entirely, the RNA gate
-    still reads a rise and says nothing.
+    by accident, and with the reweighting removed from the RNA pool the RNA gate would still read a
+    rise.
     """
     fasta, transcripts, probes = panel
     n = 20_000
@@ -1015,21 +1012,18 @@ class TestCaptureMovesTheLengthMarginal:
 
 
 class TestTheConditionalWasAlreadyRight:
-    """A regression guard rather than a falsification, and the distinction is the finding.
+    """A regression guard rather than a falsification.
 
     "On-target gDNA is longer than off-target" holds even when capture is not length-selective at
-    all, because the CONDITIONAL is right either way: at a fixed width, the probability of landing on
-    a probe rises with the width. What a non-selective engine is missing is the MARGINAL — it
-    normalises ``total_eff(w)`` away, so the length distribution never moves. The marginal gate above
-    is therefore the falsification and this one guards the piece that already worked
-    (`TRAPS: a-gate-that-already-passed`, `TRAPS: right-conditional-wrong-marginal`).
+    all, because the conditional is right either way: at a fixed width, the probability of landing on
+    a probe rises with the width. What a non-selective engine misses is the marginal (it normalises
+    ``total_eff(w)`` away, so the length distribution never moves), so the marginal gate above is the
+    falsification and this one guards the conditional.
 
-    An on-target population defined by the START's territory cannot be satisfied by any capture model
-    of this form, and reads INVERTED: conditioned on being captured, a fragment whose start is in the
-    intron is one that was long enough to REACH the probe, so an intronic start carries weight
-    ~ w^2/2 while an exonic start carries ~ p^2/2, flat in w
-    (`TRAPS: on-target-by-start-is-geometry`). Ask what a pool's selection rule correlates with, not
-    only what the selected fragments are.
+    An on-target population defined by the start's territory cannot be satisfied by any capture model
+    of this form, and reads inverted: conditioned on being captured, a fragment whose start is in the
+    intron is one long enough to reach the probe, so an intronic start carries weight ~ w^2/2 while an
+    exonic start carries ~ p^2/2, flat in w.
     """
 
     def test_the_on_probe_share_of_capture_mass_rises_with_fragment_length(self, tmp_path):
@@ -1071,12 +1065,11 @@ class TestTheConditionalWasAlreadyRight:
 
 
 def test_a_probe_naming_a_merged_duplicate_binds_its_kept_twin(tmp_path):
-    """The ladder's panel is designed on the raw annotation, and the index folds identical transcripts into one
+    """A panel may be designed on the raw annotation, and the index folds identical transcripts into one
     (`--collapse-duplicate-transcripts`), recording each dropped id as the kept one's alias. A probe naming a dropped
-    id was skipped at debug level, its coverage lost (2 of 13,824 on the ladder); it now binds the kept twin, the same
-    molecule.
+    id binds the kept twin, the same molecule.
 
-    Perturbation: skipping the alias, as before, leaves the twin with no probe."""
+    Perturbation: skipping the alias leaves the twin with no probe."""
     probes = tmp_path / "probes.tsv"
     probes.write_text("transcript_id\tstart\tend\nT_dropped\t200\t320\n")
     kept = _transcript("T", [(0, 2000)])

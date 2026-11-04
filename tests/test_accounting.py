@@ -462,7 +462,7 @@ def test_an_annotation_pass_given_other_read_pairs_stops_the_run(index, tmp_path
 def test_a_record_with_no_aligned_base_is_no_location(index, tmp_path, both):
     """A mapped record whose CIGAR aligns no base (``50S``) has nothing to place, so it is no mate location, like a
     supplementary record: a read pair whose mate has only such a record is withheld for a missing mate, its records
-    unplaced. The pair rule once passed such a mate unjudged, so the other mate alone made a fragment."""
+    unplaced, rather than the other mate alone making a fragment."""
     r1 = _record("no_base", R1_FWD, 5000, "50S", 5200)
     r2 = _record("no_base", R2_REV, 5200, "50S" if both else "50M", 5000)
     stats, _strand, _buffer, _payload = scan_and_buffer(

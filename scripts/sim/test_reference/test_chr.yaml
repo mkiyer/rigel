@@ -1,265 +1,50 @@
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
-#  THE METHOD-DEVELOPMENT TEST CHROMOSOME — the ONE hand-edited file (owner ruling, 2026-09-02)
+#  THE TEST CHROMOSOME — the one hand-edited source of the method-development benchmark
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 #
-# ⭐⭐⭐ THIS FILE IS THE BENCHMARK (owner, 2026-08-19): the test chromosome, its transcripts and their
-# abundances comprise the method-development benchmark the message policy is developed against. It
-# grows ONE STRUCTURE AT A TIME. Everything else in this directory — test_chr.gtf, test_shadow.gtf,
-# test_abundances.tsv and the three probe panels — is RENDERED from this file by
-# `scripts/sim/build_test_reference.py` (which also derives the two-contig FASTA with a splice motif
-# at every declared intron); the suite gate `tests/test_test_reference_renders.py` refuses a render
-# that drifted from the YAML. ⛔ Edit THIS file, then re-run the builder; never a render.
+# This file defines the test chromosome, its transcripts and their abundances. Everything else in this
+# directory (test_chr.gtf, test_shadow.gtf, test_abundances.tsv and the three probe panels) is rendered from it
+# by `scripts/sim/build_test_reference.py`, which also writes the two-contig FASTA with a splice motif at every
+# declared intron; `tests/test_test_reference_renders.py` refuses a render that drifted from this file. Edit
+# this file and re-run the builder; never edit a render. The recipe is docs/TESTING.md §0a.
 #
-# THE SCHEMA is the `rigel sim` scenario schema (docs/MANUAL.md `rigel sim`), plus two keys it lacks:
+# The schema is the `rigel sim` scenario schema plus two keys:
 #
-#   genes:                         one entry per transcript GROUP (a gene)
+#   genes:                         one entry per gene (a transcript group)
 #     - gene_id: gB1_clean
-#       strand: "+"                ⭐ explicit, always; see the strand rule below
-#       probed: false              ⭐ the capture panels are DESIGNED from this (benign / sparse / junction)
+#       strand: "+"                explicit, always (the strand rule below)
+#       probed: false              the capture panels are designed from this flag
 #       transcripts:
 #         - {t_id: B1_clean, exons: [[20000, 21000], ...], abundance: 10, nrna_abundance: 0}
-#   shadow_genes:                  transcripts on the BLANK contig `test_blank` — the SIMULATOR draws from
-#                                  them and the INDEX never sees them (unannotated transcription)
+#   shadow_genes:                  transcripts on the blank contig `test_blank`: simulated, never indexed
 #
-# exons are 0-based HALF-OPEN [start, end) as in every `rigel sim` scenario (a GTF line reads
-# start+1 .. end). `abundance` / `nrna_abundance` are RELATIVE MOLECULAR sampling weights (mature /
-# nascent). Nascent RNA needs no declaration: `rigel index` creates a single-exon nascent ENTITY spanning
-# each multi-exon transcript, and the simulator pools its contributor's nrna_abundance onto it. An
-# annotated single-exon transcript is its own nascent-class entity, so its weight goes in `abundance`.
+# Exons are 0-based half-open [start, end), as in every `rigel sim` scenario (a GTF line reads start+1 .. end).
+# `abundance` and `nrna_abundance` are relative molecular sampling weights of the spliced and the nascent RNA.
+# `rigel index` creates a single-exon nascent entity spanning each multi-exon transcript and the simulator
+# pools the transcript's nrna_abundance onto it; an annotated single-exon transcript is its own nascent-class
+# entity, so its whole weight goes in `abundance`.
 #
-# ⭐ THE STRAND RULE (owner, 2026-09-02): every group has an explicit strand and the chromosome carries
-# EQUAL representation of + and − (the builder refuses counts differing by more than one) — a sign error
-# in any strand-dependent rule is invisible on a one-strand substrate. Strands here follow
-# (type index + block) mod 2, so every TYPE appears on both strands across its five blocks. Overlapping
-# transcripts on opposite strands are THE BOTH-STRANDED BLOCK below; outside it, every gene keeps its
-# 20 kb intergenic spacer.
+# Strand rule: every gene has an explicit strand and the + and − counts differ by at most one (the builder
+# refuses more), because a sign error in a strand-dependent rule is invisible on a one-strand substrate. In the
+# single-strand blocks the strand follows (type + block) mod 2, so every type sits on both strands. Genes
+# overlap on opposite strands only in the both-stranded blocks; everywhere else a gene keeps a 20 kb
+# intergenic spacer.
 #
-# ── THE ANCHORED TWIN BLOCK (owner design, 2026-08-28) ───────────────────────────────────────────
-# ONE shape: exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb (span 17 kb), 20 kb
-# intergenic between genes; FIVE gene types varying exactly one bit each × FIVE abundance blocks:
-#   clean    unprobed, no nascent — intron + flanks exactly pure gDNA; one certified sj per intron
-#   nasc     unprobed, nascent ON — the contaminated message source
-#   cap      probed,   no nascent — the enrichment cliff between source and destination
-#   capnasc  probed,   nascent ON — both at once
-#   silent   probed,   mrna = 0  — every object pure gDNA; any claimed RNA is a false positive
-# Molar ladders, half-decade steps, mature UP the blocks and nascent DOWN — independent levels, as the
-# big ladder draws them: mrna 10/30/100/300/1000 (silent = 0), nrna 100/30/10/3/1 (nasc/capnasc only).
-# In fragment terms the nascent entity spans 17 kb against 3 kb spliced, so the per-gene nascent:mature
-# fragment ratio is ≈ 5.67·nrna/mrna = 57 / 5.7 / 0.57 / 0.057 / 0.0057 across the blocks; library-wide
-# nascent is a STRESS burden, not real data (DESIGN.md §0b, the nascent scope ruling).
+# Replication rule for multi-isoform structures: each structure appears in three regimes of the host A against
+# its alternative B, A ≫ B (9:1, suffix `_ab`), A ≪ B (1:9, `_ba`) and A ≈ B (1:1, `_eq`), with the pair's total
+# on the mature ladder, so the ratio and the depth are separate axes. "Blocks B2 (×3) and B4 (×30)" below means
+# the regime's units are multiplied by 3 and by 30.
 #
-# ── THE MONO BLOCK (owner-approved 2026-09-02) ────────────────────────────────────────────────────
-# Single-exon transcripts — the edge-only message case: no sj, no spliced RNA, the ONLY message source
-# is the gene edge (rung 3). One 1 kb exon, 20 kb intergenic, FOUR types × the five blocks:
-#   mono / capmono (unprobed / probed, mrna by block) · monosilent / capmonosilent (mrna = 0, the
-#   false-positive controls). No nascent on any mono gene (nothing to model on a single exon).
+# Capture panels (rendered): benign tiles each probed gene's exon union with 8 × 125 bp probes, seamless from each
+# union piece's start and never spanning a junction (a piece shorter than one probe gets one probe centred on
+# it); sparse centres one 125 bp probe on every annotated exon of a probed gene; junction places one two-block
+# probe (62 + 63 bp) on each junction of a probed gene and nothing else.
 #
-# ── THE ISOFORM BLOCK (owner-approved 2026-09-02; TRIMMED to one structure the same day) ──────────
-# Multi-exonic, multi-isoform, single-stranded transcripts — rung 3 of the message layer, grown ONE
-# structure at a time (owner ruling: a moved number must have one cause). Host U = the twin shape
-# (unprobed or probed), no nascent; each type adds ONE second isoform T (offsets from the gene start s;
-# mirrored within the 17 kb span on a − gene). Present now:
-#   altstart  T starts INSIDE U's middle exon (an alternative TSS): T = [s+8500, s+9000) [s+16000, s+17000)
-#             → one exon|exon TERMINUS boundary at s+8500; outside piece [s+8000, s+8500) U-only, inside
-#             piece [s+8500, s+9000) U+T
-#   capaltstart  the same, probed
-#   altss     T splices out at an alternative DONOR 600 bp into U's middle exon: T = [s, s+1000)
-#             [s+8000, s+8600) [s+16000, s+17000) → one exon|exon boundary at s+8600 carrying a DONOR flag
-#             and no terminus; the piece [s+8600, s+9000) is U's exon AND T's intron (a mixed-bit region).
-#             Added 2026-09-02 as the alternative-splice-site case (the owner's approval, same day).
-#   capaltss  the same, probed
-# ⭐ THE REPLICATION RULE FOR MULTI-ISOFORM STRUCTURES (owner, 2026-09-02): a structure is replicated
-# across THREE abundance regimes of its two isoforms A (the host U) and B (the second isoform T) —
-# A ≫ B (9:1), A ≪ B (1:9) and A ≈ B (1:1), suffixes `_ab`, `_ba`, `_eq` — with the PAIR's total on the
-# mature ladder (10/30/100/300/1000), so the ratio and the depth are separate axes. `altstart` predates
-# the rule and keeps its anti-ladder (U up, T down); it is re-cut under the rule when it is next touched.
-# Queued, each to be added on the day it becomes the target:
-#   nest (a single-exon T nested in U's middle exon → a region walled by termini), instart (T's
-#   alternative first exon inside U's intron).
-# The block starts at 1,365,000, pitch 37,000, 8 types × 5 blocks = 40 gene slots, the types
-# interleaved within a block (slot = (block − 1) · n_types + type); strand = "+" when (type + block) is
-# even, else "−"; `genome_length` stays 2.9 Mb so the gDNA density per base does not move when a
-# structure is added or removed.
-#
-# ── THE BLANK CHROMOSOME + SHADOWS (owner design, 2026-08-29) ─────────────────────────────────────
-# `test_blank` carries NO annotation; the shadow transcripts below are simulated there (both strands,
-# single-exon and 3-exon, a molar ladder 250 → 1, ≈ 5 % of RNA fragments — pervasive transcription at
-# a realistic dose, two DEEP shadows reproducing the contaminated seeds seen on real data). No probes:
-# an annotation-designed panel cannot target what it does not know. What it controls: anything that
-# trusts the annotation's notion of "pure gDNA" — the gDNA strand-overdispersion fit above all.
-#
-# Capture panels (rendered): BENIGN tiles each probed gene's exon UNION 8 × 125 bp seamless per union
-# piece, never spanning an sj; SPARSE centres one 125 bp probe on every annotated exon of a probed gene;
-# JUNCTION places one two-block probe (62 + 63 bp) per sj of a probed gene and nothing else.
+# The blocks, in chromosome order, are described where each starts below: twin, mono, isoform, walled,
+# terminus-cluster, both-stranded, sj+terminus, encompassing, in-exon, shared-exon, in-intron, head-to-head and
+# tiny-exon; the shadow genes on `test_blank` follow them.
 
 ref_name: test_chr
-#
-# ── THE WALLED BLOCK (owner-approved 2026-09-03; THE SCAN's stress test) ──────────────────────────
-# Exon PIECES with NO licensed face — the classes the ladder's walled-exon census found that a scan can
-# reach (11,350 ladder slots, 2.0 M fragments: 35 % between two termini, 24 % junction|terminus, 17 %
-# junction|junction, 17 % against a refused intron face). Host U = the twin shape; FOUR structures:
-#   chain     three alternative TSSs 40 / 100 / 240 bp into exon 1 — two walled pieces in a row (60, 140 bp)
-#   tssalt    a TSS 300 bp into exon 2 beside an alternative donor 600 bp in — one piece, terminus|junction
-#   tandem    an alternative acceptor and donor on exon 2 — one piece between two junctions (600 bp)
-#   altlast   two isoforms ending in an intronic last exon by different acceptors and TESs — two pieces
-#             in a row, the last against a REFUSED intron face
-# Under the REPLICATION RULE: three regimes (ab host 9 : alternatives 1 each; ba 1 : 9; eq 5 : 5),
-# unprobed / probed (cap*), blocks B2 and B4 (×3, ×30 of the twin ladder / 10); slots 40–87, strands
-# balanced. The chromosome grows to 4.65 Mb and the test configs' fragment budget from 480 k to 720 k so
-# the existing blocks keep their depth. The refused|refused class (an exon inside an intron) is the level
-# message's case and is deferred with it.
-#
-# ── THE TERMINUS-CLUSTER BLOCK (owner-approved 2026-09-05; the LEVEL LANE's substrate) ─────────────
-# The ladder's reach census found half of its pass-zero error at nodes no message reached, and the
-# mechanism is the EMPTY exon piece: closely spaced transcript ends inside one exon cut it into pieces
-# shorter than a fragment, which hold no contained fragment (their solve is trivial) while their
-# BOUNDARIES carry the crossings — the level lane's path (boundary → empty → boundary). Mirrored from a
-# real ladder locus, MIR99AHG chr21:16,606,994–16,607,141 (+): a shared last exon whose acceptor is
-# followed by TEN transcription ends 126 / 136 / 138 / 140 / 141 / 142 / 143 / 144 / 146 / 147 bp in,
-# while other isoforms continue — nine pieces of 1–10 bp, every one empty, 4,200 crossings per boundary
-# at the ladder's depth and one true gDNA fragment each. Here: host U = the twin shape; ten isoforms
-# T1…T10 share U's first two exons and end in U's last exon at those offsets (on a − gene the cluster
-# sits at the LOW end of the first exon, where a − transcript ends). Under the REPLICATION RULE with ten
-# alternatives the pair total sits one rung up the ladder so the regimes stay integers: block 2 total 100
-# (ab U 90 : T 1 each; ba U 10 : T 9 each; eq U 50 : T 5 each), block 4 total 1000 (×10); unprobed /
-# probed (cap*); slots 88–99 at pitch 37,000 from 4,621,000; the strand alternates within a block and
-# flips between the two blocks, so every type sits on both strands. The chromosome grows to 5.094 Mb
-# and the test configs' fragment budget from 720 k to 840 k (RNA depth per existing transcript −3 %,
-# gDNA density per base +6 %: the two cannot both be held when 6,600 abundance units join 32,328 and
-# 444 kb join 4.65 Mb).
-#
-# ── THE BOTH-STRANDED BLOCK (owner-approved 2026-09-07) ───────────────────────────────────────────
-# Overlapping transcripts on OPPOSITE strands — the nodes that admit RNA on both strands (AXIOM 0's two
-# bits both set), 14 % of the ladder's chain and 38–50 % of the landed policy's remaining error on the
-# stranded capture-ON rows. Every locus is TWO genes on opposite strands sharing one type token (the
-# render gate's rule that every type sits on both strands is met inside the locus): the host H and the
-# antisense A, ids `gB2_{cap}{type}_{regime}_H` / `_A`. Mirrored from the ladder's loci:
-#   asin     an antisense's two 300 bp exons (1.5 kb intron) inside the host's first intron in transcription
-#            order — TTC28-AS1 in TTC28, MYO18B-AS1 in MYO18B (58 % of the AMBIG error); host on +
-#   asinrev  the same with the host on − (the antisense mirrored within the 17 kb span)
-#   span     an antisense with a 300 bp exon in the host's first intron and a 2 kb exon covering the host's
-#            middle exon with 500 bp overhangs into both introns — PPM1F-AS1 over TOP3B (21 %); host on +
-#   conv     a simple overlap at the ends of two opposite-stranded transcripts (the owner's structure):
-#            TF + exons [s+1000, s+2000) [s+10000, s+16000), TR − exons [s+14000, s+16000) [s+20000, s+21000)
-#            — the 3' ends overlap in [s+14000, s+16000); s+16000 carries TF's TES+ and TR's acceptor on −,
-#            a junction and a terminus on one boundary from different strands (5 %); span 21 kb
-# Regimes (host : antisense), pair total 100: ab 90 : 10 (the realistic lncRNA case), ba 10 : 90 (a
-# near-silent host under an expressed antisense), eq 50 : 50; unprobed and HOST-ONLY probed (`cap`: the
-# probes tile the host's exons and nothing of the antisense — a capture design's enrichment cliff between
-# the two strands inside one node). No nascent on the hosts in this first cut. 24 loci = 48 genes, slots
-# 100–123 at pitch 37,000 from 5,065,000; the chromosome grows to 5.986 Mb and the fragment budget from
-# 840 k to 960 k (gDNA density per base −3 %, RNA depth per existing transcript +8 %).
-#
-# ── THE sj+terminus BLOCK (owner-approved 2026-09-08; the case D of the message plan) ────────────
-# ONE boundary carrying a splice junction AND a transcript terminus of the SAME strand — 386 on the
-# ladder, 1–2 % of an in-scope row's error, almost all of it at the exon INSIDE the terminus, which
-# today receives only the gDNA lane's lower bound (the terminus rule refuses a junction, the junction
-# rules refuse a terminus). Two families, mirrored from the ladder: a transcript that STARTS at an
-# internal exon's edge (RUNX1's two-exon isoform ENST00000468726 starts where exon 4 of the long isoform
-# begins, chr21:35,065,072 −: TSS−+DON−) and one that ENDS at an internal exon's edge (LARGE1's isoform
-# ending where exon 7 of twenty others begins, chr22:33,381,918 −: TES−+ACC−); the + strand carries the
-# mirror families TSS++ACC+ and TES++DON+. Host U = the twin shape; S = U's exons 2–3 in transcription
-# order, starting at exon 2's transcript-5' edge; E = U's exons 1–2, ending at exon 2's transcript-3'
-# edge — so every gene makes BOTH families, one at each boundary of exon 2, and a − gene makes the − forms.
-# Under the REPLICATION RULE with two alternatives: ab U 9 : S 1 : E 1, ba 1 : 9 : 9, eq 5 : 5 : 5, blocks
-# B2 (×3) and B4 (×30); unprobed / probed (cap*); 12 genes, slots from 5,957,000 at pitch 37,000, the
-# strand alternating within a block and flipping between them. The chromosome grows to 6.401 Mb and the
-# fragment budget from 960 k to 1,030 k (2,970 abundance units join 41,965: RNA depth per existing
-# transcript +0.2 %, gDNA density per base +0.3 %).
-# ── THE ENCOMPASSING BLOCK (session 2026-09-14; the second both-stranded block) ────────────────────
-# A long SINGLE-EXON antisense whose one exon ENCOMPASSES the whole of a spliced host on the other strand:
-# every one of the host's slots admits RNA on both strands (its exons are exon∩exon, its introns are the
-# antisense's exon), every boundary carries only the host's bits, and the antisense's level is measured
-# nowhere but in its two single-strand FLANKS — the owner's encompassing locus (a single-exon TB− over a
-# two-exon TA+, 2026-09-13), whose remaining miss is
-# the shallow flank under the intergenic gDNA edge level (`ISSUES: the-lower-bound-noise-ratchet`). On the
-# ladder: 6 gene pairs — ENSG00000280007 (−, a 20.4 kb exon) over TUBA8's four-exon isoform, ENSG00000279080
-# (+, 20.4 kb) over PLA2G6's three-exon isoform, ENSG00000279159 (−, 49 kb) over MTMR3's — all of the
-# encompassing transcripts silent in the ladder's draw, so this is where the case is expressed. Here: host
-# H = the twin shape on + at o+1,500; antisense A = one exon [o, o+20,000) on −, 1.5 kb of single-strand
-# flank on each side. Regimes (H : A) ab 90 : 10, ba 10 : 90, eq 50 : 50, pair total 100; unprobed and
-# HOST-ONLY probed (`cap`); ids `gB2_{cap}enc_{regime}_H` / `_A`. 6 loci = 12 genes at pitch 40,000 (span
-# 20 kb + the 20 kb spacer) from 6,401,000.
-# The chromosome grows to 6.641 Mb and the fragment budget from 1,030 k to 1,060 k (600 abundance
-# units join 44,935: RNA depth per existing transcript +1.6 %, gDNA density per base -0.8 %).
-# ── THE IN-EXON BLOCK (session 2026-09-14) ──────────────────────────────────────────────────────────
-# A short SINGLE-EXON antisense gene wholly INSIDE one exon of the host, with no junction and no
-# single-strand piece of its own anywhere — the slot the tilt atom's accepted limit names (`ISSUES:
-# the-atom-at-an-unwitnessed-both-strand-slot`; the golden `antisense_contained`, a 1,000-fragment toy on
-# which the atom reads 177.6 false gDNA of 1,000), so the panel carries its number. On the ladder: 13 gene
-# pairs, six of them in a protein-coding gene's LAST exon — ENSG00000273300 (+, 427 bp, expressed) inside
-# UFD1's 4.2 kb last exon, TSSK2 (+, 1,315 bp) inside ESS2's, RNF185-AS1 (−, 353 bp) inside RNF185's.
-# Here: host H = the twin shape on + with a 3 kb LAST exon [o+16,000, o+19,000) (the 3' UTR); antisense
-# A = one 500 bp exon [o+17,000, o+17,500) on −, 1 kb of single-strand host exon before it and 1.5 kb
-# after (the host's TES side). Regimes ab
-# 90 : 10 (the realistic case), ba 10 : 90, eq 50 : 50, pair total 100; unprobed / host-only probed
-# (`cap`); ids `gB2_{cap}inexon_{regime}_H` / `_A`. 6 loci = 12 genes at pitch 39,000 from 6,641,000.
-# The chromosome grows to 6.875 Mb and the fragment budget from 1,060 k to 1,090 k (600 abundance
-# units join 45,535: RNA depth per existing transcript +1.5 %, gDNA density per base -0.7 %).
-# ── THE SHARED-EXON BLOCK (session 2026-09-14; the deep stress) ─────────────────────────────────────
-# Two SPLICED genes on opposite strands sharing ONE exon exactly: the host's junction certifies RNA+ at the
-# exon's left face and the antisense's certifies RNA− at its right face, so the RNA level lanes deliver a
-# level on EACH strand into one AMBIG exon, and each face pairs a junction on one strand with a terminus
-# on the other, with no single-strand exon piece anywhere on it — the W12 deep stress (`deep_stress.py`,
-# 2026-09-13; DESIGN.md §6b.15.13 judged the tilt atom on it), here at the pair total's depth rather than
-# the toy's 500k. On the ladder the tail-to-tail shared LAST exon is the largest exon∩exon class: 74 of
-# 241 spliced pairs — SMARCB1 (+) × DERL3 (−) share 2,715 bp of their last exons, PPIL2 × YPEL1 2,480 bp,
-# DDTL × DDT 1,271 bp; the exact coincidence is the stress's idealisation. `conv` is the partial form (TR's
-# last exon inside TF's, its acceptor at TF's TES); this is the exact one. Here: H + exons [o, o+2,000)
-# [o+10,000, o+20,000); A − exons [o+10,000, o+20,000) [o+28,000, o+30,000). Regimes ab 90 : 10, ba 10 : 90,
-# eq 50 : 50, pair total 100; unprobed / host-only probed (`cap`); ids `gB2_{cap}shared_{regime}_H` / `_A`.
-# 6 loci = 12 genes at pitch 50,000 from 6,875,000.
-# The chromosome grows to 7.175 Mb and the fragment budget from 1,090 k to 1,120 k (600 abundance
-# units join 46,135: RNA depth per existing transcript +1.4 %, gDNA density per base -1.5 %).
-# ── THE IN-INTRON BLOCK (session 2026-09-14) ────────────────────────────────────────────────────────
-# A SINGLE-EXON gene inside the opposite strand's INTRON — the majority AMBIG class: the slot admits gDNA,
-# the host's unspliced RNA+ and the antisense's RNA−, the antisense has no junction, and the only message
-# source on its strand is its own gene edge (the mono block's case, now both-stranded). On the ladder: 203
-# gene pairs — processed pseudogenes and lncRNAs of median 567 bp (the small-RNA classes excluded) in
-# introns of median 20 kb: RPL31P62 (−, 328 bp) in IL17RA's intron, ENSG00000279390 (+, 2,191 bp) in
-# NRIP1's, RPL32P5 (+, 373 bp) in ADA2's. `asin` is the SPLICED antisense in the first intron; this is the
-# unspliced one. Here: host H = the twin shape on +; antisense A = one 600 bp exon [o+4,200, o+4,800) on −,
-# centred in H's first intron with 3.2 kb of intron on each side. Regimes ab 90 : 10, ba 10 : 90, eq 50 : 50,
-# pair total 100; unprobed / host-only probed (`cap`); ids `gB2_{cap}inintron_{regime}_H` / `_A`. 6 loci =
-# 12 genes at pitch 37,000 from 7,175,000.
-# The chromosome grows to 7.397 Mb and the fragment budget from 1,120 k to 1,140 k (600 abundance
-# units join 46,735: RNA depth per existing transcript +0.5 %, gDNA density per base -1.3 %).
-# ── THE HEAD-TO-HEAD BLOCK (session 2026-09-14) ─────────────────────────────────────────────────────
-# Two genes on opposite strands overlapping at their 5' ends — `conv` with the two strands SWAPPED and
-# nothing else, so the pair differs by exactly one bit: H keeps TF's exons, now on −, [o, o+1,000)
-# [o+9,000, o+15,000) (its TSS at o+15,000); A keeps TR's, now on +, [o+13,000, o+15,000) [o+19,000,
-# o+20,000) (its TSS at o+13,000). The 5' UTRs overlap in [o+13,000, o+15,000): o+15,000 carries H's TSS−
-# and A's DONOR+ (a terminus and a junction on one boundary from different strands, conv's mirror),
-# o+13,000 carries A's TSS+ inside H's first exon (an exon|exon terminus boundary that admits both strands).
-# On the ladder: 93 head-to-head pairs, 62 with overlapping first exons (median overlap 386 bp) — TRMT2A (−)
-# ⟷ RANBP1 (+) 1,455 bp, BTG3 (−) ⟷ BTG3-AS1 (+) 1,250 bp, ZBTB21 (−) ⟷ ZNF295-AS1 (+) 1,194 bp. Regimes ab
-# 90 : 10, ba 10 : 90, eq 50 : 50, pair total 100; unprobed / host-only probed (`cap`); ids
-# `gB2_{cap}div_{regime}_H` / `_A`. 6 loci = 12 genes at pitch 40,000 from 7,397,000.
-# The chromosome grows to 7.637 Mb and the fragment budget from 1,140 k to 1,170 k (600 abundance
-# units join 47,335: RNA depth per existing transcript +1.3 %, gDNA density per base -0.6 %).
-#
-# ── THE TINY-EXON BLOCK (session 2026-09-16; the RULER's substrate) ─────────────────────────────────
-# Exons SHORTER THAN A FRAGMENT: a piece that holds no contained fragment has no contained gDNA evidence,
-# and the ruler that read a transcript's length from its objects' contained supports read such a
-# transcript as 0 and then its floor (`ISSUES: ruler-multimapper-floor-caps-the-correction`). The
-# accumulator counts a fragment at EVERY boundary it crosses, so a tiny exon's evidence is its two edge
-# crossings against the intron's level, and its length is its own bases. Two structures, unprobed / probed
-# (cap*):
-#   tiny    ten 40 bp exons at 1,040 bp pitch (introns 1,000 bp; span 9,400): no piece of the transcript
-#           holds a fragment (frag_min 50), every base of it is crossing-witnessed
-#   mixed   exon 1 kb · eight 40 bp exons at 1,040 bp pitch · exon 1 kb (span 11,320): the junction beside a
-#           long exon has one supported flank and one empty one — the flank-versus-pool case
-# Blocks B2 (×3) and B4 (×30) of the twin ladder; no nascent RNA; 4 types × 2 blocks = 8 genes, slots at
-# pitch 37,000 from 7,637,000, the strands alternating within a block and flipped between the two blocks. THE BENIGN PANEL's rule gains one clause with this
-# block: a union piece shorter than one probe gets a single probe centred on it (spilling into its flanks,
-# as a real panel's probe over a tiny exon does) — no existing probed gene has such a piece, so no existing
-# panel line changes. The witness geometry is declared, not repaired: a gDNA fragment over a centred probe
-# overlaps at most 125 bp of it while a spliced fragment over four tiny exons overlaps its whole length,
-# so the gDNA witness under-reads a probed tiny transcript's capture by that ratio
-# (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
-# The chromosome grows to 7.93 Mb; the fragment budget stays at 1,170 k (1,320 abundance units join
-# 47,935, but on 400–2,400 bp of spliced length they draw under 1 % of the RNA fragments; gDNA density
-# per base −3.7 %).
 genome_length: 7930000      # the tiny block's last gene ends at 7,907,320; the 20 kb spacer follows
 seed: 20260819
 blank:
@@ -268,7 +53,18 @@ blank:
   seed: 20260829
 
 genes:
-  # ── THE ANCHORED TWIN BLOCK (owner design, 2026-08-28): 5 types × 5 blocks, first gene at 20,000, pitch 37,000
+  # ── THE ANCHORED TWIN BLOCK: 5 types × 5 blocks, first gene at 20,000, pitch 37,000 ─────────────────────
+  #    One shape: exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb (span 17 kb). Each type varies
+  #    one bit:
+  #      clean    unprobed, no nascent: introns and flanks are pure gDNA; one certified junction per intron
+  #      nasc     unprobed, nascent on: a contaminated message source
+  #      cap      probed, no nascent: the enrichment cliff between a source and a destination
+  #      capnasc  probed, nascent on: both at once
+  #      silent   probed, mrna = 0: every object is pure gDNA, so any RNA called here is a false positive
+  #    Mature runs up the blocks and nascent down, in half-decade steps: mrna 10/30/100/300/1000 (silent 0),
+  #    nrna 100/30/10/3/1 (nasc and capnasc only). The nascent entity spans 17 kb against 3 kb spliced, so a
+  #    gene's nascent:mature fragment ratio is ≈ 5.67·nrna/mrna, from 57 down to 0.0057 across the blocks;
+  #    the library-wide nascent share is a stress load, not a model of real data.
   - gene_id: gB1_clean
     strand: "-"
     probed: false
@@ -394,7 +190,9 @@ genes:
     probed: true
     transcripts:
       - {t_id: B5_silent, exons: [[908000, 909000], [916000, 917000], [924000, 925000]], abundance: 0}
-  # ── THE MONO BLOCK (owner-approved 2026-09-02): single-exon transcripts, 4 types × 5 blocks, first gene at 945,000, pitch 21,000
+  # ── THE MONO BLOCK: single-exon transcripts, 4 types × 5 blocks, first gene at 945,000, pitch 21,000 ────
+  #    One 1 kb exon and no junction, so the gene edge is the only message source. mono / capmono (unprobed /
+  #    probed, mrna by block); monosilent / capmonosilent (mrna = 0, the false-positive controls). No nascent.
   - gene_id: gB1_mono
     strand: "-"
     probed: false
@@ -495,10 +293,12 @@ genes:
     probed: true
     transcripts:
       - {t_id: B5_capmonosilent, exons: [[1344000, 1345000]], abundance: 0}
-  # ── THE ISOFORM BLOCK (owner-approved 2026-09-02): host U = the twin shape + ONE second isoform T,
-  #    8 types × 5 blocks, first gene at 1,365,000, pitch 37,000. U by the mature ladder, T by the
-  #    anti-ladder (100/30/10/3/1) so the terminus step runs from T-dominant to invisible. On a − gene
-  #    the geometry is MIRRORED within the 17 kb span so each type keeps its biological meaning.
+  # ── THE ISOFORM BLOCK: host U = the twin shape + one second isoform T, 8 types × 5 blocks ─────────────────
+  #    First gene at 1,365,000, pitch 37,000. Offsets are from the gene start s and are mirrored within the
+  #    17 kb span on a − gene, so each type keeps its meaning. altstart / capaltstart (unprobed / probed): T
+  #    starts inside U's middle exon (an alternative TSS), T = [s+8500, s+9000) [s+16000, s+17000), so s+8500 is
+  #    an exon|exon terminus boundary between a U-only and a U+T piece. U follows the mature ladder and T the
+  #    anti-ladder (100/30/10/3/1), so the terminus step runs from T-dominant to invisible.
   - gene_id: gB1_altstart
     strand: "-"
     probed: false
@@ -559,8 +359,9 @@ genes:
     transcripts:
       - {t_id: B5_capaltstart_U, exons: [[1698000, 1699000], [1706000, 1707000], [1714000, 1715000]], abundance: 1000}
       - {t_id: B5_capaltstart_T, exons: [[1706500, 1707000], [1714000, 1715000]], abundance: 1}
-  # ── altss (2026-09-02): the alternative DONOR 600 bp into U's middle exon, three abundance regimes
-  #    (A ≫ B 9:1, A ≪ B 1:9, A ≈ B 1:1; the pair's total on the ladder), probed and unprobed, slots 10–39.
+  # ── altss / capaltss: T splices out at an alternative donor 600 bp into U's middle exon, T = [s, s+1000)
+  #    [s+8000, s+8600) [s+16000, s+17000). The boundary at s+8600 carries a donor and no terminus, and
+  #    [s+8600, s+9000) is U's exon and T's intron (a mixed-bit region). Three regimes; slots 10–39.
   - gene_id: gB1_altss_ab
     strand: "-"
     probed: false
@@ -741,12 +542,14 @@ genes:
     transcripts:
       - {t_id: B5_capaltss_eq_U, exons: [[2808000, 2809000], [2816000, 2817000], [2824000, 2825000]], abundance: 500}
       - {t_id: B5_capaltss_eq_T, exons: [[2808000, 2809000], [2816000, 2816600], [2824000, 2825000]], abundance: 500}
-  # ── THE WALLED BLOCK (designed 2026-09-03 for THE SCAN): exon pieces with NO licensed face — the four
-  #    classes the ladder's walled-exon census found that a scan can reach: chain (three alternative TSSs
-  #    40/100/240 bp into exon 1: a chain of termini), tssalt (a TSS 300 bp into exon 2 beside an
-  #    alternative donor 600 bp in), tandem (alternative acceptor and donor on exon 2), altlast (two isoforms
-  #    ending in an intronic last exon by different acceptors and TESs); three regimes (ab host-dominant,
-  #    ba alternatives-dominant, eq equal) × unprobed / probed × blocks B2, B4 (×3, ×30); slots 40–87.
+  # ── THE WALLED BLOCK: exon pieces with no licensed face; host U = the twin shape, four structures ────────
+  #      chain    three alternative TSSs 40 / 100 / 240 bp into exon 1: two walled pieces in a row (60, 140 bp)
+  #      tssalt   a TSS 300 bp into exon 2 beside an alternative donor 600 bp in: one terminus|junction piece
+  #      tandem   an alternative acceptor and donor on exon 2: one piece between two junctions (600 bp)
+  #      altlast  two isoforms ending in an intronic last exon by different acceptors and TESs: two pieces in a
+  #               row, the last against a refused intron face
+  #    Regimes ab (host 9 : each alternative 1), ba (1 : 9), eq (5 : 5); unprobed / probed (cap*); blocks B2
+  #    (×3) and B4 (×30); slots 40–87.
   - gene_id: gB2_chain_ab
     strand: "+"
     probed: false
@@ -1084,8 +887,14 @@ genes:
       - {t_id: B4_capaltlast_eq_T, exons: [[4584000, 4585000], [4587000, 4587800]], abundance: 150}
       - {t_id: B4_capaltlast_eq_T2, exons: [[4584000, 4585000], [4587300, 4587600]], abundance: 150}
 
-  # ── THE TERMINUS-CLUSTER BLOCK (2026-09-05): host U + ten isoforms ending 126–147 bp into U's last exon
-  #    (mirrored from MIR99AHG chr21:16,606,994–16,607,141); regimes ab 90:1×10, ba 10:9×10, eq 50:5×10 (block 2), ×10 (block 4)
+  # ── THE TERMINUS-CLUSTER BLOCK: closely spaced transcript ends that cut one exon into empty pieces ──────
+  #    Host U = the twin shape; ten isoforms T1…T10 share U's first two exons and end in U's last exon 126 / 136 /
+  #    138 / 140 / 141 / 142 / 143 / 144 / 146 / 147 bp past its acceptor (the shape of MIR99AHG's last exon), so
+  #    the exon holds nine pieces of 1–10 bp: each is shorter than a fragment, holds no contained fragment, and
+  #    leaves the crossings to its boundaries. On a − gene the cluster sits at the low end of the first exon.
+  #    The pair total sits one rung up the ladder so the regimes stay integers: block 2 total 100 (ab U 90 : T 1
+  #    each; ba 10 : 9 each; eq 50 : 5 each), block 4 ×10; unprobed / probed (cap*); slots 88–99 at pitch 37,000
+  #    from 4,621,000, the strand alternating within a block and flipping between the two.
   - gene_id: gB2_cluster_ab
     strand: "+"
     probed: false
@@ -1266,8 +1075,21 @@ genes:
       - {t_id: B4_capcluster_eq_T8, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044144]], abundance: 50}
       - {t_id: B4_capcluster_eq_T9, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044146]], abundance: 50}
       - {t_id: B4_capcluster_eq_T10, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044147]], abundance: 50}
-  # ── THE BOTH-STRANDED BLOCK (2026-09-07): two genes per locus on opposite strands, one type token —
-  #    asin (host +), asinrev (host −), span, conv; regimes ab 90:10, ba 10:90, eq 50:50; cap = the host alone probed
+  # ── THE BOTH-STRANDED BLOCK: overlapping genes on opposite strands, whose slots admit RNA on both ────────
+  #    Each locus is two genes sharing one type token, the host H and the antisense A (ids
+  #    `gB2_{cap}{type}_{regime}_H` / `_A`):
+  #      asin     an antisense's two 300 bp exons (1.5 kb intron) inside the host's first intron; host on +
+  #      asinrev  the same with the host on − (the antisense mirrored within the 17 kb span)
+  #      span     an antisense with a 300 bp exon in the host's first intron and a 2 kb exon over the host's
+  #               middle exon, overhanging 500 bp into both introns
+  #      conv     the 3' ends of two opposite-strand transcripts overlap: TF + exons [s+1000, s+2000)
+  #               [s+10000, s+16000), TR − exons [s+14000, s+16000) [s+20000, s+21000); s+16000 carries TF's
+  #               TES+ and TR's acceptor on −, a junction and a terminus of different strands on one boundary;
+  #               span 21 kb
+  #    Regimes (host : antisense), pair total 100: ab 90 : 10, ba 10 : 90 (a near-silent host under an expressed
+  #    antisense), eq 50 : 50; unprobed and host-only probed (`cap`: the probes tile the host's exons and none of
+  #    the antisense's, an enrichment cliff between the strands inside one slot). No nascent RNA on the hosts.
+  #    24 loci = 48 genes from 5,065,000 at pitch 37,000.
   - gene_id: gB2_asin_ab_H
     strand: "+"
     probed: false
@@ -1509,11 +1331,13 @@ genes:
     transcripts:
       - {t_id: B2_capconv_eq_A, exons: [[5930000, 5932000], [5936000, 5937000]], abundance: 50}
 
-  # ── THE sj+terminus BLOCK (owner-approved 2026-09-08): host U = the twin shape + TWO isoforms whose
-  #    terminus sits exactly on one of U's junctions — S starts at exon 2's transcript-5' edge (RUNX1's
-  #    short isoform, chr21:35,065,072), E ends at exon 2's transcript-3' edge (LARGE1's isoform ending at
-  #    chr22:33,381,918); on a − gene the roles swap exon sets. Regimes ab 9:1:1, ba 1:9:9, eq 5:5:5,
-  #    blocks B2 (×3) and B4 (×30); unprobed / probed (cap); slots from 5,957,000 at pitch 37,000
+  # ── THE sj+terminus BLOCK: one boundary carrying a junction and a terminus of the same strand ───────────
+  #    Host U = the twin shape plus two isoforms: S = U's exons 2–3 in transcription order, starting at exon 2's
+  #    transcript-5' edge, and E = U's exons 1–2, ending at exon 2's transcript-3' edge (modelled on RUNX1's and
+  #    LARGE1's short isoforms). Every gene carries both families, one at each boundary of exon 2: TSS++ACC+ and
+  #    TES++DON+ on a + gene, TSS−+DON− and TES−+ACC− on a − gene. Regimes ab U 9 : S 1 : E 1, ba 1 : 9 : 9,
+  #    eq 5 : 5 : 5; blocks B2 (×3) and B4 (×30); unprobed / probed (cap); 12 genes from 5,957,000 at pitch
+  #    37,000, the strand alternating within a block and flipping between the two.
   - gene_id: gB2_sjterm_ab
     strand: "+"
     probed: false
@@ -1599,9 +1423,11 @@ genes:
       - {t_id: B4_capsjterm_eq_S, exons: [[6372000, 6373000], [6380000, 6381000]], abundance: 150}
       - {t_id: B4_capsjterm_eq_E, exons: [[6364000, 6365000], [6372000, 6373000]], abundance: 150}
 
-  # ── THE ENCOMPASSING BLOCK (2026-09-14): a 20 kb single-exon antisense A on − over the twin-shape
-  #    host H on +; regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci at
-  #    pitch 40,000 from 6,401,000
+  # ── THE ENCOMPASSING BLOCK: a 20 kb single-exon antisense A on − over the twin-shape host H on + ─────────
+  #    H at o+1,500 and A = one exon [o, o+20,000), leaving 1.5 kb of single-strand flank on each side. Every host
+  #    slot admits RNA on both strands, every boundary carries only the host's bits, and the antisense's level is
+  #    measured only in its two flanks. Regimes (H : A) ab 90 : 10, ba 10 : 90, eq 50 : 50, pair total 100;
+  #    unprobed / host-only probed (cap); 6 loci at pitch 40,000 (span 20 kb + the 20 kb spacer) from 6,401,000.
   - gene_id: gB2_enc_ab_H
     strand: "+"
     probed: false
@@ -1663,9 +1489,11 @@ genes:
     transcripts:
       - {t_id: B2_capenc_eq_A, exons: [[6601000, 6621000]], abundance: 50}
 
-  # ── THE IN-EXON BLOCK (2026-09-14): a 500 bp single-exon antisense A on − inside H's 3 kb last exon;
-  #    regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci at pitch 39,000
-  #    from 6,641,000
+  # ── THE IN-EXON BLOCK: a 500 bp single-exon antisense A on − wholly inside the host's last exon ──────────
+  #    H = the twin shape on + with a 3 kb last exon [o+16,000, o+19,000) (the 3' UTR); A = [o+17,000, o+17,500),
+  #    with 1 kb of single-strand host exon before it and 1.5 kb after. A has no junction and no single-strand
+  #    piece of its own. Regimes ab 90 : 10, ba 10 : 90, eq 50 : 50, pair total 100; unprobed / host-only probed
+  #    (cap); 6 loci at pitch 39,000 from 6,641,000.
   - gene_id: gB2_inexon_ab_H
     strand: "+"
     probed: false
@@ -1727,9 +1555,12 @@ genes:
     transcripts:
       - {t_id: B2_capinexon_eq_A, exons: [[6853000, 6853500]], abundance: 50}
 
-  # ── THE SHARED-EXON BLOCK (2026-09-14): H + and A − share one exact 10 kb last exon (the deep
-  #    stress); regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci at
-  #    pitch 50,000 from 6,875,000
+  # ── THE SHARED-EXON BLOCK: H on + and A on − share one exact 10 kb last exon ─────────────────────────────
+  #    H exons [o, o+2,000) [o+10,000, o+20,000); A exons [o+10,000, o+20,000) [o+28,000, o+30,000). The host's
+  #    junction certifies RNA+ at the shared exon's left face and the antisense's certifies RNA− at its right
+  #    face, so each face pairs a junction on one strand with a terminus on the other and the exon has no
+  #    single-strand piece (`conv` is the partial form). Regimes ab 90 : 10, ba 10 : 90, eq 50 : 50, pair total
+  #    100; unprobed / host-only probed (cap); 6 loci at pitch 50,000 from 6,875,000.
   - gene_id: gB2_shared_ab_H
     strand: "+"
     probed: false
@@ -1791,9 +1622,12 @@ genes:
     transcripts:
       - {t_id: B2_capshared_eq_A, exons: [[7135000, 7145000], [7153000, 7155000]], abundance: 50}
 
-  # ── THE IN-INTRON BLOCK (2026-09-14): a 600 bp single-exon antisense A on − in H's first intron;
-  #    regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci at pitch 37,000
-  #    from 7,175,000
+  # ── THE IN-INTRON BLOCK: a 600 bp single-exon antisense A on − in the host's first intron ────────────────
+  #    H = the twin shape on +; A = [o+4,200, o+4,800), centred in H's first intron with 3.2 kb of intron on each
+  #    side. The slot admits gDNA, the host's unspliced RNA+ and the antisense's RNA−; A has no junction, so its
+  #    own gene edge is the only message source on its strand (`asin` is the spliced form). Regimes ab 90 : 10,
+  #    ba 10 : 90, eq 50 : 50, pair total 100; unprobed / host-only probed (cap); 6 loci at pitch 37,000 from
+  #    7,175,000.
   - gene_id: gB2_inintron_ab_H
     strand: "+"
     probed: false
@@ -1855,9 +1689,13 @@ genes:
     transcripts:
       - {t_id: B2_capinintron_eq_A, exons: [[7364200, 7364800]], abundance: 50}
 
-  # ── THE HEAD-TO-HEAD BLOCK (2026-09-14): conv with the strands swapped — H on − and A on + overlap at
-  #    their 5' ends; regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci
-  #    at pitch 40,000 from 7,397,000
+  # ── THE HEAD-TO-HEAD BLOCK: `conv` with the two strands swapped, so the 5' ends overlap ─────────────────
+  #    H on − keeps TF's exons [o, o+1,000) [o+9,000, o+15,000) (TSS at o+15,000); A on + keeps TR's
+  #    [o+13,000, o+15,000) [o+19,000, o+20,000) (TSS at o+13,000). o+15,000 carries H's TSS− and A's donor+ (a
+  #    terminus and a junction of different strands on one boundary); o+13,000 carries A's TSS+ inside H's first
+  #    exon (an exon|exon terminus boundary that admits both strands). Regimes ab 90 : 10, ba 10 : 90,
+  #    eq 50 : 50, pair total 100; unprobed / host-only probed (cap); ids `gB2_{cap}div_{regime}_H` / `_A`;
+  #    6 loci at pitch 40,000 from 7,397,000.
   - gene_id: gB2_div_ab_H
     strand: "-"
     probed: false
@@ -1919,8 +1757,16 @@ genes:
     transcripts:
       - {t_id: B2_capdiv_eq_A, exons: [[7610000, 7612000], [7616000, 7617000]], abundance: 50}
 
-  # ── THE TINY-EXON BLOCK (2026-09-16): exons shorter than a fragment, unprobed / probed; blocks B2 (×3)
-  #    and B4 (×30); 8 genes at pitch 37,000 from 7,637,000
+  # ── THE TINY-EXON BLOCK: exons shorter than a fragment ───────────────────────────────────────────────────
+  #      tiny    ten 40 bp exons at 1,040 bp pitch (introns 1,000 bp; span 9,400): no piece holds a fragment
+  #              (frag_min 50), so every base is witnessed only by crossings
+  #      mixed   exon 1 kb · eight 40 bp exons at 1,040 bp pitch · exon 1 kb (span 11,320): the junction beside
+  #              a long exon has one supported flank and one empty one
+  #    A tiny exon's evidence is its two edge crossings against the intron's level, and its length is its own
+  #    bases. A gDNA fragment over a centred probe overlaps at most 125 bp of it while a spliced fragment over
+  #    four tiny exons overlaps their whole length, so the gDNA witness under-reads a probed tiny transcript's
+  #    capture by that ratio. Blocks B2 (×3) and B4 (×30); no nascent RNA; unprobed / probed (cap*); 8 genes at
+  #    pitch 37,000 from 7,637,000, the strands alternating within a block and flipped between the two.
   - gene_id: gB2_tiny
     strand: "+"
     probed: false
@@ -1962,6 +1808,11 @@ genes:
     transcripts:
       - {t_id: B4_capmixed, exons: [[7896000, 7897000], [7898000, 7898040], [7899040, 7899080], [7900080, 7900120], [7901120, 7901160], [7902160, 7902200], [7903200, 7903240], [7904240, 7904280], [7905280, 7905320], [7906320, 7907320]], abundance: 300}
 
+# ── THE BLANK CHROMOSOME AND ITS SHADOWS ─────────────────────────────────────────────────────────────────
+# `test_blank` carries no annotation. These shadow transcripts are simulated there and never indexed: both
+# strands, single-exon and 3-exon, a molar ladder 250 → 1 with two deep shadows, about 5 % of the RNA
+# fragments. No probe targets them, since a panel designed from the annotation cannot. They test anything that
+# trusts the annotation's notion of pure gDNA, the gDNA strand-overdispersion fit above all.
 shadow_genes:
   - gene_id: gshadow_U1
     strand: "+"

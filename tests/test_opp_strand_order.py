@@ -1,11 +1,9 @@
 """Two transcripts on opposite strands, overlapping, swept across gDNA and nascent settings.
 
-With neither gDNA nor nascent RNA the two transcripts are independent and must be solved as
-separate loci; adding nascent entities, or adding gDNA candidates, makes them share equivalence
-classes and therefore one locus, which is the coupling the EM has to handle rather than avoid. Each
-of the four settings is then re-run with the fragments permuted: the answer must not depend on the
-order the buffer happened to be filled in, and an opposite-strand overlap is where an order
-dependence would first show, because that is where a unit's candidate set stops being obvious.
+With neither gDNA nor nascent RNA the two transcripts are separate loci; nascent spans or gDNA candidates make them
+share equivalence classes and so one locus. Each of the four settings is re-run with the fragments permuted, and the
+answer must not depend on the buffer's order: an opposite-strand overlap is where a unit's candidate set stops being
+obvious, so it is where an order dependence would first show.
 """
 
 import logging
@@ -194,7 +192,7 @@ class TestOppositeStrandOverlap:
     # -------------------------------------------------------------------
 
     def test_mrna_only_independent(self, tmp_path):
-        """With zero gDNA and zero nRNA, transcripts should be independent."""
+        """With no gDNA and no nascent RNA, the transcripts are independent."""
         sc, result, pr, bench = _run(
             tmp_path,
             gdna_abundance=0,
@@ -277,7 +275,7 @@ class TestOppositeStrandOverlap:
     # -------------------------------------------------------------------
 
     def test_fragment_order_mrna_only(self, tmp_path):
-        """mRNA-only: shuffling should not change results."""
+        """Annotated RNA only: shuffling does not change results."""
         self._test_order_sensitivity(
             tmp_path,
             gdna_abundance=0,

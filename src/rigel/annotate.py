@@ -1,98 +1,32 @@
-"""
-rigel.annotate — Per-fragment annotated BAM output.
+"""rigel.annotate — the annotated BAM: every input record stamped with its fragment's assignment.
 
-Produces a BAM file where every original record is stamped with EM-derived
-assignment tags, enabling read-level introspection of the quantification pipeline.
+The pipeline fills an :class:`AnnotationTable`, parallel arrays keyed by ``frag_id`` holding each fragment's
+assignment. :func:`write_annotated_bam` then re-reads the input BAM in the same name-sorted order and stamps every
+record, in C++ (``BamAnnotationWriter``), with these tags:
 
-Two-pass architecture
----------------------
-Pass 1 (the normal pipeline) builds a lightweight **annotation table** —
-parallel numpy arrays keyed by ``frag_id`` — recording the pipeline's
-assignment decision for each fragment:
-
-- ``best_tid`` — transcript index (-1 = intergenic / gDNA / unassigned)
-- ``best_gid`` — gene index (-1 = intergenic / unassigned)
-- ``tx_flags`` — ZF outcome bitfield (see ``AF_*`` constants; includes
-  is_resolved, is_annotated, is_gdna, is_nascent, is_intergenic,
-  is_multimapper_dropped)
-- ``posterior``— posterior probability of the winning assignment
-- ``frag_class`` — fragment class (unambig / ambig_same_strand / …)
-- ``n_candidates`` — number of competing EM candidates
-
-Pass 2 re-reads the input BAM (same name-sorted order) and stamps each
-record with standard BAM tags.  This pass is implemented entirely in
-C++ (``_bam_impl.BamAnnotationWriter``) using the same htslib-based
-infrastructure as pass 1.
-
-BAM Tag Schema
---------------
-.. list-table::
-   :widths: 5 5 40
-   :header-rows: 1
-
-   * - Tag
-     - Type
-     - Description
-   * - ZT
-     - Z
-     - Transcript ID (``"."`` for intergenic / gDNA-only)
-   * - ZG
-     - Z
-     - Gene ID (``"."`` for intergenic)
-   * - ZR
-     - Z
-     - Gene name / symbol (``"."`` for intergenic)
-   * - ZI
-     - i
-     - Transcript index into rigel reference (``-1`` if unassigned)
-   * - ZJ
-     - i
-     - Gene index into rigel reference (``-1`` if unassigned)
-   * - ZF
-     - i
-     - Outcome bitfield fully answering "what happened to this fragment?":
-       bit 0 = is_resolved; bits 1, 2 and 4 record which kind of candidate won:
-       bit 1 = is_annotated (a reference transcript, single-exon included),
-       bit 2 = is_gdna (gDNA: unspliced intergenic + EM-gDNA),
-       bit 4 = is_nascent (a synthetic span, which Rigel adds to model a
-       multi-exon transcript's unspliced RNA); bit 3 is retired and never set;
-       bit 5 = is_intergenic (no transcript holds the fragment, which is
-       unspliced: always with is_gdna); bit 6 is retired and never set;
-       bit 7 = is_multimapper_dropped.  See ``AF_*`` constants for canonical values.
-   * - ZW
-     - f
-     - Posterior probability of assignment
-   * - ZC
-     - Z
-     - Input-ambiguity class (pre-EM candidate-set structure):
-       ``unambig``, ``ambig_same_strand``, ``ambig_opp_strand``,
-       ``multimapper``, or ``.`` for a fragment that never entered EM;
-       ``unused_alignment`` on a placed read pair's record in none of its
-       usable alignments (a rejected one's, one that pairs with nothing, a
-       supplementary record); for a read pair withheld with no usable
-       alignment (ZF 0), its reason: ``off_index``, ``chimeric``,
-       ``unannotated_splice`` or ``unpaired``
-   * - ZH
-     - i
-     - Primary hit flag: 1 = the winning placement's records, 0 otherwise
-   * - ZN
-     - i
-     - Number of EM candidate components
-   * - ZS
-     - Z
-     - The splice type of the record's own placement (``unspliced``,
-       ``spliced_annot``, ``spliced_implicit``, ``splice_artifact``), or
-       ``unknown`` on a record that is no usable alignment
-   * - ZL
-     - i
-     - Locus ID (``-1`` if no locus)
-   * - ZB
-     - i
-     - Number of splice junctions in this record's CIGAR that matched the
-       splice-artifact blacklist and were treated as unspliced during
-       scoring.  Record-local (not fragment-level): a mate with clean
-       sj reports ``0`` even if its mate reports ``>0``.  Always
-       ``0`` when no blacklist is loaded.
+====  ====  ==============================================================================================
+Tag   Type  Meaning
+====  ====  ==============================================================================================
+ZT    Z     transcript ID (``.`` for intergenic or gDNA-only)
+ZG    Z     gene ID (``.`` for intergenic)
+ZR    Z     gene name (``.`` for intergenic)
+ZI    i     transcript index into the rigel reference (``-1`` if unassigned)
+ZJ    i     gene index into the rigel reference (``-1`` if unassigned)
+ZF    i     the outcome bitfield (the ``AF_*`` constants below)
+ZW    f     posterior probability of the assignment
+ZC    Z     input-ambiguity class: ``unambig``, ``ambig_same_strand``, ``ambig_opp_strand``, ``multimapper``,
+            or ``.`` for a fragment that never entered the EM; ``unused_alignment`` on a placed read pair's
+            record in none of its usable alignments (a rejected one's, one that pairs with nothing, a
+            supplementary record); for a read pair withheld with no usable alignment (ZF 0), its reason:
+            ``off_index``, ``chimeric``, ``unannotated_splice`` or ``unpaired``
+ZH    i     1 on the winning placement's records, 0 otherwise
+ZN    i     number of EM candidate components
+ZS    Z     splice type of the record's own placement (``unspliced``, ``spliced_annot``,
+            ``spliced_implicit``, ``splice_artifact``), or ``unknown`` on a record that is no usable alignment
+ZL    i     locus ID (``-1`` if none)
+ZB    i     junctions in this record's CIGAR that matched the splice-artifact blacklist and were scored as
+            unspliced; per record, not per fragment, and 0 when no blacklist is loaded
+====  ====  ==============================================================================================
 """
 
 import logging
@@ -107,36 +41,24 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Assignment flag bits (written to BAM as the ZF:i tag)
-#
-# ZF is the unified per-fragment outcome bitfield.  One AND-mask per
-# predicate answers "what happened to this fragment?" without requiring
-# cross-reference to any other tag.
+# ZF, the per-fragment outcome bitfield: one AND-mask per predicate answers "what happened to this fragment?"
 #
 #   bit 0 (0x01)  is_resolved             a candidate won, or the intergenic fast path took it
 #   bit 1 (0x02)  is_annotated            the winner is a reference transcript, single-exon included
 #   bit 2 (0x04)  is_gdna                 the winner is gDNA (unspliced intergenic + EM-gDNA)
-#   bit 3 (0x08)  retired                 never set, so no value of an earlier layout is reused with a
-#                                         new meaning
-#   bit 4 (0x10)  is_nascent              the winner is a synthetic span, which Rigel adds to model a
-#                                         multi-exon transcript's unspliced RNA
-#   bit 5 (0x20)  is_intergenic           no transcript holds it (deterministic fast-path), so it is
-#                                         unspliced (a spliced hit the scan keeps has a transcript holding
-#                                         its junctions): gDNA
-#   bit 6 (0x40)  retired                 never set: it marked the resolver's chimera call, deleted when a
-#                                         chimeric alignment came to be withheld before resolution
-#   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-include-multimap drop
+#   bit 3 (0x08)  reserved                never set, so an older BAM's bit is never read with a new meaning
+#   bit 4 (0x10)  is_nascent              the winner is a synthetic span, which models a multi-exon
+#                                         transcript's unspliced RNA
+#   bit 5 (0x20)  is_intergenic           no transcript holds it (the deterministic fast path), so it is
+#                                         unspliced, and gDNA
+#   bit 6 (0x40)  reserved                never set, as bit 3
+#   bit 7 (0x80)  is_multimapper_dropped  unresolved because --no-include-multimap dropped it
 #
-# Bits 1, 2 and 4 are the winner-kind bits: they record which kind of candidate won, named for the
-# category the output tables report it under.
-#
-# Invariants (tests/test_annotate.py holds every canonical value and every stamped record to them):
-#   1. is_resolved and is_multimapper_dropped are never both set; ZF = 0, the unresolved sentinel, sets
-#      neither
-#   2. A winner-kind bit {is_annotated, is_gdna, is_nascent} is set only with is_resolved, and then
-#      exactly one is
-#   3. is_intergenic -> is_resolved, never with is_annotated or is_nascent
-#   4. bits 3 (0x08) and 6 (0x40) are never set
+# Bits 1, 2 and 4 record which kind of candidate won. Invariants (gate: tests/test_annotate.py):
+#   1. is_resolved and is_multimapper_dropped are never both set; ZF = 0, unresolved, sets neither
+#   2. exactly one winner-kind bit is set when is_resolved is, and none otherwise
+#   3. is_intergenic implies is_resolved, and never comes with is_annotated or is_nascent
+#   4. bits 3 and 6 are never set
 # ---------------------------------------------------------------------------
 
 # Primitive bits
@@ -157,31 +79,20 @@ AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT  # 0x80
 
 
 def winner_flag(is_synthetic: bool) -> int:
-    """Return the ZF value of a fragment a transcript won.
-
-    ``AF_NASCENT`` when the winner is a synthetic span, ``AF_ANNOTATED``
-    for every reference transcript, single-exon included.  gDNA-component
-    winners are stamped separately at the call site using ``AF_GDNA_EM``
-    and do not pass through this helper.
-    """
+    """The ZF value of a fragment a transcript won: ``AF_NASCENT`` for a synthetic span, ``AF_ANNOTATED`` for every
+    reference transcript. A gDNA winner is stamped ``AF_GDNA_EM`` at the call site instead."""
     return AF_NASCENT if is_synthetic else AF_ANNOTATED
 
 
 def winner_flags(is_synthetic: np.ndarray) -> np.ndarray:
-    """Vectorized :func:`winner_flag` over the winning transcripts' ``is_synthetic`` flags.
-
-    Returns a ``uint8`` array, one ZF value per winner (the input is
-    already filtered to valid-winner indices).
-    """
+    """:func:`winner_flag` over the winning transcripts' ``is_synthetic`` flags: one ``uint8`` ZF value per winner."""
     is_synth_b = np.asarray(is_synthetic, dtype=bool)
     return np.where(is_synth_b, AF_NASCENT, AF_ANNOTATED).astype(np.uint8)
 
 
 @dataclass(slots=True)
 class AnnotationTable:
-    """Lightweight per-fragment annotation table.
-
-    Backed by parallel numpy arrays, one entry per annotated fragment.
+    """The per-fragment annotation table: parallel numpy arrays, one entry per annotated fragment.
 
     Attributes
     ----------
@@ -267,11 +178,10 @@ class AnnotationTable:
         n_candidates: np.ndarray,
         locus_ids: np.ndarray | None = None,
     ) -> None:
-        """Append multiple annotation rows in batch.
+        """Append a batch of annotation rows.
 
-        ``locus_ids`` is the true per-fragment locus-subproblem id (from the EM
-        partition). When omitted, ``locus_id`` stays at its -1 default and is
-        filled later from the winning transcript by :func:`write_annotated_bam`.
+        ``locus_ids`` is each fragment's locus from the EM partition. When omitted, ``locus_id`` stays -1 and
+        :func:`write_annotated_bam` fills it from the winning transcript.
         """
         n = len(frag_ids)
         if n == 0:
@@ -373,12 +283,8 @@ def write_annotated_bam(
 ) -> dict:
     """The annotated-BAM pass: stamp every record with assignment tags.
 
-    Re-reads the input BAM in the same name-sorted order as pass 1.
-    For each read-name group, looks up the annotation by ``frag_id``
-    (maintained in lockstep with the original scan) and writes tags.
-
-    Implemented entirely in C++ via ``_bam_impl.BamAnnotationWriter``
-    using the same htslib infrastructure as pass 1 — no pysam needed.
+    Re-reads the input BAM in the scan's name-sorted order, looks up each read-name group's annotation by
+    ``frag_id`` and writes the tags, in C++ (``BamAnnotationWriter``).
 
     Parameters
     ----------
@@ -412,7 +318,7 @@ def write_annotated_bam(
     """
     from .native import BamAnnotationWriter
 
-    # Build writer using the same FragmentResolver as pass 1
+    # the scan's own resolver
     writer = BamAnnotationWriter(
         index.resolver,
         sj_spec,
@@ -420,14 +326,11 @@ def write_annotated_bam(
         include_multimap,
     )
 
-    # Slice annotation arrays to populated size
     n = annotations.size
 
-    # Locus id (ZL): prefer the true per-fragment locus subproblem stamped during
-    # the EM scatter (which correctly carries in-locus gDNA winners), and only fall
-    # back to the winning transcript's locus for rows still unset (-1) — e.g. the
-    # deterministic unambiguous-mRNA path that bypasses the EM partition. True
-    # intergenic gDNA (never in any locus) stays -1.
+    # ZL: the fragment's own locus from the EM scatter, which carries in-locus gDNA winners. A row still -1, such as
+    # one from the deterministic path that bypasses the EM, falls back to its winning transcript's locus; intergenic
+    # gDNA stays -1.
     if locus_id_per_transcript is not None:
         best_tid = annotations.best_tid[:n]
         from_tid = np.where(
@@ -438,7 +341,7 @@ def write_annotated_bam(
         current = annotations.locus_id[:n]
         annotations.locus_id[:n] = np.where(current >= 0, current, from_tid)
 
-    # The writer takes strings; an annotation may leave a gene unnamed (NaN in the index), which the BAM reads `.`
+    # The writer takes strings; an unnamed gene (NaN in the index) is written `.`
     t_ids = _tag_strings(index.t_df["t_id"].values)
     g_ids = _tag_strings(index.g_df["g_id"].values)
     g_names = _tag_strings(index.g_df["g_name"].values)

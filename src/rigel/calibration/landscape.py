@@ -1,31 +1,16 @@
-"""The population component-density hyperprior — the landscape.
+"""The landscape: the population hyperprior on one component's density, ``P(log ρ_c)``.
 
-Fit `P(log ρ_c)` over the population from the previous solve's deconvolved mass for one component, then
-feed it to that component's ψ composition arm on the re-solve. The census at the end (:func:`census`,
-:func:`split_basins`) splits the fitted density into basins; the capture reader (`capture_efficiency`) takes the
-gDNA landscape's largest basin as the bulk and every basin above it as the enriched spectrum.
+It is fitted from a previous solve's deconvolved mass for one component and fed to that component's ψ arm on the
+re-solve. The census (:func:`census`, :func:`split_basins`) splits the fitted density into basins; the capture reader
+(``capture_efficiency``) takes the gDNA landscape's largest basin as the bulk and every basin above it as the
+enriched spectrum. Layer 5.
 
-The estimator is component-agnostic, deliberately so. Every step below is arithmetic on
-``(count, mass, eff)`` for whichever component the caller selected: :func:`_grid` is ``mass/eff``,
-:func:`_poisson_kernels` is `P(count | ρ·E)`, :func:`knn_widths` is nearest-neighbour spacing on a 1-D
-axis, :func:`_render` is convolution. Nothing here knows which component it is fitting. The
-component-specific reasoning — which objects train it, and what an anchor means — belongs to the caller
-and lives beside the caller's substrate selector, where the chain is: the REGIONs-only / AMBIG-excluded /
-anchor-bearing selection, and what a zero-count object is evidence of.
-
-The shape of the truth it has to represent: a component's density is typically one near point mass plus
-one broad bump some decades away — for gDNA, a uniform depleted level with hybrid capture lifting the
-covered regions a couple of decades above it; for RNA, a silent majority against an expressed spread.
-Two components, one sharp and one broad, several decades apart, so the estimator must resolve a spike
-and a wide bump on the same axis. That requirement fixes the two rules the design rests on:
-
-1. Above the location floor (``CONSTANTS.landscape.located_var``) precision is a continuous weight, never a tuned
-   admission threshold: a tuned cutoff scores worse than ignoring precision. See :func:`_reliability`.
-2. Resolution is a population quantity, not a measurement one. See :func:`knn_widths`, worth reading
-   before touching the kernel.
-
-Its grid, kernel grouping and modelling constants are ``rigel.config.CONSTANTS.landscape``, documented there,
-including which of them were selected against gDNA-shaped data only.
+The estimator is component-agnostic arithmetic on ``(count, mass, eff)``; which objects train it and what an anchor
+means are the caller's. A component's density is typically a sharp mass plus a broad bump decades away (for gDNA, the
+depleted level with capture lifting covered regions above it), so the estimator must resolve a spike and a wide bump
+on one axis. Two rules follow: above the location floor (``CONSTANTS.landscape.located_var``) precision is a
+continuous weight, never an admission threshold (:func:`_reliability`); and resolution is a population quantity, not
+a measurement one (:func:`knn_widths`). Its constants are ``CONSTANTS.landscape``.
 """
 
 from __future__ import annotations
@@ -39,60 +24,44 @@ from ..config import CONSTANTS
 from ..native import transfer_rows as _rows
 from .simplex_logodds import _block_rows
 
-#: the arm's clips — the kernel's (``psi_kernel.h``), whose arm evaluates this prior, so the two homes are one
+#: the arm's clips, shared with the kernel arm that evaluates this prior (``psi_kernel.h``)
 _EPS = float(_rows.ARM_EPS)
 _LN10 = np.log(10.0)
 
 
 @dataclass(frozen=True)
 class DensityLandscape:
-    """A fitted population gDNA-density hyperprior: ``logP`` over a natural-log rate grid, entering ψ
-    as exact Bayes.
+    """A fitted population gDNA-density hyperprior: ``logP`` over a natural-log rate grid, entering ψ as exact Bayes.
 
-    ψ reads the curve ITSELF, at the density every cell of every slot implies — ``log ρ_c = log f_g + log M −
-    log E`` on the slot's gDNA support — with numpy's interpolation and the ends held constant off the grid
-    (`native/psi_kernel.h`, ``Arm``).
-    Bare: no reference prior, no measure term, no Jacobian — ``logP`` is a density in log-rate, so its
-    conversion to a linear-rate density cancels the ``log σ'(λ)`` change of variable exactly, per component,
-    and ψ's arm adds the reference itself. The grid already spans the data's own support (:func:`_grid`), so
-    the held ends fire only on ψ's extreme fractions, where the honest statement is "no more information out
-    here", not a linear extension of the last slope."""
+    ψ reads the curve at the density each cell of each slot implies, ``log ρ_c = log f_g + log M − log E`` on the
+    slot's gDNA support, by linear interpolation with the ends held constant (``native/psi_kernel.h``, ``Arm``).
+    ``logP`` is bare: a density in log-rate needs no Jacobian, since its conversion to linear rate cancels ψ's
+    ``log σ'(λ)`` change of variable exactly, and ψ's arm adds the reference measure itself. The grid spans the
+    data's support (:func:`_grid`), so the held ends act only at ψ's extreme fractions, where the prior has no more
+    information."""
 
     log_rho: np.ndarray
     logP: np.ndarray
     n_train: int
-    #: The population's own rendered density on the same grid, before the one pseudo-region of ignorance
-    #: (:func:`fit_landscape`): ``-inf`` where no kernel puts mass. ψ reads ``logP``, whose pseudo-region
-    #: bounds how hard the prior can push. The capture reader (`capture_efficiency`) reads this one instead:
-    #: its alternative is the population's own spectrum, and the pseudo-region's uniform mass, spread up to
-    #: the top of the grid, is not a level any object was measured at.
+    #: the population's own rendered density on the same grid, without the pseudo-region of ignorance
+    #: (:func:`fit_landscape`); ``-inf`` where no kernel puts mass. ψ reads ``logP``; the capture reader reads this,
+    #: because the pseudo-region's uniform mass is not a level any object was measured at.
     logP_free: np.ndarray
 
     def required_logodds_window(self, mass, eff) -> float:
-        """The λ bracket this prior's own support demands — derived, with no constant chosen.
+        """The λ bracket this prior's own support demands, derived with no constant.
 
-        ψ reads the curve at ``log ρ_i(f) = log f + log M_i − log E_i`` and can only offer
-        ``f ∈ [σ(−L), σ(L)]``. So this prior is expressible at slot ``i`` only if ψ can place that slot on
-        the landscape's own floor ``ρ_floor = exp(log_rho[0])`` — :func:`_grid`'s resolution wall::
+        ψ reads the curve at ``log ρ_i(f) = log f + log M_i − log E_i`` for ``f ∈ [σ(−L), σ(L)]``, so the prior is
+        expressible at slot ``i`` only if ψ can place the slot on the landscape's floor ``ρ_floor = exp(log_rho[0])``::
 
             σ(−L)·M_i/E_i ≤ ρ_floor   ⇔   σ(−L) ≤ f_i := ρ_floor·E_i/M_i   ⇔   L ≥ log((1 − f_i)/f_i)
 
-        and the bracket the chain needs is the maximum over the slots ψ evaluates. For the typical
-        ``f_i ≪ 1`` that collapses to ``max_i log(M_i/E_i) − log ρ_floor``, this landscape's own
-        log-dynamic range, which is why nothing is chosen here.
+        The bracket is the maximum over the slots with mass and opportunity; for ``f_i ≪ 1`` it is the landscape's own
+        log-dynamic range ``max_i log(M_i/E_i) − log ρ_floor``. A slot with ``f_i ≥ 1`` imposes nothing (``L_i ≤ 0``).
 
-        A slot with ``f_i ≥ 1`` imposes no constraint: its own total density already sits at or below the
-        wall, so ψ can express it at any bracket. Those return a non-positive ``L_i`` and are dominated by
-        the maximum, which is why no mask is needed beyond "has mass and has opportunity".
-
-        The caller must take ``max(configured L, this)``, never this alone. The configured bracket is
-        the state-space range the Beta(½,½) reference needs to stay proper; this is the additional demand
-        the fitted prior makes, and narrowing below the configured value trades one defect for another.
-
-        This is not an accuracy knob and must not become one. It restores the property
-        :mod:`.simplex_logodds` already claims as its acceptance test — that the answer does not depend on
-        ``L`` — by making the bracket wide enough that the prior is representable. Widening past this must
-        therefore change nothing, and that saturation is the gate.
+        The caller must take ``max(configured L, this)``: the configured bracket keeps the Beta(½,½) reference proper,
+        and this is the fitted prior's additional demand. It is not an accuracy knob: it makes the answer independent
+        of ``L``, so widening past it must change nothing.
         """
         m = np.asarray(mass, dtype=np.float64)
         e = np.asarray(eff, dtype=np.float64)
@@ -100,32 +69,23 @@ class DensityLandscape:
         if not live.any():
             return 0.0
         rho_floor = float(np.exp(self.log_rho[0]))
-        # f_i is a FRACTION, so clip into (0, 1): at f_i ≥ 1 the slot imposes nothing (L_i ≤ 0), and the
-        # lower clip is the float guard, not a floor on the answer.
+        # f_i is a fraction, so clip into (0, 1): at f_i ≥ 1 the slot imposes nothing (L_i ≤ 0), and the lower clip
+        # is a float guard, not a floor on the answer.
         f = np.clip(rho_floor * e[live] / m[live], _EPS, 1.0 - _EPS)
         return float(max(0.0, np.max(np.log1p(-f) - np.log(f))))
 
 
 def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
-    """The log10 rate axis: exactly the domain ψ's fitted arm can ask the curve about. No
-    asserted range, and nothing left over to choose.
+    """The log10 rate axis: exactly the domain ψ's fitted arm can ask the curve about.
 
-    ψ evaluates the prior at ``ρ_g = f_g·M/E`` for ``f_g ∈ (0, 1]``, so:
+    ψ evaluates the prior at ``ρ_g = f_g·M/E`` for ``f_g ∈ (0, 1]``. The top is ``max_i log10(M_i/E_i)``: no region
+    can sit above its own total density. The bottom is the resolution wall ``min_i log10(1/E_i)``: a region of
+    effective length ``E`` with no gDNA says only ``ρ ≲ 1/E``, and since a zero-count kernel ``e^{−ρE}`` decreases
+    monotonically, the floor is where the depleted anchor deposits its mass. Both bounds dominate every kernel centre
+    ``log10(max(count, 1)/E)``, since ``count ≤ M``.
 
-    * the top is a hard bound, ``max_i log10(M_i/E_i)``. No region can ever be placed above its own total
-      density, so there is nothing above it to represent.
-    * the bottom is the resolution wall, ``min_i log10(1/E_i)``. A region of effective length ``E`` that
-      sequenced no gDNA says only "ρ ≲ 1/E"; below the deepest such wall nothing is distinguishable from
-      anything else. This end matters more than it looks — a zero-count region's kernel ``e^{−ρE}`` is
-      monotone decreasing, so where the floor sits is where the depleted anchor deposits its mass.
-
-    Both bounds also dominate every kernel centre ``log10(max(count,1)/E)``, since ``count ≤ M``, so no
-    centre is ever truncated.
-
-    Do not pad this by a kernel width. The pad would be set by the single widest kernel, one isolated
-    region would stretch the span by a couple of decades, and since the point count is fixed the grid step
-    coarsens and the whole landscape over-smooths. A lone region's broad kernel is 1/n of the mass spread
-    over decades; spending resolution to render its tails costs resolution everywhere that matters.
+    The grid must not be padded by a kernel width: the pad would be set by the widest kernel, so one isolated region
+    would stretch the span, coarsen the fixed-count grid and over-smooth the whole landscape.
     """
     lo = float(np.min(-np.log10(np.maximum(eff, _EPS))))
     hi = float(np.max(np.log10(np.maximum(mass, _EPS)) - np.log10(np.maximum(eff, _EPS))))
@@ -135,11 +95,10 @@ def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
 
 
 def _poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np.ndarray:
-    """Per-region ``P(count | ρ·E)`` on the grid, row-normalised to unit mass → ``(n, K)``.
+    """Per-region ``P(count | ρ·E)`` on the grid, each row normalised to unit mass; ``(n, K)``.
 
-    Zero-native, and that is the point: at ``count = 0`` this is ``e^{−ρE}``, a monotone decay that says
-    "ρ is anything below the resolution wall" — the honest statement, and the one a point-estimate KDE
-    cannot make, since it would invent a location at ``1/E``.
+    At ``count = 0`` the kernel is ``e^{−ρE}``, which says "ρ is anywhere below the resolution wall"; a point-estimate
+    KDE would invent a location at ``1/E`` instead.
     """
     lam = np.exp(grid * _LN10)[None, :] * eff[:, None]
     ll = count[:, None] * np.log(np.maximum(lam, _EPS)) - lam - gammaln(count[:, None] + 1.0)
@@ -155,35 +114,16 @@ def knn_widths(
 ) -> np.ndarray:
     """The population resolution: ``h_i = scale · dist(a_i, k-th nearest neighbour)``, ``k = √n``.
 
-    ⛔ Read this before changing the kernel. The per-region Poisson likelihood is a measurement width, and
-    on the log axis it is ``1/(√g·ln10)`` decades, so it shrinks as ρ^(−1/2) — by well over an order of
-    magnitude across a library, dropping below one grid step exactly where the enriched mode lives, so
-    that the regions carrying that band's mass become deltas in a single cell. A landscape built from
-    measurement widths alone is therefore smooth through the depleted bulk and a comb over the enriched
-    one, and it reports one broad mode as dozens.
+    The per-region Poisson likelihood is a measurement width, ``1/(√g·ln10)`` decades on the log axis, which shrinks
+    as ρ^(−1/2) and falls below one grid step where the enriched mode lives; measurement widths alone render a smooth
+    bulk and a comb over the enriched band, reporting one broad mode as many. A population's resolution is how finely
+    the sample resolves it, which is the nearest-neighbour spacing, and it self-corrects: fewer regions give farther
+    neighbours and wider kernels. The ``grid_step`` floor is forced by the axis: a kernel narrower than one cell is a
+    delta at the wrong height.
 
-    A population's resolution is set by how finely the sample can resolve it, never by how precisely one
-    member happens to be measured. Nearest-neighbour spacing is exactly that quantity — it is what decides
-    whether two kernels merge into one mode or stand apart as two spurious ones — and it self-corrects
-    with no tuning: fewer regions ⇒ farther neighbours ⇒ wider kernels.
-
-    The ``grid_step`` floor is forced by the axis, not chosen: nothing narrower than one cell is
-    representable, so a kernel below it is not a narrow density but a delta at the wrong height.
-
-    Two alternatives are measured and rejected: a single global width, which flattens the genuinely sharp
-    depleted bulk in order to serve the sparse tail, one width being unable to serve regions whose
-    required resolution differs by an order of magnitude; and Abramson sample-point adaptivity
-    ``h ∝ f(a)^(−1/2)``, which is about neutral, because a spike is high pilot density at its own location
-    and so keeps itself narrow, reinforcing exactly what needs merging.
-
-    ⛔ This must be the true k-th-nearest-neighbour distance, and getting it wrong is not cosmetic. Taking
-    ``max(a_i − a_{i−k}, a_{i+k} − a_i)`` instead — the far boundary of a 2k window — is systematically
-    larger and, for a region with no near neighbours on one side, reaches all the way back into the bulk.
-    That hands the widest kernel in the fit to the most isolated region, which is precisely backwards: an
-    isolated observation is one observation, and smearing it across decades asserts population mass
-    everywhere it touches. On a zero-gDNA library, where every such region is a false positive, the
-    handful of over-called regions is then rendered as a permissive plateau across the whole enriched
-    range.
+    The distance must be the true k-th-nearest-neighbour distance. The far edge of a 2k window,
+    ``max(a_i − a_{i−k}, a_{i+k} − a_i)``, is systematically larger and hands the widest kernel to the most isolated
+    region, smearing one observation across decades.
     """
     n = centres.size
     k = max(int(round(np.sqrt(n))), 2)
@@ -193,8 +133,8 @@ def knn_widths(
     pos = np.searchsorted(srt, centres)
     # The k+1 nearest points are a contiguous window [j, j+k] containing `pos`, so the distance is
     #     min over j in [pos−k, pos] of  max(a_pos − a_j, a_{j+k} − a_pos).
-    # The first term falls and the second rises with j, so the objective is V-shaped and the minimum sits at
-    # the crossing of `a_j + a_{j+k} − 2·a_pos`. Bisect for it — exact, and O(n log k) rather than O(n·k).
+    # The first term falls and the second rises with j, so the minimum sits where `a_j + a_{j+k} − 2·a_pos` crosses
+    # zero; bisection finds it exactly in O(n log k) rather than O(n·k).
     a = srt[np.minimum(pos, n - 1)]
     lo = np.maximum(pos - k, 0)
     hi = np.minimum(pos, n - 1 - k)
@@ -214,28 +154,20 @@ def knn_widths(
 
 
 def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.ndarray:
-    """Per-region mass ``w = ref/(v + ref)`` — the irreducible share of the log-rate variance against the
+    """Per-region weight ``w = ref/(v + ref)``: the irreducible share of the log-rate variance against the
     deconvolution ambiguity ``v = Var(log f_g)``.
 
-    ``ref`` sums the region's own Poisson counting floor ``1/max(count,1)`` and the reference variance
-    (``CONSTANTS.landscape.reliability_sd_decades``). A confident region keeps mass so a real enriched mode
-    survives; a give-up region (``v ≫ ref``) collapses toward zero. The zero-count structural anchor is the
-    trusted "no gDNA here" statement and carries ``w = 1``: its density is ``0`` for every ``f_g``, so its
-    composition ambiguity is irrelevant.
+    ``ref`` is the region's Poisson counting floor ``1/max(count, 1)`` plus the reference variance
+    (``CONSTANTS.landscape.reliability_sd_decades``). A confident region keeps its mass, so a real enriched mode
+    survives; a region the deconvolution could not resolve (``v ≫ ref``) collapses toward zero. The zero-count
+    structural anchor carries ``w = 1``: its density is 0 for every ``f_g``, so its composition ambiguity is
+    irrelevant.
 
-    Precision enters twice, and the two roles are distinct. ABOVE the location floor
-    (``CONSTANTS.landscape.located_var``) it is this continuous weight and nothing else: a tuned admission
-    threshold on it was measured worse than
-    ignoring precision, and moving it into the kernel width is refuted by its own control (a single constant
-    width performs identically, so that form is a global bandwidth under another name, and it inflates false
-    enrichment on zero-gDNA libraries). AT the floor it is admission — a slot whose log-count is uncertain by
-    more than one nat² has no location, as a count below one fragment has none, and it is not a training
-    slot (the four ladder zero controls read 500 → 282, 211 → 194, 550 → 265, 231 → 172 under it, with
-    every contaminated stratum unchanged or better).
-
-    On unstranded data the weight does not separate enriched from depleted within a region class; it
-    separates classes (exons being down-weighted against introns and intergenic), and every enriched
-    region is an exon. It is therefore informative but coarse, and how coarse is set by the reference variance.
+    Above the location floor (``CONSTANTS.landscape.located_var``) precision enters only as this continuous weight,
+    never as an admission threshold or a kernel width. At the floor it is admission: a slot whose log-count is
+    uncertain by more than one nat² has no location, and the caller does not train on it. On unstranded data the
+    weight separates region classes (exons against introns and intergenic) rather than enriched from depleted within
+    one, so it is informative but coarse, as coarse as the reference variance sets.
     """
     v = np.maximum(np.nan_to_num(var, nan=np.inf, posinf=np.inf), 0.0)
     reference_var = (CONSTANTS.landscape.reliability_sd_decades * _LN10) ** 2
@@ -246,20 +178,13 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
 def _estep_kernels(kernels: np.ndarray, count: np.ndarray, grid: np.ndarray, prev) -> np.ndarray:
     """The E-step on the kernels that have no location.
 
-    A region trained at less than one fragment has no location of its own — the estimator already centres
-    it at its resolution wall, ``max(count, 1)`` — and its Poisson kernel is flat below that wall.
-    Normalised to unit mass, such a kernel spreads that mass uniformly under the wall, which is the
-    flat-prior posterior and not a population statement: short empty regions, whose wall sits at exon
-    densities, then deposit a tail of landscape mass at high density on a library that has none. That
-    tail is the reason a blind exon is not given a posterior median.
-
-    The refit loop already holds the previous fit, and the deconvolution's E-step places a location-free
-    kernel where the population is: ``kernel × P_prev(ρ)``, renormalised. A counted kernel keeps its own
-    location and is not touched, so an enriched minority cannot be competed away by the bulk — which is
-    what happens when the E-step is applied to every kernel. ``prev`` is ``None`` at the first fit, where
-    nothing changes. What acts is where the previous fit puts the mass: a mirrored previous landscape, as
-    a control, makes the capture-ON zero rows far worse. No constant enters, the one-fragment floor being
-    the estimator's own."""
+    A region trained at less than one fragment is centred at its resolution wall, and its Poisson kernel is flat
+    below it; normalised, it spreads its mass uniformly under the wall, which is the flat-prior posterior rather than a
+    population statement, and short empty regions would deposit spurious mass at high density. With the previous fit
+    at hand, such a kernel is placed where the population is: ``kernel × P_prev(ρ)``, renormalised. A counted kernel
+    keeps its own location, so an enriched minority cannot be competed away by the bulk. ``prev`` is ``None`` at the
+    first fit, where nothing changes. No constant enters: the one-fragment floor is the estimator's own.
+    """
     if prev is None:
         return kernels
     p_prev = np.exp(
@@ -274,15 +199,12 @@ def _estep_kernels(kernels: np.ndarray, count: np.ndarray, grid: np.ndarray, pre
 
 
 def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
-    """Sum the weighted kernels, each widened to the population resolution → an unnormalised density.
+    """Sum the weighted kernels, each widened to the population resolution, into an unnormalised density.
 
-    Convolution is linear, so widening every kernel and then summing equals summing and then convolving
-    — which is why kernels are grouped by width and each group convolved once
-    (``CONSTANTS.landscape.width_bins`` groups). The kernels are built and summed a row tile at a time
-    (`simplex_logodds._block_rows`, the same working-set rule ψ tiles by): a training set of a million
-    regions never exists as an ``(n, K)`` matrix, only its per-group weighted sums do. Each row joins its
-    group's sum in row order, one order at every tile height, so the tile's height — a resource setting —
-    sets the working set and no bit (``tests/calibration/test_landscape.py``).
+    Convolution is linear, so the kernels are grouped by width (``CONSTANTS.landscape.width_bins`` groups) and each
+    group's sum is convolved once. The kernels are built and summed a row tile at a time
+    (``simplex_logodds._block_rows``), so the training set never exists as an ``(n, K)`` matrix. Each row joins its
+    group's sum in row order whatever the tile height, so the tile height sets the working set and changes no bit.
     """
     n_bins = CONSTANTS.landscape.width_bins
     step = float(grid[1] - grid[0])
@@ -297,9 +219,8 @@ def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
         contrib = weights[sl, None] * kernels
         for b in np.unique(bin_of[sl]):
             part = contrib[bin_of[sl] == b]
-            # the group's running sum enters as its first row, and a sum down the rows adds them in row order,
-            # so every row is added after the one before it: no tile boundary regroups an addition, as adding
-            # the tile's own partial sum into the total would
+            # the group's running sum enters as the part's first row and the sum runs down the rows in order, so no
+            # tile boundary regroups an addition (adding a tile's own partial sum into the total would)
             part[0] += sums[b]
             sums[b] = part.sum(0)
     out = np.zeros_like(grid)
@@ -326,29 +247,22 @@ def fit_landscape(
     domain: tuple | None = None,
     prev: "DensityLandscape | None" = None,
 ) -> "DensityLandscape | None":
-    """Fit the landscape from pass-0's per-region deconvolved gDNA. Returns ``None`` if it cannot be fit.
+    """Fit the landscape from a previous solve's per-region deconvolved gDNA; ``None`` if it cannot be fit.
 
-    Parameters mirror one training region each: ``count`` the deconvolved gDNA mass ``f_g·M``, ``mass`` the
-    region's total unspliced mass ``M`` (which bounds the achievable density and so fixes the grid top),
-    ``eff`` the effective length, ``var`` the belief's ``Var(log f_g)``, and ``anchor`` the zero-mass
-    structural regions (see :func:`_reliability`). Substrate selection is the caller's job, since it needs
-    the chain.
+    One entry per training region: ``count`` the deconvolved gDNA mass ``f_g·M``, ``mass`` the total unspliced mass
+    ``M`` (which bounds the achievable density and so the grid top), ``eff`` the effective length, ``var`` the
+    belief's ``Var(log f_g)``, and ``anchor`` the zero-mass structural regions (:func:`_reliability`). The caller
+    selects the substrate, since that needs the chain.
 
-    ``domain`` is the ``(mass, eff)`` of the population the prior will be read at, when that is wider than
-    the population it is fitted on. :func:`_grid` spans the data's own support and the curve is held
-    constant beyond it, which is right only while the two populations coincide; where the training population
-    is a subset — a slot with no composition does not train — a consumer above the training set's top
-    density would read a flat prior and fall back to ψ's reference. On a gDNA-free library whose exons are
-    all blind, that collapses the grid to a decade at the floor and invents gDNA. With ``domain`` the grid
-    is the consumers' and the kernels are the training set's.
+    ``domain`` is the ``(mass, eff)`` of the population the prior will be read at, when it is wider than the training
+    population (a slot with no composition does not train). The grid then spans the consumers while the kernels stay
+    the training set's; without it, a consumer above the training set's top density would read a flat prior.
 
-    ``prev`` is the previous refit's landscape, or ``None`` at the first fit: the E-step on the
-    location-free kernels (:func:`_estep_kernels`).
+    ``prev`` is the previous refit's landscape, or ``None`` at the first fit (:func:`_estep_kernels`).
 
-    The estimator is a weighted sum of zero-native per-region kernels at the population resolution. There
-    is no EM, no competition between components and no iteration, so it is deterministic and every
-    region's contribution is traceable — and a capture-enriched minority cannot be competed away by the
-    bulk, which is how a mixture fitted by EM loses one.
+    The estimator is a weighted sum of zero-native per-region kernels at the population resolution, with no EM, no
+    competition between components and no iteration: it is deterministic, every region's contribution is traceable,
+    and a capture-enriched minority cannot be competed away by the bulk.
     """
     count = np.asarray(count, dtype=np.float64)
     mass = np.asarray(mass, dtype=np.float64)
@@ -375,12 +289,9 @@ def fit_landscape(
     if not (total > 0.0 and np.isfinite(total)):
         return None
 
-    # One pseudo-region of complete ignorance, spread uniformly. Ordinary Laplace smoothing, and the "one"
-    # is one region — no constant. It bounds how hard this prior can push: without it the empty cells take
-    # whatever floor the arithmetic happens to underflow to, which is an assertion the sample cannot
-    # support. A population of `W` weighted regions cannot resolve a cell rarer than ~1/W, so the log-range
-    # is bounded by log W and the prior stays weak and correctable — the governing principle for pass-0
-    # output, which is exactly what this is fitted from.
+    # one pseudo-region of complete ignorance, spread uniformly: Laplace smoothing where the "one" is one region, so
+    # no constant. It bounds how hard the prior can push: a population of `W` weighted regions cannot resolve a cell
+    # rarer than ~1/W, so the log-range is bounded by log W and the prior stays weak and correctable.
     free = density / total
     density = (density + total / (grid.size * max(float(weights.sum()), 1.0))) / total
     with np.errstate(divide="ignore"):
@@ -413,7 +324,7 @@ def census(landscape: DensityLandscape) -> tuple[LandscapeMode, ...]:
     adjacent maxima, so they partition the grid and their masses sum to one.
 
     A maximum is an interior cell above its left neighbour and at least its right one (a plateau peaks at
-    its left end), or an EDGE cell strictly above its one neighbour: a density that is highest at the edge
+    its left end), or an edge cell strictly above its one neighbour: a density that is highest at the edge
     of the grid peaks there, whatever else it holds. A flat edge is no peak. A density with no maximum at
     all peaks at its arg-max."""
     x = np.asarray(landscape.log_rho, dtype=np.float64)

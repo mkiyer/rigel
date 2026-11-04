@@ -1,8 +1,7 @@
 """The public surface of ``rigel.calibration`` is exactly ``__all__``, and every name in it resolves.
 
-The package is imported by the pipeline, by the instruments and by the rest of the test suite through
-these names alone, so a name that disappears or one that is exported without existing is a break that
-would otherwise only surface at a caller's import.
+The pipeline, the instruments and the rest of the test suite import the package through these names alone, so a name
+that disappears, or one exported without existing, would otherwise surface only at a caller's import.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ def test_error_types():
 
 
 def test_assemble_priors_implemented():
-    # The locus-prior bridge is real: assemble_priors is a callable and LocusPriors is its dataclass
-    # result. Its behaviour is gated in test_priors.py; this only holds the surface.
+    # The locus-prior bridge is real: assemble_priors is a callable and LocusPriors its dataclass result. test_priors.py
+    # covers its behaviour; this holds only the surface.
     assert callable(cal.assemble_priors)
     assert hasattr(cal.LocusPriors, "__dataclass_fields__")

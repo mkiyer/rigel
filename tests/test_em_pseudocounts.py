@@ -1,13 +1,13 @@
 """The EM's two pseudocounts: calibration's gDNA count, restated at the locus's own scale.
 
-The locus EM's theta is each component's share of EVERY fragment in the locus: the E-step units and the
+The locus EM's theta is each component's share of every fragment in the locus: the E-step units and the
 deterministic spliced fragments, which skip the E-step but are added to every M-step
 (``em_solver.cpp:map_em_step`` / ``vbem_step``, ``raw = unambig_totals + em_totals``). The grouped prior update
 is exact EM for ``P_g log theta_g + P_R log(1 - theta_g)``, so the prior leaves the EM's own answer in place
 iff ``P_g : P_R = G : (N - G)`` over that whole pool. Calibration's unspliced split ``G : U_R`` states the
 unspliced fragments' split as the whole pool's and leans toward gDNA in proportion to the spliced share.
 
-The falsification test drives the SHIPPED solver through the pipeline's own locus runner on a locus whose
+The falsification test drives the shipped solver through the pipeline's own locus runner on a locus whose
 counts are exact expectations, so the prior-free fixed point is the truth, and hands it calibration's exact gDNA
 count: gDNA and every transcript must land on the truth whatever the spliced share and however the spliced
 fragments split between the E-step and the deterministic path.
@@ -194,15 +194,13 @@ def _run(ss: float, junction_len: int, mode: str):
 @pytest.mark.parametrize("ss", [0.9, 0.5])
 @pytest.mark.parametrize("junction_len", [5, 20, 60])
 def test_an_exact_calibration_leaves_gdna_and_every_transcript_at_the_truth(mode, ss, junction_len):
-    """The spliced share runs from 11 % to 60 % of the locus. Calibration's unspliced split ``G : U_R`` over-calls
-    gDNA here by +70 to +944 fragments against a truth of 900, growing with the spliced share, and moves the
-    transcripts by as much (measured on the pre-change solver path, 2026-09-24)."""
+    """The spliced share runs from 11 % to 60 % of the locus. Calibration's unspliced split ``G : U_R``, read as the
+    whole pool's, would over-call gDNA here, more as the spliced share grows, and move the transcripts by as much."""
     gdna, truth_gdna, t, truth_t = _run(ss, junction_len, mode)
     assert gdna == pytest.approx(truth_gdna, abs=0.5), f"gDNA {gdna:.2f} against {truth_gdna:.0f}"
     if mode == "map":
         np.testing.assert_allclose(t, truth_t, atol=0.5)
     else:
         # VBEM moves the split between two isoforms that share positions by O(1) fragment at these counts
-        # whatever the prior (``exp ψ(α) ≈ α − ½``): 1.1–1.8 of 250–800 here. The shipped odds moved them by
-        # 67–900.
+        # whatever the prior (``exp ψ(α) ≈ α − ½``), so the transcripts are held to 1 % of 250–800.
         np.testing.assert_allclose(t, truth_t, rtol=0.01)

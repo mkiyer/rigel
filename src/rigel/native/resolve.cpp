@@ -1,19 +1,8 @@
 /**
- * resolve.cpp — nanobind C++ extension for fragment resolution.
+ * resolve.cpp — the rigel._resolve_impl nanobind module: Python bindings for fragment resolution.
  *
- * Fragment resolution: cgranges overlap queries, set merging and fragment-length computation, calling
- * cgranges directly without round-tripping to Python.
- *
- * The core logic (FragmentResolver, ResolvedFragment, FragmentAccumulator,
- * constants, helper types) lives in shared headers so that
- * bam_scanner.cpp can call _resolve_core() directly:
- *   - native/constants.h
- *   - native/resolve_context.h
- *
- * Module: rigel._resolve_impl
- *
- * Build:
- *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
+ * The resolver itself (FragmentResolver, ResolvedFragment, FragmentAccumulator) lives in resolve_context.h and
+ * constants.h, so bam_scanner.cpp calls _resolve_core() directly; this file only binds it.
  */
 
 #include "resolve_context.h"
@@ -41,8 +30,6 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("genomic_footprint", &ResolvedFragment::genomic_footprint)
         .def_ro("genomic_start", &ResolvedFragment::genomic_start)
         .def_prop_ro("is_same_strand", &ResolvedFragment::get_is_same_strand)
-        .def_prop_ro("is_strand_qualified",
-                     &ResolvedFragment::get_is_strand_qualified)
         .def_prop_ro("t_inds", &ResolvedFragment::get_t_inds)
         .def_prop_ro("frag_lengths", &ResolvedFragment::get_frag_lengths)
         .def_prop_ro("overlap_bp", &ResolvedFragment::get_overlap_bp)
@@ -69,7 +56,7 @@ NB_MODULE(_resolve_impl, m) {
         .def("set_ref_names", &FragmentResolver::set_ref_names,
              nb::arg("ref_names"),
              "Seed the ref-name -> ID space in canonical index.ref_names order.\n\n"
-             "Must be called BEFORE build_overlap_index so the resolver's ref ids\n"
+             "Call it before build_overlap_index so the resolver's ref ids\n"
              "match index.ref_name_to_id (the space used by t_df, region_df and the\n"
              "calibration accumulator partition).")
         .def("build_overlap_index", &FragmentResolver::build_overlap_index,
@@ -88,7 +75,7 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("max_anchor_left"), nb::arg("max_anchor_right"),
              "Build the splice-junction artifact blacklist map.\n\n"
              "Entries are keyed by (ref, start, end) without strand.\n"
-             "A CIGAR sj is rejected when EITHER its left or right\n"
+             "A CIGAR sj is rejected when either its left or right\n"
              "anchor is <= the blacklist maximum for that sj.")
         .def("set_metadata", &FragmentResolver::set_metadata,
              nb::arg("n_transcripts"),
@@ -105,8 +92,8 @@ NB_MODULE(_resolve_impl, m) {
         .def("set_nrna_parent_index",
              &FragmentResolver::set_nrna_parent_index,
              nb::arg("nrna_parent"),
-             "Set per-transcript nRNA parent index (int32; -1 = none).\n"
-             "Synthetic nRNA candidates are derived from real-tx hits\n"
+             "Set each transcript's synthetic nascent span (int32; -1 = none).\n"
+             "Nascent-span candidates are derived from annotated-transcript hits\n"
              "during _resolve_core; synthetics are not in cgranges.")
         .def("build_exon_index", &FragmentResolver::build_exon_index,
              nb::arg("offsets"), nb::arg("starts"), nb::arg("ends"),

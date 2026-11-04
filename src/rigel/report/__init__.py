@@ -1,12 +1,8 @@
-"""rigel.report — build a self-contained HTML QC report from ``rigel quant`` outputs.
+"""Build a self-contained HTML QC report from ``rigel quant`` outputs (:func:`build_report`).
 
-The report is a separate, optional step: ``rigel quant`` writes the report substrate
-(``summary.json`` plus the companion feather tables); ``rigel report`` turns that substrate into
-a shareable, offline HTML page at any later time. This keeps the quant hot path dependency-lean.
-Only the report's charts need the ``rigel[report]`` extra; without it the report still builds, with
-the charts left out.
-
-Public entry point: :func:`build_report`.
+``rigel quant`` writes the report substrate (``summary.json`` and the companion feather tables); ``rigel report``
+turns it into one offline HTML page at any later time, so quant carries none of the report's dependencies. Only the
+charts need the ``rigel[report]`` extra; without it the report builds with the charts left out.
 """
 
 from .build import build_report

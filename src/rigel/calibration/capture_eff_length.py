@@ -1,67 +1,21 @@
-"""Capture-aware EM effective lengths — a transcript's conserved shares of its objects at their capture
-efficiencies.
+"""Capture-aware EM effective lengths: a transcript's conserved shares of its objects at their capture efficiencies.
 
-Under hybrid capture a transcript's usable length is not its full length: only the probe-enriched part
-of its footprint is sampled, and contracting the gDNA component alone would leave it artificially
-concentrated against the RNA components. So EVERY transcript's EM effective length is contracted by the
-calibration's own efficiencies, each object's deconvolved gDNA read against the bulk (`capture_efficiency`;
-`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``) — on the same objects the deposit rule puts
-the transcript's fragments on (gate:
-``tests/calibration/test_capture_eff_length.py``).
+Layer 2 (opportunity). Under hybrid capture only the probe-enriched part of a transcript's footprint is sampled, and
+contracting gDNA alone would concentrate it against RNA, so every transcript's EM length is contracted by
+calibration's own per-object gDNA capture efficiencies, on the objects the deposit rule uses. A transcript's pieces
+are the regions its exons cover (an unspliced entity's single exon is its span); between consecutive pieces is a cut,
+a boundary or a junction. With ``S_p`` its contained share of piece ``p`` and ``M_k`` its conserved share at cut ``k``
+(``effective_length.conserved_cut_shares``), which together total the fl-marginal length exactly,
 
-THE LENGTH IS A SUM OVER OBJECTS, CONSERVED. A transcript's pieces are the regions its exons cover (an
-unspliced entity's single exon is its span, introns included), in its own coordinates; between two
-consecutive pieces is a CUT — the boundary between them, or a junction where the transcript splices. Its
-placements put their unit on those objects exactly as the accumulator does: a contained placement on its
-piece, a crossing one split over the cuts it crosses (`effective_length.conserved_cut_shares`). So
+    eff_t = fl_t · (Σ_pieces S_p c_p + Σ_cuts M_k c_k) / (Σ_pieces S_p + Σ_cuts M_k).
 
-    eff_t = fl_t · (Σ_pieces S_p c_p + Σ_cuts M_k c_k) / (Σ_pieces S_p + Σ_cuts M_k),
+A piece prices at its region's efficiency, a contiguous cut at its boundary's, a junction by conservation of bases
+(:func:`_junction_prices`). With no landscape, or every efficiency exactly 1, ``fl_eff_lengths`` comes back
+bit-identically. Efficiencies are yields against the bulk, so a captured transcript's length exceeds ``fl``, and a
+factor common to every component cancels in the EM. Pieces are cut at the index's unobservable mask; a template the
+mask does not touch is unchanged to the bit.
 
-``S_p`` the transcript's contained share of piece ``p`` and ``M_k`` its conserved share at cut ``k``; the
-shares total the fl-marginal length exactly, however many cuts one fragment crosses, and the contraction
-scales the fl-marginal ``fl_eff_lengths`` the pipeline built. A piece prices at its region's efficiency
-and a contiguous cut at its boundary's: there the transcript's fragments are gDNA's.
-
-THE EFFICIENCIES ARE gDNA's, CARRIED TO THE EM'S TABLES. Each ``c`` is gDNA's yield at the object, read on
-gDNA's uncaptured law ``g``; the EM scores both origins with its own two tables
-(:mod:`rigel.calibration.shared_length_law`), so each object's efficiency enters as ``c · share(g) /
-share(T_G)``, ``T_G`` the scorer's gDNA table. When the two tables are one law the per-fragment capture weight
-cancels from the E-step, and RNA's length is ``Σ_o c_o share_o(g)``: the null model, exactly.
-
-A JUNCTION IS PRICED BY CONSERVATION OF BASES. gDNA never deposits on a junction, and capture is local, so
-a junction's efficiency comes from the objects within a fragment of it. In genomic order, a fragment across
-a junction holds bases of the exon below it and of the exon above it; a gDNA fragment across the junction's
-LOW boundary (the end of the exon below) holds the same low-exon bases and intron bases, one across its HIGH
-boundary (the start of the exon above) intron bases and the same high-exon bases, and averaged over the
-crossing positions each carries half a fragment of intron. Where capture adds over bases,
-
-    c_junction = c_lo + c_hi − ½ (c_intron,lo + c_intron,hi),
-
-the junction's two boundaries less the intron pieces beside them — a piece too short to contain a fragment
-has no contained count, and reads the boundary on its far side instead. The sum is never below 0.
-
-CAPTURE SATURATES. A fragment binds its best single probe part, so a fragment across a junction is captured no
-more than one wholly inside a fully captured piece: the landscape's saturated level
-(`CalibrationResult.gdna_capture_saturation`). Where probes tile the exons to their edges, a gDNA fragment
-crossing an exon's boundary still binds most of a probe, so each boundary reads most of the exon's level, not
-half of it, and the uncapped sum would count the junction's exon capture about twice (gate:
-``test_a_junction_is_captured_no_more_than_a_fully_captured_piece``). The bound is the larger of that level
-and the best object the junction touches, its two pieces and its two boundaries:
-
-- a probe spanning the junction binds a spliced RNA fragment as ONE part where gDNA sees two, so a junction
-  may out-capture every gDNA object beside it, up to saturation;
-- a junction beside an object read above the saturated level, at a stronger probe's own level, may reach that
-  object's.
-
-Where the saturated level is 1 and no object reads above it, the bound is 1. A library with no landscape
-returns ``fl_eff_lengths`` bit-identically, and so does one whose efficiencies are all exactly 1: only the
-captured case contracts. The unit is the bulk, so a captured transcript's length rises above ``fl``; the EM
-reads every component's length in the same unit, and a factor common to all of them cancels.
-
-THE LENGTHS ARE OVER THE OBSERVABLE GENOME. A fragment touching a base of the index's unobservable mask is never
-observed, so a template's pieces are cut at the mask and no cut joins two pieces a masked base separates; its
-fl-marginal length (:func:`observable_fl_eff_lengths`) is the sum of its runs', the stretches no masked base
-interrupts. A template the mask does not touch is unchanged to the bit.
+Gate: ``tests/calibration/test_capture_eff_length.py``.
 """
 
 from __future__ import annotations
@@ -91,7 +45,6 @@ __all__ = [
     "place_log_weights",
     "rna_captured_fraction",
     "transcript_capture_eff_lengths",
-    "transcript_objects",
 ]
 
 
@@ -282,11 +235,10 @@ def _transcript_pieces(
 def observable_fl_eff_lengths(
     index: "TranscriptIndex", region_arrays: "RegionArrays", rna_fl
 ) -> np.ndarray:
-    """Every template's fl-marginal length over the starts the index's mask leaves (gate:
-    ``tests/calibration/test_capture_eff_length.py``): ``Σ_runs Σ_w f(w) (run − w + 1)₊`` over its runs, the stretches
-    no masked base interrupts, since a fragment touching a masked base is never observed. A template the mask does not
-    touch keeps the closed form of its whole length, to the bit; every template keeps the closed form's floor of one
-    base, as one shorter than every fragment does."""
+    """Every template's fl-marginal length over the starts the index's mask leaves: ``Σ_runs Σ_w f(w) (run − w + 1)₊``
+    over its runs, the stretches no masked base interrupts, since a fragment touching a masked base is never observed.
+    A template the mask does not touch keeps the closed form of its whole length, to the bit; every template keeps the
+    closed form's floor of one base, as one shorter than every fragment does."""
     lengths = index.t_df["length"].to_numpy(np.int64)
     eff = rna_fl.compute_all_transcript_eff_lens(lengths)
     pieces = _transcript_pieces(index, region_arrays)
@@ -327,14 +279,6 @@ def _objects(pieces: _TranscriptPieces, pmf: np.ndarray) -> TranscriptObjects:
     )
 
 
-def transcript_objects(
-    index: "TranscriptIndex", region_arrays: "RegionArrays", rna_fl_pmf: np.ndarray
-) -> TranscriptObjects:
-    """Every transcript's :class:`TranscriptObjects` on one pmf: its pieces, its cuts, and its conserved share of
-    each."""
-    return _objects(_transcript_pieces(index, region_arrays), rna_fl_pmf)
-
-
 def _cut_efficiencies(
     objects: TranscriptObjects,
     region_arrays: "RegionArrays",
@@ -343,10 +287,8 @@ def _cut_efficiencies(
     gdna_contained: np.ndarray,
     saturation: float,
 ) -> np.ndarray:
-    """Every cut's efficiency: a contiguous cut's boundary's; a junction's by conservation of bases,
-    ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``, at least 0 and at most the larger of the saturated level
-    and the best object the junction touches — ``A`` the piece below the junction and ``B`` the piece above
-    it, in genomic order."""
+    """Every cut's efficiency: a contiguous cut's boundary's, a junction's from :func:`_junction_prices`. ``A`` is the
+    piece below the cut and ``B`` the piece above it, in genomic order."""
     right_of = region_right_boundary(np.asarray(region_arrays.ref_id))
     A = objects.piece[objects.cut_row]
     B = objects.piece[objects.cut_row + 1]
@@ -364,8 +306,22 @@ def _junction_prices(
     A, B, right_of, c_region, c_boundary, gdna_contained, saturation
 ) -> np.ndarray:
     """The junction between exon pieces ``A`` (below it, in genomic order) and ``B`` (above it), by conservation of
-    bases: ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``, at least 0 and at most the larger of the saturated level
-    and the best object the junction touches."""
+    bases::
+
+        c_junction = c_lo + c_hi − ½ (c_intron,lo + c_intron,hi)
+
+    gDNA never deposits on a junction and capture is local, so the price comes from the objects within a fragment of
+    it. A gDNA fragment across the low boundary (the end of the exon below) holds the junction fragment's low-exon
+    bases plus intron, one across the high boundary its high-exon bases plus intron, and averaged over positions each
+    carries half a fragment of intron; where capture adds over bases, that is the two boundaries less the intron
+    pieces beside them.
+
+    The price is at least 0 and at most the larger of the landscape's saturated level and the best object the junction
+    touches (its two pieces and two boundaries). A fragment binds its best single probe part, so it is captured no more
+    than one inside a fully captured piece; without the cap, probes tiled to the exons' edges would count the exon's
+    capture about twice. The saturation term lets a probe spanning the junction (one part for spliced RNA, two for
+    gDNA) out-capture every gDNA object beside it; the best-object term lets a junction beside a stronger probe reach
+    that object's level."""
     junction_lo, junction_hi = right_of[A], right_of[B - 1]
     intron_lo, intron_hi = A + 1, B - 1
     # an intron piece too short to contain a gDNA fragment reads the boundary on its far side
@@ -431,11 +387,11 @@ def place_log_weights(
     """``log w`` per buffered row: a multimapper's place's capture weight, ``w(x) = Σ_o m_o(x) c_o``, the deposit
     rule's mass of the place at every object it deposits on (CSR over rows, ``rigel.native.PLACE_*`` kinds, flat
     ids) times the object's capture efficiency (:func:`place_efficiencies`). Its sum over a component's placements,
-    on the law the efficiencies are read on, is the component's capture-contracted length (gate:
-    ``tests/calibration/test_capture_eff_length.py``), so every candidate at the place carries it.
+    on the law the efficiencies are read on, is the component's capture-contracted length, so every candidate at the
+    place carries it.
 
     A row with no object (a unique fragment's, on which the weight is common to every candidate) reads 0, and so does
-    an intergenic place: intergenic sequence is uncaptured (owner, 2026-10-27). float32, as the scorer reads it.
+    an intergenic place, because intergenic sequence is uncaptured. float32, as the scorer reads it.
     """
     from ..native import PLACE_BOUNDARY, PLACE_REGION, PLACE_SJ
 
@@ -465,18 +421,15 @@ def transcript_capture_eff_lengths(
     fl_eff_lengths: np.ndarray,
     tables: "LengthTables",
 ) -> np.ndarray:
-    """``eff_em_t = fl_t · Σ_o share_o(T_R) ĉ_o / Σ_o share_o(T_R)`` over the transcript's pieces and cuts (gate:
-    ``tests/calibration/test_capture_eff_length.py``).
+    """``eff_em_t = fl_t · Σ_o share_o(T_R) ĉ_o / Σ_o share_o(T_R)`` over the transcript's pieces and cuts.
 
-    The efficiencies are the result's: a piece's region's, a contiguous cut's boundary's, a junction's from the
-    objects beside it. They are gDNA's yields, read on gDNA's uncaptured law ``g`` (``tables.anchor``), and RNA's
-    normaliser carries each to the EM's own tables: ``ĉ_o = c_o · share_o(g) / share_o(T_G)``, the scorer's gDNA
-    table ``T_G`` (``tables.gdna``). Where the two tables are one law the per-fragment capture weight cancels and
-    this is ``Σ_o c_o share_o(g)``, RNA's capture-weighted length on the uncaptured law, the null model exactly; where
-    ``T_G`` is ``g`` itself it is the efficiencies as read. An object ``T_G`` cannot reach keeps ``c_o``. With no
-    landscape ``fl`` is returned verbatim; a transcript with no share on any object (shorter than every fragment)
-    keeps ``fl``. The efficiencies are relative yields against the bulk, so ``eff_em`` exceeds ``fl`` where capture
-    enriched the transcript.
+    The efficiencies ``c_o`` are the result's (a piece's region's, a contiguous cut's boundary's, a junction's from the
+    objects beside it): gDNA's yields, read on gDNA's uncaptured law ``g`` (``tables.anchor``). Each is carried to the
+    scorer's gDNA table ``T_G`` (``tables.gdna``) as ``ĉ_o = c_o · share_o(g) / share_o(T_G)``. Where the two tables
+    are one law the per-fragment capture weight cancels and this is ``Σ_o c_o share_o(g)``, the null model exactly;
+    where ``T_G`` is ``g`` the efficiencies are used as read. An object ``T_G`` cannot reach keeps ``c_o``. With no
+    landscape ``fl`` is returned unchanged, and a transcript with no share on any object (shorter than every fragment)
+    keeps ``fl``.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     if calibration.gdna_bulk_density is None:

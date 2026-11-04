@@ -1,19 +1,9 @@
 /**
- * scoring.cpp — nanobind C++ extension for hot-path scoring functions.
+ * scoring.cpp — the fragment scorer, exposed as ``rigel._scoring_impl``.
  *
- * This module provides the performance-critical scoring kernels. Python
- * builds one NativeFragmentScorer per run (``rigel.scoring``) and feeds the
- * buffer's chunks to a StreamingScorer (``rigel.routing.FragmentRouter``); the
- * per-fragment loop runs here, in C++.  Functions are exposed as
- * ``rigel._scoring_impl``.
- *
- * Contents:
- *   - compute_fragment_weight (the coverage weight, used by the kernels below)
- *   - NativeFragmentScorer class (scoring parameters + per-chunk kernels)
- *   - StreamingScorer class (stateful per-chunk scoring for streaming memory)
- *
- * Build:
- *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
+ * Python builds one NativeFragmentScorer per run (``rigel.scoring.build_scorer``) and feeds the buffer's chunks to a
+ * StreamingScorer (``rigel.routing.FragmentRouter``), which scores every fragment's candidates and emits the EM's
+ * CSR units.
  */
 
 #include <algorithm>
@@ -30,7 +20,6 @@
 
 namespace nb = nanobind;
 
-// Use constants from constants.h via the rigel namespace.
 using rigel::LOG_HALF;
 using rigel::TAIL_DECAY_LP;
 using rigel::STRAND_NEG;
@@ -43,17 +32,10 @@ using rigel::FRAG_UNAMBIG;
 using rigel::FRAG_AMBIG_SAME_STRAND;
 using rigel::FRAG_MULTIMAPPER;
 
-// Maximum candidates handled via stack-allocated buffer before falling
-// back to heap allocation.  Avoids malloc in the common case where a
-// fragment overlaps a moderate number of transcripts.
+// Candidates scored in a stack buffer before falling back to the heap, so the common fragment needs no malloc.
 static constexpr int SCORED_STACK_CAPACITY = 64;
 
-// ----------------------------------------------------------------
-// Online log-sum-exp accumulator (numerically stable)
-// ----------------------------------------------------------------
-//
-// Maintains running (max_v, sum_v) such that the logsumexp of the
-// stream of inputs x_1,..,x_n equals  max_v + log(sum_v).
+// Online log-sum-exp: keeps (max_v, sum_v) so that logsumexp(x_1..x_n) = max_v + log(sum_v).
 static inline void lse_update(
     double& max_v,
     double& sum_v,
@@ -72,10 +54,6 @@ static inline void lse_update(
     }
 }
 
-// ----------------------------------------------------------------
-// Array type aliases
-// ----------------------------------------------------------------
-
 using i32_1d  = nb::ndarray<const int32_t,  nb::ndim<1>, nb::c_contig>;
 using i8_1d   = nb::ndarray<const int8_t,  nb::ndim<1>, nb::c_contig>;
 using f64_1d  = nb::ndarray<const double,  nb::ndim<1>, nb::c_contig>;
@@ -85,22 +63,10 @@ using u8_1d   = nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig>;
 using u16_1d  = nb::ndarray<const uint16_t, nb::ndim<1>, nb::c_contig>;
 using f64_2d_mut = nb::ndarray<double, nb::ndim<2>, nb::c_contig>;
 
-// ----------------------------------------------------------------
-// compute_fragment_weight
-// ----------------------------------------------------------------
-//
-// Inverse coverage-capacity weight for a fragment on a transcript.
-//
-// Uses the trapezoid coverage model: under uniform random sampling
-// the expected coverage at transcript-relative position x on a
-// transcript of spliced length L for a fragment of length f is
-//   min(x, w, L - x)   where  w = min(f, L/2).
-//
-// A fragment in the plateau region gets weight 1.0.  A fragment near
-// a transcript boundary gets weight > 1.0, reflecting that it is less
-// likely to be generated yet was still observed — stronger evidence
-// for that transcript.
-
+// Inverse coverage-capacity weight of a fragment on a transcript, under the trapezoid coverage model: with uniform
+// sampling, the expected coverage at position x of a transcript of spliced length L, for a fragment of length f, is
+//   min(x, w, L - x),   w = min(f, L/2).
+// A fragment on the plateau weighs 1; one near an end weighs more, being less likely to be generated yet observed.
 static double compute_fragment_weight(int32_t frag_start,
                                       int32_t frag_end,
                                       int32_t transcript_length) {
@@ -148,61 +114,45 @@ static double compute_fragment_weight(int32_t frag_start,
     return w / area_per_base;
 }
 
-// ================================================================
-// NativeFragmentScorer
-// ================================================================
-//
-// Holds all pre-computed scoring parameters and index arrays so that
-// scoring and candidate pruning execute entirely in C++ with
-// zero Python round-trips.  Constructed once per pipeline run from
-// the Python FragmentScorer.
-
+// The scoring parameters and index arrays, copied once per run, so scoring and pruning make no Python round-trip.
 class NativeFragmentScorer {
 
-    // --- Scalar scoring parameters ---
     double log_p_sense_;
     double log_p_antisense_;
     bool   r1_antisense_;
-    // `--overhang-alpha 0` is a hard gate: log 0 = -inf, and 0 * -inf is NaN, so the gate is carried as a flag and
-    // the penalty as 0; a candidate with any overhang is skipped, which is what the -inf would have done
+    // An overhang alpha of 0 is a hard gate. Its log is -inf and 0 * -inf is NaN, so the gate is a flag and the
+    // penalty 0: a candidate with any overhang is skipped.
     bool oh_gate_;
     double oh_log_pen_;
-    // A hit's sequence, each base against an aligned one that matches (`rigel.scoring.sequence_log_penalties`): per
-    // NM mismatch, and per soft-clipped read base. Read only on a multimapper's hits, which it tells apart; one hit's
-    // sequence is common to all its candidates and cancels. In a library with no mismatch a mismatch is -inf: the hit
-    // takes no part, and a multimapper's sum over its places skips the term, so the order of its hits cannot matter.
+    // Log penalties per NM mismatch and per soft-clipped base (`rigel.scoring.sequence_log_penalties`). Read only on a
+    // multimapper's hits, which they tell apart; a single hit's sequence is common to its candidates and cancels. In a
+    // library with no mismatches a mismatch is -inf and the hit drops out of the sum over places.
     double mismatch_log_pen_;
     double clip_log_pen_;
     int32_t fl_max_size_;
     double  fl_tail_base_;
     bool    has_fl_lut_;
-    int32_t n_transcripts_;
 
-    // --- Copied index arrays ---
-    std::vector<int8_t>  t_strand_;   // int8[n_transcripts]
-    std::vector<int32_t> t_length_;   // spliced exonic length
-    std::vector<uint8_t> t_is_synthetic_;  // uint8[n_transcripts] — 1 = a synthetic span, 0 = an annotated transcript
-    std::vector<int32_t> t_ref_;           // int32[n_transcripts] — its reference: a genic place's, for gDNA's places
+    // Per transcript
+    std::vector<int8_t>  t_strand_;
+    std::vector<int32_t> t_length_;        // spliced exonic length
+    std::vector<uint8_t> t_is_synthetic_;  // 1 = a synthetic span, 0 = an annotated transcript
+    std::vector<int32_t> t_ref_;           // its reference, which keys gDNA's places
 
-    // --- Pool-separated likelihood pruning ---
-    double max_ll_delta_;             // Δ = -log(ε), pre-computed
+    double max_ll_delta_;             // the pruning bound, -log(pruning_min_posterior)
 
-    // --- Fragment-length LUT — RNA model (copied from numpy) ---
+    // Fragment-length log-probability tables, RNA's and gDNA's
     std::vector<double> fl_log_prob_;
-
-    // --- Fragment-length LUT — gDNA model (copied from numpy) ---
     std::vector<double> gdna_fl_log_prob_;
     int32_t gdna_fl_max_size_;
     double  gdna_fl_tail_base_;
     bool    has_gdna_fl_lut_;
 
-    // --- Exon data in CSR layout for genomic→transcript mapping ---
+    // Exons in CSR layout, for mapping a genomic position onto a transcript
     std::vector<int32_t> exon_offsets_;  // [n_transcripts + 1]
-    std::vector<int32_t> exon_starts_;   // flattened
-    std::vector<int32_t> exon_ends_;     // flattened
-    std::vector<int32_t> exon_cumsum_;   // flattened cumsum_before
-
-    // --- Internal helpers (inlined in the hot loop) ---
+    std::vector<int32_t> exon_starts_;
+    std::vector<int32_t> exon_ends_;
+    std::vector<int32_t> exon_cumsum_;   // exonic bases before each exon
 
     inline double frag_len_log_lik(int32_t flen) const {
         if (flen <= 0 || !has_fl_lut_) return 0.0;
@@ -218,35 +168,30 @@ class NativeFragmentScorer {
         return gdna_fl_tail_base_ + (flen - gdna_fl_max_size_) * TAIL_DECAY_LP;
     }
 
-    /// Can gDNA have produced this alignment? The ONE rule, for a single fragment and for every hit of a
-    /// multimapper alike, before any likelihood is read.
-    ///   UNSPLICED  yes.
-    ///   ARTIFACT   yes: every junction it carried was rejected by the blacklist, so it is unspliced.
-    ///   IMPLICIT   yes: its mate gap is unobserved, so gDNA reads it unbroken at the footprint and a
-    ///              transcript at its own length, and the fragment length tells them apart.
-    ///   SPLICED_ANNOT  no: a sequenced junction that survived the blacklist.
-    /// Whether gDNA then COMPETES is the likelihood's: its term is the unspliced term at the genomic
-    /// footprint whatever the label, and it is pruned exactly as an RNA candidate is (`gdna_competes`).
+    /// Whether gDNA can have produced an alignment, for a single fragment and every hit of a multimapper alike:
+    ///   UNSPLICED      yes.
+    ///   ARTIFACT       yes: the blacklist rejected every junction it carried, so it is unspliced.
+    ///   IMPLICIT       yes: its mate gap is unobserved, so gDNA reads it unbroken at the footprint and a transcript
+    ///                  at its own length, and the fragment length tells them apart.
+    ///   SPLICED_ANNOT  no: a sequenced junction survived the blacklist.
+    /// Whether gDNA then competes is the likelihood's to decide (`gdna_competes`).
     inline bool gdna_can_explain(int stype) const {
         return stype == SPLICE_UNSPLICED || stype == SPLICE_ARTIFACT || stype == SPLICE_IMPLICIT;
     }
 
-    /// The locus's gDNA candidate is kept when its likelihood is within the pruning bound of the unit's best RNA
-    /// candidate — `max_ll_delta_ = -log(pruning_min_posterior)`, the bound every RNA candidate meets within
-    /// its pool — and is otherwise no candidate at all. A footprint the gDNA length law cannot produce is
-    /// pruned by this, with no length rule of its own. The intergenic term is never pruned (`flush_mm_group`).
+    /// The locus's gDNA candidate is kept when its likelihood is within `max_ll_delta_` of the unit's best RNA
+    /// candidate, the bound every RNA candidate meets within its pool. A footprint the gDNA length law cannot produce
+    /// is pruned here, with no length rule of its own. The intergenic term is never pruned (`flush_mm_group`).
     inline bool gdna_competes(double gdna_ll, double best_rna_ll) const {
         return best_rna_ll - gdna_ll <= max_ll_delta_;
     }
 
-    /// The fragment's coverage weight on transcript ``t_idx`` (``compute_fragment_weight``), read on the interval it
-    /// occupies in the transcript's OWN 5'->3' coordinates, cut to the transcript. Its start is projected onto the
-    /// transcript: inside an exon at the exon's offset; in an intron, or before the first exon, the overhang's length
-    /// before the next exon's start; past the last exon that far past the end. It extends ``flen``, the length of the
-    /// path the transcript implies. So it occupies ``[fwd, fwd + flen)`` forward, and on a minus-strand transcript,
-    /// whose 5'->3' runs against the genome, the mirror ``[t_len - fwd - flen, t_len - fwd)``. A fragment and its
-    /// mirror image on the other strand weigh the same. Held to an independent evaluation of the coverage model on
-    /// both strands in ``tests/test_pipeline_routing.py``.
+    /// The fragment's coverage weight on transcript ``t_idx`` (``compute_fragment_weight``), on the interval it
+    /// occupies in the transcript's own 5'->3' coordinates, cut to the transcript. Its start projects inside an exon to
+    /// the exon's offset, in an intron or before the first exon to that many bases before the next exon's start, and
+    /// past the last exon to that many bases past the end. It spans ``flen``, the path length the transcript implies:
+    /// ``[fwd, fwd + flen)`` on a plus-strand transcript and the mirror ``[t_len - fwd - flen, t_len - fwd)`` on a
+    /// minus-strand one, so a fragment and its mirror image weigh the same.
     inline double coverage_weight(int32_t genomic_start, int32_t flen, int32_t t_idx) const {
         const int32_t begin   = exon_offsets_[t_idx];
         const int32_t n_exons = exon_offsets_[t_idx + 1] - begin;
@@ -282,10 +227,7 @@ class NativeFragmentScorer {
 
 public:
 
-    // ---------------------------------------------------------------
-    // Constructor — copies all data from Python into C++ owned storage
-    // ---------------------------------------------------------------
-
+    // Copies every input into storage the scorer owns.
     NativeFragmentScorer(
         double log_p_sense,
         double log_p_antisense,
@@ -323,26 +265,24 @@ public:
         gdna_fl_tail_base_(gdna_fl_tail_base),
         has_gdna_fl_lut_(false)
     {
-        // Copy index arrays
-        n_transcripts_ = static_cast<int32_t>(t_strand_arr.shape(0));
+        const int32_t n_transcripts = static_cast<int32_t>(t_strand_arr.shape(0));
         {
             const auto* p = t_strand_arr.data();
-            t_strand_.assign(p, p + n_transcripts_);
+            t_strand_.assign(p, p + n_transcripts);
         }
         {
             const auto* p = t_length_arr.data();
-            t_length_.assign(p, p + n_transcripts_);
+            t_length_.assign(p, p + n_transcripts);
         }
         {
             const auto* p = t_is_synthetic_arr.data();
-            t_is_synthetic_.assign(p, p + n_transcripts_);
+            t_is_synthetic_.assign(p, p + n_transcripts);
         }
         {
             const auto* p = t_ref_arr.data();
-            t_ref_.assign(p, p + n_transcripts_);
+            t_ref_.assign(p, p + n_transcripts);
         }
 
-        // Copy fragment-length LUT (RNA model)
         if (!fl_log_prob_obj.is_none()) {
             auto fl_arr = nb::cast<f64_1d>(fl_log_prob_obj);
             const double* p = fl_arr.data();
@@ -351,7 +291,6 @@ public:
             has_fl_lut_ = true;
         }
 
-        // Copy fragment-length LUT (gDNA model)
         if (!gdna_fl_log_prob_obj.is_none()) {
             auto fl_arr = nb::cast<f64_1d>(gdna_fl_log_prob_obj);
             const double* p = fl_arr.data();
@@ -360,7 +299,6 @@ public:
             has_gdna_fl_lut_ = true;
         }
 
-        // Copy pre-built exon CSR arrays directly
         {
             const auto* p = exon_offsets_arr.data();
             int32_t n = static_cast<int32_t>(exon_offsets_arr.shape(0));
@@ -387,7 +325,7 @@ public:
 
 private:
 
-    // Cached raw pointers for one prepared chunk.
+    // Raw pointers into one chunk's arrays.
     struct ChunkPtrs {
         const int32_t*  t_off;
         const int32_t*  t_ind;
@@ -402,15 +340,14 @@ private:
         const int32_t*  g_sta;
         const uint16_t* nm;
         const uint16_t* clip;
-        // The log capture weight of each row's place, applied to a multimapper's every candidate at that place;
-        // nullptr reads 0 (a unique fragment's is common to its candidates and never applied).
+        // Each row's log place weight, applied to every multimapper candidate at that place; nullptr reads 0. A unique
+        // fragment's is common to its candidates and never applied.
         const float*    lw;
         int N;
     };
 
-    // A component's term at one hit of a multimapper, keyed by the component — a transcript (annotated or a synthetic
-    // span alike), or for the locus's gDNA the hit's reference — with the hit's genomic extent `[start, end)`, which
-    // tells the component's places apart (`merge_places`).
+    // A component's term at one hit of a multimapper. The key is a transcript (annotated or synthetic span), or for the
+    // locus's gDNA the hit's reference; the genomic extent `[start, end)` tells the component's places apart.
     struct PlaceTerm {
         int32_t key;
         int32_t start, end;
@@ -419,8 +356,8 @@ private:
         double  coverage_wt;
     };
 
-    // A candidate's term — a transcript's (annotated or a synthetic span), or for gDNA a reference's — and what the
-    // unit records of it: one hit's, or a multimapper's over its hits, read at its best hit.
+    // A candidate's term (a transcript's, or for gDNA a reference's) and what the unit records of it: one hit's, or a
+    // multimapper's summed over its places with the count column and weight of its best hit.
     struct Candidate {
         int32_t key;
         double  log_lik;
@@ -428,9 +365,9 @@ private:
         double  coverage_wt;
     };
 
-    // Each key's term is the SUM over its places, RNA's and gDNA's alike: hits whose extents overlap are alternatives
-    // at one place and count once, at the best of them; distinct places add. A transcript's unit records the count
-    // column and coverage weight of its best hit, the first in input order among equals. `terms` is sorted in place.
+    // Each key's term is the sum over its places, for RNA and gDNA alike: hits whose extents overlap are alternatives
+    // at one place and count once, at the best of them; distinct places add. The unit records the count column and
+    // coverage weight of the best hit, the first in input order among equals. Sorts `terms` in place.
     static void merge_places(std::vector<PlaceTerm>& terms, std::vector<Candidate>& out) {
         static constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
         out.clear();
@@ -458,8 +395,8 @@ private:
         }
     }
 
-    // The log of the sum over every place of every key: gDNA's term, its keys the references its places are on.
-    // `per_key` receives each key's own sum.
+    // gDNA's term: the log of the sum over every place of every key, the keys being references. `per_key` receives
+    // each key's own sum.
     static double sum_over_places(std::vector<PlaceTerm>& terms, std::vector<Candidate>& per_key) {
         merge_places(terms, per_key);
         double lse_max = 0.0, lse_sum = 0.0;
@@ -469,39 +406,37 @@ private:
         return lse_has ? lse_max + std::log(lse_sum) : -std::numeric_limits<double>::infinity();
     }
 
-    // Growing output vectors + write cursors for single-pass scoring.
+    // The growing output vectors and write cursors of one scoring pass.
     struct FillState {
-        // CSR candidate arrays (growing)
+        // CSR candidate arrays
         std::vector<int32_t>*  v_ti;
         std::vector<float>*    v_ll;
         std::vector<uint8_t>*  v_ct;
         std::vector<float>*    v_cw;
-        // CSR offsets (growing; starts with {0})
+        // CSR offsets, starting at {0}
         std::vector<int64_t>*  v_offsets;
-        // Per-unit metadata (growing)
+        // Per unit
         std::vector<int8_t>*   v_is_spliced;
         std::vector<float>*    v_gdna_ll;
         std::vector<float>*    v_ig_ll;
         std::vector<int64_t>*  v_fid;
         std::vector<int8_t>*   v_fclass;
         std::vector<uint8_t>*  v_stype;
-        // Det-unambig (growing)
+        // Deterministic unambiguous assignments
         std::vector<int32_t>*  v_det_ti;
         std::vector<int64_t>*  v_det_fid;
         // The fragments a hard gate dropped, and their classes: no pool holds them, and the annotated BAM says so
         std::vector<int64_t>*  v_gated_fid;
         std::vector<int8_t>*   v_gated_fclass;
-        // The multimappers whose only places the gates left are intergenic: intergenic gDNA, in no locus
+        // Multimappers whose only places left by the gates are intergenic: intergenic gDNA, in no locus
         std::vector<int64_t>*  v_intergenic_fid;
-        // Unambig counts accumulation (single-pass)
+        // Unambiguous counts, [n_transcripts, ua_ncols]
         double* ua_counts;
         int ua_ncols;
         const int8_t* t_str;
-        // Candidate write cursor
         int64_t cand_cur;
 
-        // Eager MM group accumulators (persists across chunks).
-        // Candidates are scored eagerly as alignments arrive;
+        // The open multimapper group, which persists across chunks: alignments are scored as they arrive, and
         // flush_mm_group() merges them over places, prunes and emits.
         int64_t mm_fid;
         int     mm_n_members;
@@ -509,9 +444,9 @@ private:
         std::vector<Candidate> mm_merged;
         int     mm_best_stype;
 
-        // gDNA's terms at the places it can explain: at a place with a transcript candidate the locus's, merged over
-        // places at the flush; at a place with none the intergenic term's, an online log-sum-exp (no reference is
-        // known there, so each is its own place).
+        // gDNA's terms at the places it can explain. A place with a transcript candidate adds to the locus's term,
+        // merged over places at the flush; a place with none adds to the intergenic term, an online log-sum-exp in
+        // which each hit is its own place.
         std::vector<PlaceTerm> mm_gdna_terms;
         std::vector<Candidate> mm_gdna_merged;
         double  mm_ig_lse_max;
@@ -548,9 +483,9 @@ private:
         }
     };
 
-    // Row `row`'s candidate entry `k`, annotated transcript or synthetic span alike: what it carries on its own, the
-    // strand, the fragment length the transcript implies and the overhang past its exons. A term the whole hit shares
-    // is the caller's. False when the entry is no candidate: no exonic base, or overhang at the overhang gate.
+    // The term of row `row`'s candidate entry `k`: strand, the fragment length the transcript implies, and the
+    // overhang past its exons. A term the whole hit shares is the caller's. False when the entry is no candidate: no
+    // exonic base, or an overhang under the overhang gate.
     inline bool candidate_term(const ChunkPtrs& cp, int row, int64_t k, Candidate& c) const {
         const int32_t t_idx = cp.t_ind[k];
         const int32_t ebp = cp.e_bp[k];
@@ -576,21 +511,14 @@ private:
         return true;
     }
 
-    // gDNA's term at a hit, before any term the hit shares: the gDNA length law at its genomic footprint, and the ½
-    // of a strand it does not prefer.
+    // gDNA's term at a hit, before any term the hit shares: the gDNA length law at the genomic footprint, and ½ for a
+    // strand it does not prefer.
     inline double gdna_term(int32_t footprint) const {
         return gdna_frag_len_log_lik(footprint) + LOG_HALF;
     }
 
-    // ---------------------------------------------------------------
-    // score_mm_alignment — eagerly score one MM alignment
-    // ---------------------------------------------------------------
-    //
-    // Called during score_chunk_impl() for each MM alignment.
-    // Reads from the current chunk's live arrays and appends its scored
-    // candidates to st.mm_terms.  Also updates the per-group
-    // splice type and gDNA accumulators.
-
+    // Scores one multimapper alignment from the current chunk: appends its candidates to st.mm_terms and updates the
+    // group's splice type and gDNA terms.
     void score_mm_alignment(
         const ChunkPtrs& cp, int row,
         FillState& st) const
@@ -600,7 +528,7 @@ private:
         int n_cand    = static_cast<int>(end - start);
 
         int stype    = cp.s_type[row];
-        // The hit's sequence and its place's capture weight, on every candidate at it, RNA's and gDNA's alike.
+        // The hit's sequence and its place weight apply to every candidate at it, RNA and gDNA alike.
         const int nm = cp.nm[row], clip = cp.clip[row];
         const double log_seq = (nm > 0 ? nm * mismatch_log_pen_ : 0.0) + (clip > 0 ? clip * clip_log_pen_ : 0.0);
         const double log_w = cp.lw ? static_cast<double>(cp.lw[row]) : 0.0;
@@ -609,14 +537,13 @@ private:
         const int32_t hit_start = cp.g_sta[row];
         const int32_t hit_end = hit_start + std::max(gfp_val, 1);
 
-        // Update per-group metadata accumulators (the reported splice type only)
+        // The group's reported splice type
         if (stype == SPLICE_SPLICED_ANNOT) st.mm_best_stype = SPLICE_SPLICED_ANNOT;
 
-        // gDNA's term at this place, from every hit gDNA can explain (`gdna_can_explain`), SUMMED over the
-        // places: the molecule came from one of them. A place with a transcript candidate is the locus's, on its
-        // candidates' reference; a place with none is intergenic, in no locus, and its sum is the intergenic term.
-        // A term at -inf (a mismatch in a library with none, or a length the law cannot produce) adds nothing, so it
-        // is skipped and the hits' order cannot matter. The EM applies each component's rate and length.
+        // gDNA's term is summed over every place it can explain, since the molecule came from one of them. A place
+        // with a transcript candidate is the locus's, on the candidates' reference; a place with none is intergenic.
+        // A -inf term adds nothing and is skipped, so the hits' order cannot matter. The EM applies each component's
+        // rate and length.
         if (gdna_can_explain(stype))
         {
             double hit_log_ll = gdna_term(gfp_val) + log_seq + log_w;
@@ -628,10 +555,9 @@ private:
             }
         }
 
-        // Count the group's alignments — read only as the group's non-empty test, before a flush
+        // Read only as the group's non-empty test
         ++st.mm_n_members;
 
-        // Score every transcript candidate, annotated or the synthetic span
         Candidate c;
         for (int64_t k = start; k < end; ++k)
             if (candidate_term(cp, row, k, c))
@@ -639,8 +565,8 @@ private:
                                        c.coverage_wt});
     }
 
-    // A unit's candidates into its CSR, pruned by pool: annotated transcripts and synthetic spans are each kept within
-    // `max_ll_delta_` of their own pool's best. Returns the best kept term, -inf when none is kept.
+    // Writes a unit's candidates to the CSR, pruned by pool: annotated transcripts and synthetic spans are each kept
+    // within `max_ll_delta_` of their own pool's best. Returns the best kept term, -inf when none is kept.
     double emit_pruned(const Candidate* c, int n, FillState& st) const {
         static constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
         double annotated_best = NEG_INF;
@@ -664,18 +590,12 @@ private:
         return best_ll;
     }
 
-    // ---------------------------------------------------------------
-    // flush_mm_group — prune and emit one multimapper group
-    // ---------------------------------------------------------------
-    //
-    // All scoring has already been done eagerly by score_mm_alignment. This method merges each transcript's terms
-    // over its places (`merge_places`), prunes them, decides the group's outcome once every place has been read, and
-    // resets the accumulators for the next group:
-    //   - an EM unit, when an RNA candidate survives: its transcripts hold its locus;
-    //   - intergenic gDNA, when none does but an intergenic place does: no locus holds it, and it is booked as a
-    //     multimapper none of whose hits resolves is (its gDNA at a genic place has no locus without a candidate);
+    // Closes one multimapper group: merges each transcript's terms over its places, prunes them, decides the group's
+    // outcome and resets the accumulators. The outcome is
+    //   - an EM unit, when an RNA candidate survives;
+    //   - intergenic gDNA, when none does but an intergenic place does: no locus holds it (gDNA at a genic place has
+    //     no locus without a candidate);
     //   - gated, when no place survives.
-
     void flush_mm_group(
         FillState& st,
         int64_t& stat_mm,
@@ -690,8 +610,8 @@ private:
         const int64_t emit_start = st.cand_cur;
         const double best_ll = emit_pruned(st.mm_merged.data(), static_cast<int>(st.mm_merged.size()), st);
 
-        // The group's two gDNA readings, each the sum over its places: the locus's, and the intergenic term no locus
-        // carries. -inf where no place of the kind survived its gates.
+        // The group's two gDNA terms, each summed over its places: the locus's and the intergenic one; -inf where no
+        // place of the kind survived its gates.
         const double gdna_ll = sum_over_places(st.mm_gdna_terms, st.mm_gdna_merged);
         const double ig_ll = st.mm_ig_lse_has ? st.mm_ig_lse_max + std::log(st.mm_ig_lse_sum) : NEG_INF;
 
@@ -706,8 +626,8 @@ private:
                 static_cast<uint8_t>(st.mm_best_stype));
 
             // The locus's gDNA is kept when it competes with the group's best RNA candidate. The intergenic term is
-            // kept whenever a place survived: it competes at the intergenic rate against the locus's rates and
-            // lengths, none of which are in these scores, so no difference of scores bounds its posterior.
+            // kept whenever a place survived: its rate and the locus's rates and lengths are not in these scores, so no
+            // difference of scores bounds its posterior.
             const bool has_gdna = gdna_competes(gdna_ll, best_ll);
             const bool has_ig = ig_ll > NEG_INF;
             // "spliced" = gDNA is no candidate anywhere: the group is certified RNA.
@@ -727,9 +647,7 @@ private:
         st.reset_mm_group();
     }
 
-    // Single-pass inner loop — scores fragments and pushes results
-    // to growing output vectors.  Also accumulates ua_counts for
-    // det-unambig fragments.
+    // Scores one chunk's fragments into the output vectors, and counts deterministic unambiguous ones in ua_counts.
     void score_chunk_impl(
         const ChunkPtrs& cp,
         FillState& st,
@@ -755,7 +673,6 @@ private:
         for (int i = 0; i < N; ++i) {
             int fclass = fc[i];
 
-            // ---- Multimapper: eager scoring ----
             if (fclass == FRAG_MULTIMAPPER) {
                 int64_t fid_val = f_id[i];
                 if (fid_val != st.mm_fid) {
@@ -770,7 +687,7 @@ private:
                 continue;
             }
 
-            // Non-MM fragment: flush any pending MM group
+            // Not a multimapper: close any open group
             if (st.mm_n_members > 0) {
                 flush_mm_group(
                     st,
@@ -786,13 +703,12 @@ private:
             // A fragment with no candidate is skipped and not counted in stat_gated.
             if (n_cand <= 0) continue;
 
-            // ---- Det-unambig: both ua_counts + det arrays ----
+            // Deterministic unambiguous: one spliced annotated candidate, counted directly
             if (fclass == FRAG_UNAMBIG &&
                 stype == SPLICE_SPLICED_ANNOT) {
                 int32_t t_idx = t_ind[start];
 
-                // The overhang gate holds on this path too: an overhang past the one candidate's exons excludes it,
-                // so the fragment is gated exactly as an EM-routed one would be
+                // The overhang gate holds here too, so the fragment is gated exactly as an EM-routed one would be
                 const int rl_det = r_len[i] > 0 ? static_cast<int>(r_len[i]) : 1;
                 if (oh_gate_ && rl_det - e_bp[start] > 0) {
                     ++stat_gated;
@@ -801,7 +717,6 @@ private:
                     continue;
                 }
 
-                // ua_counts accumulation
                 {
                     int t_sv =
                         static_cast<int>(st.t_str[t_idx]);
@@ -822,15 +737,14 @@ private:
                             += 1.0;
                 }
 
-                // Det-unambig output arrays
                 st.v_det_ti->push_back(t_idx);
                 st.v_det_fid->push_back(f_id[i]);
                 ++stat_det;
                 continue;
             }
 
-            // ---- EM-routed scoring: one hit, so no sequence term (it would be common to every candidate) ----
-            // Every candidate, annotated transcript and synthetic span alike, then the pruned survivors into the unit
+            // EM-routed: one hit, so no sequence term (it would be common to every candidate). Score every candidate,
+            // then write the pruned survivors as the unit.
             Candidate scored_stack[SCORED_STACK_CAPACITY];
             std::vector<Candidate> scored_heap;
             Candidate* scored = scored_stack;
@@ -845,7 +759,6 @@ private:
             const int64_t emit_start = st.cand_cur;
             const double best_ll = emit_pruned(scored, n_scored, st);
 
-            // ---- Finalize this EM unit ----
             int64_t new_cands = st.cand_cur - emit_start;
             if (new_cands > 0) {
                 st.v_offsets->push_back(st.cand_cur);
@@ -855,9 +768,8 @@ private:
                 st.v_stype->push_back(
                     static_cast<uint8_t>(stype));
 
-                // Non-MM path (NH=1 or ambig-same-strand): single-term gDNA
-                // expression, kept when it competes with the unit's best RNA
-                // candidate. EM applies per-locus gDNA effective length.
+                // One hit, so one gDNA term, kept when it competes with the unit's best RNA candidate. The EM applies
+                // the locus's gDNA effective length.
                 double gdna_ll = 0.0;
                 bool has_gdna = false;
                 if (gdna_can_explain(stype)) {
@@ -891,20 +803,12 @@ private:
     }
 };
 
-// ================================================================
-// StreamingScorer — stateful per-chunk scoring for streaming memory
-// ================================================================
-//
-// Processes one chunk at a time via score_chunk(), allowing Python
-// to free each chunk's arrays immediately after the call returns.
-// Multimapper groups are scored eagerly (no cross-chunk references).
-// Call finish() after all chunks to flush the final MM group and
-// retrieve the CSR result arrays.
-
+// Scores one chunk per score_chunk() call, so Python can free each chunk's arrays as soon as it returns; a multimapper
+// group holds no reference into an earlier chunk. finish() closes the last group and returns the CSR arrays.
 class StreamingScorer {
     const NativeFragmentScorer& scorer_;
 
-    // Growing output vectors (heap-allocated, capsule-transferred)
+    // Output vectors, heap-allocated and handed to numpy capsules by finish()
     std::vector<int64_t>*  v_offsets_;
     std::vector<int32_t>*  v_ti_;
     std::vector<float>*    v_ll_;
@@ -924,7 +828,6 @@ class StreamingScorer {
 
     NativeFragmentScorer::FillState st_;
 
-    // Statistics
     int64_t stat_det_, stat_em_u_, stat_em_as_, stat_em_ao_;
     int64_t stat_gated_, stat_mm_;
 
@@ -933,14 +836,12 @@ class StreamingScorer {
 public:
     StreamingScorer(
         NativeFragmentScorer& scorer,
-        i8_1d   t_to_strand_arr,
         f64_2d_mut unambig_counts)
       : scorer_(scorer),
         stat_det_(0), stat_em_u_(0), stat_em_as_(0),
         stat_em_ao_(0), stat_gated_(0),
         stat_mm_(0), finished_(false)
     {
-        // Allocate growing vectors
         v_offsets_ = new std::vector<int64_t>();
         v_offsets_->push_back(0);
 
@@ -960,7 +861,6 @@ public:
         v_gfc_ = new std::vector<int8_t>();
         v_igfid_ = new std::vector<int64_t>();
 
-        // Wire up FillState
         st_ = NativeFragmentScorer::FillState{};
         st_.v_offsets    = v_offsets_;
         st_.v_ti         = v_ti_;
@@ -981,12 +881,11 @@ public:
         st_.ua_counts    = unambig_counts.data();
         st_.ua_ncols     =
             static_cast<int>(unambig_counts.shape(1));
-        st_.t_str        = t_to_strand_arr.data();
+        st_.t_str        = scorer.t_strand_.data();
     }
 
     ~StreamingScorer() {
-        // If finish() was never called, clean up owned vectors.
-        // After finish() these are nullptr (ownership transferred).
+        // nullptr after finish(), which hands ownership to the capsules
         delete v_offsets_;
         delete v_ti_;
         delete v_ll_;
@@ -1005,7 +904,6 @@ public:
         delete v_igfid_;
     }
 
-    // Non-copyable
     StreamingScorer(const StreamingScorer&) = delete;
     StreamingScorer& operator=(const StreamingScorer&) = delete;
 
@@ -1047,16 +945,13 @@ public:
                 "StreamingScorer: finish called twice");
         finished_ = true;
 
-        // Flush final pending MM group
         if (st_.mm_n_members > 0) {
             scorer_.flush_mm_group(
                 st_,
                 stat_mm_, stat_gated_);
         }
 
-        // Build capsule-backed numpy arrays (zero-copy to Python)
-        // Transfer ownership to capsules — set pointers to null
-        // so destructor doesn't double-free.
+        // Zero-copy, capsule-backed numpy arrays; the pointers are nulled below so the destructor does not free them.
         auto result = nb::make_tuple(
             vec_to_ndarray(v_offsets_),
             vec_to_ndarray(v_ti_),
@@ -1082,7 +977,6 @@ public:
             vec_to_ndarray(v_igfid_)
         );
 
-        // Null out pointers — capsules now own the memory
         v_offsets_ = nullptr;
         v_ti_ = nullptr;  v_ll_ = nullptr;
         v_ct_ = nullptr;  v_cw_ = nullptr;
@@ -1095,10 +989,6 @@ public:
         return result;
     }
 };
-
-// ----------------------------------------------------------------
-// nanobind module definition
-// ----------------------------------------------------------------
 
 NB_MODULE(_scoring_impl, m) {
     m.doc() = "C++ hot-path scoring kernels for rigel (nanobind)";
@@ -1137,10 +1027,8 @@ NB_MODULE(_scoring_impl, m) {
     nb::class_<StreamingScorer>(m, "StreamingScorer")
         .def(nb::init<
                  NativeFragmentScorer&,
-                 i8_1d,
                  f64_2d_mut>(),
              nb::arg("scorer"),
-             nb::arg("t_to_strand_arr"),
              nb::arg("unambig_counts"))
         .def("score_chunk",
              &StreamingScorer::score_chunk,
@@ -1148,7 +1036,7 @@ NB_MODULE(_scoring_impl, m) {
         .def("finish",
              &StreamingScorer::finish);
 
-    // Export scoring constants for Python-side parity tests
+    // Scoring constants, for the Python parity tests
     m.attr("LOG_HALF")      = rigel::LOG_HALF;
     m.attr("TAIL_DECAY_LP") = rigel::TAIL_DECAY_LP;
 

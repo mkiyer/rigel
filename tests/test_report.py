@@ -1,22 +1,16 @@
 """The `rigel report` HTML builder, from a synthesized substrate rather than a pipeline run.
 
-A minimal but realistic substrate — a schema-4 ``summary.json`` and its companion feathers — is written
-to a temp directory, and the loader, the view model, the chart specifications and the full HTML build run
-against it. The report must be self-contained, inlining its runtime, and must honour a custom output path.
-The pools carry the output convention's five names, one spelling each, and the summary's own counts and
-fractions; the strandedness tile is the strand model's own verdict; a gene's RNA is its count; every
-fragment-length category shows one readable label; and every cut, cap and rounding the report applies is
-``CONSTANTS.qc``'s. The capture panel shows calibration's own answer, and the front end reads only the keys,
-cells and format tags the view model writes, and escapes every string a user or an annotation chose before it
-becomes markup (read off ``report.js``'s source: the suite runs no JavaScript). Every chart the page embeds
-must compile and read every mark property it sets. Vega-specific assertions are conditional on
-``vl-convert-python``.
+A minimal but realistic substrate (a ``summary.json`` of the current schema and its companion feathers) is written
+to a temp directory, and the loader, the view model, the chart specifications and the full HTML build run against
+it: the report is self-contained, names each of the four pools one way with the summary's own numbers, takes every
+cut, cap and rounding from ``CONSTANTS.qc``, and its front end reads only what the view model writes and escapes
+every string a user or an annotation chose (read off ``report.js``'s source: the suite runs no JavaScript).
+Vega-specific assertions are conditional on ``vl-convert-python``.
 
-The report reads ``summary.json`` only through the keys ``SUMMARY_KEYS`` lists, and tolerantly, so a key
-misspelled on the report's side would read its default without a sound — and the synthesized substrate, written
-by the same hand, would agree with it. One gate therefore reads a REAL output directory, written by the writer
-``rigel quant`` runs from a small simulated library: every listed key, every gene-table column and every
-fragment-length category must be one that writer writes.
+The report reads ``summary.json`` through the keys ``SUMMARY_KEYS`` lists, tolerantly, so a key misspelled on the
+report's side would read its default without a sound, and a substrate written by the same hand would agree with it.
+One gate therefore reads a real output directory written by ``rigel quant``'s writer: every listed key, gene-table
+column and fragment-length category must be one that writer writes.
 """
 
 import argparse
@@ -524,8 +518,8 @@ def test_every_format_tag_the_view_model_emits_is_one_the_front_end_formats(tmp_
 
 def test_each_pool_is_named_once_and_shows_the_summarys_own_count_and_fraction(tmp_path):
     """The bar, its legend, the donut, the table and the KPIs name each pool the same way, in the output
-    convention's words, and show the count and fraction ``summary.json`` holds for it. The words the convention
-    retired name nothing the report shows."""
+    convention's words, and show the count and fraction ``summary.json`` holds for it. "Mature", "mRNA" and
+    "nRNA" name nothing the report shows."""
     d = _write_substrate(tmp_path / "run")
     summary = json.loads((d / "summary.json").read_text())
     q, intergenic = summary["quantification"], summary["fragment_stats"]["intergenic"]
@@ -544,7 +538,7 @@ def test_each_pool_is_named_once_and_shows_the_summarys_own_count_and_fraction(t
     kpis = {k["l"]: k["v"] for k in quant["kpis"]}
     assert kpis["Annotated transcripts"] == q["count_annotated"]
     assert kpis["Nascent RNA"] == q["count_nascent"]
-    assert kpis["Transcripts"] == q["n_transcripts"]  # annotated transcripts only, in schema 4
+    assert kpis["Transcripts"] == q["n_transcripts"]  # annotated transcripts only
     shown = json.dumps(quant) + _SECTIONS + _asset("report.js")
     assert not re.findall(r"\b(?:[Mm]ature|mRNA|nRNA)\b", shown)
 

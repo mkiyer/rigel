@@ -1,18 +1,10 @@
-"""
-rigel.frag_length_model — Fragment length distribution model.
+"""rigel.frag_length_model — the fragment-length distribution.
 
-Two shapes, and nothing trains it. :meth:`FragmentLengthModel.from_pmf` builds the scoring and
-effective-length model from a pmf that ``calibration.fl.build_fl_models`` derived from the
-accumulator payload; ``FragmentLengthModel(counts=...)`` wraps a raw histogram for the QC report's
-summary statistics.
-
-The distribution is stored as a histogram (float vector) indexed by fragment length in bases. Sizes
->= ``max_size`` are clamped into a single overflow bin.
-
-Fragments whose length exceeds ``max_size`` receive exponential tail decay in the scorer: each
-additional base-pair beyond the boundary incurs a fixed log-probability penalty (the scorer's
-``TAIL_DECAY_LP = log(0.99) ≈ −0.01`` per bp, ``native/constants.h``), so very long fragments are
-penalised heavily rather than assigned the same probability as the overflow bin.
+:meth:`FragmentLengthModel.from_pmf` builds the scoring and effective-length model from a pmf that
+``calibration.fl.build_fl_models`` derives from the accumulator payload; ``FragmentLengthModel(counts=...)`` wraps a raw
+histogram for the QC report's statistics. The histogram is indexed by length in bases, with lengths ``>= max_size`` in
+one overflow bin. The scorer penalises each base beyond ``max_size`` by a fixed log-probability (``TAIL_DECAY_LP`` in
+``native/constants.h``), so a very long fragment scores below the overflow bin.
 """
 
 from dataclasses import dataclass, field
@@ -24,23 +16,16 @@ from .config import BamScanConfig
 
 @dataclass
 class FragmentLengthModel:
-    """Fragment length distribution model.
+    """A fragment-length distribution over ``max_size + 1`` bins: ``counts[k]`` holds length *k* for
+    ``k < max_size``, and ``counts[max_size]`` every length ``>= max_size``.
 
-    The histogram has ``max_size + 1`` bins:
-      - ``counts[k]`` for ``0 <= k < max_size``: fragments with
-        fragment length exactly *k*.
-      - ``counts[max_size]``: overflow bin for fragment lengths >= max_size.
-
-    :meth:`from_pmf` gives the finalized scoring model (``_log_prob`` and ``_tail_base`` are what
-    the scorer reads); the ``counts=`` constructor gives the raw QC view, whose statistics read the
-    histogram itself.
+    :meth:`from_pmf` gives the finalized scoring model (the scorer reads ``_log_prob`` and ``_tail_base``); the
+    ``counts=`` constructor gives the raw QC view, whose statistics read the histogram itself.
 
     Attributes
     ----------
     max_size : int
-        Maximum fragment length tracked individually (sizes >= this
-        go into the overflow bin).  Queries above this receive
-        exponential tail decay in the scorer.
+        The overflow bin's index; the scorer decays lengths above it.
     counts : np.ndarray
         Float64 histogram of shape ``(max_size + 1,)``.
     """
@@ -63,14 +48,9 @@ class FragmentLengthModel:
 
     @property
     def n_observations(self) -> int:
-        """Number of observations, derived from the total histogram weight.
-
-        ROUNDED, not truncated, and that matters because some histograms are fractional. A length
-        pool divided by its own opportunity holds non-integer weights by construction (the de-tilt
-        preserves the pool's total but redistributes it), so truncating would report one fewer
-        fragment than the histogram beside it holds, and a reader has no way to tell a rounding
-        artefact from a lost fragment. ``total_weight`` is the unrounded quantity.
-        """
+        """The total histogram weight, rounded. Rounded rather than truncated because a length pool divided by its
+        own opportunity holds fractional weights, and truncating would report one fragment fewer than it holds.
+        ``total_weight`` is the unrounded quantity."""
         return int(round(self._total_weight))
 
     # ------------------------------------------------------------------
@@ -83,11 +63,8 @@ class FragmentLengthModel:
         pmf,
         max_size: int | None = None,
     ) -> "FragmentLengthModel":
-        """Create a finalized model from an already-normalized PMF.
-
-        This is intended for calibrated scoring surfaces whose probabilities
-        have already been regularized and normalized upstream.
-        """
+        """A finalized model from a pmf built upstream. Mass beyond ``max_size`` joins the overflow bin, and every
+        bin is floored at the smallest positive float so its log is finite."""
         prob_in = np.asarray(pmf, dtype=np.float64)
         if prob_in.ndim != 1:
             raise ValueError("FragmentLengthModel.from_pmf: pmf must be one-dimensional.")
@@ -130,36 +107,21 @@ class FragmentLengthModel:
 
     @property
     def total_weight(self) -> float:
-        """Sum of all histogram weights (may differ from n_observations
-        if non-unit weights are used)."""
+        """Sum of the histogram weights (unrounded :attr:`n_observations`)."""
         return self._total_weight
 
     @property
     def pmf(self) -> np.ndarray:
-        """Public probability vector, shape ``(max_size + 1,)``.
-
-        Returns the finalized pmf of a :meth:`from_pmf` model. This is the
-        *same* vector used internally by
-        :meth:`compute_all_transcript_eff_lens` and the analytical
-        moment helpers, so consumers that need the underlying PMF (e.g.
-        the calibration boundary-crossing exposure) stay consistent
-        with effective-length math without reaching into private state.
-
-        Always returns the model's own normalized ``float64`` array; do not
-        mutate.
-        """
+        """The finalized pmf of a :meth:`from_pmf` model, shape ``(max_size + 1,)``: the same vector the effective
+        lengths use, so a consumer stays consistent with them. The model's own array; do not mutate."""
         return self._normalized_probs()
 
     @property
     def mean(self) -> float:
-        """Weighted mean of the *in-range* fragment lengths.
+        """Weighted mean of the in-range fragment lengths; 0.0 when there are none.
 
-        The ``>= max_size`` overflow bin is right-censored — its members' exact
-        lengths are unknown, only that they exceed ``max_size`` — so treating it
-        as a point mass at ``max_size`` would bias the mean toward the ceiling.
-        It is therefore EXCLUDED; this reports the mean of the resolved lengths.
-        The censored count is surfaced separately (``to_dict()`` → ``overflow``).
-        Returns 0.0 if there are no in-range observations.
+        The overflow bin is right-censored, so counting it as a point mass at ``max_size`` would bias the mean toward
+        the ceiling; it is excluded, and ``to_dict()`` reports it as ``overflow``.
         """
         w = self.counts[: self.max_size]
         total = float(w.sum())
@@ -170,12 +132,8 @@ class FragmentLengthModel:
 
     @property
     def std(self) -> float:
-        """Weighted standard deviation of the in-range fragment lengths.
-
-        Excludes the ``>= max_size`` overflow bin, consistently with :meth:`mean`
-        (the spread is reported about the in-range mean). Returns 0.0 if there
-        are no in-range observations.
-        """
+        """Weighted standard deviation of the in-range fragment lengths, about :attr:`mean`; 0.0 when there are
+        none."""
         w = self.counts[: self.max_size]
         total = float(w.sum())
         if total <= 0.0:
@@ -187,13 +145,8 @@ class FragmentLengthModel:
 
     @property
     def median(self) -> float:
-        """Weighted median fragment length (over the full distribution).
-
-        Unlike :meth:`mean` / :meth:`mode`, the median is a rank statistic and
-        stays identifiable under right-censoring as long as the overflow fraction
-        is below 50%, so the ``>= max_size`` bin is retained here (it correctly
-        places the censored tail on the high side). Returns 0.0 if no observations.
-        """
+        """Weighted median fragment length over the full distribution; 0.0 when empty. A rank statistic survives
+        right-censoring while the overflow share is below one half, so the overflow bin is kept here."""
         total = self.total_weight
         if total == 0:
             return 0.0
@@ -203,12 +156,8 @@ class FragmentLengthModel:
 
     @property
     def mode(self) -> int:
-        """In-range fragment length with the highest weight.
-
-        Excludes the ``>= max_size`` overflow bin: that bin aggregates the whole
-        censored tail, so it can be the single largest bin without representing a
-        genuine peak (see :meth:`mean`). Returns 0 if no in-range observations.
-        """
+        """The in-range fragment length with the highest weight; 0 when there are none. The overflow bin holds the
+        whole censored tail, so it is excluded: it can be the largest bin without being a peak."""
         w = self.counts[: self.max_size]
         if float(w.sum()) <= 0.0:
             return 0
@@ -220,14 +169,11 @@ class FragmentLengthModel:
         return float(self.counts[self.max_size])
 
     # ------------------------------------------------------------------
-    # eCDF-based effective length computation
+    # Effective length (salmon-style eCDF)
     # ------------------------------------------------------------------
 
     def _normalized_probs(self) -> np.ndarray:
-        """Return the finalized probability vector, shape (max_size+1,).
-
-        Only a :meth:`from_pmf` model has one. A raw-count model is a statistics view, and refuses
-        rather than answering ``None``."""
+        """The finalized probability vector, shape ``(max_size + 1,)``; a raw-count model refuses."""
         if self._prob is None:
             raise ValueError(
                 "this FragmentLengthModel holds raw counts only; pmf() and the effective lengths need "
@@ -235,20 +181,13 @@ class FragmentLengthModel:
             )
         return self._prob
 
-    # ------------------------------------------------------------------
-    # Analytical transcript effective length (salmon-style eCDF)
-    # ------------------------------------------------------------------
-
     def _build_eff_len_cache(self) -> tuple[np.ndarray, np.ndarray]:
-        """Precompute cumulative CDF and moment arrays for vectorized
-        effective length computation.
+        """The cumulative pmf and first moment, memoized on a finalized model.
 
-        Returns (cdf, cmom) each of shape (max_size+1,) where:
-            cdf[k] = sum_{l=0}^{k} P(l)
+        Returns ``(cdf, cmom)``, each of shape ``(max_size + 1,)``::
+
+            cdf[k]  = sum_{l=0}^{k} P(l)
             cmom[k] = sum_{l=0}^{k} l * P(l)
-
-        A finalized model is immutable, so its cumulative arrays are
-        computed once and memoized.
         """
         if self._finalized and self._cdf_cache is not None:
             return self._cdf_cache, self._cmom_cache
@@ -267,45 +206,28 @@ class FragmentLengthModel:
         *,
         min_value: float = 1.0,
     ) -> np.ndarray:
-        """Vectorized analytical effective length for an array of
-        transcript exonic lengths.
+        """The effective length of each transcript exonic length, from the cumulative sums of the pmf::
 
-        Uses precomputed cumulative CDF and moment arrays so
-        each transcript requires only two table lookups and a
-        multiply-subtract::
-
-            eff_len = (L + 1) × (CDF[k] − P(0)) − CMOM[k]
-
-        where ``k = min(L, max_size)`` and ``CDF / CMOM`` are
-        precomputed cumulative sums of the fragment length
-        distribution.
-
-        This is the recommended entry point for computing effective
-        lengths for all transcripts in a single call.
+            eff_len = (L + 1) × (CDF[k] − P(0)) − CMOM[k],   k = min(L, max_size)
 
         Parameters
         ----------
         lengths : np.ndarray
             1-D array of transcript exonic (spliced) lengths.
         min_value : float, default 1.0
-            Lower floor applied to the result. Default ``1.0`` matches
-            salmon's transcript-scoring convention (prevents log(0)
-            for very short transcripts). Pass ``0.0`` when the value
-            is used as a Poisson-rate denominator (gDNA density
-            estimation), where a zero-span region must contribute
-            zero effective length.
+            Floor on the result. ``1.0`` keeps a short transcript's log finite (salmon's convention); pass ``0.0``
+            where the value is a Poisson-rate denominator, so a zero-span region contributes zero.
 
         Returns
         -------
         np.ndarray
-            float64 array of effective lengths, each ≥ ``min_value``.
+            float64 effective lengths, each ≥ ``min_value``.
         """
         lengths = np.asarray(lengths, dtype=np.int64)
         probs = self._normalized_probs()
         p0 = float(probs[0])
         cdf, cmom = self._build_eff_len_cache()
 
-        # Clamp to valid range for the histogram
         k = np.clip(lengths, 0, self.max_size)
 
         # eff = (L + 1) * sum_{l=1}^{k} P(l) - sum_{l=1}^{k} l*P(l)
@@ -320,14 +242,8 @@ class FragmentLengthModel:
     # ------------------------------------------------------------------
 
     def to_dict(self) -> dict:
-        """JSON/YAML-serializable summary of the fragment length model.
-
-        Includes summary statistics and a trimmed histogram (bins with
-        zero counts at the tails are omitted). ``mean`` / ``std`` / ``mode``
-        describe the in-range lengths; the right-censored ``>= max_size`` tail is
-        reported separately under ``summary.overflow`` (count + fraction).
-        """
-        # Find the range of non-zero bins for compact output
+        """JSON-serializable summary: the statistics and the histogram trimmed of empty tail bins. ``mean``, ``std``
+        and ``mode`` describe the in-range lengths; the censored tail is ``summary.overflow`` (count and fraction)."""
         nonzero = np.nonzero(self.counts)[0]
         if len(nonzero) > 0:
             lo, hi = int(nonzero[0]), int(nonzero[-1])
@@ -349,8 +265,7 @@ class FragmentLengthModel:
                 "std": float(round(self.std, 2)),
                 "median": float(round(self.median, 2)),
                 "mode": int(self.mode),
-                # Right-censored fragments (length >= max_size), excluded from
-                # mean/std/mode above; reported here for QC.
+                # right-censored lengths (>= max_size), excluded from mean / std / mode
                 "overflow": {
                     "count": float(round(overflow, 2)),
                     "fraction": float(round(overflow / total, 6)) if total > 0 else 0.0,
@@ -361,12 +276,3 @@ class FragmentLengthModel:
                 "values": hist_values,
             },
         }
-
-
-# There is deliberately no plural container of raw per-SpliceType histograms here: mixing a genomic
-# footprint for one subset of fragments with a transcript-space length for a disjoint one gives an
-# anchor measured differently from the pools it anchors.
-#
-# `FragmentLengthModel` above is the scoring and effective-length model, built by `from_pmf` from a
-# pmf that `calibration.fl.build_fl_models` derives from the accumulator payload. The per-splice-type
-# QC counts come from the scanner's own census (`rigel.splice.census_field`).

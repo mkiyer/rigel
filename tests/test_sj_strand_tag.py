@@ -2,8 +2,7 @@
 counted and said, and a library whose spliced reads carry no tag is not quantified as unstranded in silence.
 
 Junction strands come only from the tag (XS, or minimap2's ts). ``auto`` reads both on every spliced record, so a
-library whose first spliced reads lack the tag still has its strand: choosing one mode from the first spliced reads
-read none of a late-tagged library's tags. An unknown spec used to become ``XS,ts`` in the scanner without a word.
+library whose first spliced reads lack the tag still has its strand. An unknown spec is refused.
 """
 
 import logging

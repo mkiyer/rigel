@@ -110,16 +110,11 @@ class TestAntisenseIntronicOverlap:
         `t2`'s truth is 0 and it must stay 0. The failure this holds off is not only a leak into `t2`
         but the same fragments being called gDNA in a library that contains none: at low strand
         specificity the intronic nascent fragments are ambiguous in position and nearly ambiguous in
-        strand, so whatever the solver cannot place on the host lands somewhere wrong. The bound is
+        strand, so whatever the solver cannot place on the host lands somewhere wrong. The fragments
+        at risk are the host's nascent entity's: denied their share of the locus's RNA pseudocount,
+        they would land on the one annotated transcript that could also explain them. The bound is
         left tight (5 at SS ≥ 0.9, 20 below) rather than tracking the current answer, so a regression
         shows.
-
-        ⭐ Both sub-1.0 rungs were strict xfails (`ISSUES: nested-antisense-leak-under-the-sane-ruler`)
-        and the RNA prior's restoration closed them: 124 → 14 at SS 0.65 and 24 → 2 at SS 0.9. The
-        leaked fragments were the host's NASCENT entity's, denied their share of the locus's RNA
-        pseudocount and landing on the one annotated transcript that could also explain them — so the
-        "EM-side assignment at an unwitnessed nested transcript" the entry named was downstream of the
-        allocation rule, not of the ruler. The residue at SS 0.65 is real and inside the bound.
         """
         bench = build_and_run(
             scenario,
@@ -222,12 +217,10 @@ class TestAntisenseIntronicMultiIsoform:
         assert_accountability(bench)
         assert_negative_control(bench, strand_specificity=0.9)
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-        # A TRIPWIRE, not a target. Calibration under-calls gDNA on this scenario, and a little of the
+        # A tripwire, not a target. Calibration under-calls gDNA on this scenario, and a little of the
         # surplus RNA lands on the wrong isoform, so the limit admits under a percent of the library
-        # rather than zero. Tightening it is the job of the prior work, not of this bound.
-        assert t2.observed <= 20, (
-            f"T2 mRNA leak: {t2.observed:.0f} at SS=0.9 (Step-1 interim limit=20)"
-        )
+        # rather than zero.
+        assert t2.observed <= 20, f"T2 annotated-RNA leak: {t2.observed:.0f} at SS=0.9 (limit 20)"
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, scenario, gdna, nrna, ss):
@@ -245,12 +238,12 @@ class TestAntisenseIntronicMultiIsoform:
 
 
 # =====================================================================
-# Multi-exon antisense: nRNA prior NOT zeroed, strand-only defense
+# Multi-exon antisense: nRNA prior not zeroed, strand-only defense
 # =====================================================================
 
 
 class TestAntisenseIntronicMultiExonT2:
-    """g2 is multi-exon, so its nascent prior is NOT zeroed and the strand model alone has to prevent
+    """g2 is multi-exon, so its nascent prior is not zeroed and the strand model alone has to prevent
     a wrong-strand nascent assignment."""
 
     @pytest.fixture
@@ -304,14 +297,10 @@ class TestAntisenseIntronicMultiExonT2:
     def test_nrna_multiexon_t2_low_ss(self, scenario):
         """nRNA + multi-exon T2 + SS=0.65 (worst case).
 
-        ⭐ The gate `ISSUES: nascent-gets-no-rna-prior` owned, and what closing it is worth. This was
-        a strict xfail reading 70 fragments of leak against the limit of 50: the host's synthetic
-        nascent entity was denied its share of the locus's RNA pseudocount, so the nascent fragments
-        it should have held landed on the annotated antisense `t2` — the only other component that
-        could explain them. With the prior distributed over every RNA component the leak is **0**.
-
-        The bound stays at 50 rather than tightening to the current answer, so the next regression
-        shows as a number rather than as a pass.
+        The host's synthetic nascent entity must get its share of the locus's RNA pseudocount, or the
+        nascent fragments it should hold land on the annotated antisense `t2`, the only other component
+        that could explain them. The bound stays at 50 rather than tightening to the current answer, so
+        a regression shows as a number rather than as a pass.
         """
         bench = build_and_run(
             scenario,

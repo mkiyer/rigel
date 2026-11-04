@@ -2,92 +2,52 @@
 #  THE fl-GAP SIDE PANEL, ARM 2 — gDNA LONG (250 bp), RNA SHORT (75 bp)
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# ⭐ RE-SIMULATED 2026-10-03 on the current simulator — the one-contiguous-part capture physics
-# (600343bd) and the ladder's SPARSE nascent model — so the fragment-length gap is the ONLY
-# difference from `gdna_ladder.yaml`: the `nrna:` block below is the ladder's, verbatim. The panel
-# simulated before that date carried the retired uniform nascent model and the old capture physics;
-# it was deleted (owner, 2026-10-03) and no number measured on it is quotable.
+# A side panel, never a ladder rung: the same reference, index, abundances, nascent block and capture as
+# `gdna_ladder.yaml`, with only the fragment-length parameters changed. The ladder gives both origins one length
+# distribution because the EM scores length (one table for RNA, one for gDNA) and a gap lets it split the origins
+# on length alone. So the transcript-level number here never ranks a calibration mechanism: it is read per
+# stratum as the tool's end-to-end accuracy on a library with this gap, and a length mechanism is judged on both
+# arms beside the equal-length ladder. A calibration mechanism is ranked here only by instruments that stop before
+# the EM, such as `calibration_vs_oracle.py`.
 #
-# ⛔⛔⛔ THIS IS A SIDE PANEL AND IT IS NEVER A LADDER RUNG. `gdna_ladder.yaml` gives both origins the
-# SAME fragment-length distribution on purpose, and that is a forcing function rather than tidiness:
-# THE EM ALREADY USES THE FRAGMENT-LENGTH DISTRIBUTION (`scoring.cpp` carries `fl_log_prob_` for RNA
-# and `gdna_fl_log_prob_` for gDNA), so a large gap lets the EM split the two origins on LENGTH ALONE,
-# bypassing calibration and MASKING its bugs. ⛔ **Therefore the TRANSCRIPT-LEVEL number on this panel
-# never RANKS a calibration mechanism** — `quant_accuracy.py`'s table, and anything else downstream
-# of the EM, is being handed part of the answer by the length gap. It is still read, per stratum, as
-# the tool's end-to-end accuracy on a library with this gap (0.8.0 ships on the transcript table), and
-# a length mechanism is judged on BOTH arms beside the equal-length ladder.
-# ⭐ **WHAT RANKS A CALIBRATION MECHANISM HERE:** every instrument that stops BEFORE the EM.
-# `calibration_vs_oracle.py` scores a `CalibrationResult` against an oracle-composition
-# `CalibrationResult` — it runs `calibrate`, never the EM — so it is interpretable on this panel.
-#
-# ⭐⭐ WHAT IT IS FOR, precisely. The pooled gDNA background is `count / E_contained(ell, pmf)`; a pmf-free
-# START/END pair (an alternative deleted 2026-09-22) would TIE it off capture on the equal-length ladder,
-# because the two estimators differ by exactly
+# What it exercises: the pooled gDNA background is `count / E_contained(ell, pmf)`, which departs from a
+# length-free estimate by
 #
 #     rho_r * (E_r/E_g - 1)
 #
-# — the RNA share of a MIXED pool times a factor the ladder pins at 1. Measured on the ladder's own
-# pmfs (gap -12.4 bp) that factor is +0.02 % ... +1.6 %; re-priced at a realistic gap it is
-# -0.2 % ... -78 %. This panel is what exerts it, so a length mechanism can be judged instead of
-# argued about. ⚠ A pooled rate over a megabase-scale pool cannot see it; only short objects (exons)
-# can (`TRAPS: a-pooled-rate-cannot-see-a-short-object-factor`).
+# the RNA share of a mixed pool times a factor that equal lengths pin at 1. Only short objects (exons) can see
+# that factor; a pooled rate over a megabase-scale pool cannot.
 #
-# ⭐ TWO ARMS, OPPOSITE SIGNS, and THIS IS THE ONE THAT IS EASY TO FORGET: RNA is NOT reliably longer
-# than gDNA — true for cfRNA, false elsewhere — so arm 1 alone would let the tool overfit to one
-# library type. Arm 1 is `flgap_rna_long.yaml` (gDNA 75, RNA 250). ⭐ The sign of `E_r/E_g - 1` FLIPS
-# between the two arms, so a repair that is real must move the two in OPPOSITE directions; one that
-# merely trades one bias for another will not.
+# Two arms of opposite sign, because RNA is not reliably longer than gDNA (true for cfRNA, false elsewhere) and
+# one arm alone would let the tool overfit one library type. The sign of `E_r/E_g - 1` flips between the arms, so
+# a real repair moves them in opposite directions; one that trades one bias for another does not.
 #
-# ⚠ THE STD MOVES WITH THE MEAN, AND THAT IS FORCED RATHER THAN CHOSEN. The sampler is a rejection
-# draw from Normal(mean, std) truncated to [frag_min, frag_max] (`sim/sampling.py`), so with
-# `frag_min = 50` a configured mean of 75 at the ladder's std of 98 REALISES at 137.65 bp — truncation
-# dominates and the arm would not be the arm. Measured over 400 k draws of the sampler alone:
+# The std moves with the mean. The sampler draws from Normal(mean, std) truncated to [frag_min, frag_max] by
+# rejection (`sim/sampling.py`), so with `frag_min = 50` a mean of 75 at the ladder's std of 98 would realise near
+# 138 bp; std 20 keeps the short side near 75 bp and std 60 the long side near 250. A configured length is not a
+# realised one: read the gap from each condition's `truth_fragment_lengths.tsv`. The RNA side lands a little
+# short of its configuration because an RNA fragment must fit inside its transcript. There are two quotable gaps,
+# the library's (the raw deposit histograms) and the tool's (the fitted fl pmfs); say which.
 #
-#     cfg (75, 98)  -> realised 137.65    <- NOT a 75 bp arm
-#     cfg (75, 20)  -> realised  78.54    <- this file (RNA)
-#     cfg (250, 60) -> realised 249.64    <- this file (gDNA)
+# Reads are capped at the fragment length by the simulator (`read_len = min(read_length, frag_len)`), so a 100 bp
+# read is safe against a 78 bp mean; most of the short side's fragments are shorter than a read and their two
+# reads overlap completely.
 #
-# ⛔ So "75 / 250" is a CONFIGURATION and the realised gap is a MEASUREMENT
-# (`TRAPS: configured-lengths-are-not-realised`). ⭐ MEASURED after simulating, count-weighted off
-# each condition's own `truth_fragment_lengths.tsv`:
+# One gDNA level (g50) by design: the panel probes one mechanism whose size the length gap sets, while the ladder
+# stays the ranking panel, and a 50/50 mix maximises the RNA share of the intron pool where the mechanism bites.
 #
-#     capture OFF   gDNA 249.59   RNA  78.43 (mRNA  78.40, nascent 78.6)   GAP −171.15 bp
-#     capture ON    gDNA 258.82   RNA  81.54 (mRNA  81.54, nascent 81.7)   GAP −177.28 bp
-#
-# (2026-10-03; both strand specificities agree to 0.01 bp; capture lengthens both origins, gDNA by
-# 9.2 bp and RNA by 3.1 bp. Arm 1 reads +169.05 / +171.00 bp, so the two arms are near mirror images
-# off capture and the sign-flip test is clean.)
-#
-# ⚠ The RNA side lands a little SHORT of its configuration because an mRNA fragment must fit inside its
-# transcript while gDNA need not — the same transcript-length truncation `gdna_ladder.yaml` records for
-# its equal arms.
-# ⚠ There are TWO quotable gaps: this one (the raw deposit histograms = the LIBRARY) and the fitted
-# de-tilted EB-shrunk fl pmfs (= what the TOOL believes). Say which you mean.
-#
-# ⚠ Reads are capped at the fragment length by the simulator (`wgs_engine.py`,
-# `read_len = min(read_length, frag_len)`), so a 100 bp read_length is safe against a 78 bp mean: no
-# adapter run-off, no mis-alignment artefact; most of this arm's RNA fragments are shorter than a read
-# and their two reads overlap completely.
-#
-# ⭐ ONE gDNA LEVEL (g50) BY DESIGN, and the usual trap does not apply. `TRAPS:
-# a-single-level-panel-cannot-see-a-constant` is about a panel used to RANK a mechanism; this one
-# probes a single named mechanism whose size is set by the fl gap, not by the gDNA level, and the
-# ladder remains the ranking panel. g50 is chosen because a 50/50 mix maximises the RNA share of the
-# intron pool where the mechanism bites.
+# The mirror arm is `flgap_rna_long.yaml`.
 #
 # Run:  python scripts/sim/panel.py status --config scripts/sim/configs/flgap_rna_short.yaml
 
 genome: $RIGEL_RUNS/suite/reference/genome.fa
 gtf: $RIGEL_RUNS/suite/reference/genes.gtf
-# ⭐ The SAME reference and index as the ladder, so the annotation, the probes and the set of synthetic
-# nascent ENTITIES are identical. ⛔ ONE thing differs from the ladder: the fragment-length parameters,
-# deliberately, this panel's whole purpose.
+# the ladder's reference and index, so the annotation, the probes and the synthetic nascent entities
+# are identical to the ladder's
 index: $RIGEL_RUNS/suite/rigel_index
 outdir: $RIGEL_RUNS/suite/flgap_rna_short
 
-# ⭐ No FASTQs (owner, 2026-10-03): nothing reads them — every scorer reads the oracle BAM and `panel.py`
-# finds a condition by `sim_oracle.bam`. The truth tables are written from the oracle BAM first.
+# no FASTQs: every scorer reads the oracle BAM, and `panel.py` finds a condition by `sim_oracle.bam`
 emit_fastq: false
 
 # ── Read simulation — the RNA arm: SHORT ────────────────────────────────────────────────────────
@@ -100,8 +60,8 @@ simulation:
   frag_min: 50
   frag_max: 500
   read_length: 100
-  # substitutions per base, about an Illumina run's (owner, 2026-10-21): the oracle BAM places every read by
-  # truth and records its NM; an aligner's input carries the errors as sequenced reads do
+  # substitutions per base, about an Illumina run's: the oracle BAM places every read by truth and
+  # records its NM; an aligner's input carries the errors as sequenced reads do
   error_rate: 0.002
   n_workers: 8
 
@@ -123,17 +83,17 @@ gdna:
   frag_min: 50
   frag_max: 500
 
-# ── Strand — both of the owner's named common cases ─────────────────────────────────────────────
+# ── Strand — unstranded and stranded ────────────────────────────────────────────────────────────
 strand_specificities: [0.50, 0.99]
 
-# ── Nascent — the ladder's block, VERBATIM (`gdna_ladder.yaml` holds the rationale) ─────────────
+# ── Nascent — the ladder's block, verbatim (`gdna_ladder.yaml` holds the rationale) ─────────────
 nrna:
   mode: sparse
   abundance_ranges: [[1.0, 100.0]]
   on_fraction: 0.50
   ratio_labels: [mid]
 
-# ── Capture — both, so the clean read (OFF) and the realistic one (ON) are both available ────────
+# ── Capture — off and on ────────────────────────────────────────────────────────────────────────
 capture:
   probe_format: transcript
   off_target_weight: 1.0

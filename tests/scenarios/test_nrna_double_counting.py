@@ -136,7 +136,7 @@ class TestNrnaDoubleCounting:
         )
 
         # ----- Core nRNA double-counting assertion -----
-        # When nRNA is present AND gDNA is not overwhelming, the pipeline's nRNA count must not
+        # When nRNA is present and gDNA is not overwhelming, the pipeline's nRNA count must not
         # exceed the truth by more than the limit. A synthetic nascent transcript competes as an
         # ordinary transcript in the EM, so with gDNA present the three-way competition
         # (mRNA / nRNA / gDNA) gets more slack than the two-way one.
@@ -163,8 +163,7 @@ class TestNrnaDoubleCounting:
             if gdna == 0 and ss >= 0.99:
                 # Perfect SS, no gDNA: total RNA near-exact. The bound is not zero because a
                 # zero-gDNA library still shows a small phantom gDNA share from antisense nascent
-                # fragments — a calibration-solve artifact tracked on its own, not an
-                # effective-length one.
+                # fragments, a calibration-solve artifact rather than an effective-length one.
                 assert rna_rel_err < 0.08, (
                     f"Total RNA error: expected={total_rna_expected}, "
                     f"observed={total_rna_observed:.0f}, "
@@ -211,7 +210,7 @@ class TestNrnaDoubleCounting:
     @pytest.mark.parametrize("ss", SS_LEVELS, ids=[f"ss_{int(s * 100)}" for s in SS_LEVELS])
     @pytest.mark.parametrize("nrna", [30, 70], ids=[f"nrna_{n}" for n in [30, 70]])
     def test_nrna_strand_inversion(self, scenario, nrna, ss):
-        """Higher strand specificity must not DEGRADE nRNA accuracy.
+        """Higher strand specificity must not degrade nRNA accuracy.
 
         The inversion this gates is paradoxical and therefore easy to miss: a strand model that
         double-counts nascent RNA gets worse as the strand signal gets stronger, so a sweep that only
@@ -229,7 +228,7 @@ class TestNrnaDoubleCounting:
             # At near-random SS the strand model provides almost no signal and nRNA detection may
             # fail outright, the nascent fragments leaking to gDNA; at higher SS the signal is clear.
             lower_bound = 0.0 if ss < 0.7 else (0.30 if ss >= 0.8 else 0.05)
-            # Upper bound: must NOT be double-counted (was ~2.0 before fix)
+            # Upper bound: nascent RNA must not be double-counted
             assert lower_bound <= nrna_ratio < 1.50, (
                 f"nRNA ratio {nrna_ratio:.2f} out of [{lower_bound}, 1.50] "
                 f"(pipeline={bench.n_nrna_pipeline:.0f}, "
@@ -256,7 +255,7 @@ class TestNrnaDoubleCounting:
         )
         # Total RNA should be near-perfect, there being no gDNA. The bound is not zero for the same
         # reason as the sweep's zero-gDNA perfect-SS branch: a small antisense-nRNA phantom gDNA
-        # share survives calibration, and it is tracked as its own defect.
+        # share survives calibration.
         total_rna = bench.total_rna_observed
         total_expected = bench.total_expected + bench.n_nrna_expected
         if total_expected > 0:

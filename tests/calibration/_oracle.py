@@ -1,16 +1,13 @@
-"""THE calibration oracle: the validated ground truth every truth-scoring instrument reads.
+"""The calibration oracle: the validated ground truth every truth-scoring instrument reads.
 
-The oracle IS the production accumulator, partitioned by TRUE fragment origin — the sim BAM split into
-gdna / mrna / nrna by read-name origin (:func:`rigel.sim.read_name.parse_origin`), the same production
-scanner and accumulator run on each partition, and the partitions asserted to sum to the full payload.
-Because the accumulator deposits each fragment independently, that identity proves the partition is the
-production payload split by origin, so there is no reimplementation here to get subtly wrong. Four
-populations sit on three axes, each an integer count with two GENOME-strand columns: ``region_contained``
-(the whole path lies inside the region); ``boundary_unspliced`` (the mixture being deconvolved) and
-``boundary_spliced`` (certified RNA) at a contiguous boundary; ``sj_count`` (pure RNA by construction) at
-an sj. gDNA cannot splice, and that is checked here as ``boundary_spliced`` and ``sj_count`` being
-identically zero in the gdna partition — stronger than testing two columns, because it covers the sj axis
-as well.
+The oracle is the production accumulator, partitioned by true fragment origin: the sim BAM is split into gdna / mrna /
+nrna by read-name origin (:func:`rigel.sim.read_name.parse_origin`), the production scanner and accumulator run on each
+partition, and the partitions are asserted to sum to the full payload. Because the accumulator deposits each fragment
+independently, that identity proves the partition is the production payload split by origin, with nothing reimplemented.
+Four populations sit on three axes, each an integer count with two genome-strand columns: ``region_contained`` (the
+whole path lies inside the region); ``boundary_unspliced`` (the mixture being deconvolved) and ``boundary_spliced``
+(certified RNA) at a contiguous boundary; ``sj_count`` (pure RNA) at an sj. gDNA cannot splice, checked as
+``boundary_spliced`` and the sj banks being identically zero in the gdna partition.
 """
 
 from __future__ import annotations
@@ -21,48 +18,45 @@ import numpy as np
 import pysam
 
 from rigel.pipeline import scan_and_buffer
+from rigel.scan_payload import _DEFERRED_RECORD_FIELDS
 from rigel.sim.read_name import STRAND_FORWARD, parse_origin
 
 ORIGINS = ("gdna", "mrna", "nrna")
 
-#: The RNA reads again, split by *TRANSCRIPT* strand: an ADDITIONAL partition, never a replacement for
-#: :data:`ORIGINS`. The three populations are ``{gDNA, RNA+, RNA−}``, so a per-population measurement
-#: needs per-slot RNA truth keyed by the strand of the TRANSCRIPT the fragment came from. The payload's
-#: own two columns are GENOME strand, which equals transcript strand only at ``ss 0.99`` — i.e. it is
-#: wrong on exactly the unstranded half this partition exists for. The information is already in the
-#: read name: the simulator writes the TRANSCRIPT's ``f``/``r`` (`wgs_engine._t_strand_chars`), so no
-#: new simulation is needed. ``ORIGINS`` is left alone deliberately — instruments iterate it as the
-#: accumulator's three-way axis, and both partitions describe the same reads, which is what makes the
-#: closure gate ``rna_pos + rna_neg == mrna + nrna`` a real falsification rather than a restatement.
+#: The RNA reads again, split by transcript strand: an additional partition beside :data:`ORIGINS`, not a replacement.
+#: The populations are ``{gDNA, RNA+, RNA−}``, so a per-population measurement needs per-slot RNA truth keyed by the
+#: strand of the transcript the fragment came from. The payload's own columns are genome strand, which equals transcript
+#: strand only at ``ss 0.99``, wrong on the unstranded half this partition exists for. The simulator writes the
+#: transcript's ``f``/``r`` into the read name (`wgs_engine._t_strand_chars`), so no new simulation is needed.
+#: ``ORIGINS`` stays the accumulator's three-way axis that instruments iterate, and since both partitions describe the
+#: same reads, ``rna_pos + rna_neg == mrna + nrna`` is a real check.
 RNA_STRAND_ORIGINS = ("rna_pos", "rna_neg")
 
-#: Every per-object bank on the payload. Sum-to-full is asserted over ALL of them: a bank left out of
-#: this tuple is a bank the oracle would silently stop validating.
+#: Every per-object bank on the payload. Sum-to-full is asserted over all of them, so a bank missing here would go
+#: unvalidated.
 _BANKS = (
     "region_contained_count",
     "boundary_unspliced_count",
     "boundary_spliced_count",
     "sj_count",
     "region_start_count",
-    # The three CONSERVED MASS banks — exactly what `component_shares` reads, so a bank left out of
-    # the tuple is a bank the origin split is never validated on. These three are float64, so
-    # sum-to-full holds to within the representation rather than byte-exact (see `_validate`).
+    # The three conserved-mass banks, exactly what `component_shares` reads. They are float64, so sum-to-full holds
+    # within the representation rather than byte-exact (see `_validate`).
     "boundary_unspliced_mass",
     "boundary_spliced_mass",
     "sj_mass",
 )
 
-#: The banks a gDNA fragment can NEVER touch — it does not splice. ``sj_mass`` is the strongest of the
-#: three: the mass is where a spliced fragment's whole share goes when its blocks cross no boundary, so
-#: a gDNA record leaking onto the sj axis shows up here as fragment-scale mass rather than as a single
-#: incidence.
+#: The banks a gDNA fragment can never touch, since it does not splice. ``sj_mass`` is the strongest of the three: a
+#: spliced fragment's whole share goes there when its blocks cross no boundary, so a gDNA record leaking onto the sj
+#: axis shows as fragment-scale mass rather than a single incidence.
 _RNA_ONLY_BANKS = ("boundary_spliced_count", "sj_count", "sj_mass")
 
 
 def _split_bam(bam: str, out_dir: Path, tag: str) -> tuple[dict[str, str], dict[str, int]]:
-    """Split a name-sorted BAM into per-origin BAMs. Both mates share a qname ⇒ same origin ⇒ same file;
-    iteration order (hence name-sort) is preserved. EVERY read is written to exactly one partition — the
-    'account for every fragment' guarantee — and the total is asserted to reconcile."""
+    """Split a name-sorted BAM into per-origin BAMs. Both mates share a qname and so an origin and a file; iteration
+    order (hence name-sort) is preserved. Every read is written to exactly one partition, and the total is asserted to
+    reconcile."""
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = {k: str(out_dir / f"{tag}.{k}.bam") for k in ORIGINS}
     counts = {k: 0 for k in ORIGINS}
@@ -84,11 +78,9 @@ def _split_bam(bam: str, out_dir: Path, tag: str) -> tuple[dict[str, str], dict[
 
 
 def split_rna_by_transcript_strand(bam: str, out_dir, tag: str):
-    """Split a name-sorted sim BAM's RNA reads into ``rna_pos`` / ``rna_neg`` by TRANSCRIPT strand.
-
-    gDNA reads are excluded (they have no transcript), and every RNA read lands in exactly one
-    partition — an unclassifiable strand raises rather than being dropped, the same rule
-    :func:`_split_bam` follows. Returns ``(paths, counts)``.
+    """Split a name-sorted sim BAM's RNA reads into ``rna_pos`` / ``rna_neg`` by transcript strand. gDNA reads are
+    excluded (they have no transcript), and every RNA read lands in exactly one partition; an unclassifiable strand
+    raises, as in :func:`_split_bam`. Returns ``(paths, counts)``.
     """
     from pathlib import Path as _Path
 
@@ -103,7 +95,7 @@ def split_rna_by_transcript_strand(bam: str, out_dir, tag: str):
             origin = parse_origin(record.query_name)
             if origin.kind == "gdna":
                 continue
-            # an RNA name's strand letter is its TRANSCRIPT's; `parse_origin` refuses any other letter
+            # an RNA name's strand letter is its transcript's; `parse_origin` refuses any other letter
             key = "rna_pos" if origin.strand == STRAND_FORWARD else "rna_neg"
             writers[key].write(record)
             counts[key] += 1
@@ -120,19 +112,107 @@ def _scan_payload(bam: str, index, cfg):
     return payload
 
 
-def lift_drain_parts(lift: dict, parts_list: list) -> tuple[list, int]:
-    """Drain a list of partition payloads by REPLAYING the whole's already-drawn choices.
+def lift_choices(whole, parts, choices: np.ndarray):
+    """Carry hypothesis choices made on the whole library onto its origin partitions.
 
-    One call per exact PARTITIONING of the whole (the choice queue is shared across the list —
-    `second_pass.lift_choices`' own contract), and the list order matters for the greedy tie
-    assignment, so callers draining two partitionings (e.g. origins and RNA strands) should put any
-    SHARED member (``gdna``) first in both lists, which hands it the identical choice slice and keeps
-    the two partitionings' remainders consistent. Returns ``(drained_parts, n_ambiguous)``; an empty
-    ``lift`` (no held fragments) returns the parts unchanged with 0.
+    Splitting a BAM by origin and re-scanning reconstructs the pass-one payload exactly, because pass one deposits each
+    fragment independently; that identity makes an origin-split oracle valid. The second pass breaks it: its multinomial
+    is scored against the whole payload's densities, so draining three partitions separately would not sum to draining
+    the whole. So the choices are scored and drawn once on the whole library, and each fragment's chosen hypothesis is
+    replayed inside whichever partition holds it; every fragment then deposits independently given its choice, and each
+    partition's drained tally is comparable with the whole's::
+
+        scores  = score_held_fragments(whole, ...)
+        choices = choose_hypotheses(scores, whole, seed=...)      # <- once, on the whole
+        drained = drain(whole, choices, ...)                      # the tally the solver reads
+        lifted, ambiguous = lift_choices(whole, partitions, choices)     # the truth, per origin
+        for p, ch in zip(partitions, lifted):
+            drain(p, ch, ...)
+
+    Every partition must be lifted in one call, which is why the signature takes a sequence: a record's choice is
+    consumed from a per-key queue whose state must be shared across partitions, or two could take the same entry and
+    leave another unused. A one-partition caller passes ``[p]``.
+
+    The key is the bank's own canonical sort key, a record's sequence of placements, each the
+    ``_DEFERRED_RECORD_FIELDS`` tuple the C++ sorts on, imported rather than restated. :class:`DeferredFragments`
+    guarantees that two records tying on that key are identical, so no tie-break is needed. Identical records have
+    identical hypothesis sets (enumeration reads the span and the annotation, never the origin), so a local hypothesis
+    index transfers between them.
+
+    When several whole-library records share a key and are split across origins, no partition can know which it holds,
+    and the assignment is greedy in canonical order. The deposits are interchangeable but the origin attribution is not,
+    so the count of such records is returned; a caller must report it, and it bounds the truth error exactly. On
+    distinct-span substrates it is 0 and the lift is exact.
+
+    Returns ``(lifted, n_ambiguous)``: one ``int64`` array per partition, aligned with that partition's
+    ``deferred.hypothesis_offsets``.
+
+    :raises ValueError: if a partition holds a record ``whole`` does not, or more copies of one key than ``whole`` does;
+    either means the payloads are not a partition of one scan.
+    """
+    w = whole.deferred
+    parts = list(parts)
+    choices = np.asarray(choices, np.int64)
+    if choices.shape[0] != w.n_fragments:
+        raise ValueError(
+            f"lift_choices got {choices.shape[0]} choices for {w.n_fragments} whole-library held "
+            "records. One choice per held record, in the bank's canonical order."
+        )
+
+    def _keys(d):
+        per_placement = list(
+            zip(*(np.asarray(getattr(d, f), np.int64).tolist() for f in _DEFERRED_RECORD_FIELDS))
+        )
+        offsets = np.asarray(d.placement_offsets, np.int64)
+        return [
+            tuple(per_placement[int(offsets[i]) : int(offsets[i + 1])])
+            for i in range(d.n_fragments)
+        ]
+
+    # key -> the whole's choices for that key, in canonical order, consumed left to right across all partitions so each
+    # entry is handed out exactly once.
+    pool: dict[tuple, list[int]] = {}
+    for i, k in enumerate(_keys(w)):
+        pool.setdefault(k, []).append(int(choices[i]))
+    taken: dict[tuple, int] = {}
+
+    out, ambiguous = [], 0
+    for p in parts:
+        d = p.deferred
+        lifted = np.zeros(d.n_fragments, np.int64)
+        for j, k in enumerate(_keys(d)):
+            run = pool.get(k)
+            if run is None:
+                raise ValueError(
+                    f"lift_choices: a partition holds record {j} with key {k}, which is not in the whole "
+                    "library's held bank. The payloads are not a partition of one scan — check they came "
+                    "from the same BAM."
+                )
+            at = taken.get(k, 0)
+            if at >= len(run):
+                raise ValueError(
+                    f"lift_choices: the partitions hold more records with key {k} ({at + 1}) than the "
+                    f"whole library does ({len(run)}). They are not a partition of one scan."
+                )
+            if len(run) > 1:
+                ambiguous += 1
+            lifted[j] = run[at]
+            taken[k] = at + 1
+        out.append(lifted)
+    return out, ambiguous
+
+
+def lift_drain_parts(lift: dict, parts_list: list) -> tuple[list, int]:
+    """Drain a list of partition payloads by replaying the whole's already-drawn choices.
+
+    One call per exact partitioning of the whole (the choice queue is shared across the list, per :func:`lift_choices`).
+    The list order matters for the greedy tie assignment, so a caller draining two partitionings (e.g. origins and RNA
+    strands) should put any shared member (``gdna``) first in both, which hands it the identical choice slice. Returns
+    ``(drained_parts, n_ambiguous)``; an empty ``lift`` (no held fragments) returns the parts unchanged with 0.
     """
     if not lift:
         return list(parts_list), 0
-    from rigel.second_pass import drain, lift_choices
+    from rigel.second_pass import drain
 
     lifted, n_amb = lift_choices(lift["undrained"], list(parts_list), lift["choices"])
     return [
@@ -143,22 +223,20 @@ def lift_drain_parts(lift: dict, parts_list: list) -> tuple[list, int]:
 
 @dataclass
 class OracleTruth:
-    """Validated per-origin accumulator payloads for one condition. Construct via :meth:`from_bam`, which
-    runs the sum-to-full validation as a HARD gate (raises if the partition does not reconstruct the full
-    payload — i.e. if the oracle is ever not trustworthy)."""
+    """Validated per-origin accumulator payloads for one condition. Construct via :meth:`from_bam`, which runs the
+    sum-to-full validation as a hard check and raises if the partition does not reconstruct the full payload."""
 
     full: object
     parts: dict  # origin -> payload
     read_counts: dict  # origin -> reads written (every input read accounted for)
-    #: held records whose ORIGIN attribution the lift could not determine — 0 unless ``drain_with``
-    #: was used. It bounds the truth error exactly; a caller must REPORT it (`second_pass.lift_choices`).
+    #: held records whose origin attribution the lift could not determine; 0 unless ``drain_with`` was used. It bounds
+    #: the truth error exactly, and a caller must report it (:func:`lift_choices`).
     n_ambiguous: int = 0
-    #: DRAINED frame only (``full.drain is not None``): the gdna partition's deposits in each RNA-only
-    #: bank. Not an oracle defect — the whole-library drain genuinely draws a spliced hypothesis for
-    #: some true-gDNA fragments, so production's tally violates "gDNA never splices" as a statement
-    #: about DEPOSITS, and the truth must SAY so rather than refuse to describe the frame the
-    #: calibrator reads (`ISSUES: drain-contaminates-certified-rna`). ``None`` in the pass-one frame,
-    #: where the same deposits are impossible and remain a hard failure.
+    #: Drained frame only (``full.drain is not None``): the gdna partition's deposits in each RNA-only bank. The
+    #: whole-library drain draws a spliced hypothesis for some true-gDNA fragments, so production's tally violates "gDNA
+    #: never splices" as a statement about deposits, and the truth records it rather than refusing to describe the frame
+    #: the calibrator reads. ``None`` in the pass-one frame, where such deposits are impossible and remain a hard
+    #: failure.
     gdna_spliced_leak: "dict | None" = None
 
     @classmethod
@@ -174,35 +252,31 @@ class OracleTruth:
     ) -> "OracleTruth":
         """Split the BAM by origin, scan each partition, and validate sum-to-full.
 
-        ``full_payload`` lets a caller that has ALREADY scanned the full BAM (e.g. to run
-        ``calibrate`` on it) hand that payload in, skipping a redundant full re-scan. It must be
-        the production scan of ``bam`` with the same ``cfg`` — sum-to-full then also PROVES the
-        oracle partitions reconstruct the exact payload the calibration consumed.
+        ``full_payload`` lets a caller that has already scanned the full BAM (e.g. to run ``calibrate``) hand that
+        payload in. It must be the production scan of ``bam`` with the same ``cfg``; sum-to-full then also proves the
+        partitions reconstruct the exact payload calibration consumed.
 
-        ``drain_with`` makes the oracle valid for a DRAINED tally. Without it, every number an
-        instrument reads off this class is an undrained one, because the second pass conditions on the
-        whole tally and partitions drained independently do not sum to the whole drained
-        (TRAPS: draining-breaks-the-oracle). Pass ``(undrained_whole, choices, region_types, sj)`` —
-        exactly what ``pipeline._drain_side_buffer(_lift=...)`` publishes — and each partition is
-        drained by REPLAYING the whole's already-drawn choices inside it (`second_pass.lift_choices`).
+        ``drain_with`` makes the oracle valid for a drained tally; without it every number read off this class is
+        undrained, because the second pass conditions on the whole tally and independently drained partitions do not sum
+        to the whole. Pass ``(undrained_whole, choices, region_types, sj)``, which
+        ``pipeline._drain_side_buffer(_lift=...)`` publishes, and each partition is drained by replaying the whole's
+        choices (:func:`lift_choices`).
 
-        ⛔ The two payloads are different objects and swapping them is the one way to get this wrong.
-        ``full_payload`` takes the DRAINED whole — it is what sum-to-full is asserted against and what
-        calibration read. ``drain_with[0]`` takes the UNDRAINED whole — the drained bank is empty by
-        design, so it cannot supply the key pool and every partition would raise. That failure is at
-        least loud, and in the other direction ``from_parts``' sum-to-full becomes the drain's own
-        end-to-end identity gate for free.
+        The two payloads must not be swapped. ``full_payload`` takes the drained whole, which sum-to-full is asserted
+        against and calibration read. ``drain_with[0]`` takes the undrained whole: the drained bank is empty, so it
+        cannot supply the key pool and every partition would raise. ``from_parts``' sum-to-full then doubles as the
+        drain's end-to-end identity check.
         """
         paths, read_counts = _split_bam(bam, work_dir, tag)
         full = full_payload if full_payload is not None else _scan_payload(bam, index, cfg)
         parts = {k: _scan_payload(paths[k], index, cfg) for k in ORIGINS}
         n_ambiguous = 0
         if drain_with is not None:
-            from rigel.second_pass import drain, lift_choices
+            from rigel.second_pass import drain
 
             undrained_whole, choices, region_types, sj = drain_with
-            # ALL partitions in ONE call — the per-key queue's state is shared across them, so each of
-            # the whole's choices is handed out exactly once (`lift_choices`' own docstring).
+            # All partitions in one call: the per-key queue's state is shared across them, so each of the whole's
+            # choices is handed out exactly once.
             lifted, n_ambiguous = lift_choices(
                 undrained_whole, [parts[k] for k in ORIGINS], choices
             )
@@ -216,14 +290,13 @@ class OracleTruth:
     def from_cached_parts(
         cls, drained_full, parts: dict, lift: dict, read_counts: dict | None = None
     ) -> "OracleTruth":
-        """Assemble a DRAINED-frame oracle from CACHED pass-one partitions.
+        """Assemble a drained-frame oracle from cached pass-one partitions.
 
-        ``drained_full`` is the whole payload after ``pipeline._drain_side_buffer(..., _lift=lift)``;
-        ``parts`` are FRESHLY LOADED undrained partition payloads (drained here in place — pass loads
-        nothing else holds); ``lift`` is the ``_lift`` box the drain published. An EMPTY ``lift``
-        means the side buffer was empty, so pass one IS the drained frame and the parts stand.
-        ``from_parts``' sum-to-full then runs on the drained frame — the lift's own end-to-end
-        identity gate, for free (the same property ``from_bam(drain_with=...)`` relies on).
+        ``drained_full`` is the whole payload after ``pipeline._drain_side_buffer(..., _lift=lift)``; ``parts`` are
+        freshly loaded undrained partition payloads (drained here in place, so pass ones nothing else holds); ``lift``
+        is the ``_lift`` box the drain published. An empty ``lift`` means the side buffer was empty, so pass one is the
+        drained frame and the parts stand. ``from_parts``' sum-to-full then runs on the drained frame, the lift's
+        end-to-end identity check.
         """
         if not lift:
             return cls.from_parts(drained_full, parts, read_counts)
@@ -236,18 +309,13 @@ class OracleTruth:
     def from_parts(
         cls, full, parts: dict, read_counts: dict | None = None, n_ambiguous: int = 0
     ) -> "OracleTruth":
-        """Assemble from payloads that are ALREADY scanned, and validate — the entry point a cache
-        needs.
+        """Assemble from payloads that are already scanned, and validate: the entry point a cache needs.
 
-        The validation is not optional here either, and that is the whole reason this exists rather
-        than callers constructing the dataclass directly. Splitting and re-scanning is minutes per
-        condition, so any instrument that runs the panel more than once wants to persist the
-        partitions; but a cached oracle that skipped sum-to-full would be a *silently* wrong truth
-        source feeding everything downstream. Re-running the identity over loaded arrays costs
-        milliseconds, so the cached path is exactly as gated as the scanned one.
-
-        ``read_counts`` is bookkeeping (every input read accounted for) and a cache need not carry it;
-        it defaults to ``-1`` per origin, which is distinguishable from a real count of zero.
+        Splitting and re-scanning takes minutes per condition, so an instrument running the panel more than once
+        persists the partitions; a cached oracle that skipped sum-to-full would be a silently wrong truth source.
+        Re-running the identity over loaded arrays costs milliseconds, so the cached path is as checked as the scanned
+        one. ``read_counts`` is bookkeeping a cache need not carry; it defaults to ``-1`` per origin, distinguishable
+        from a real count of zero.
         """
         self = cls(
             full=full,
@@ -259,18 +327,13 @@ class OracleTruth:
         return self
 
     def _validate(self) -> None:
-        """Sum-to-full on EVERY bank: integers EXACTLY, fractions to the representation and no further.
+        """Sum-to-full on every bank: integers exactly, fractions to the representation and no further.
 
-        One convention, two standards, and the split is the point. A COUNT is an integer and integer
-        addition is associative, so its partitions must sum to the full payload with no tolerance at
-        all — that is the great majority of the banks. A FRACTION is float64, and summing three
-        partitions re-associates the additions, so those agree only to within the representation. The
-        budget is `n * EPS` scaled by the magnitude, derived from the deposit count and never fitted,
-        and a COUNT bank that needed it fails here.
-
-        Casting every bank to int64 would be vacuous rather than strict: three banks hold fractions in
-        (0, 1], which int64 truncates to zero, so the comparison would be zeros against zeros and
-        would certify any partition at all. The float tolerance is 1e-16-scale.
+        A count is an integer and integer addition is associative, so its partitions must sum to the full payload with
+        no tolerance; that is most banks. A fraction is float64, and summing three partitions re-associates the
+        additions, so those agree within ``n * EPS`` scaled by the magnitude, derived from the deposit count. A count
+        bank that needed the tolerance fails. Casting every bank to int64 would truncate the (0, 1] fraction banks to
+        zero and certify any partition at all.
         """
         eps = float(np.finfo(np.float64).eps)
         for bank in _BANKS:
@@ -298,13 +361,11 @@ class OracleTruth:
                     "partition is not the production split, or the accumulator stopped depositing "
                     "per fragment."
                 )
-        # gDNA is never spliced (physical) — but the frames differ in what that means for DEPOSITS.
-        # PASS-ONE frame: a spliced deposit in the gdna partition is impossible and is a hard failure,
-        # on EITHER spliced bank, the sj axis included. DRAINED frame (``full.drain is not None``):
-        # the whole-library drain genuinely draws a spliced hypothesis for some true-gDNA fragments,
-        # so the same deposits are a FACT of production's tally; the truth RECORDS them per bank
-        # (``gdna_spliced_leak``) instead of refusing to describe the frame the calibrator reads
-        # (`ISSUES: drain-contaminates-certified-rna`).
+        # gDNA is never spliced, but the frames differ in what that means for deposits. In the pass-one frame a spliced
+        # deposit in the gdna partition is impossible and is a hard failure, on either spliced bank and the sj axis. In
+        # the drained frame (``full.drain is not None``) the whole-library drain draws a spliced hypothesis for some
+        # true-gDNA fragments, so such deposits are part of production's tally; the truth records them per bank
+        # (``gdna_spliced_leak``) instead of refusing the frame the calibrator reads.
         leak = {
             bank: int(np.asarray(getattr(self.parts["gdna"], bank), np.int64).sum())
             for bank in _RNA_ONLY_BANKS
@@ -318,19 +379,17 @@ class OracleTruth:
                         f"oracle INVALID: gdna partition has {g} deposits in {bank}."
                     )
 
-    # ---- per-REGION TRUE counts on the accumulator basis ----
+    # ---- per-region true counts on the accumulator basis ----
     def region_unspliced(self):
-        """``(G, R)`` per region: TRUE contained gDNA vs contained RNA count — the gDNA-vs-RNA competition
-        basis the calibration deconvolves. ``R`` = mrna + nrna (exon-body + nascent).
-
-        There is no spliced term to exclude: ``region_contained`` is credited only when the fragment
-        used no sj, so a region's contained population is unspliced by construction.
+        """``(G, R)`` per region: true contained gDNA vs contained RNA count, the competition basis calibration
+        deconvolves. ``R`` = mrna + nrna. ``region_contained`` is credited only when the fragment used no sj, so there
+        is no spliced term to exclude.
         """
         nc = lambda k: np.asarray(self.parts[k].region_contained_count, np.float64).sum(1)  # noqa: E731
         return nc("gdna"), nc("mrna") + nc("nrna")
 
     def region_true_fg(self):
-        """Per-region TRUE gDNA fraction of the contained count (NaN where there is no contained mass)."""
+        """Per-region true gDNA fraction of the contained count (NaN where there is no contained mass)."""
         G, R = self.region_unspliced()
         tot = G + R
         return np.where(tot > 0, G / np.maximum(tot, 1e-12), np.nan), tot
@@ -338,17 +397,14 @@ class OracleTruth:
     def component_shares(self) -> dict:
         """The true per-component share at every boundary, measured rather than modelled.
 
-        ``mass / count`` inside one origin partition IS that component's mean conserved fragment-mass
-        per crossing, on the real partition, under the real placement. It needs no fragment-length
-        pmf, no uniform-placement assumption and no reach model — which is the whole point, because
-        the fitted pmfs carry a phantom length gap and an analytic share would import it. That is what
-        makes an arm built on this an ORACLE arm and not a MODEL arm: deriving the share from
-        ``truth_fragment_lengths.tsv`` through ``crossing_eff_length`` would be a model evaluated on
-        truth inputs, and it could then be wrong in the same direction as the thing it prices.
+        ``mass / count`` inside one origin partition is that component's mean conserved fragment mass per crossing, on
+        the real partition under the real placement. It needs no fragment-length pmf, uniform-placement assumption or
+        reach model, which is what makes an arm built on it an oracle arm rather than a model arm: a share derived from
+        ``truth_fragment_lengths.tsv`` through ``crossing_eff_length`` would be a model on truth inputs and could err in
+        the same direction as what it prices.
 
-        1.0 where a component never crossed a boundary — the identity, matching
-        ``PopulationView.mass_per_crossing``. A zero there would delete mass rather than leave it
-        unscaled, and the shipped accessor makes the same choice for the same reason.
+        1.0 where a component never crossed a boundary, the identity, matching ``PopulationView.mass_per_crossing``; a
+        zero would delete mass rather than leave it unscaled.
 
         Returns ``{"gdna": float64[n_boundaries], "rna": float64[n_boundaries]}``.
         """
@@ -367,17 +423,14 @@ class OracleTruth:
         return out
 
     def override_masses(self, region_arrays) -> dict:
-        """The TRUE ``CalibrationResult`` mass arrays on all three axes, built DIRECTLY from the
-        per-origin substrates — the exact schema ``calibrate`` assembles, so it can be fed via
-        ``dataclasses.replace(cal, **override_masses(ra))`` as the perfect-calibration lever.
+        """The true ``CalibrationResult`` mass arrays on all three axes, built directly from the per-origin substrates
+        in the schema ``calibrate`` assembles, so ``dataclasses.replace(cal, **override_masses(ra))`` gives a perfect
+        calibration.
 
-        gDNA = the gdna partition's count; RNA = the (mrna + nrna) count, spliced-INCLUSIVE on the boundary
-        axis to match ``chain_boundary_deconv``'s ``rna = (1−f_g)·unspliced + spliced``. Conservation
-        ``gdna + rna = the full object count`` holds on both axes because the partitions sum to the full
-        payload (the validated identity).
-
-        ``count_rna_sj`` is the FULL payload's sj flux, not the RNA partitions' — they are equal by
-        the same identity, and taking it from ``full`` says so rather than re-deriving it.
+        gDNA is the gdna partition's count; RNA is the (mrna + nrna) count, spliced-inclusive on the boundary axis to
+        match ``chain_boundary_deconv``'s ``rna = (1−f_g)·unspliced + spliced``. ``gdna + rna`` equals the full object
+        count on both axes because the partitions sum to the full payload. ``count_rna_sj`` is the full payload's sj
+        flux, equal to the RNA partitions' by the same identity.
         """
         from rigel.calibration.substrate import CalibrationSubstrate
 

@@ -1,14 +1,11 @@
 """`rigel.calibration.gdna_opportunity`'s four length pools, against a brute-force enumerating oracle.
 
-The oracle enumerates and the code computes: every closed form here is checked against a loop that
-walks every start position on a small partition and asks the deposit rule's OWN question — "is this
-fragment contained in exactly one region?", "does it cross exactly one boundary?" — so each divisor is
-verified against the selection it is meant to invert rather than against a re-derivation of itself
-(TRAPS: self-checking-validator). The rule the oracle implements is
-`tests/native/_accumulator_reference.py`'s ``FragmentPool``, verbatim: contained in exactly one region
-types the fragment by that region's coarse type (intergenic or intronic only); crossing exactly one
-boundary types it by the sorted pair of flanking region types; and anything else — an exonic contained
-fragment, a multi-boundary crossing — enters no pool at all.
+The oracle walks every start position on a small partition and asks the deposit rule's own question ("is this fragment
+contained in exactly one region?", "does it cross exactly one boundary?"), so each divisor is checked against the
+selection it inverts rather than a re-derivation of itself. The rule is `tests/native/_accumulator_reference.py`'s
+``FragmentPool``: contained in exactly one region types the fragment by that region's coarse type (intergenic or
+intronic only); crossing exactly one boundary types it by the sorted pair of flanking region types; and anything else
+(an exonic contained fragment, a multi-boundary crossing) enters no pool.
 """
 
 from __future__ import annotations
@@ -76,8 +73,8 @@ def region_lengths_of(region_bounds: list[int]) -> np.ndarray:
 
 # ── the partitions the oracle is run over ───────────────────────────────────────────────────────
 
-#: Deliberately awkward: a 1 bp region (legal, and common in a real index), a region shorter than the
-#: widest fragment, adjacent same-type regions, and both flank pairs present.
+#: A 1 bp region (legal, and common in a real index), a region shorter than the widest fragment, adjacent same-type
+#: regions, and both flank pairs present.
 PARTITIONS = [
     ([0, 40, 41, 90, 200], [TYPE_INTERGENIC, TYPE_EXON, TYPE_INTRON, TYPE_EXON]),
     ([0, 10, 60, 61, 62, 130], [TYPE_INTRON, TYPE_EXON, TYPE_INTRON, TYPE_EXON, TYPE_INTERGENIC]),
@@ -176,10 +173,8 @@ class TestAgainstTheEnumeratingOracle:
     @pytest.mark.parametrize("region_bounds,types", PARTITIONS)
     @pytest.mark.parametrize("width", WIDTHS)
     def test_every_start_is_accounted_for(self, region_bounds, types, width):
-        """The pools plus the unpooled remainder must exhaust every admissible start.
-
-        This is the one assertion that would catch an opportunity function that is individually
-        plausible and collectively wrong — double-counting a start, or losing one at a boundary.
+        """The pools plus the unpooled remainder must exhaust every admissible start, which catches an opportunity
+        function that is individually plausible and collectively wrong (a start double-counted, or lost at a boundary).
         """
         oracle = enumerate_pools(region_bounds, types, width)
         pooled = sum(oracle["contained"].values()) + sum(oracle["crossing"].values())
@@ -220,7 +215,7 @@ class TestAgainstTheEnumeratingOracle:
 
 
 class TestTheTiltsAreOpposite:
-    """The reason the four pools cannot be pooled raw, asserted rather than stated in prose."""
+    """Why the four pools cannot be pooled raw."""
 
     def test_contained_opportunity_falls_with_length_and_crossing_rises(self):
         lengths = np.array([500, 1200, 80, 3000], dtype=np.int64)
@@ -235,8 +230,8 @@ class TestTheTiltsAreOpposite:
         assert np.all(np.diff(crossing[2:301]) > 0)
 
     def test_a_short_region_caps_the_crossing_opportunity(self):
-        """Where a flank is shorter than the fragment, the crossing count STOPS growing — that is the
-        `(w-1-a)+` term, and it is why `(w-1)` alone is not the opportunity."""
+        """Where a flank is shorter than the fragment, the crossing count stops growing: that is the `(w-1-a)+` term,
+        and why `(w-1)` alone is not the opportunity."""
         crossing = crossing_opportunity(
             np.array([30], dtype=np.int64), np.array([40], dtype=np.int64), 300
         )
@@ -247,7 +242,7 @@ class TestTheTiltsAreOpposite:
 
 class TestTheCombination:
     def test_combined_probability_is_the_opportunity_weighted_average(self):
-        """`(sum count)/(sum A)` IS `sum(A_p f_p)/sum(A_p)` — the identity the design rests on."""
+        """`(sum count)/(sum A)` is `sum(A_p f_p)/sum(A_p)`, the identity the design rests on."""
         rng = np.random.default_rng(0)
         max_width = 60
         pools = [rng.random(max_width + 1) * 1000 + 1 for _ in range(4)]
@@ -268,10 +263,8 @@ class TestTheCombination:
 
 class TestWiredIntoTheModel:
     def test_the_fallback_is_the_CONTAINED_pair_not_the_raw_four(self):
-        """Without a divisor the gDNA pool must fall back to the two contained pools.
-
-        Pooling the four raw is measurably WORSE than either the contained pair or the de-tilted four,
-        so "no annotation offered" must not silently pick it.
+        """Without a divisor the gDNA pool falls back to the two contained pools: pooling the four raw is worse than
+        either the contained pair or the de-tilted four.
         """
         from types import SimpleNamespace
 
@@ -281,7 +274,7 @@ class TestWiredIntoTheModel:
         pools = np.zeros((5, max_size + 1))
         pools[0, 5] = 100.0  # intergenic contained
         pools[1, 6] = 50.0  # intronic contained
-        pools[2, 18] = 400.0  # intron-exon crossing — much longer, and much larger
+        pools[2, 18] = 400.0  # intron-exon crossing: much longer, and much larger
         pools[3, 19] = 300.0  # intergenic-exon crossing
         pools[4, 10] = 70.0  # RNA
         payload = SimpleNamespace(
@@ -294,17 +287,14 @@ class TestWiredIntoTheModel:
         assert float(gdna_fl_mass(payload).sum()) == 850.0
 
         models = build_fl_models(payload, prior_ess=0.0)
-        # The fallback must be the contained pair — 150 fragments at 5 and 6 bp, not 850 dragged long.
+        # The fallback must be the contained pair: 150 fragments at 5 and 6 bp, not 850 dragged long.
         assert models.n_gdna == pytest.approx(150.0)
         assert float((models.gdna_pmf * np.arange(max_size + 1)).sum()) < 7.0
 
     def test_the_divisor_moves_the_gdna_pool_and_preserves_its_evidence_weight(self):
-        """The four-pool arm uses all 850 fragments, and the EB weight reflects that.
-
-        PERTURBATION: the RNA pool here spans SEVERAL lengths on purpose. `detilt_pool` renormalises
-        back to the pool's own total, so a single-bin histogram is invariant under any divisor
-        whatsoever — and with a one-bin RNA pool this test cannot see the gDNA divisor leaking into
-        the RNA one.
+        """The four-pool arm uses all 850 fragments, and the EB weight reflects that. The RNA pool spans several lengths
+        on purpose: `detilt_pool` renormalises to the pool's own total, so a single-bin histogram would be invariant
+        under any divisor and could not show the gDNA divisor leaking into the RNA one.
         """
         from types import SimpleNamespace
 
@@ -339,18 +329,15 @@ class TestWiredIntoTheModel:
             "the crossing pools must contribute evidence"
         )
         assert not np.allclose(plain.gdna_pmf, detilted.gdna_pmf)
-        # The RNA pool is untouched by the gDNA divisor — the two selections are different objects.
+        # The RNA pool is untouched by the gDNA divisor: the two selections are different objects.
         assert plain.rna_pmf == pytest.approx(detilted.rna_pmf)
 
     def test_EVERY_production_caller_of_build_fl_models_passes_the_annotation_inputs(self):
-        """Every annotation input to `build_fl_models` is optional, so tests without an index can build a
-        model — which makes forgetting one in production silent. Without ``sj_opportunity`` the RNA pool
-        stays tilted long; without ``gdna_opportunity`` the gDNA pool falls back to the contained pair and
-        reads ~15 % short under capture; without ``regions`` the two-pool contrast never runs. So every
-        call site in the package is pinned.
-
-        Source-level on purpose — a runtime check would need a full pipeline run per call site — and over
-        every module, so a new caller anywhere is checked without this test being retargeted.
+        """Every annotation input to `build_fl_models` is optional so tests without an index can build a model, which
+        makes forgetting one in production silent: without ``sj_opportunity`` the RNA pool stays tilted long; without
+        ``gdna_opportunity`` the gDNA pool falls back to the contained pair and reads short under capture; without
+        ``regions`` the two-pool contrast never runs. So every call site in the package is checked, at source level (a
+        runtime check would need a pipeline run per call site) and over every module, so a new caller is covered.
         """
         import ast
         from pathlib import Path
@@ -376,10 +363,8 @@ class TestWiredIntoTheModel:
 
 class TestFromTheIndex:
     def test_the_four_pools_are_built_off_the_index_partition(self, mini_index):
-        """The index path, gated on the one invariant that must hold on any real partition:
-
-        the four pools are disjoint selections of the same start positions, so their sum can never
-        exceed the total number of admissible starts. A divisor that violates that is over-counting.
+        """On any real partition the four pools are disjoint selections of the same start positions, so their sum can
+        never exceed the total admissible starts; a divisor that violates that over-counts.
         """
         opportunity = observable_gdna_opportunity(RegionArrays.from_index(mini_index), 200)
         for pool in opportunity.pools:

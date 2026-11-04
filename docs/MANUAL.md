@@ -428,8 +428,9 @@ A `config.yaml` is always written, recording all resolved parameters and I/O
 paths; rerun the exact analysis with `rigel quant --config results/config.yaml`
 on the rigel version that wrote it (its header names the version). Another
 version refuses a key it does not have, naming the version that wrote the file:
-every 0.7.1 `config.yaml` carries four keys removed in 0.8.0 and one renamed
-(`splicing_anchor_tolerance`, now `intron_overhang_tolerance`).
+every 0.7.1 `config.yaml` carries five keys removed in 0.8.0 (`assignment_min_posterior`,
+`gdna_em_llr_bias`, `gdna_prior_mixture_bridge`, `mismatch_alpha`, `sweep_n_grid_single_strand`) and one
+renamed (`splicing_anchor_tolerance`, now `intron_overhang_tolerance`).
 
 **How the outputs name RNA.** Every table, `summary.json` key and report label puts RNA in one of two
 categories. **Annotated** RNA is RNA on a transcript of the reference annotation, single-exon transcripts
@@ -565,11 +566,11 @@ histograms they are built from.
 Run-level QC manifest. It is a small, human-readable index — the bulky raw
 fragment-length histograms live in the `fragment_lengths.feather` companion
 (see above), not in the JSON. `schema_version` (integer) identifies the layout;
-the current version is **7**. Top-level keys:
+the current version is **8**. Top-level keys:
 
 | Key | Contents |
 |-----|----------|
-| `schema_version` | Manifest schema version (currently `7`) |
+| `schema_version` | Manifest schema version (currently `8`) |
 | `rigel_version`, `timestamp` | Version and run time |
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
@@ -1010,10 +1011,9 @@ Yes, and only the EM's own step may do it. A component at the floor (`EM_LOG_EPS
 so it stays dead unless it holds fragments no other component can explain. Rigel accelerates the EM
 with SQUAREM, which jumps ahead along the EM's path; a jump that would carry a still-live component
 below the floor is shortened toward the plain EM step instead of being cut off there, in VBEM and
-MAP-EM alike. Before 2026-09-25 such components were clamped to the floor, and which of several
-transcripts sharing the same fragments survived then depended on where the EM started. VBEM keeps a
-milder dependence of its own, accepted as a known limit: where fragments are genuinely ambiguous, which
-of several near-equivalent explanations it settles on can depend on its starting point. Rigel always
+MAP-EM alike. VBEM keeps a mild dependence on where it starts, accepted as a known limit: where
+fragments are genuinely ambiguous, which of several near-equivalent explanations it settles on can
+depend on its starting point. Rigel always
 starts from the same coverage-weighted point, so one input and one version give the EM one answer at any thread
 count, and the alternatives measured no more accurate against simulated truth; a change that moves only the starting
 point, as a new version may, can move such fragments between isoforms, unspliced RNA and gDNA.

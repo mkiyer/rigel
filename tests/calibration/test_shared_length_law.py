@@ -1,17 +1,13 @@
 """``shared_length_law``: one length table for both origins unless the data show a difference capture cannot make.
 
-The gates, in the order the design argues them. On equal chemistry the scorer's two tables are one array, however
-strong the capture, because a captured census of gDNA's law sits inside the bound; a real gap is kept whole, never
-partly shrunk; capture only lengthens, so an RNA census no longer than gDNA's law moves nothing; the mixture stays
-within RNA's captured fraction and more capture never widens what is left; the bound is the worst case over every
-capture response that rewards length at most proportionally, and only over those; the weight and the mixture are
-continuous in every input; with no capture each origin keeps its own law; an RNA law no spliced fragment measured is
-one law; and the geometric path is exact at both ends. On laws BUILT from nested pools and handed over as the pipeline
-hands them, equal chemistry under capture is one law at every RNA pool size, a gap the spliced fragments measure is
-kept whole, and RNA with no spliced fragment is one law.
-
-PERTURBATION (`TRAPS: perturb-every-gate`): the no-measurement branch deleted, that branch keeping gDNA's own law, and
-the pipeline reading every RNA law as measured each fire at least one gate.
+On equal chemistry the scorer's two tables are one array however strong the capture, because a captured census of gDNA's
+law sits inside the bound; a real gap is kept whole, never partly shrunk; capture only lengthens, so an RNA census no
+longer than gDNA's law moves nothing; the mixture stays within RNA's captured fraction, and more capture never widens
+what is left; the bound is the worst case over every capture response that rewards length at most proportionally, and
+only over those; the weight and the mixture are continuous in every input; with no capture each origin keeps its own
+law; an RNA law no spliced fragment measured is one law; and the geometric path is exact at both ends. On laws built
+from nested pools and handed over as the pipeline hands them, equal chemistry under capture is one law at every RNA pool
+size, a gap the spliced fragments measure is kept whole, and RNA with no spliced fragment is one law.
 """
 
 from __future__ import annotations
@@ -59,7 +55,7 @@ def _tables(r, g, kappa, var_r=ZERO, var_g=ZERO):
 
 @pytest.mark.parametrize("kappa", [0.2, 0.6, 0.98])
 def test_equal_chemistry_under_capture_is_one_table(kappa):
-    """RNA's census is gDNA's law captured at every fraction up to ``kappa``: the gDNA table IS the RNA table."""
+    """RNA's census is gDNA's law captured at every fraction up to ``kappa``: the gDNA table is the RNA table."""
     for fraction in (0.0, 0.5 * kappa, kappa):
         r = size_biased(G, fraction)
         t = _tables(r, G, kappa)
@@ -168,8 +164,8 @@ def test_more_capture_never_leaves_a_wider_contrast():
 
 def _proportional_responses(rng, n):
     """Random capture responses that reward length at most proportionally: ``m(l) = l s(l)``, ``s`` non-increasing and
-    ``m`` non-decreasing — a probe overlap that grows with length and saturates. Built directly: each step keeps
-    ``s(l + 1) / s(l)`` in ``[l / (l + 1), 1]``, the whole class, with half the draws concave."""
+    ``m`` non-decreasing (a probe overlap that grows with length and saturates). Each step keeps ``s(l + 1) / s(l)`` in
+    ``[l / (l + 1), 1]``, the whole class, with half the draws concave."""
     out = []
     lo = np.divide(L[1:-1], L[2:])
     for k in range(n):
@@ -184,9 +180,9 @@ def _proportional_responses(rng, n):
 
 
 def test_the_bound_is_the_worst_case_over_proportional_capture_responses():
-    """For every response whose capture weight grows at most in proportion to length, the captured census is no
-    further from the law than the size-biased one at the same captured fraction — in Hellinger distance, KL and
-    chi-square alike (convex order)."""
+    """For every response whose capture weight grows at most in proportion to length, the captured census is no further
+    from the law than the size-biased one at the same captured fraction, in Hellinger distance, KL and chi-square alike
+    (convex order)."""
     rng = np.random.default_rng(5)
     on = G > 0
 
@@ -238,7 +234,7 @@ def test_the_mixture_is_continuous_in_kappa_and_through_equal_means():
 
 
 def test_with_no_capture_each_origin_keeps_its_own_law():
-    """``kappa = 0``: no mixture, no bound, and any resolved difference whole — gDNA's own law, bit for bit."""
+    """``kappa = 0``: no mixture, no bound, and any resolved difference whole: gDNA's own law, bit for bit."""
     g, r = _law(200.0, 70.0), _law(215.0, 75.0)
     t = _tables(r, g, 0.0)
     assert t.decision.captured == 0.0 and t.decision.bound == 0.0 and t.decision.weight == 1.0
@@ -257,8 +253,9 @@ def test_noise_that_covers_the_difference_is_one_table_even_without_capture():
 
 def test_a_noisy_near_empty_tail_of_one_law_does_not_hide_a_real_gap():
     """Where gDNA's law is all but empty (its EB floor) and RNA's is not, a plug-in variance carried there must not read
-    as a reason for one law: the noise is the null's, read at the two laws' common mass (cfRNA-B's case: gDNA's law
-    near 100 bp, RNA's near 260, and gDNA's contrast variance spread over RNA's lengths)."""
+    as a reason for one law: the noise is the null's, read at the two laws' common mass (as when gDNA's law sits near
+    100 bp, RNA's near 260, and gDNA's contrast variance spreads over RNA's lengths).
+    """
     g, r = _law(110.0, 30.0), _law(260.0, 60.0)
     g = (g + 1e-12) / (g + 1e-12).sum()
     # at RNA's own lengths gDNA's law sits at its floor, while the contrast's intronic pool, which carries RNA there,
@@ -284,7 +281,7 @@ def test_the_geometric_path_is_exact_at_both_ends_and_a_law_between():
 def test_an_rna_law_no_spliced_fragment_measured_shows_no_difference():
     """An empty spliced pool leaves RNA's law at the anchor, a fallback no count measured, and its zero variance is no
     precision: the decision reads no RNA measurement as no difference and keeps one law, however far the anchor sits
-    from gDNA's law, capture or none."""
+    from gDNA's law, with or without capture."""
     g, anchor = _law(200.0, 70.0), _law(260.0, 80.0)
     for kappa in (0.0, 0.7):
         t = shared_length_law(anchor, g, ZERO, ZERO, kappa, rna_measured=False)
@@ -311,8 +308,8 @@ def _built_law(mean: float, sd: float) -> np.ndarray:
 def _built_tables(monkeypatch, g_law, r_law, n_rna, kappa, seed, *, spliced=True):
     """``build_fl_models`` on a payload whose gDNA pool is every gDNA fragment, whose spliced pool is RNA's fragments
     thinned by their junction-crossing chance (none with ``spliced`` False: RNA all unspliced), and whose anchor is
-    every fragment of both; then the decision exactly as the pipeline hands it over (``pipeline.length_tables``), at
-    a captured fraction ``kappa``."""
+    every fragment of both; then the decision exactly as the pipeline hands it over (``pipeline.length_tables``), at a
+    captured fraction ``kappa``."""
     from types import SimpleNamespace
 
     import rigel.calibration.capture_eff_length as cel
@@ -335,7 +332,7 @@ def _built_tables(monkeypatch, g_law, r_law, n_rna, kappa, seed, *, spliced=True
 
 
 def test_equal_chemistry_under_capture_is_one_law_at_every_rna_pool_size(monkeypatch):
-    """RNA's census gDNA's law captured at half the captured fraction, from an empty spliced pool to a deep one: the
+    """RNA's census is gDNA's law captured at half the captured fraction, from an empty spliced pool to a deep one: the
     built laws' own variances keep it one law in every library."""
     g = _built_law(225.0, 82.0)
     for n_rna in (0, 1_000, 10_000, 100_000):
@@ -358,7 +355,8 @@ def test_a_real_gap_measured_by_spliced_fragments_is_kept_whole(monkeypatch, kap
 @pytest.mark.parametrize("kappa", [0.0, 0.6])
 def test_rna_with_no_spliced_fragment_shows_no_length_difference(monkeypatch, kappa):
     """RNA in the library but none of it spliced: its law is the anchor, which carries unspliced RNA of another length,
-    and nothing measured RNA's own law — so one law, never the anchor read as RNA's census against gDNA's law."""
+    and nothing measured RNA's own law, so it is one law; the anchor is never read as RNA's census against gDNA's law.
+    """
     g = _built_law(225.0, 82.0)
     t = _built_tables(monkeypatch, g, _built_law(130.0, 50.0), 200_000, kappa, 0, spliced=False)
     assert t.decision.weight == 0.0

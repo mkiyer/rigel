@@ -1,4 +1,4 @@
-"""Test-only helpers for fragment resolution; NOT part of the shipped ``rigel`` package.
+"""Test-only helpers for fragment resolution; not part of the shipped ``rigel`` package.
 
 Production fragment resolution runs entirely in C++ (``rigel._resolve_impl``'s
 ``FragmentResolver``, reached as ``index.resolver``). This module provides:

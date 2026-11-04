@@ -1,16 +1,15 @@
-"""The deposit-behaviour digest's fixture, run against the SPECIFICATION rather than the C++.
+"""The deposit-behaviour digest's fixture, run against the executable specification rather than the C++.
 
-``rigel.scan_cache.deposit_digest`` computes the cache key's behavioural half from the NATIVE
-accumulator, because the cache holds what the production scanner deposited and the key must certify
-that. This module is the same fixture over the executable specification, and it exists for two gates:
+``rigel.scan_cache.deposit_digest`` computes the cache key's behavioural half from the native accumulator, because the
+key must certify what the production scanner deposited. This module runs the same fixture over the specification, for
+two tests:
 
-* the two must produce the SAME digest — otherwise the key certifies an artifact nothing writes;
-* the specification's rule can be PERTURBED in-process, which the compiled one cannot, so this is how
-  "a changed deposit rule moves the digest" is actually falsified.
+* the two must produce the same digest, or the key certifies an artifact nothing writes;
+* the specification's rule can be perturbed in-process, which the compiled one cannot, so this is how a changed deposit
+  rule is shown to move the digest.
 
-The fixture is duplicated deliberately and the duplication is GATED: if the two drift, the agreement
-test fails loudly. Importing the src fixture and re-running it here would test nothing, because both
-sides would then share whatever mistake it contained.
+The fixture is duplicated on purpose, and the agreement test catches drift; importing the src fixture would let both
+sides share any mistake in it.
 """
 
 from __future__ import annotations

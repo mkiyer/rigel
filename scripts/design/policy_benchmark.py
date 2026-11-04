@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""How does each message policy score, per condition, against certified truth? This is the standing
-policy benchmark and the instrument a message-policy change is judged by. It runs every named
-policy over each cached condition of a panel and reports the whole-library gDNA error in
-fragments, `sum |estimate - truth|` against the certified per-slot truth in `slot_truth.npz`,
-split by axis (region / boundary), one row per condition. It runs no EM and re-scans nothing:
-each condition is read from its cached scan in the drained frame the truth is certified in.
-Read the two halves separately and never pool them: unstranded rows (`ss 0.50`) are where a
-policy must win against `silent`, the measured floor; stranded rows (`ss 0.99`) are where it
-must do minimal harm, so a ratio near 1.00x is a pass; a panel total hides a sign flip between
-them. A row at any other specificity (the test panel's `ss 0.70`) is counted apart, against neither
-bar. `--panel test` is the development loop (seconds); `--panel ladder` is the shipping judgement,
-and a toy and the panel have inverted a ranking before, so a claim names its substrate.
-`--by-class` sums the same error per node class (certified stratum, boundaries split
-by terminus flag, exons by reach: licensed intron face / edge only / walled) to rank where a
-policy's remaining error sits; on the test chromosome the capture-OFF rows are dominated by the
-designed shadow-transcription floor, identical in every arm, so read the capture-ON rows there.
-`--set SECTION.FIELD=VALUE` (repeatable) applies any config value on top of every policy's fields,
-the same spelling `calibration_vs_oracle.py` takes, so a grid arm is read on the panel and on the
-metric from one config value.
+"""How does each message policy score, per condition, against certified truth?
+
+The instrument a message-policy change is judged by. It runs every named policy over each cached condition of
+a panel and reports the whole-library gDNA error in fragments, `sum |estimate - truth|` against the certified
+per-slot truth in `slot_truth.npz`, split by axis (region / boundary), one row per condition. It runs no EM and
+re-scans nothing: each condition is read from its cached scan in the drained frame the truth is certified in.
+
+Read the strand halves apart, never pooled: unstranded rows (`ss 0.50`) must win against `silent`, the floor;
+stranded rows (`ss 0.99`) must do minimal harm, so a ratio near 1.00x passes. A panel total hides a sign flip
+between them, and a row at any other specificity (the test panel's `ss 0.70`) is counted apart, against
+neither bar. `--panel test` is the development loop (seconds) and `--panel ladder` the shipping judgement; a toy
+and the panel can rank differently, so a claim names its substrate.
+
+`--by-class` sums the same error per node class (certified stratum, boundaries split by terminus flag, exons by
+reach: licensed intron face / edge only / walled) to show where a policy's remaining error sits. On the test
+chromosome the capture-OFF rows are dominated by the designed shadow-transcription floor, identical in every
+arm, so read the capture-ON rows there. `--set SECTION.FIELD=VALUE` (repeatable) applies a config value on top
+of every policy's fields, spelled as `calibration_vs_oracle.py` takes it.
 
 Usage::
 
@@ -57,16 +56,7 @@ from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
-from _shared import RUNS, set_field, strandedness  # noqa: E402
-
-#: the substrates, each: (index dir, the panel dir holding `scan_cache/` and `oracle_cache/`)
-PANELS = {
-    "test": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios"),
-    # the same chromosome under the two other probe designs (junction-only and sparse probes)
-    "test_junction": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_junction"),
-    "test_sparse": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_sparse"),
-    "ladder": (RUNS / "suite" / "rigel_index", RUNS / "suite" / "ladder"),
-}
+from _shared import PANELS, set_field, strandedness  # noqa: E402
 
 #: policy name -> the `CalibrationConfig` fields that install it
 POLICIES = {
@@ -90,9 +80,9 @@ def _truth_gdna(truth_dir: Path) -> dict:
 
 def _slot_classes(truth: dict, payload, boundary_flags) -> np.ndarray:
     """Each slot's node class: its certified stratum, a boundary tagged ``[term]`` when a transcript
-    terminus sits on it, an exon tagged by its REACH — ``(licensed intron face)`` when some adjacent
+    terminus sits on it, an exon tagged by its reach: ``(licensed intron face)`` when some adjacent
     intron|exon face carries no terminus, else ``(edge only)`` when it has a gene edge, else
-    ``(walled: no licensed face)`` — the classes the message rebuild's holes are named in."""
+    ``(walled: no licensed face)``."""
     kind = np.asarray(truth["kind"])
     obj = np.asarray(truth["obj"], np.int64)
     strata = np.asarray(truth["stratum"]).astype(str)
@@ -125,9 +115,8 @@ def score_condition(
     fields."""
     truth_dir = panel_dir / "oracle_cache" / condition
     cache = read_scan_cache(panel_dir / "scan_cache" / condition, index)
-    # the drained frame: `calibration_inputs` drains at the production seed and builds the
-    # production fl models — the frame `slot_truth.npz` is certified in, so estimate and truth
-    # speak one tally.
+    # the drained frame: `calibration_inputs` drains at the production seed and builds the production fl
+    # models, the frame `slot_truth.npz` is certified in, so estimate and truth count the same fragments
     kw = calibration_inputs(cache, index)
     payload = kw["payload"]
     kwargs = dict(

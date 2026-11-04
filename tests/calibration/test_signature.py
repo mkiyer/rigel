@@ -1,9 +1,9 @@
-"""The region signature — packing, deriving and the strand classes read off it.
+"""The region signature: packing, deriving and the strand classes read off it.
 
-A signature is four bits (exon/intron × +/−) and every downstream strand question is a function of
-them, so these gates hold the encoding itself: the bit layout, the range check, the coarse strand a
-signature collapses to, the vectorised twin agreeing with the scalar form, the one shared numbering
-with ``rigel.types.Strand``, and the active-strand classifier a boundary's taxonomy is built from.
+A signature is four bits (exon/intron × +/−), and every downstream strand question is a function of them, so these tests
+hold the encoding itself: the bit layout, the range check, the coarse strand a signature collapses to, the vectorised
+twin agreeing with the scalar form, the one shared numbering with ``rigel.types.Strand``, and the active-strand
+classifier a boundary's taxonomy is built from.
 """
 
 from __future__ import annotations
@@ -43,8 +43,8 @@ def test_transcript_strand_class_array():
 
 
 def test_strand_convention_unified():
-    """``TS_*`` is one convention with ``RegionStrand`` (== ``rigel.types.Strand``): NONE=0, POS=1,
-    NEG=2, AMBIG=3. Two numberings for one concept is how a sign error becomes invisible."""
+    """``TS_*`` is one convention with ``RegionStrand`` (== ``rigel.types.Strand``): NONE=0, POS=1, NEG=2, AMBIG=3. Two
+    numberings for one concept would hide a sign error."""
     from rigel.types import Strand
 
     assert (TS_NONE, TS_POS, TS_NEG, TS_AMBIG) == (0, 1, 2, 3)
@@ -68,7 +68,7 @@ def test_strand_convention_unified():
 
 
 def test_rna_active_strands():
-    """RNA-active = a transcript is present (exon OR intron) on the strand."""
+    """RNA-active means a transcript is present (exon or intron) on the strand."""
     sig = np.array(
         [
             0,  # intergenic
@@ -98,9 +98,9 @@ def test_boundary_taxonomy_from_flank_helpers():
         right_pos, _ = rna_active_strands(np.array([right]))
         return bool((left_pos & right_pos)[0])
 
-    # 1) intergenic ↔ exon: no + transcript on the left flank ⇒ no crossing ⇒ gDNA sink.
+    # 1) intergenic ↔ exon: no + transcript on the left flank, so no crossing: a gDNA sink.
     assert crosses(intergenic, exon_p) is False
-    # 2) intron ↔ exon, 3) exon ↔ exon, 4) ambig ↔ ambig: a + transcript on both flanks ⇒ it crosses.
+    # 2) intron ↔ exon, 3) exon ↔ exon, 4) ambig ↔ ambig: a + transcript on both flanks, so it crosses.
     assert crosses(intron_p, exon_p) is True
     assert crosses(exon_p, exon_p) is True
     assert crosses(ambig, ambig) is True

@@ -1,13 +1,6 @@
-"""
-rigel.sim.scenario — End-to-end simulation scenario orchestrator.
-
-A ``Scenario`` bundles genome generation, gene annotation, index
-building (TranscriptIndex), read simulation, alignment (minimap2) and
-BAM name-sorting (samtools) into a single reproducible workflow.
-
-All artifacts are written to a working directory (temp by default)
-and can be cleaned up via ``cleanup()`` or the context-manager
-protocol.
+"""``Scenario``: a small reproducible library end to end — random genome, annotation, index, reads, and either a
+minimap2 alignment or the oracle BAM. Artifacts go to a working directory (temporary by default) that ``cleanup()``
+or the context manager removes.
 
 Usage
 -----
@@ -53,10 +46,8 @@ __all__ = ["Scenario", "ScenarioResult"]
 
 
 def _to_sim_params(sim_config: ReadSimConfig, n_rna: int) -> SimulationParams:
-    """Translate a Scenario ``ReadSimConfig`` into the engine's ``SimulationParams``.
-
-    (Strand specificity is passed separately to ``WholeGenomeSimulator``; ``n_workers`` is 1 —
-    scenarios are tiny single-condition runs.)"""
+    """Translate a ``ReadSimConfig`` into the engine's ``SimulationParams``, single-worker. Strand specificity goes
+    to ``WholeGenomeSimulator`` separately."""
     return SimulationParams(
         n_rna_fragments=n_rna,
         sim_seed=sim_config.seed,
@@ -79,8 +70,8 @@ def _gdna_overdispersion(gdna_config: GDNAConfig) -> float:
 
 
 def _to_gdna_sim(gdna_config: GDNAConfig | None) -> GDNASimConfig:
-    """Translate a Scenario ``GDNAConfig`` into the engine's ``GDNASimConfig`` (fragment-length +
-    strand overdispersion; the gDNA *count* is derived separately via the pool split)."""
+    """Translate a ``GDNAConfig`` into the engine's ``GDNASimConfig``: fragment lengths and strand overdispersion. The
+    gDNA count comes from the pool split."""
     if gdna_config is None:
         return GDNASimConfig()
     return GDNASimConfig(
@@ -103,16 +94,15 @@ class ScenarioResult:
     gtf_path : Path
         Gene annotation GTF file.
     bam_path : Path
-        BAM file: name-sorted (``samtools sort -n``) when aligned,
-        query-grouped (``SO:unsorted GO:query``) when oracle.
+        Name-sorted when aligned, query-grouped (``GO:query``) when oracle.
     index_dir : Path
-        TranscriptIndex output directory (Feather files).
+        TranscriptIndex directory.
     index : TranscriptIndex
-        Loaded TranscriptIndex ready for quantification.
+        The loaded index.
     transcripts : list[Transcript]
-        Transcript objects with assigned indices.
+        The annotated transcripts, with index rows as ``t_index``.
     genome : MutableGenome
-        The genome (post splice-motif edits).
+        The genome, splice motifs written.
     fastq_r1 : Path or None
         R1 FASTQ file (None in oracle mode).
     fastq_r2 : Path or None
@@ -122,8 +112,7 @@ class ScenarioResult:
     gdna_config : GDNAConfig or None
         gDNA configuration used (None if no gDNA simulated).
     is_oracle : bool
-        True when BAM was produced by the oracle simulator
-        (no FASTQ/alignment step).
+        True when the BAM is the simulator's oracle BAM, not an alignment.
     """
 
     fasta_path: Path
@@ -140,53 +129,22 @@ class ScenarioResult:
     is_oracle: bool = False
 
     def ground_truth_gdna_count(self) -> int:
-        """Count gDNA fragments from FASTQ read names.
-
-        Returns
-        -------
-        int
-            Number of gDNA-origin fragments.
-        """
+        """Count gDNA fragments from FASTQ read names."""
         return count_origins_from_fastq(self.fastq_r1)["gdna"]
 
     def ground_truth_nrna_count(self) -> int:
-        """Count nascent RNA fragments from FASTQ read names.
-
-        Returns
-        -------
-        int
-            Number of nascent-RNA-origin fragments.
-        """
+        """Count nascent RNA fragments from FASTQ read names."""
         return count_origins_from_fastq(self.fastq_r1)["nrna"]
 
     def ground_truth_from_fastq(self) -> dict[str, int]:
-        """Parse FASTQ read names to get ground-truth fragment counts.
-
-        Unlike :meth:`ground_truth_from_bam`, this counts *all* simulated
-        fragments regardless of alignment success, providing the true
-        number of fragments the simulator produced per transcript.
-        Only mature-RNA origins are counted: gDNA and nascent-RNA reads are
-        excluded.
-
-        Returns
-        -------
-        dict[str, int]
-            Mapping of ``t_id → count`` for each transcript.
-        """
+        """``t_id → count`` of the transcript-origin fragments the simulator wrote, from FASTQ read names, aligned or
+        not; gDNA and nascent fragments are excluded."""
         return dict(count_mrna_by_transcript_from_fastq(self.fastq_r1))
 
     # -- BAM-based ground truth (oracle mode) ---------------------------------
 
     def ground_truth_from_bam(self) -> dict[str, int]:
-        """Parse BAM read names for ground-truth mRNA fragment counts.
-
-        The read-name format is :mod:`rigel.sim.read_name`'s.
-
-        Returns
-        -------
-        dict[str, int]
-            Mapping of ``t_id → count`` for each transcript.
-        """
+        """``t_id → count`` of the transcript-origin fragments in the BAM, from its read names."""
         return dict(count_mrna_by_transcript_from_bam(self.bam_path))
 
     def ground_truth_gdna_count_from_bam(self) -> int:
@@ -198,11 +156,7 @@ class ScenarioResult:
         return count_origins_from_bam(self.bam_path)["nrna"]
 
     def ground_truth_auto(self) -> dict[str, int]:
-        """Return ground-truth mRNA counts from FASTQ or BAM.
-
-        Uses FASTQ-based ground truth if FASTQ files exist,
-        otherwise falls back to BAM read names (oracle mode).
-        """
+        """Ground-truth transcript counts from the FASTQ when it exists, else from the BAM."""
         if self.fastq_r1 is not None and self.fastq_r1.exists():
             return self.ground_truth_from_fastq()
         return self.ground_truth_from_bam()
@@ -232,8 +186,7 @@ class Scenario:
     seed : int
         Random seed for genome and read generation.
     work_dir : Path or None
-        Working directory for output files.  If None, a temporary
-        directory is created and cleaned up on ``cleanup()``.
+        Output directory; ``None`` creates a temporary one that ``cleanup()`` removes.
     ref_name : str or None
         Reference name. Defaults to *name*.
     """
@@ -282,14 +235,9 @@ class Scenario:
     def _index_and_transcriptome(
         self, fasta_path: Path, gtf_path: Path, nrna_abundance: float
     ) -> tuple[Path, TranscriptIndex, list[Transcript], list[Transcript]]:
-        """Simulate the toy from the same transcriptome `rigel quant` will read: build the
-        TranscriptIndex from the written GTF first, load its transcript list — annotated
-        transcripts plus the synthetic nascent entities — carry the annotation's abundances onto
-        the annotated rows by ``t_id``, and pool each multi-exon transcript's nascent molecules
-        onto its entity (`whole_genome.assign_nrna_to_entities`).
-
-        ``nrna_abundance > 0`` overrides every expressed multi-exon transcript's own value, as
-        :meth:`build` documents; ``0.0`` keeps the per-transcript values from ``add_gene``.
+        """Build the index from the written GTF and return the transcriptome `rigel quant` will read, with the
+        annotation's abundances carried onto it by ``t_id`` and each multi-exon transcript's nascent molecules
+        pooled onto its entity. ``nrna_abundance`` is :meth:`build`'s.
 
         Returns ``(index_dir, index, all_rows, annotated_rows)``.
         """
@@ -319,38 +267,22 @@ class Scenario:
         capture_config: CaptureConfig | None = None,
         nrna_abundance: float = 0.0,
     ) -> ScenarioResult:
-        """Execute the full simulation pipeline.
-
-        1. Write genome FASTA + index.
-        2. Write gene annotations (GTF) and build the TranscriptIndex from them.
-        3. Simulate paired-end reads (FASTQ).
-        4. Align with minimap2 (``splice:sr``).
-        5. Name-sort the BAM with ``samtools sort -n``.
+        """Write the genome and GTF, build the index, simulate paired-end FASTQ, and align it with minimap2 into a
+        name-sorted BAM.
 
         Parameters
         ----------
         n_fragments : int
             Number of fragments to simulate.
         sim_config : ReadSimConfig or None
-            Read simulation config. None uses defaults with same seed.
+            Read simulation config; ``None`` uses the defaults at the scenario's seed.
         gdna_config : GDNAConfig or None
-            gDNA contamination config.  If None, falls back to the
-            ``gdna_config`` set on the ``Scenario`` constructor.
+            gDNA contamination config; ``None`` uses the constructor's.
         nrna_abundance : float
-            Nascent RNA molecular abundance applied to all expressed
-            transcripts.  This is an **independent** abundance value —
-            ``abundance`` (mature mRNA) is NOT modified.  The read pool
-            split is proportional to abundance × effective_length for
-            each pool.
-
-            When set to 0.0 (default), per-transcript ``nrna_abundance``
-            values from the transcript dict (set at ``add_gene`` time)
-            are preserved unchanged.  When > 0, overrides all expressed
-            transcripts' ``nrna_abundance`` with this value.
-
-            Example: ``nrna_abundance=30`` with ``abundance=100`` gives
-            reads drawn proportionally to ``100 × spliced_eff_len``
-            (mature) vs. ``30 × genomic_span_eff_len`` (nascent RNA).
+            When > 0, the nascent molecular abundance of every expressed multi-exon transcript,
+            independent of its ``abundance``; 0.0 (default) keeps the values from ``add_gene``.
+            Reads are drawn in proportion to ``abundance × spliced_eff_len`` against
+            ``nrna_abundance × genomic_span_eff_len``.
 
         Returns
         -------
@@ -358,15 +290,12 @@ class Scenario:
         """
         wdir = self.work_dir
 
-        # Resolve gDNA config: build() param overrides constructor
         effective_gdna = gdna_config if gdna_config is not None else self.gdna_config
         effective_capture = capture_config if capture_config is not None else self.capture_config
 
-        # 1. Genome FASTA
         logger.info(f"[{self.name}] Writing genome FASTA...")
         fasta_path = self.genome.write_fasta(wdir)
 
-        # 2. GTF annotation, then the INDEX and the transcriptome it defines (entities included)
         logger.info(f"[{self.name}] Writing GTF annotations...")
         gtf_path = self.annotation.write_gtf(wdir)
         logger.info(f"[{self.name}] Building TranscriptIndex...")
@@ -374,7 +303,6 @@ class Scenario:
             fasta_path, gtf_path, nrna_abundance
         )
 
-        # 3. Simulate reads (one engine: WholeGenomeSimulator, FASTQ mode)
         if sim_config is None:
             sim_config = ReadSimConfig(seed=self.seed)
         sim = WholeGenomeSimulator(
@@ -399,7 +327,6 @@ class Scenario:
         )
         sim.close()
 
-        # 4. Align with minimap2 → SAM → name-sorted BAM
         logger.info(f"[{self.name}] Aligning with minimap2...")
         bam_path = self._align(fasta_path, r1_path, r2_path, gtf_path=gtf_path)
 
@@ -428,39 +355,19 @@ class Scenario:
         n_rna_fragments: int | None = None,
         gdna_fraction: float | None = None,
     ) -> ScenarioResult:
-        """Execute the simulation pipeline using oracle (perfect) alignments.
-
-        Bypasses external alignment (minimap2/samtools):
-        :class:`wgs_engine.WholeGenomeSimulator` writes the oracle BAM directly,
-        query-grouped (``SO:unsorted GO:query``), with CIGAR strings derived from
-        the known transcript structure. The engine writes its FASTQ pair as well,
-        but the result carries no FASTQ.
-
-        Pipeline:
-        1. Write genome FASTA + index.
-        2. Write gene annotations (GTF) and build the TranscriptIndex from them.
-        3. Generate oracle BAM (perfect alignments).
+        """Like :meth:`build`, but with no aligner: the engine writes the oracle BAM directly, query-grouped, its
+        CIGARs from the known template structure. The result carries no FASTQ.
 
         Parameters
         ----------
         n_fragments : int
-            Number of fragments to simulate (mode a: fixed total).
-            Ignored when *n_rna_fragments* is set.
-        sim_config : ReadSimConfig or None
-            Read simulation config. None uses defaults with same seed.
-        gdna_config : GDNAConfig or None
-            gDNA contamination config.  If None, falls back to the
-            ``gdna_config`` set on the ``Scenario`` constructor.
-        nrna_abundance : float
-            Nascent RNA molecular abundance applied to all expressed
-            transcripts (same semantics as ``build()``).
+            Fixed total, split between RNA and gDNA by abundance; ignored when *n_rna_fragments* is set.
+        sim_config, gdna_config, nrna_abundance
+            As for :meth:`build`.
         n_rna_fragments : int or None
-            Fixed RNA fragment count (mode b).  When set, exactly this
-            many RNA fragments (mRNA + nRNA) are generated and gDNA
-            is added on top as ``n_rna_fragments × gdna_fraction``.
+            Fixed RNA fragment count, with ``n_rna_fragments × gdna_fraction`` gDNA fragments added.
         gdna_fraction : float or None
-            Fraction of RNA fragments to add as gDNA contamination
-            (only used when *n_rna_fragments* is set).
+            gDNA fragments per RNA fragment, read only with *n_rna_fragments*.
 
         Returns
         -------
@@ -471,21 +378,16 @@ class Scenario:
         effective_gdna = gdna_config if gdna_config is not None else self.gdna_config
         effective_capture = capture_config if capture_config is not None else self.capture_config
 
-        # 1. Genome FASTA
         fasta_path = self.genome.write_fasta(wdir)
-
-        # 2. GTF annotation, then the INDEX and the transcriptome it defines (entities included)
         gtf_path = self.annotation.write_gtf(wdir)
         index_dir, index, rows, transcripts = self._index_and_transcriptome(
             fasta_path, gtf_path, nrna_abundance
         )
 
-        # 3. Oracle BAM (perfect alignments) — one engine: WholeGenomeSimulator (oracle_bam=True).
         if sim_config is None:
             sim_config = ReadSimConfig(seed=self.seed)
         gdna_abundance = effective_gdna.abundance if effective_gdna else 0.0
         if n_rna_fragments is not None:
-            # Fixed-RNA mode (b): explicit RNA total, gDNA added on top.
             n_rna = n_rna_fragments
             n_gdna = int(round(n_rna * gdna_fraction)) if gdna_fraction and effective_gdna else 0
             sim = WholeGenomeSimulator(
@@ -499,7 +401,6 @@ class Scenario:
                 capture_config=effective_capture,
             )
         else:
-            # Fixed-total mode (a): abundance-weighted RNA/gDNA split.
             sim = WholeGenomeSimulator(
                 fasta_path,
                 rows,
@@ -539,27 +440,14 @@ class Scenario:
     def _align(
         self, fasta_path: Path, r1_path: Path, r2_path: Path, gtf_path: Path | None = None
     ) -> Path:
-        """Align reads with minimap2 and produce a name-sorted BAM.
-
-        Pipeline::
-
-            minimap2 -ax splice:sr --secondary=yes [-j ann.bed] \\
-              ref.fa r1.fq r2.fq \\
-              | samtools sort -n -o output.bam -
-
-        The ``splice:sr`` preset handles short RNA-seq reads with
-        splice-aware alignment.  ``--secondary=yes`` retains
-        multimappers so that NH tags are populated.
-
-        When *gtf_path* is provided, a BED12 annotation file is
-        generated and passed via ``-j`` so that minimap2 can use
-        known splice junctions to improve alignment accuracy.
+        """Align with ``minimap2 -ax splice:sr --secondary=yes [-j ann.bed] | samtools sort -n``, keeping secondary
+        alignments, and return the name-sorted BAM. With *gtf_path*, the annotation's junctions go to minimap2 as
+        BED12.
         """
         from ..index import write_bed12, read_transcripts
 
         bam_path = self.work_dir / f"{self.name}.bam"
 
-        # minimap2 → samtools sort -n (name-sorted)
         minimap2_cmd = [
             "minimap2",
             "-ax",
@@ -567,7 +455,6 @@ class Scenario:
             "--secondary=yes",
         ]
 
-        # Add BED12 annotation if GTF is available
         if gtf_path is not None:
             bed_path = self.work_dir / f"{self.name}_annotation.bed"
             transcripts = read_transcripts(gtf_path)
@@ -594,7 +481,6 @@ class Scenario:
 
         logger.debug(f"Running: {' '.join(minimap2_cmd)} | {' '.join(sort_cmd)}")
 
-        # Pipe minimap2 output to samtools sort
         p1 = subprocess.Popen(
             minimap2_cmd,
             stdout=subprocess.PIPE,

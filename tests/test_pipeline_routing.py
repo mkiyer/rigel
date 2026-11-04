@@ -1,12 +1,11 @@
 """How the pipeline routes a fragment into EM units, and what it counts on the way.
 
-A multimapper's EM unit carries transcript candidates only, spliced or not — synthetic nascent spans
-are ordinary transcripts, and the gDNA candidate is appended per locus inside the EM — and an unspliced
-one carries a finite per-unit gDNA log-likelihood; a multimapper's gDNA likelihood is the sum over
-the hits gDNA can explain, the places it could have come from, never their mean and never over `NH`; the route
-counters are exclusive, so
-each unit is counted once and the totals mean something; and the `NM` penalty discriminates between
-a multimapper's hits when enabled and is exactly inert when not.
+A multimapper's EM unit carries transcript candidates only, spliced or not (synthetic nascent spans are ordinary
+transcripts, and the gDNA candidate is appended per locus inside the EM), and an unspliced one carries a finite
+per-unit gDNA log-likelihood; a multimapper's gDNA likelihood is the sum over the hits gDNA can explain, the places it
+could have come from, never their mean and never over `NH`; the route counters are exclusive, so each unit is
+counted once; and the `NM` penalty discriminates between a multimapper's hits when enabled and is exactly inert when
+not.
 """
 
 import math
@@ -148,7 +147,7 @@ class _Index:
 
 def _make_env(index):
     strand_models = StrandModels(exonic_spliced=StrandModel(pos_pos=20))
-    # Only the SIZE is needed here — an int, rather than a whole length-model container threaded
+    # Only the size is needed here: an int, rather than a whole length-model container threaded
     # through several frames as an object.
     max_frag_size = 1000
     estimator = AbundanceEstimator(index.num_transcripts, em_config=EMConfig(seed=1))
@@ -172,9 +171,8 @@ def _route_buffer(
     fl=None,
 ):
     """Build EM data from a buffer using the shipped scorer and FragmentRouter."""
-    # Routing tests don't exercise FL scoring: pass unfinalized (empty) FL models
-    # so the scorer's FL LUT is inert (_log_prob is None), matching the prior use
-    # of the container's empty rna/gdna models. A test that must see the length term passes ``fl``.
+    # Routing tests don't exercise FL scoring: pass unfinalized (empty) FL models so the scorer's
+    # FL LUT is inert (_log_prob is None). A test that must see the length term passes ``fl``.
     empty_fl = fl if fl is not None else FragmentLengthModel(max_size=max_frag_size)
     scorer = build_scorer(
         strand_models,
@@ -249,7 +247,7 @@ def test_multimapper_spliced_annot_has_transcript_candidates_only():
 def test_multimapper_unspliced_has_transcript_candidates_only_and_a_gdna_log_lik():
     """An unspliced multimapper's unit carries transcript candidates only in the global CSR.
 
-    Synthetic nRNA transcripts are ordinary transcripts, so nothing is appended for them, and the
+    Synthetic nascent spans are ordinary transcripts, so nothing is appended for them, and the
     gDNA candidate is appended per locus inside the locus EM. What the unit does carry is a finite
     per-unit gDNA log-likelihood.
     """
@@ -301,7 +299,7 @@ def test_multimapper_unspliced_has_transcript_candidates_only_and_a_gdna_log_lik
     assert stats.em_routed_multimapper_units == 1
     # All candidates are transcript-level (nothing is appended for synthetic spans)
     assert np.all(em.t_indices < index.num_transcripts)
-    # gDNA candidates NOT in global CSR (added per-locus)
+    # gDNA candidates not in global CSR (added per-locus)
     # gDNA log-likelihood is pre-computed per unit for unspliced
     assert em.gdna_log_liks[0] > -np.inf
 
@@ -556,10 +554,10 @@ def _overhang_pair(fragment_class):
     ids=["one-alignment", "multimapper"],
 )
 def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_class):
-    """`--overhang-alpha 0` is documented as a hard gate (the CLI's help, MANUAL): a candidate with any overhang
-    is excluded and a candidate with none is scored as under any other alpha. The penalty is ``log 0 = -inf``,
-    and ``0 * -inf`` is NaN, which every prune test rejects, so an unguarded scorer dropped EVERY candidate —
-    a run that silently quantified almost nothing. Both scoring paths carry the term."""
+    """`--overhang-alpha 0` is a hard gate: a candidate with any overhang is excluded and a candidate with none is
+    scored as under any other alpha. The penalty is ``log 0 = -inf``, and ``0 * -inf`` is NaN, which every prune
+    test rejects, so an unguarded scorer would drop every candidate and silently quantify almost nothing. Both
+    scoring paths carry the term."""
     index = _Index(
         t_to_g=[0, 0],
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
@@ -596,8 +594,8 @@ def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_c
 def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_routed_one():
     """At alpha 0 an overhang excludes a candidate outright. A fragment whose only candidate fails the gate is dropped
     and counted as gated whatever its routing: the deterministic path, which assigns an unambiguous annotated-spliced
-    fragment without scoring it, once read no overhang, so the same fragment was kept when deterministic and dropped
-    when EM-routed."""
+    fragment without scoring it, reads the overhang too, so the same fragment is never kept when deterministic and
+    dropped when EM-routed."""
     index = _Index(
         t_to_g=[0],
         t_to_strand=[int(Strand.POS)],
@@ -678,7 +676,7 @@ def _gated_chunk(route):
 )
 def test_a_gated_fragment_is_annotated_unresolved(route, fragment_class):
     """A fragment a hard gate drops reaches no pool, and the annotated BAM says so: its row is unresolved (ZF 0) with
-    its class. Without a row the annotation pass took it for the intergenic fast path and stamped it gDNA."""
+    its class. Without a row the annotation pass would take it for the intergenic fast path and stamp it gDNA."""
     from rigel.annotate import AF_UNRESOLVED, AnnotationTable
 
     index = _Index(
@@ -711,11 +709,11 @@ def test_a_gated_fragment_is_annotated_unresolved(route, fragment_class):
 
 # ── which fragments may be gDNA: one rule, by alignment ───────────────────────────────────────────
 #
-# gDNA can explain an alignment it can produce: an unspliced one; an IMPLICIT one — an unspliced pair whose
+# gDNA can explain an alignment it can produce: an unspliced one; an implicit one (an unspliced pair whose
 # mate gap could hold an annotated intron, where the gap is unobserved and only the fragment length tells the
-# readings apart; and an ARTIFACT one, whose every junction the blacklist rejected, which is unspliced. A
-# multimapper can be gDNA if ANY of its alignments can, and its gDNA term is the sum over those alignments.
-# gDNA's term is the unspliced term at the footprint whatever the label, and gDNA then COMPETES exactly as an
+# readings apart); and an artifact one, whose every junction the blacklist rejected, which is unspliced. A
+# multimapper can be gDNA if any of its alignments can, and its gDNA term is the sum over those alignments.
+# gDNA's term is the unspliced term at the footprint whatever the label, and gDNA then competes exactly as an
 # RNA candidate does: it is pruned when its likelihood falls more than -log(pruning_min_posterior) below the
 # unit's best RNA candidate. No length rule of its own: a footprint the length law cannot produce is pruned.
 
@@ -765,7 +763,7 @@ def _unspliced_term(footprint, nm=0, fl=None):
 
 
 def _live_fl():
-    """A length law that varies with length on [50, 500] and has no mass beyond, as the ladder's does."""
+    """A length law that varies with length on [50, 500] and has no mass beyond."""
     pmf = np.zeros(1001)
     pmf[50:501] = np.linspace(1.0, 2.0, 451)
     return FragmentLengthModel.from_pmf(pmf, 1000)
@@ -785,7 +783,7 @@ def test_a_sequenced_junction_that_survived_the_blacklist_is_RNA_only():
 
 
 def test_a_multimapper_with_ONE_unspliced_alignment_is_a_gdna_candidate():
-    """One spliced alignment no longer removes gDNA from the group: the unspliced alignment is a place
+    """One spliced alignment does not remove gDNA from the group: the unspliced alignment is a place
     gDNA could have come from, and the gDNA term is taken over the eligible alignments alone."""
     em, _ = _one_unit(
         [_hit(SpliceType.SPLICED_ANNOT, 300, t=0), _hit(SpliceType.UNSPLICED, 250, t=1)],
@@ -879,8 +877,8 @@ def test_gdna_is_PRUNED_exactly_as_an_RNA_candidate_is(splice_type):
 
 
 def test_an_ARTIFACT_whose_footprint_the_law_cannot_produce_is_pruned():
-    """Its footprint still spans the rejected intron (the splicing-artifact work edits that); at 5,000 bp the
-    law has no mass, so gDNA does not compete."""
+    """Its footprint still spans the rejected intron; at 5,000 bp the law has no mass, so gDNA does not
+    compete."""
     em, _ = _one_unit([_hit(SpliceType.SPLICE_ARTIFACT, 5000)], [FRAG_UNAMBIG], [1], fl=_live_fl())
     assert em.is_spliced[0]
     assert em.gdna_log_liks[0] == -np.inf
@@ -888,7 +886,7 @@ def test_an_ARTIFACT_whose_footprint_the_law_cannot_produce_is_pruned():
 
 def test_a_multimapper_s_gdna_sum_takes_every_eligible_hit_even_one_the_law_cannot_produce():
     fl = _live_fl()
-    a = fl._log_prob[1000] + math.log(0.5)  # an IMPLICIT hit at 1,000 bp: the floor
+    a = fl._log_prob[1000] + math.log(0.5)  # an implicit hit at 1,000 bp: the floor
     b = _unspliced_term(250, nm=1, fl=fl)
     em, _ = _one_unit(
         [_hit(SpliceType.SPLICED_IMPLICIT, 1000, t=0), _hit(SpliceType.UNSPLICED, 250, t=1, nm=1)],
@@ -1036,9 +1034,9 @@ def test_a_minus_strand_fragment_weighs_what_its_plus_strand_mirror_weighs(offse
     """The trapezoid coverage is read along the transcript 5'→3', and on the minus strand that runs against
     the genome: a fragment whose genomic start sits ``offset`` bp into the exon covers transcript positions
     ``[L − offset − f, L − offset)``, exactly the interval a plus-strand fragment at ``L − offset − f`` covers,
-    so the genome's mirror image of a fragment weighs what the fragment weighs. Anchored on the flipped START
-    instead, the interval ran off the transcript's 3' end: at an end of the minus-strand transcript the weight
-    read 1 (the plateau's) instead of 2."""
+    so the genome's mirror image of a fragment weighs what the fragment weighs. Anchored on the flipped start
+    instead, the interval would run off the transcript's 3' end, and at an end of the minus-strand transcript the
+    weight would read 1 (the plateau's) instead of 2."""
     mirror = _TX_LEN - offset - _FLEN
     w = _weights(
         _ONE_EXON,

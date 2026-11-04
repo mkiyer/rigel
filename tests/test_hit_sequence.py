@@ -9,7 +9,7 @@ log[ε / (3(1 − ε))] and a clipped base log[1 / (4(1 − ε))] (``rigel.scori
   is the aligner's choice of where to cut, and a multimapper's hits are the question the prices answer.
 * A hit carries its records' NM and soft clips, both mates'.
 * The prices are read only on a multimapper's hits, which they tell apart: one hit's sequence is common to all its
-  candidates and cancels (``tests/test_pipeline_routing.py::test_a_one_hit_fragment_reads_no_sequence``).
+  candidates and cancels.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ BASES = "ACGT"
 
 @pytest.fixture(scope="module")
 def index(tmp_path_factory):
-    """One gene, tA's exons at [1000, 1300) and [2000, 2300) on chr1 (``test_multimapper_places``)."""
+    """One gene, tA's exons at [1000, 1300) and [2000, 2300) on chr1."""
     return _build_index(tmp_path_factory.mktemp("sequence"), ["chr1"])
 
 

@@ -1,13 +1,11 @@
 """The two-phase sweep (`sweep.solve_chain`) and the beliefs it starts from.
 
-Every fixture is built by ``_synthetic.make_chain_parts`` on the shipped axes: a region axis, a
-contiguous-boundary axis with ``k − 1`` entries per reference and so no terminal slots, and a sj
-axis whose boundaries state their own ``(src, dst, strand)``. Both matter here. A reference
-terminal would be a data-free boundary slot that could be G1-locked and emit structural all-gDNA
-into its neighbour, an artefact no real annotation produces; and a sj stating its own endpoints is
-what lets the mature flux at an intron-exon boundary be derived from the graph rather than placed
-by hand. The gates cover the per-slot init, the factor-1 anchors, a delivered row's pull, the
-mature-exon chain, the strand overdispersion the solve reads, and the numeric contract.
+Every fixture is built by ``_synthetic.make_chain_parts`` on the shipped axes: a region axis, a contiguous-boundary axis
+with ``k − 1`` entries per reference and so no terminal slots, and a sj axis whose boundaries state their own ``(src,
+dst, strand)``. A reference terminal would be a data-free boundary slot that could be G1-locked and emit structural
+all-gDNA into its neighbour; a sj stating its own endpoints lets the mature flux at an intron-exon boundary be derived
+from the graph. The tests cover the per-slot init, the factor-1 anchors, a delivered row's pull, the mature-exon chain
+and the numeric contract.
 """
 
 from __future__ import annotations
@@ -40,9 +38,8 @@ from rigel.calibration.signature import (
 )
 
 
-#: These gates exercise the SWEEP's shape and the per-slot init under the measured floor, named
-#: explicitly. The message policies have their own gates (`test_sweep_backbone.py`,
-#: `test_transfer_policy.py`).
+#: These tests exercise the sweep's shape and the per-slot init under the silent policy, named explicitly. The message
+#: policies have their own tests (`test_sweep_backbone.py`, `test_transfer_policy.py`).
 region_sweep = functools.partial(solve_chain, policy=SilentPolicy(), logodds_window=10.0)
 
 
@@ -65,7 +62,7 @@ def test_init_zero_gdna_introns_via_strand():
         parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, logodds_window=10.0
     )
 
-    # the chain is N E N E N, so the regions are at 0, 2, 4 — there are no terminal slots.
+    # the chain is N E N E N, so the regions are at 0, 2, 4; there are no terminal slots.
     rid = [0, 2, 4]
     fg = b.f_g[rid]
     # intergenic: locked gDNA sink {0,0,1}, all precision locked (var 0).
@@ -74,15 +71,14 @@ def test_init_zero_gdna_introns_via_strand():
     # intron+ (zero gDNA): the strand tilt alone drives f_g → 0; g finite.
     assert fg[1] < 0.15
     assert np.isfinite(b.var_gdna[2])
-    # AMBIG: unresolved by strand → {0,0,1} default at MAX (inf) variance for the sweep to resolve.
+    # AMBIG: unresolved by strand → {0,0,1} default at maximal (inf) variance for the sweep to resolve.
     assert fg[2] == 1.0
     assert np.isinf(b.var_gdna[4])
 
 
 def test_init_boundary_continuity_gate():
-    # 1 ref, 2 regions (exon+ | intron+) → ONE boundary between them. There are no terminal boundary
-    # slots: a reference with k regions owns k-1 boundaries, so there is nothing before the first
-    # region or after the last to be a sink.
+    # 1 ref, 2 regions (exon+ | intron+) → one boundary between them. A reference with k regions owns k-1 boundaries, so
+    # there is no terminal slot to be a sink.
     parts = make_chain_parts(
         [BIT_EXON_POS, BIT_INTRON_POS],
         region_size_bp=[1000.0, 2000.0],
@@ -103,8 +99,8 @@ def test_init_boundary_continuity_gate():
 
 
 def test_init_tss_boundary_is_black_hole():
-    # intergenic | exon+ : the internal boundary is a TSS (intergenic↔exon) ⇒ continuity blocks RNA ⇒ sink.
-    # the TSS-crossing fragments are sense-tilted, but continuity must STILL block RNA (the black hole).
+    # intergenic | exon+: the internal boundary is a TSS (intergenic↔exon), so continuity blocks RNA and it is a sink,
+    # even though the TSS-crossing fragments are sense-tilted.
     parts = make_chain_parts(
         [0, BIT_EXON_POS],
         region_size_bp=[1000.0, 2000.0],
@@ -121,12 +117,12 @@ def test_init_tss_boundary_is_black_hole():
 
 
 def test_precision_state_count_resolution():
-    """The log-density solver's precision state is ``Var(log f_g)`` — the message currency (TRAPS: two-gaussians-one-latent). It reflects
-    EVIDENCE: a region with more fragments (same composition) resolves its log-density sharper, so a lower
-    ``Var(log f_g)`` ⇒ a more confident message. (In LOG space a confident ``f_g→0`` region has WIDE variance —
-    a near-zero gDNA density carries little reliable gDNA-density information to impute, the
-    "zero-density-is-not-a-measurement" principle — so the lattice's linear ``Var(f_g)`` ordering does not
-    carry over.) A region with no fragments reports zero variance."""
+    """The log-density solver's precision state is ``Var(log f_g)``, the message currency. It reflects evidence: a
+    region with more fragments of the same composition resolves its log-density more sharply, so a lower ``Var(log
+    f_g)`` means a more confident message. (In log space a confident ``f_g→0`` region has wide variance, since a
+    near-zero gDNA density carries little gDNA-density information, so the lattice's linear ``Var(f_g)`` ordering does
+    not carry over.) A region with no fragments reports zero variance.
+    """
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
     kappa = 0.99
@@ -141,30 +137,25 @@ def test_precision_state_count_resolution():
         allow_pos,
         allow_neg,
         kappa=kappa,
-        od_g=0.2,
-        od_r=0.1,
         n_grid=60,
         L=10.0,
     )
     assert d.gdna_frac_var is not None
-    # p̂=0.5 at κ=0.99 ⇒ the fragments look unstranded ⇒ the mean channel points at the gDNA mode f_g=1.
-    # Under the count-zero-info variance freeze the count enters as PRECISION: more evidence sharpens
-    # that signal, so the higher-count region resolves NEARER the mode with a lower Var(log f_g)
-    # rather than being pinned count-independently.
+    # p̂=0.5 at κ=0.99 makes the fragments look unstranded, so the mean channel points at the gDNA mode f_g=1. The count
+    # enters as precision, so the higher-count region resolves nearer the mode with a lower Var(log f_g) rather than
+    # being pinned independently of the count.
     assert d.gdna_frac[0] > 0.85 and d.gdna_frac[1] > 0.85  # both gDNA-dominant
     assert d.gdna_frac[1] >= d.gdna_frac[0]  # more count ⇒ nearer the mode
     assert d.gdna_frac_var[1] < d.gdna_frac_var[0]  # more fragments ⇒ sharper
-    # the variance is present, finite, non-negative for active regions.
+    # the variance is present, finite and non-negative for active regions.
     assert np.all(np.isfinite(d.gdna_frac_var)) and np.all(d.gdna_frac_var >= 0.0)
-    # a no-fragment region is inactive ⇒ zero variance.
+    # a no-fragment region is inactive, so its variance is zero.
     d0 = _solve_regions_logodds_all(
         np.array([0.0]),
         np.array([0.0]),
         np.array([True]),
         np.array([True]),
         kappa=kappa,
-        od_g=0.2,
-        od_r=0.1,
         n_grid=60,
         L=10.0,
     )
@@ -172,12 +163,9 @@ def test_precision_state_count_resolution():
 
 
 def _factor1_uniform_rho():
-    """The factor-1 bedrock fixture: a UNIFORM-gDNA chain intergenic | AMBIG | intergenic, every object's
-    count laid down as ``rho x its own placements`` (rho = 0.5). Returns the per-SLOT gDNA density after
-    the sweep.
-
-    One density per slot, not a (left, right) pair: a 0-bp boundary has one divisor. The invariant
-    is that laying down a uniform field must be read back by the solver.
+    """The factor-1 fixture: a uniform-gDNA chain intergenic | AMBIG | intergenic, every object's count laid down as
+    ``rho x its own placements`` (rho = 0.5). Returns the per-slot gDNA density after the sweep: one density per slot,
+    since a 0-bp boundary has one divisor. A uniform field laid down must be read back by the solver.
     """
     rho = 0.5
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
@@ -214,8 +202,8 @@ def _factor1_uniform_rho():
 
 
 def test_gdna_sweep_factor1_intergenic_anchors():
-    """The factor-1 bedrock, anchors: on a UNIFORM-gDNA chain the strand/signature-locked intergenic regions
-    read back ρ EXACTLY — the measured-gDNA anchor invariant, which every phase must hold."""
+    """On a uniform-gDNA chain the strand/signature-locked intergenic regions read back ρ exactly, an anchor invariant
+    every phase must hold."""
     rho = 0.5
     rho_g = _factor1_uniform_rho()
     interg = [0, 4]  # the chain is N E N E N, so the two intergenic regions are slots 0 and 4
@@ -223,16 +211,15 @@ def test_gdna_sweep_factor1_intergenic_anchors():
 
 
 def test_interior_anchor_is_immovable_and_produces_no_nan():
-    """The interior-anchor regression. A composition-CERTAIN (`g1_locked`) region has
-    ``Var(log f_c) = 0``, so any code path that forms a fusion weight as ``1/Var`` produces ``∞`` and cascades
-    a nan through the whole chain. Pin both halves of the contract on the factor-1 chain, whose two intergenic
-    REGIONs are exactly such anchors sitting INTERIOR to the chain (each has a live neighbour):
+    """A composition-certain (`g1_locked`) region has ``Var(log f_c) = 0``, so any fusion weight formed as ``1/Var``
+    would be ``∞`` and spread a nan through the chain. On the factor-1 chain, whose two intergenic regions are such
+    anchors interior to the chain:
 
-    1. no nan anywhere — beliefs and variances stay finite (``∞`` is the honest 'unsolved' state and
-       is allowed on a variance; nan never is);
-    2. the anchor is immovable — it reads back the true ρ exactly beside an AMBIG neighbour that is
-       itself wrong by 22 %: a `g1_locked` region is never `solvable`, so its ψ output is discarded and its
-       own count stands."""
+    1. no nan anywhere: beliefs and variances stay finite (``∞`` is the honest "unsolved" state and is allowed on a
+       variance; nan never is);
+    2. the anchor is immovable: it reads back the true ρ exactly beside a wrong AMBIG neighbour, because a `g1_locked`
+       region is never `solvable`, so its ψ output is discarded and its own count stands.
+    """
     rho = 0.5
     rho_g = _factor1_uniform_rho()
     assert not np.any(np.isnan(rho_g)), rho_g
@@ -241,12 +228,12 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
 
 
 def test_gdna_sweep_zero_gdna_pin_and_monotone():
-    # A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−, solved under the silent policy: every slot on
-    # its own evidence and nothing sent between them. The AMBIG region starts at the all-gDNA init f_g=1.
+    # A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−, solved under the silent policy: every slot on its own
+    # evidence, nothing sent between them. The AMBIG region starts at the all-gDNA init f_g=1.
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
-    # sense-tilted RNA (κ=0.95): the + intron aligns genome+, the − intron genome−. The two boundaries carry
-    # the same tilt as the regions they separate. Two boundaries, not four: there are no terminal
-    # slots, so there is no directly-adjacent terminal G1 lock to emit structural gDNA into a flank.
+    # sense-tilted RNA (κ=0.95): the + intron aligns genome+, the − intron genome−. The two boundaries carry the tilt of
+    # the regions they separate. There are no terminal slots, so no adjacent terminal G1 lock emits structural gDNA into
+    # a flank.
     parts = make_chain_parts(
         [BIT_INTRON_POS, BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_NEG],
         region_size_bp=2000.0,
@@ -275,21 +262,20 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         n_rna_obs=10000.0,  # the spliced sample behind κ: the stranded (κ=0.95) channel reads live
         n_grid=40,
     )
-    # Slot 3 is the AMBIG | intron− boundary, whose − tilt reads RNA on its own. The AMBIG region itself
-    # (slot 2) is not asserted: its strand is balanced (both strands live), so its strand likelihood is
-    # DEGENERATE — a balanced count is equally consistent with gDNA and with balanced ±RNA — and with no
-    # prior and nothing sent to it, it stays near its all-gDNA init.
+    # Slot 3 is the AMBIG | intron− boundary, whose − tilt reads RNA on its own. The AMBIG region (slot 2) is not
+    # asserted: its strand is balanced, so its strand likelihood is degenerate (a balanced count fits gDNA and balanced
+    # ±RNA equally), and with no prior and nothing sent to it, it stays near its all-gDNA init.
     assert final.f_g[3] < 0.50
-    # single-strand introns: the decisive strand wins → they read RNA, well below their all-gDNA init.
+    # single-strand introns: the decisive strand wins, so they read RNA, well below their all-gDNA init.
     assert final.f_g[0] < 0.50 and final.f_g[4] < 0.50
 
 
-# a delivered row: two-sided pull + emergent deference --------
+# a delivered row: two-sided pull and emergent deference --------
 
 
 def _gdna_share_row(n_grid, mode_share, prec):
-    """A claim on the gDNA share delivered as a λ-row on the solve grid — the message layer's one
-    currency: a Gaussian on ``log f_g`` at ``log mode_share`` with precision ``prec``."""
+    """A claim on the gDNA share delivered as a λ-row on the solve grid, the message layer's one currency: a Gaussian on
+    ``log f_g`` at ``log mode_share`` with precision ``prec``."""
     from scipy.special import log_expit
 
     from rigel.calibration.simplex_logodds import _logodds_grid
@@ -299,19 +285,17 @@ def _gdna_share_row(n_grid, mode_share, prec):
 
 
 def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
-    """A row claiming ``f_g = 0.2`` (strong) on a balanced AMBIG region (flat strand) pulls f_g TOWARD
-    0.2 — two-sided by construction (a profile on the grid, no boundary wall), not to the f_g=1 vertex."""
+    """A row claiming ``f_g = 0.2`` (strong) on a balanced AMBIG region (flat strand) pulls f_g toward 0.2: two-sided by
+    construction (a profile on the grid, no boundary wall), not to the f_g=1 vertex."""
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
-    # AMBIG region, balanced counts ⇒ the strand is flat (κ=0.5); only the row shapes f_g.
+    # AMBIG region with balanced counts: the strand is flat (κ=0.5), so only the row shapes f_g.
     d = _solve_regions_logodds_all(
         np.array([50.0]),
         np.array([50.0]),
         np.array([True]),
         np.array([True]),
         kappa=0.5,
-        od_g=0.0,
-        od_r=0.0,
         n_grid=80,
         L=10.0,
         row_logprior=_gdna_share_row(80, 0.2, 200.0),
@@ -321,9 +305,8 @@ def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
 
 
 def test_a_weak_row_defers_to_a_decisive_strand():
-    """Emergent deference: a WEAK row (precision 3) claiming ``f_g = 0.9`` must lose to a decisive
-    single-strand region's ~1000-fragment strand likelihood — f_g stays ≈0 (a weak claim cannot override
-    the data; no log-wall forces it off zero)."""
+    """A weak row (precision 3) claiming ``f_g = 0.9`` loses to a decisive single-strand region's ~1000-fragment strand
+    likelihood: f_g stays ≈0, since a weak claim cannot override the data."""
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
     d = _solve_regions_logodds_all(
@@ -332,8 +315,6 @@ def test_a_weak_row_defers_to_a_decisive_strand():
         np.array([True]),
         np.array([False]),
         kappa=0.99,
-        od_g=0.0,
-        od_r=0.0,
         n_grid=80,
         L=10.0,
         row_logprior=_gdna_share_row(80, 0.9, 3.0),
@@ -343,31 +324,25 @@ def test_a_weak_row_defers_to_a_decisive_strand():
 
 
 # --- the mature-exon chain: an expressed exon between two gDNA-only introns ---------------------------
-# Under the silent policy every slot is solved on its own evidence: the introns' balanced counts must
-# read gDNA and the exon's sense-tilted count RNA. The spliced reads over the introns move no slot's
-# answer here (the ``spliced=False`` chain solves identically); the policies that carry them have their
-# own gates.
+# Under the silent policy every slot is solved on its own evidence: the introns' balanced counts must read gDNA and the
+# exon's sense-tilted count RNA. The spliced reads over the introns move no slot's answer here (the ``spliced=False``
+# chain solves identically); the policies that carry them have their own tests.
 
 
-#: slots of the ``_mature_exon_chain`` fixture. The chain is ``N E N E N E N E N`` — 9 slots, regions at
-#: the even ones — so the exon under test is slot 4 and its two flanking introns are slots 2 and 6.
+#: slots of the ``_mature_exon_chain`` fixture. The chain is ``N E N E N E N E N`` (9 slots, regions at the even ones),
+#: so the exon under test is slot 4 and its flanking introns are slots 2 and 6.
 MX_EXON, MX_INTRONS = 4, [2, 6]
 
 
 def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_scale=1.0):
-    """``exon+ | intron+ | EXON+ | intron+ | exon+`` — a pure-MATURE expressed gene with NO nascent.
+    """``exon+ | intron+ | EXON+ | intron+ | exon+``: a pure-mature expressed gene with no nascent RNA.
 
-    Five regions, not three, and the extra two are load-bearing: a sj states its own ``(src, dst)``,
-    so it has to HAVE endpoints. The sj over intron ``n1`` runs ``n0 → n2`` and the one over ``n3``
-    runs ``n2 → n4``, and `build_region_geometry` places their flux on the boundaries they leave and
-    enter, so the exon under test (``n2``) ends up with mature flux on both its flanking boundaries
-    — derived from the graph rather than asserted by construction.
-
-    Physically consistent: every exon's contained unspliced is balanced gDNA + sense (+) mature; the
-    introns and every boundary carry balanced gDNA only. `boundary_spliced` is 0 everywhere, and
-    that is a fact rather than a convenience — mature RNA never crosses an exon-intron boundary
-    (TRAPS: mature-rna-never-crosses-a-boundary). It skips the intron as a sj, never as a contiguous
-    crossing.
+    Five regions, because a sj states its own ``(src, dst)`` and so needs endpoints: the sj over intron ``n1`` runs ``n0
+    → n2`` and the one over ``n3`` runs ``n2 → n4``, and `build_region_geometry` places their flux on the boundaries
+    they leave and enter, so the exon under test (``n2``) gets mature flux on both flanking boundaries, derived from the
+    graph. Every exon's contained unspliced count is balanced gDNA plus sense (+) mature; the introns and every boundary
+    carry balanced gDNA only. `boundary_spliced` is 0 everywhere because mature RNA never crosses an exon-intron
+    boundary: it skips the intron as a sj.
     """
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     L = 2000.0
@@ -379,9 +354,9 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     g_half = rho_g * Eg / 2.0  # per-strand contained gDNA count (balanced)
     mat = rho_m * Er  # contained mature count (+ strand only)
     is_exon = np.array([1.0, 0.0, 1.0, 0.0, 1.0])
-    # ``spl_scale`` < 1 models a CAPTURE-DEPLETED sj: sj-spanning reads are only partially
-    # captured, so the sj UNDER-reports the exon's true mature density ⇒ the boundary→exon mature
-    # MEASUREMENT disagrees with the exon's own (confident) unspliced belief. Used by the silencing test.
+    # ``spl_scale`` < 1 models a capture-depleted sj: sj-spanning reads are only partly captured, so the sj
+    # under-reports the exon's true mature density and the boundary→exon mature measurement disagrees with the exon's
+    # own confident unspliced belief.
     j_count = rho_m * cross_r * spl_scale
     sj = (
         [
@@ -419,9 +394,8 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0):
         belief,
         ra,
         rna_sense_frac=kappa,
-        # The strand channel is live iff the protocol decision on (κ, N_rna) says so; with the default
-        # N = 0 there is no decision and the channel is dead, so the fixture supplies the spliced sample
-        # behind its κ = 0.95, which reads live by thousands of nats.
+        # The strand channel is live iff the protocol decision on (κ, N_rna) says so; with the default N = 0 there is no
+        # decision and the channel is dead, so the fixture supplies the spliced sample behind its κ = 0.95.
         n_rna_obs=n_rna_obs,
         n_grid=60,
         _capture=cap,
@@ -430,27 +404,24 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0):
 
 
 def test_mature_no_nascent_hallucination_in_introns():
-    """An expressed exon whose RNA is all spliced must not make its flanking gDNA-only introns read as
-    RNA; the introns stay gDNA (truth ``f_g = 1``). Each intron is solved on its own balanced counts, so
-    this pins that nothing from the exon's RNA reaches them."""
+    """An expressed exon whose RNA is all spliced must not make its flanking gDNA-only introns read as RNA; the introns
+    stay gDNA (truth ``f_g = 1``), each solved on its own balanced counts."""
     fin_m, _ = _sweep(_mature_exon_chain(spliced=True))
     fg_introns = fin_m.f_g[MX_INTRONS]
     assert np.all(fg_introns > 0.85), fg_introns
 
 
 def test_mature_measurement_recovers_exon_rna():
-    """The companion direction: the same chain's expressed exon is recovered as mostly RNA (its true
-    f_g ≈ ρ_g·E_g/(ρ_g·E_g+ρ_m·E_r) ≈ 0.32), read off its own + strand tilt — the gDNA-only introns
-    beside it do not starve the exon of its own RNA."""
+    """The same chain's expressed exon is recovered as mostly RNA (true f_g ≈ ρ_g·E_g/(ρ_g·E_g+ρ_m·E_r) ≈ 0.32), read
+    off its own + strand tilt; the gDNA-only introns beside it do not starve it of RNA."""
     fin_m, _ = _sweep(_mature_exon_chain(spliced=True))
     fg_exon = float(fin_m.f_g[MX_EXON])
     assert fg_exon < 0.45, fg_exon  # truth ≈0.32; comfortably RNA-dominated, not pinned to gDNA
 
 
 def test_tau_gag_fix_deconvolution_prediction_stays_gated():
-    """On the unstranded chain with no spliced reads the exon has no composition evidence of its own — no
-    strand channel and no sj — so nothing may drive it to a confident vertex: its solved f_g stays near
-    the uninformative reference."""
+    """On the unstranded chain with no spliced reads the exon has no composition evidence of its own (no strand channel
+    and no sj), so nothing may drive it to a confident vertex: its f_g stays near the uninformative reference."""
     ex = MX_EXON
     fin_no, cap_no = _sweep(_mature_exon_chain(spliced=False, kappa=0.5), kappa=0.5)
     # No spliced reads + no strand ⇒ the exon has no composition evidence of its own; it stays mid-range,
@@ -458,58 +429,17 @@ def test_tau_gag_fix_deconvolution_prediction_stays_gated():
     assert 0.2 < float(fin_no.f_g[ex]) < 0.8, fin_no.f_g[ex]
 
 
-def test_pure_gdna_region_confident_at_near_binomial_od():
-    """A pure-gDNA single-strand region has exact 50/50 per-strand counts, which the strand mixture
-    (gDNA mean ½, RNA mean κ≠½) must read as gDNA — f_g≈1. At the near-binomial overdispersion it
-    does; inflating the gDNA Beta-Binomial widens it, loses specificity at ½ and drags the region
-    toward the RNA/gDNA boundary. A pure-RNA control (+frac=κ) stays f_g≈0 at both."""
-    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
-
-    # κ=0.7 (intermediate strand): gDNA mean ½ is near enough to the RNA mean that the gDNA BB width
-    # matters — exactly where an inflated prior does its damage.
-    def solve(u_pos, u_neg, od):
-        return float(
-            _solve_regions_logodds_all(
-                np.array([float(u_pos)]),
-                np.array([float(u_neg)]),
-                np.array([True]),
-                np.array([False]),
-                kappa=0.7,
-                od_g=od,
-                od_r=od,
-                n_grid=80,
-                L=10.0,
-            ).gdna_frac[0]
-        )
-
-    # pure gDNA (exact 50/50, truth f_g=1): near-binomial od → confidently gDNA; inflating od
-    # monotonically under-calls it. The bound is set on the physics rather than on a recorded
-    # magnitude: with ψ bare the strand speaks cleanly and the solver is materially od-robust, so a
-    # moderate inflation costs only a few percent and it takes od=0.4 to move it by 0.15.
-    fg = [solve(500, 500, od) for od in (0.034, 0.143, 0.4)]
-    assert fg[0] > 0.8, fg
-    assert fg[0] > fg[1] > fg[2], fg  # monotone: inflating od always degrades the gDNA call
-    assert fg[2] < fg[0] - 0.15, fg  # and at a materially inflated od the damage is large
-    # pure RNA (+frac = κ = 0.7): near-binomial stays RNA-dominated; the inflated prior's symmetric harm is
-    # MORE false gDNA on RNA too (it pulls every region toward ½). (At this intermediate κ the gDNA/RNA means
-    # are close, so a small residual f_g is inherent — the point is near-binomial is cleaner.)
-    rna_near = solve(700, 300, 0.034)
-    rna_infl = solve(700, 300, 0.143)
-    assert rna_near < 0.25, rna_near
-    assert rna_infl > rna_near, (rna_infl, rna_near)
-
-
-# Slot ids on the `_mature_exon_chain` chain (``N E N E N E N E N``, regions at the even slots, see
-# `MX_EXON`). No gate reads these three, and their names do not describe the slots they hold:
+# Slot ids on the `_mature_exon_chain` chain (``N E N E N E N E N``, regions at the even slots, see `MX_EXON`). No test
+# reads these three, and their names do not describe the slots they hold:
 _R1_EXON = 3  # slot 3: the boundary between intron n1 (slot 2) and the exon under test (slot 4)
 _B1 = 2  # slot 2: intron n1, the exon's left flank
 _B2 = 4  # slot 4: the exon under test
 
 
 def test_sweep_finite_over_extreme_configs():
-    """No nan/inf reaches the fold. The real region_sweep over spliced/±, stranded/unstranded, and extreme
-    gDNA/mature densities (pure-gDNA, pure-RNA, empty, tiny, huge) — every final fraction is finite & in range,
-    every variance is ≥0 (∞ = the honest 'unsolved' state is allowed; nan is not)."""
+    """No nan/inf reaches the fold. Over spliced/±, stranded/unstranded and extreme gDNA/mature densities (pure-gDNA,
+    pure-RNA, empty, tiny, huge), every final fraction is finite and in range and every variance is ≥0 (∞, the unsolved
+    state, is allowed; nan is not)."""
     for spliced in (True, False):
         for kappa in (0.5, 0.95):
             for rho_g, rho_m in [(0.5, 1.0), (0.0, 1.0), (2.0, 0.0), (1e-6, 1e-6), (1e4, 1e4)]:
@@ -524,19 +454,18 @@ def test_sweep_finite_over_extreme_configs():
 
 
 def test_region_sweep_deterministic():
-    """Pass-0 must be bit-reproducible. The sweep is one native call (`native.solve_blocks`) that solves
-    each locus block end to end with no reduction across blocks, so the same input must give a
-    bit-identical belief run-to-run — a prerequisite for any confidence claim about the solver. Uses
-    the unstranded (κ=½) case, the one most sensitive to any ordering nondeterminism."""
+    """The sweep is one native call (`native.solve_blocks`) that solves each locus block end to end with no reduction
+    across blocks, so the same input gives a bit-identical belief run to run. Uses the unstranded (κ=½) case, the most
+    sensitive to ordering nondeterminism."""
     a, capa = _sweep(_mature_exon_chain(spliced=True, kappa=0.5), kappa=0.5)
     b, capb = _sweep(_mature_exon_chain(spliced=True, kappa=0.5), kappa=0.5)
     for nm in ("f_g", "f_pos", "f_neg", "var_gdna"):
         x, y = np.asarray(getattr(a, nm)), np.asarray(getattr(b, nm))
-        assert np.array_equal(x, y, equal_nan=True), (nm, x, y)  # BIT-identical (not just close)
+        assert np.array_equal(x, y, equal_nan=True), (nm, x, y)  # bit-identical, not just close
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE NUMERIC CONTRACT, CONTINUED — ψ is CHUNK-EXACT: how the rows are tiled moves no number.
+# The numeric contract, continued: ψ is chunk-exact, so how the rows are tiled moves no number.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -563,8 +492,6 @@ def _chunk_substrate(m=255, K=120, seed=3):
     args = (u_pos, u_neg, ap, an)
     kw = dict(
         kappa=0.9,
-        od_g=0.02,
-        od_r=0.03,
         n_grid=K,
         L=10.0,
         gdna_prior=(log_rho, log_p),
@@ -578,8 +505,8 @@ def _chunk_substrate(m=255, K=120, seed=3):
 
 
 def _solve_in_chunks(args, kw, edges):
-    """`_solve_regions_logodds_all` on each ``[a, b)`` of ``edges`` in turn, scattered back — the
-    block solve's arithmetic, with nothing but the row tiling changed."""
+    """`_solve_regions_logodds_all` on each ``[a, b)`` of ``edges`` in turn, scattered back: the block solve's
+    arithmetic with only the row tiling changed."""
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
     fields = ("gdna_frac", "rna_pos_frac", "rna_neg_frac", "gdna_frac_var")
@@ -598,12 +525,11 @@ def _solve_in_chunks(args, kw, edges):
 
 
 def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
-    """The property the locus solve stands on: the answer at a slot is a function of that slot's inputs
-    and the grid, never of which other rows share its tile. Whole, in halves, in thirds and one row at a
-    time must agree to the bit on every field of both paths (the single-strand solve and the AMBIG
-    cube). The read-out earns this by reducing every row in a fixed order — a contiguous ψ and
-    per-row moment sums that do not go through BLAS — because a layout- or row-count-dependent
-    reduction moves the last ulp, and one ulp is a different number."""
+    """The answer at a slot is a function of that slot's inputs and the grid, never of which rows share its tile. Whole,
+    in halves, in thirds and one row at a time must agree to the bit on every field of both paths (the single-strand
+    solve and the AMBIG cube). The read-out reduces every row in a fixed order (a contiguous ψ and per-row moment sums
+    that avoid BLAS), because a layout- or row-count-dependent reduction would move the last ulp.
+    """
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
     m, args, kw = _chunk_substrate()
@@ -621,17 +547,17 @@ def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
                 f"{name}: {f} moved at {int((arr != ref).sum())} of {m} slots "
                 f"(max |delta| {np.max(np.abs(arr - ref)):.3e}) — the read-out is not chunk-exact"
             )
-    # not vacuous: both paths solved, with a fitted arm
+    # both paths solved, with a fitted arm
     assert (args[2] ^ args[3]).any() and (args[2] & args[3]).any()
     assert kw["gdna_prior"] is not None and kw["gdna_support"] is not None
 
 
 def test_the_psi_solve_is_thread_exact_so_the_thread_count_moves_no_number():
-    """ψ's slots are pulled one at a time by a pool of threads, each slot solved by the same arithmetic
-    on its own scratch and written to its own four outputs — so the answer at 2, 3 and every-core threads
-    is the serial answer to the bit on every field of both paths (the single-strand solve and the AMBIG
-    cube), and the budget is a resource, not a tunable. PERTURBATION: a kernel whose threads shared a
-    scratch, or skipped or doubled a slot, fails here."""
+    """ψ's slots are pulled one at a time by a pool of threads, each solved by the same arithmetic on its own scratch
+    and written to its own four outputs, so the answer at 2, 3 and every-core threads is the serial answer to the bit on
+    every field of both paths; the thread budget is a resource, not a tunable. Threads sharing scratch, or a slot
+    skipped or doubled, would fail here.
+    """
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
     m, args, kw = _chunk_substrate()
@@ -649,8 +575,8 @@ def test_the_psi_solve_is_thread_exact_so_the_thread_count_moves_no_number():
 
 
 def test_the_thread_budget_is_a_non_negative_count_and_the_cli_fans_it_out():
-    """`CalibrationConfig.n_threads`: 0 is every core (the locus EM's reading), a negative count is
-    refused; the default is 0."""
+    """`CalibrationConfig.n_threads`: 0 is every core (as for the locus EM), a negative count is refused; the default is
+    0."""
 
     from rigel.config import CalibrationConfig
 

@@ -10,8 +10,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <set>
-#include <string>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -29,15 +28,13 @@ static constexpr int8_t ITYPE_TRANSCRIPT      = 1;
 // annotated transcript (the scan's annotated-path rule), so no fragment is spliced across an unannotated junction.
 static constexpr int32_t SPLICE_UNSPLICED       = 0;
 static constexpr int32_t SPLICE_SPLICED_ANNOT   = 1;
-// the two derived classes — neither is a CIGAR splice:
+// The two derived classes, neither a CIGAR splice:
 static constexpr int32_t SPLICE_IMPLICIT        = 2;  // PE gap spans an annotated intron
 static constexpr int32_t SPLICE_ARTIFACT        = 3;  // CIGAR sj rejected by blacklist
-// ⚠ Must equal `len(rigel.splice.SpliceType)`. It sizes the scanner's per-fragment splice census,
-// so a category added on one side and not the other is caught by `test_every_splice_type_is_censused`
-// rather than reading zero through the stats dict's `.get(key, 0)`.
+// Must equal `len(rigel.splice.SpliceType)`: it sizes the scanner's per-fragment splice census.
 static constexpr size_t NUM_SPLICE_TYPES        = 4;
 
-// MergeOutcome (named for the gates in tests/_resolution_reference.py)
+// MergeOutcome: the resolver's merge levels (mirrored in tests/_resolution_reference.py)
 static constexpr int32_t MC_INTERSECTION          = 0;
 static constexpr int32_t MC_INTERSECTION_NONEMPTY = 1;
 static constexpr int32_t MC_UNION                 = 2;
@@ -49,20 +46,15 @@ static constexpr int32_t STRAND_POS       = 1;
 static constexpr int32_t STRAND_NEG       = 2;
 static constexpr int32_t STRAND_AMBIGUOUS = 3;  // POS | NEG
 
-// FragmentClass — the fragment classification codes, defined here alone: `_scoring_impl`, which routes on
-// them, exports them, and rigel.buffer reads them from it (pinned by tests/test_buffer.py).
+// FragmentClass: the fragment classification codes, defined here alone. `_scoring_impl` routes on them and exports
+// them, and rigel.buffer reads them from it.
 static constexpr int32_t FRAG_UNAMBIG           = 0;
 static constexpr int32_t FRAG_AMBIG_SAME_STRAND = 1;
 static constexpr int32_t FRAG_AMBIG_OPP_STRAND  = 2;
 static constexpr int32_t FRAG_MULTIMAPPER       = 3;
 
-// Assignment flags bitfield (written to BAM as ZF:i tag).
-// ZF is the unified per-fragment outcome bitfield.  See
-// src/rigel/annotate.py for the full schema + invariants; it composes
-// every value but the three the C++ stamp sites write, so only those
-// three values' bits are named here.
-//
-// Primitive bits
+// The per-fragment outcome bitfield, written to the BAM as the ZF:i tag. src/rigel/annotate.py holds the full schema
+// and composes every value but the three the C++ stamp sites write, so only those values' bits are named here.
 static constexpr int32_t AF_RESOLVED_BIT         = 0x01;
 static constexpr int32_t AF_GDNA_BIT             = 0x04;
 static constexpr int32_t AF_INTERGENIC_BIT       = 0x20;
@@ -97,10 +89,10 @@ inline bool is_unannotated_splice(int32_t verdict) {
 }
 
 // ================================================================
-// Scoring constants (shared by scoring.cpp and Python side)
+// Scoring constants (shared by scoring.cpp and the Python side)
 // ================================================================
-static constexpr double LOG_HALF       = -0.6931471805599453;       // log(0.5)
-static constexpr double TAIL_DECAY_LP  = -0.01005033585350145;      // log(0.99)
+static constexpr double LOG_HALF       = -0.6931471805599453;       // log(0.5): a strand with no preference
+static constexpr double TAIL_DECAY_LP  = -0.01005033585350145;      // log(0.99): per-bp penalty past the length table
 
 // ================================================================
 // Geometric helper types shared across modules
@@ -201,54 +193,22 @@ struct RawResolveResult {
     std::vector<int32_t> t_exon_bp;
     std::vector<int32_t> t_intron_bp;
 
-    // Per-fragment count of CIGAR splice junctions rejected by the
-    // alignment-time blacklist.  Caller sets this BEFORE calling
-    // _resolve_core so the resolver can promote SPLICE_UNSPLICED
-    // to SPLICE_ARTIFACT.
+    // CIGAR junctions rejected by the alignment-time blacklist. The caller sets it before _resolve_core, so the
+    // resolver can promote SPLICE_UNSPLICED to SPLICE_ARTIFACT.
     int32_t n_sj_blacklisted = 0;
 
-    // The per-sj strand table's key ---
-    // Coordinates of the LEFTMOST ANNOTATED CIGAR-N sj this fragment
-    // crosses; -1 when it crosses none.  `sj_strand` above is the fragment's
-    // motif strand (one XS/ts tag per fragment), which completes the key.
-    //
-    // ⚠ Crediting the FIRST annotated sj is a CHOICE, recorded here so it
-    // is not mistaken for a derivation.  A qualified fragment carries ONE sense
-    // bit: `sj_strand` is read from the BAM XS/ts tag, which is per RECORD, and
-    // mates that disagree OR to STRAND_AMBIGUOUS, which the qualification
-    // rejects.  So all K sj of a fragment necessarily agree.
-    //
-    // Two measured reasons for credit-one:
-    //   (a) the 2×2 marginal identity REQUIRES one row per fragment;
-    //   (b) the K >= 2 stratum is a materially cleaner population (minor rate
-    //       0.35x at K=2, 0.14x at K=3, 0 at K>=4), so crediting all K shifts
-    //       kappa by 21-34%.
-    //
-    // ⚠ A cost of the deterministic leftmost pick, recorded so it is not
-    // rediscovered as a bug: 3-5% of sj never receive an observation (leftmost
-    // and rightmost agree, so this is concentration on fewer sj, not a 5'/3'
-    // bias). Determinism wins anyway: this repo has goldens.
-    //
-    // ⚠ ANNOTATED, not merely leftmost: `sj_strand` is the OR of the ANNOTATED
-    // introns' strands only, so an unannotated intron may carry a different (or
-    // absent) tag.  Keying on an annotated sj is what makes the 2×2
-    // marginal identity hold unconditionally.
+    // The per-junction strand table's key: the leftmost annotated CIGAR-N junction this fragment crosses (-1 when
+    // none), completed by `sj_strand`, the fragment's one motif strand. A qualified fragment carries one strand bit
+    // (mates whose XS/ts tags disagree OR to STRAND_AMBIGUOUS and are rejected), so all its junctions agree, and
+    // crediting one junction per fragment keeps the 2×2 marginal identity. The pick is the leftmost so it is
+    // deterministic, and it must be an annotated junction because `sj_strand` is the OR of annotated introns only.
     int32_t sj_key_ref = -1;
     int32_t sj_key_start = -1;
     int32_t sj_key_end = -1;
 
-    // ⭐ EVERY explanation of this fragment's UNSEQUENCED gaps, flat. Hypothesis h owns introns
-    // [gap_intron_offsets[h], gap_intron_offsets[h+1]).
-    //
-    // A mate gap may hold no intron, one, or several, and which it is CANNOT be observed -- the bases are
-    // not there. Each compatible transcript determines exactly one answer (its own introns lying inside
-    // the gaps), so the set is finite and small, and two transcripts implying the same introns are ONE
-    // hypothesis. The accumulator arbitrates.
-    //
-    // ⚠ An EMPTY hypothesis (no introns) is the UNSPLICED one, and it is the genomic explanation: cutting
-    // nothing means the gap is real template. It is present whenever some compatible transcript implies
-    // nothing there, or whenever the fragment carries no annotated CIGAR-N sj and so could be gDNA.
-    // ⛔ It is never added as the synthetic span candidate -- the synthetic span IS this hypothesis.
+    // Every explanation of this fragment's unsequenced gaps, flat: hypothesis h owns introns
+    // [gap_intron_offsets[h], gap_intron_offsets[h+1]) (`FragmentResolver::enumerate_gap_hypotheses`). The empty
+    // hypothesis is the unspliced, genomic one; the synthetic span is this hypothesis, never a separate one.
     std::vector<IntronBlock> gap_introns;
     std::vector<int32_t>     gap_intron_offsets;      // n_hypotheses + 1, always starts at 0
     std::vector<int32_t>     gap_sj_strand;           // n_hypotheses

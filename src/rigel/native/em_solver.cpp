@@ -1,14 +1,8 @@
 /**
- * em_solver.cpp — C++ EM solver for rigel locus-level abundance estimation.
+ * em_solver.cpp — the per-locus EM (module rigel._em_impl).
  *
- * The per-locus EM step (MAP + VBEM), equivalence-class construction,
- * component effective-length normalization, and the SQUAREM acceleration loop.
- *
- * Module: rigel._em_impl
- *
- * Build:
- *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
- *   Pure C++17 + nanobind + numpy.  No external dependencies.
+ * Builds each locus's sub-problem and equivalence classes, runs MAP-EM or VBEM under SQUAREM with the grouped
+ * gDNA/RNA calibration prior, assigns the posteriors, and finds the loci as connected components.
  */
 
 #include <algorithm>
@@ -16,7 +10,6 @@
 #include <cmath>
 #include <limits>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <numeric>
@@ -33,9 +26,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
-#include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
-#include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
 
@@ -48,21 +39,20 @@ static constexpr double EM_LOG_EPSILON = 1e-300;
 // iterations spend the same VBEM budget `EMConfig.iterations` names.
 static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 
-// VBEM floor: the minimum alpha a component keeps, EM_LOG_EPSILON (≈1e-300), deep enough that digamma
-// returns ≈ −1e300. After max-subtraction in the E-step kernel exp(−1e300) = 0.0 (IEEE underflow), so a
-// component at the floor receives zero responsibility, and the evidence-proportional prior gives it
-// nothing: it stays dead unless it holds deterministic fragments of its own. ⛔ So only the EM's own step
-// may put a component there — never SQUAREM's extrapolation (`backtracked_squarem_step`).
+// VBEM floor: the smallest alpha a component keeps. digamma(1e-300) ≈ −1e300, so after max-subtraction the E-step
+// gives a component at the floor exactly zero responsibility and the evidence-proportional prior gives it nothing: it
+// stays dead unless it holds deterministic fragments. Only the EM's own step may put a component there, never
+// SQUAREM's extrapolation (`backtracked_squarem_step`).
 static constexpr double VBEM_SQUAREM_PRIOR_FLOOR = EM_LOG_EPSILON;
 
-// The mode codes: labels, not quantities, so any distinct values would do. Defined here alone — the module
-// exports them, rigel.estimator reads them, and `batch_locus_em_partitioned` refuses any other code.
+// Mode codes are labels, not quantities. The module exports them for rigel.estimator, and
+// `batch_locus_em_partitioned` refuses any other value.
 //
 // The assignment (`assign_posteriors`)
 static constexpr int ASSIGN_FRACTIONAL = 0;  // every candidate keeps its posterior share
 static constexpr int ASSIGN_SAMPLE     = 1;  // count first, then one component per unit
 // The warm start (`compute_grouped_warm_start`)
-static constexpr int WARM_START_COVERAGE = 0;  // the shipped coverage-weighted seed
+static constexpr int WARM_START_COVERAGE = 0;  // the default coverage-weighted seed
 static constexpr int WARM_START_PRIOR    = 1;  // the prior alone: the seed is zeroed
 static constexpr int WARM_START_UNIFORM  = 2;  // every component equal
 
@@ -72,7 +62,6 @@ static constexpr int32_t EM_WINNER_INTERGENIC = -3;
 // ================================================================
 // The intergenic term: a fixed rate no locus parameter carries
 // ================================================================
-//
 // A multimapper's place with no transcript candidate is in no locus, so its gDNA comes at the library's intergenic
 // rate `λ` (fragments per start, in the unit the capture efficiencies are read in), beside the locus's components,
 // whose absolute rates are `M θ_c / L̃_c`. `M` is the locus's own data count, re-estimated with θ: the maximiser of
@@ -80,7 +69,7 @@ static constexpr int32_t EM_WINNER_INTERGENIC = -3;
 // `M = Σ_u Σ_{c in locus} r_uc + N_det`. In the locus's frame the term is one more component, last, of weight
 // `log λ − log M`; it takes no share of the prior and none of θ's normalisation, and its slot of the EM's state holds
 // `M` so SQUAREM accelerates the two together: `M / N` under MAP, where the state is a share, and `M` under VBEM,
-// where it is a count. A locus with no intergenic place has no such component and is solved as it always was.
+// where it is a count. A locus with no intergenic place has no such component.
 struct IntergenicTerm {
     int    idx = -1;        // its component index, the last one; -1: the locus has none
     double log_rate = -std::numeric_limits<double>::infinity();
@@ -93,17 +82,16 @@ static inline double intergenic_log_weight(const IntergenicTerm& ig, double data
 }
 
 // ================================================================
-// Profiling instrumentation — per-locus and aggregate statistics
+// Per-locus profiling statistics (batch_locus_em_partitioned with emit_locus_stats)
 // ================================================================
 
 using hrclock = std::chrono::steady_clock;
 
-/// Per-locus profiling statistics collected during batch_locus_em_partitioned.
 struct LocusProfile {
     int locus_idx = -1;
     int n_transcripts = 0;
     int n_units = 0;
-    int n_components = 0;        // n_t + 1
+    int n_components = 0;        // n_t + 1, or n_t + 2 with the intergenic term
     int n_equiv_classes = 0;
     int64_t ec_total_elements = 0; // sum of n*k across all ECs
     int max_ec_width = 0;        // max k across ECs
@@ -155,9 +143,7 @@ struct SplitMix64 {
     }
 };
 
-// ================================================================
 // Array type aliases
-// ================================================================
 
 using i32_1d = nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig>;
 using i64_1d = nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig>;
@@ -196,7 +182,7 @@ static inline double digamma(double x) {
 }
 
 // ================================================================
-// Equivalence class — groups units with identical candidate sets
+// Equivalence classes: the units sharing one candidate component set, as dense matrices
 // ================================================================
 
 struct EmEquivClass {
@@ -207,17 +193,9 @@ struct EmEquivClass {
     int k;  // number of components per unit
 };
 
-// ================================================================
-// Equivalence class builder
-// ================================================================
-//
-// Groups CSR units by their candidate component set (the ordered tuple of
-// t_indices per unit) into dense matrices for batch processing.
-
-// Hash for vector<int32_t> keys
+// FNV-1a hash of a candidate component set.
 struct VecHash {
     size_t operator()(const std::vector<int32_t>& v) const noexcept {
-        // FNV-1a hash
         size_t h = 14695981039346656037ULL;
         for (int32_t val : v) {
             h ^= static_cast<size_t>(static_cast<uint32_t>(val));
@@ -278,18 +256,10 @@ static std::vector<EmEquivClass> build_equiv_classes(
         result.push_back(std::move(ec));
     }
 
-    // ---- Deterministic ordering ----
-    // The `unordered_map` above iterates in an order that depends on the hash table's internals, so the
-    // equiv classes come out in no fixed order.  The E-step accumulates column sums over rows and FP
-    // addition is non-associative, so an unstable order produces ULP differences that SQUAREM amplifies
-    // across iterations into large cascading output differences.  Sorting by comp_idx pins it.
-    //
-    // The rows within a class need no sort: `build_multi_loci` orders each locus's units by `frag_id`,
-    // the reader's BAM-order identity, so `unit_list` is already canonical.
-    // `tests/test_scan_order_independence.py` requires byte-identical output across scan thread counts
-    // in both assignment modes.
-
-    // Sort equiv classes by comp_idx (lexicographic)
+    // Sort the classes by comp_idx. `unordered_map` iterates in no fixed order, and the E-step's column sums
+    // depend on addition order in floating point, so an unstable order gives ULP differences that SQUAREM
+    // amplifies. Rows within a class need no sort: `build_multi_loci` orders each locus's units by `frag_id`
+    // (BAM order), so `unit_list` is already canonical.
     std::sort(result.begin(), result.end(),
               [](const EmEquivClass& a, const EmEquivClass& b) {
                   return a.comp_idx < b.comp_idx;
@@ -299,11 +269,8 @@ static std::vector<EmEquivClass> build_equiv_classes(
 }
 
 // ================================================================
-// Kahan summation helper for numerical stability
+// Kahan summation: O(eps) error rather than O(n·eps), for the E-step's column sums over large classes
 // ================================================================
-//
-// Reduces FP accumulation error from O(n*eps) to O(eps).  Critical
-// for column-sum accumulators in the E-step where n can be 500K+.
 
 struct KahanAccumulator {
     double sum = 0.0;
@@ -318,15 +285,11 @@ struct KahanAccumulator {
 };
 
 // ================================================================
-// EM step kernel — the hot inner loop (range-based)
+// EM step kernel — the hot inner loop
 // ================================================================
-//
-// Processes every row of one equivalence class: computes posteriors
-// from log_weights, normalizes rows via log-sum-exp, and writes the k
-// column sums, each Kahan-summed in row order, to col_sums.
-//
-// Thread safety: the EC is read-only, each row's posteriors live in a
-// stack-local buffer, and col_sums is the caller's slot.
+// For every row of one equivalence class: the posteriors from log_weights, normalised by log-sum-exp, with the k
+// column sums Kahan-summed in row order into col_sums. Thread-safe: the class is read-only, each row's posteriors
+// live in a stack-local buffer, and col_sums is the caller's slot.
 
 static inline void em_step_kernel(
     const EmEquivClass& ec,
@@ -377,7 +340,7 @@ static inline void em_step_kernel(
                 __m512d v = _mm512_loadu_pd(row + j);
                 v = _mm512_sub_pd(v, max_v);
 
-                // Whole-vector early-zero skip: if ALL 8 lanes < cutoff
+                // Whole-vector early-zero skip: all 8 lanes below the cutoff
                 __mmask8 mask = _mm512_cmp_pd_mask(v, cutoff_v, _CMP_LT_OQ);
                 if (mask == 0xFF) {
                     _mm512_storeu_pd(row + j, _mm512_setzero_pd());
@@ -390,7 +353,6 @@ static inline void em_step_kernel(
             }
             row_sum = _mm512_reduce_add_pd(sum_v);
         }
-        // AVX-512 scalar tail
         for (; j < k; ++j) {
             double x = row[j] - max_val;
             double e = rigel::fast_exp_scalar(x);
@@ -407,7 +369,7 @@ static inline void em_step_kernel(
                 __m256d v = _mm256_loadu_pd(row + j);
                 v = _mm256_sub_pd(v, max_v);
 
-                // Whole-vector early-zero skip: if ALL 4 lanes < cutoff
+                // Whole-vector early-zero skip: all 4 lanes below the cutoff
                 __m256d cmp = _mm256_cmp_pd(v, cutoff_v, _CMP_LT_OQ);
                 if (_mm256_movemask_pd(cmp) == 0xF) {
                     _mm256_storeu_pd(row + j, _mm256_setzero_pd());
@@ -424,7 +386,6 @@ static inline void em_step_kernel(
             lo = _mm_add_pd(lo, hi);
             row_sum = _mm_cvtsd_f64(lo) + _mm_cvtsd_f64(_mm_unpackhi_pd(lo, lo));
         }
-        // AVX2 scalar tail
         for (; j < k; ++j) {
             double x = row[j] - max_val;
             double e = rigel::fast_exp_scalar(x);
@@ -442,7 +403,7 @@ static inline void em_step_kernel(
                 float64x2_t v = vld1q_f64(row + j);
                 v = vsubq_f64(v, max_v);
 
-                // Whole-vector early-zero skip: if BOTH lanes < cutoff, store zeros
+                // Whole-vector early-zero skip: both lanes below the cutoff
                 uint64x2_t mask = vcltq_f64(v, cutoff_v);
                 if (vgetq_lane_u64(mask, 0) & vgetq_lane_u64(mask, 1)) {
                     vst1q_f64(row + j, zero_v);
@@ -455,7 +416,6 @@ static inline void em_step_kernel(
             }
             row_sum = vgetq_lane_f64(sum_v, 0) + vgetq_lane_f64(sum_v, 1);
         }
-        // NEON scalar tail
         for (; j < k; ++j) {
             double x = row[j] - max_val;
             double e = rigel::fast_exp_scalar(x);
@@ -475,9 +435,9 @@ static inline void em_step_kernel(
         // Normalize and accumulate column sums (fused)
         if (row_sum > 0.0 && std::isfinite(row_sum)) {
             double inv_sum = 1.0 / row_sum;
-            for (int j = 0; j < k; ++j) {
-                row[j] *= inv_sum;
-                col_acc[j].add(row[j]);
+            for (int c = 0; c < k; ++c) {
+                row[c] *= inv_sum;
+                col_acc[c].add(row[c]);
             }
         } else {
             // a row no component can emit (every weight -inf) lands here: outside the model, skipped
@@ -492,14 +452,9 @@ static inline void em_step_kernel(
 // ================================================================
 // The E-step: per-class column sums, added in class order
 // ================================================================
-//
-// Each equivalence class's column sums go to a slot of their own, and the
-// slots are added into em_totals in class order once every class is done:
-// the single-thread E-step's additions in its order, on one thread or many, so
-// the totals are the same to the last bit whatever the thread count and the
-// threads change only which class runs where. A class is never split across
-// threads, since a split would re-associate its row sums. Built once per locus,
-// its slots and order reused by every step.
+// Each equivalence class writes its column sums to its own slot, and the slots are added into em_totals in class
+// order, so the totals are bit-identical for any thread count. A class is never split across threads, since a split
+// would re-associate its row sums. Built once per locus and reused by every step.
 
 class EStep {
 public:
@@ -578,35 +533,18 @@ private:
 // Grouped RNA/gDNA prior update
 // ================================================================
 
-// The calibration prior for one locus: how many pseudo-fragments of gDNA and of RNA to add, and who
-// is allowed to receive the RNA share.
-//
-// Field names spell the quantity out: each is a count of pseudo-fragments, not a symbol from a
-// derivation.
+// The calibration prior for one locus: pseudo-fragments of gDNA and of RNA, and how the RNA share is allocated.
 struct AggregatePrior {
     double gdna_prior_fragments = 0.0;
     double rna_prior_fragments  = 0.0;
     int    gdna_index = -1;
     bool   has_gdna_candidate = false;
 
-    //: ⭐⭐ Per-component ALLOCATION WEIGHT for the RNA prior. `nullptr` means "allocate in proportion
-    //: to the evidence each component already carries", which is the shipped rule and the one this
-    //: field generalises.
-    //:
-    //: ⭐ THE SHIPPED RULE IS ALREADY AN ADDITIVE PER-COMPONENT PSEUDOCOUNT, and seeing that is what
-    //: makes this one field rather than a second mechanism:
-    //:
-    //:     out[i] = raw[i] · (1 + rna_prior/rna_count)  ==  raw[i] + rna_prior·raw[i]/rna_count
-    //:
-    //: so it is `raw[i] + a_i` with `a_i = rna_prior · w_i / Σ w` at `w_i = raw[i]`. The two
-    //: designs differ ONLY in the weights. Calling the shipped one "multiplicative, hence neutral"
-    //: describes the CONSEQUENCE of choosing `w_i = raw[i]` — a prior that echoes the EM's own current
-    //: belief carries no information — not a different kind of update.
-    //:
-    //: ⛔ THE ONE PLACE THEY ARE NOT INTERCHANGEABLE IS `raw[i] == 0`, and it is the consequential one.
-    //: The shipped weights make `out[i] = 0` an ABSORBING STATE no prior magnitude can escape, so a
-    //: component with no warm-start evidence can never be revived. A strictly positive weight has no
-    //: such state.
+    // Per-component allocation weight for the RNA prior; nullptr allocates in proportion to the evidence each
+    // component already carries. Both are the additive pseudocount `a_i = rna_prior · w_i / Σw`; the evidence rule
+    //     out[i] = raw[i] · (1 + rna_prior/rna_count) = raw[i] + rna_prior · raw[i]/rna_count
+    // is the case `w_i = raw[i]`. They differ at `raw[i] == 0`: evidence weights make `out[i] = 0` an absorbing
+    // state, so a component with no evidence is never revived, and a strictly positive weight has no such state.
     const double* component_rna_prior_weight = nullptr;
 };
 
@@ -614,35 +552,13 @@ static inline double nonnegative_finite(double x) {
     return (std::isfinite(x) && x > 0.0) ? x : 0.0;
 }
 
-// Split the locus into gDNA and RNA, add the calibration prior to each, and hand the RNA share out
-// among the RNA components in proportion to the evidence each already carries.
+// Split the locus into gDNA and RNA, add the calibration prior to each, and share the RNA prior over the RNA
+// components in proportion to the evidence each already carries (or to the caller's allocation weight).
 //
-// ⭐ EVERY RNA COMPONENT RECEIVES ITS SHARE, AND NONE IS SINGLED OUT FOR ZERO.
-// RNA is RNA: whether the annotation happens to assert a given RNA component — a synthetic span is a
-// transcript this index manufactured — is not a fact about this locus's composition, so
-// the allocation does not read it. The rule the prior implements is therefore sayable in one line:
-// the RNA pseudocount is distributed over the RNA components in proportion to the evidence each
-// already carries.
-//
-// ⭐ WHAT THAT BUYS, AND WHAT IT COSTS. Because the weights echo the EM's own current belief the
-// prior carries no information ABOUT THE SPLIT WITHIN RNA — it enters every RNA component as the
-// same factor `(1 + rna_prior/rna_count)`, so it moves only the gDNA:RNA split, which is the one
-// thing it is for. Withholding the share from synthetic components would make the factor un-common and
-// let the prior ALONE redistribute RNA between entities the data cannot tell apart (at a locus of two
-// equally good explanations it drives the synthetic one to 1e-298). The price is that the prior does
-// not help a synthetic span decay: its geometric rate is `kappa = w_N/w_T < 1` rather than
-// `kappa/(1 + rna_prior/rna_count)`, still strictly below one for free, since a synthetic span is
-// longer than the annotated transcript it spans.
-//
-// ⛔ A ZERO-EVIDENCE COMPONENT STILL CANNOT BE REVIVED. `out[i]` is proportional to `raw[i]`, so
-// `out[i] = 0` is an ABSORBING STATE under these weights — the structural guard against a zombie
-// entity, and a property of the WEIGHTS. Gate:
-// `tests/native/test_grouped_prior_update.py::test_a_zero_count_component_CANNOT_be_revived_by_the_prior`.
-//
-// ⛔ THE gDNA:RNA SPLIT IS UNCHANGED, EXACTLY. The RNA components sum to `rna_count + rna_prior`,
-// because the prior is redistributed WITHIN the RNA pool rather than withheld from it. So the
-// library gDNA fraction — the number calibration exists to produce — cannot move. Any movement in it
-// is a bug in this function, not an effect of the rule.
+// Every RNA component, annotated transcript or synthetic span, receives its share: under evidence weights the prior
+// is the common factor `(1 + rna_prior/rna_count)` and moves only the gDNA:RNA split, while a withheld share would
+// move RNA between components the data cannot tell apart. Within one call the RNA components sum to
+// `rna_count + rna_prior` and gDNA to `gdna_count + gdna_prior`, exactly.
 static void apply_grouped_prior_update(
     const double* raw_counts,
     const double* carried_state,
@@ -654,8 +570,7 @@ static void apply_grouped_prior_update(
     const bool has_gdna = aggregate_prior.has_gdna_candidate
         && gdna_index >= 0 && gdna_index < n_components;
 
-    // The whole RNA pool, which is also the whole set of recipients: the prior's arithmetic and the
-    // gDNA:RNA split it sets are answers to the same sum, and there is no second total.
+    // The RNA pool's evidence and carried totals; every RNA component is a recipient.
     double rna_count = 0.0, rna_carried = 0.0;
     for (int i = 0; i < n_components; ++i) {
         if (i == gdna_index) continue;
@@ -665,10 +580,7 @@ static void apply_grouped_prior_update(
         }
     }
 
-    // ⭐ The RNA components' total ALLOCATION WEIGHT, when the caller supplied one. Computed here,
-    // beside the count and carried totals, because it is the third answer to the same question — in
-    // what proportion is the RNA prior shared out? — and the gate below has to choose between all
-    // three.
+    // The RNA components' total allocation weight, when the caller supplies one.
     const double* rna_prior_weight = aggregate_prior.component_rna_prior_weight;
     double rna_weight = 0.0;
     if (rna_prior_weight != nullptr) {
@@ -679,34 +591,13 @@ static void apply_grouped_prior_update(
     }
     const bool weighted = rna_weight > EM_LOG_EPSILON;
 
-    // ⭐ The gDNA pseudocount is gated on there BEING a gDNA component — without one there is nowhere
-    // to put it, and adding it anywhere else would invent mass.
+    // The gDNA pseudocount needs a gDNA component to land on.
     double gdna_prior = has_gdna ? nonnegative_finite(aggregate_prior.gdna_prior_fragments) : 0.0;
-    // ⛔⛔ THE RNA PSEUDOCOUNT IS **NOT** GATED ON THE gDNA COMPONENT. It lands on the RNA components,
-    // which exist whether or not a gDNA candidate does, so gating it would discard the whole RNA prior
-    // at any locus none of whose units carries one — a locus whose fragments are ALL SPLICED, since a
-    // gDNA candidate is appended to every unspliced unit.
-    //
-    // ⭐ **Why such a gate hides.** Under the evidence-proportional weights the RNA prior enters as a
-    // COMMON factor `(1 + rna_prior/rna_count)` over the RNA components, and a common factor cancels
-    // when `theta` is normalised — so at a locus with no gDNA component the prior cannot move `theta`,
-    // and suppressing it changes nothing observable. ⚠ It is observable when the allocation is an
-    // informative per-component WEIGHT, where the prior says something the evidence does not.
+    // The RNA pseudocount lands on the RNA components, so it is not gated on a gDNA component (an all-spliced locus
+    // has none). It is dropped only when nothing can receive it, tested on the denominator the chosen branch divides
+    // by (the weight total, else the count, else the carried state): any other total could keep a live prior at a
+    // locus with zero count but carried alpha (VBEM), multiply it by zero and move the gDNA:RNA split.
     double rna_prior  = nonnegative_finite(aggregate_prior.rna_prior_fragments);
-    // ⛔⛔ THE GATE MUST NAME THE DENOMINATOR THE CHOSEN BRANCH ACTUALLY DIVIDES BY. A gate testing one
-    // total while the branch below divides by another keeps a live `rna_prior` at a locus with zero RNA
-    // count but nonzero carried alpha, multiplies it by `inv = 0` and silently drops it: the RNA pool
-    // sums to `rna_count` while gDNA still receives `gdna_count + gdna_prior`, MOVING the gDNA:RNA
-    // split this function exists to hold fixed. Reachable under VBEM, which is
-    // the shipped default and passes `alpha` as the carried state. Gate:
-    // `tests/native/test_grouped_prior_update.py`, specifically
-    // `test_a_locus_with_NO_rna_evidence_AT_ALL_drops_the_rna_prior`.
-    //
-    // With an explicit allocation weight the denominator is the weight total, so that is what the
-    // gate must name. This is not a refinement — it is the case the weighted lane exists FOR. A
-    // locus with no RNA evidence at all has `rna_count == rna_carried == 0`, so the count-based gate
-    // zeroes the prior and the pool stays empty; that is right when the only thing saying where mass
-    // belongs IS the evidence, and wrong when the caller has said so directly.
     const double prior_recipients = weighted
         ? rna_weight
         : ((rna_count > EM_LOG_EPSILON) ? rna_count : rna_carried);
@@ -723,21 +614,8 @@ static void apply_grouped_prior_update(
         out_counts[gdna_index] = gdna_total;
     }
 
-    // ⭐⭐ THE WEIGHTED ALLOCATION. When the caller supplies a per-component weight the prior is a
-    // genuine additive pseudocount `a_i = rna_prior · w_i / Σ w`, and the whole update is one loop:
-    //
-    //     out[i] = raw[i] + a_i
-    //
-    // ⭐ Conservation is immediate and needs no case analysis: Σ_{i≠g} out[i] = rna_count + rna_prior,
-    // because the `a_i` sum to `rna_prior` by construction. That is why this branch has no
-    // `rna_count`/`rna_carried` split — the CARRIED STATE existed only to answer "who should receive
-    // the prior when there is no evidence?", and an explicit weight answers it directly.
-    //
-    // ⛔ A ZERO WEIGHT TOTAL FALLS BACK TO THE EVIDENCE-PROPORTIONAL RULE rather than dropping the
-    // prior. Dropping it would leave gDNA holding `gdna_prior` while the RNA pool summed to
-    // `rna_count` — MOVING the split this function exists to hold fixed, which is the exact defect
-    // the `prior_recipients` paragraph above records. A weight vector that says "nobody" is a weight
-    // vector with nothing to say.
+    // Weighted allocation: out[i] = raw[i] + rna_prior · w_i / Σw, so the pool sums to rna_count + rna_prior. A zero
+    // weight total is not `weighted` and takes the evidence rule below, which keeps the prior and the split.
     if (weighted) {
         const double scale = rna_prior / rna_weight;
         for (int i = 0; i < n_components; ++i) {
@@ -748,8 +626,7 @@ static void apply_grouped_prior_update(
         return;
     }
 
-    // Each RNA component takes its evidence scaled up to absorb its share of the prior. Summed over
-    // the pool: `rna_total · (rna_count/rna_count) = rna_count + rna_prior`.
+    // Evidence weights: each RNA component's evidence scaled by rna_total / rna_count.
     if (rna_count > EM_LOG_EPSILON) {
         const double inv = 1.0 / rna_count;
         for (int i = 0; i < n_components; ++i) {
@@ -757,10 +634,8 @@ static void apply_grouped_prior_update(
             out_counts[i] = rna_total * nonnegative_finite(raw_counts[i]) * inv;
         }
     } else if (rna_carried > EM_LOG_EPSILON && carried_state != nullptr) {
-        // The zero-evidence path, live under VBEM (which passes `alpha` as the carried state). The
-        // pool is prior-only, so it is shared in proportion to the carried alpha — over every RNA
-        // component, on the same rule as above. Unreachable from the warm start, which passes
-        // `carried_state = nullptr`, so this never zeroes a component at initialisation.
+        // Zero evidence, reachable under VBEM (which passes `alpha` as the carried state): the prior-only pool is
+        // shared in proportion to the carried alpha. The warm start passes nullptr and never reaches this.
         const double inv = 1.0 / rna_carried;
         for (int i = 0; i < n_components; ++i) {
             if (i == gdna_index) continue;
@@ -770,13 +645,8 @@ static void apply_grouped_prior_update(
 }
 
 // ================================================================
-// MAP-EM step: theta → theta_new
+// MAP-EM step: theta → theta_new, under the grouped prior (`apply_grouped_prior_update`)
 // ================================================================
-//
-// Grouped MAP-EM with additive aggregate RNA/gDNA pseudocounts. The
-// calibration prior constrains only the aggregate gDNA-vs-RNA split; RNA
-// pseudocount mass is dynamically distributed in proportion to current RNA
-// evidence, so no transcript receives a fixed floor.
 
 static void map_em_step(
     const double* theta,
@@ -799,10 +669,8 @@ static void map_em_step(
     }
     if (ig.idx >= 0) log_weights[ig.idx] = intergenic_log_weight(ig, theta[ig.idx] * ig.n_all);
 
-    // Zero em_totals
     std::fill(em_totals, em_totals + n_components, 0.0);
 
-    // E-step: accumulate posteriors
     estep.run(log_weights.data(), em_totals);
 
     // Grouped MAP-EM: raw counts first, then aggregate prior projection.
@@ -845,7 +713,6 @@ static void vbem_step(
     // The locus's own components; the intergenic term, if any, is the last and its slot holds M.
     const int n_locus = ig.idx >= 0 ? ig.idx : n_components;
 
-    // Compute alpha_sum
     double alpha_sum = 0.0;
     for (int i = 0; i < n_locus; ++i) {
         alpha_sum += alpha[i];
@@ -860,10 +727,8 @@ static void vbem_step(
     }
     if (ig.idx >= 0) log_weights[ig.idx] = intergenic_log_weight(ig, alpha[ig.idx]);
 
-    // Zero em_totals
     std::fill(em_totals, em_totals + n_components, 0.0);
 
-    // E-step
     estep.run(log_weights.data(), em_totals);
 
     // M-step: grouped count-space update (unnormalized alpha-like mass).
@@ -881,11 +746,8 @@ static void vbem_step(
 // ================================================================
 // Marginal data log-likelihood at a given theta (diagnostic)
 // ================================================================
-// Σ_units log( Σ_c (theta_c / eff_c) · exp(log_lik_{u,c}) ), i.e. Σ_units
-// logsumexp_c(log_weights[c] + log_lik_{u,c}) where log_weights[c] =
-// log(theta_c + eps) − log_eff_len[c]. This is the data term of the EM
-// objective; comparing it across two converged solutions says which is the
-// higher-likelihood (MLE) fixed point.
+// Σ_units logsumexp_c(log_weights[c] + log_lik_{u,c}): the EM objective's data term, which ranks two converged
+// solutions by likelihood.
 static double marginal_data_loglik(
     const std::vector<EmEquivClass>& ec_data, const double* log_weights)
 {
@@ -912,7 +774,7 @@ static double marginal_data_loglik(
 }
 
 // ================================================================
-// Coverage-weighted warm start + grouped aggregate prior projection
+// Warm start, projected by the grouped prior
 // ================================================================
 
 static void compute_grouped_warm_start(
@@ -927,24 +789,10 @@ static void compute_grouped_warm_start(
     // The seed and the prior are the locus's own components'; the intergenic slot starts at 0 here.
     const int n_components = ig_idx >= 0 ? ig_idx : n_components_all;
     std::fill(warm_counts_out, warm_counts_out + n_components_all, 0.0);
-    // Warm start = unambig_totals (an INDEPENDENT, non-competing seed) + coverage-weighted shares of the
-    // AMBIGUOUS (competing) fragments, then the grouped aggregate-prior projection.
-    //
-    // ⭐⭐ `WARM_START_PRIOR` ZEROES that seed, so the projection below runs on all-zero evidence and theta
-    // starts proportional to the PRIOR ALONE. It exists because the shipped seed and the prior are two
-    // different methods and the projection MULTIPLIES them: a coverage-weighted share scaled by a
-    // per-transcript allocation derived some other way is neither method's answer. Zeroing the seed is
-    // how a prior gets tested on its own terms.
-    //
-    // ⛔ IT IS ONLY MEANINGFUL WITH A PER-COMPONENT WEIGHT. Under the shipped evidence-proportional
-    // rule `out[i]` is proportional to `raw[i]`, so an all-zero seed yields an all-zero RNA pool and
-    // every fragment goes to gDNA — `theta = 0` is the absorbing state. With a weight vector the same
-    // input yields `out[i] = rna_prior * w_i / Σw`, which is exactly the intent.
-    //
-    // ⭐⭐ `WARM_START_UNIFORM`: every component starts equal, so the seed asserts nothing at all
-    // and the EM's landing point is a property of the LIKELIHOOD rather than of where it was put down.
-    // It is the control that separates "the shipped seed steers the solver into a bad basin" from "the
-    // objective itself has one" — and it needs no weight vector, unlike `prior`.
+    // WARM_START_COVERAGE seeds the deterministic counts plus each ambiguous unit's coverage-weighted shares, then
+    // applies the grouped prior. WARM_START_PRIOR zeroes the seed, so theta starts from the prior alone; it needs an
+    // allocation weight, since under evidence weights an all-zero seed gives an all-zero RNA pool. WARM_START_UNIFORM
+    // starts every component equal, so where the EM lands is a property of the likelihood, not of the seed.
     std::vector<double> warm_raw(static_cast<size_t>(n_components_all), 0.0);
     if (warm_mode == WARM_START_PRIOR) {
         apply_grouped_prior_update(
@@ -990,15 +838,10 @@ static void compute_grouped_warm_start(
 // ================================================================
 // SQUAREM step length: backtracked, never clamped
 // ================================================================
-//
-// SQUAREM jumps to `state0 + 2·step·r + step²·v` along the EM's own path, and for a shrinking component
-// the jump can land below the floor. It used to be CLAMPED there — and a component at the floor takes no
-// responsibility and no share of the evidence-proportional prior, so it never came back: the ACCELERATOR
-// decided which of the components sharing fragments lived, and the EM's answer depended on its warm start
-// (`tests/test_em_start_independence.py` replays three real loci the clamp forked). Instead the step is
-// shrunk toward 1 — halving its excess over the plain double step `state2`, which the EM produced itself —
-// until no component that `state2` keeps above the floor is carried below it. A component `state2` itself
-// takes below the floor is the EM's own verdict and does not hold the step back. `backtracks` counts the
+// SQUAREM jumps to `state0 + 2·step·r + step²·v`, which can carry a shrinking component below the floor, where it
+// never returns. Clamping there would let the accelerator, not the EM, decide which components live. So the step
+// halves its excess over 1 (the plain double step `state2`) until no component `state2` keeps above the floor lands
+// below it; a component `state2` itself takes below the floor does not hold the step back. `backtracks` counts the
 // halvings.
 static double backtracked_squarem_step(
     double step,
@@ -1085,8 +928,7 @@ static EMResult run_squarem(
     int stabilization_fail_count = 0;
 
     if (use_vbem) {
-        // ---- VBEM with SQUAREM acceleration ----
-        // state = Dirichlet parameters alpha
+        // ---- VBEM under SQUAREM; the state is the Dirichlet alpha ----
         for (size_t i = 0; i < nc; ++i) {
             state0[i] = std::max(init_counts[i], VBEM_SQUAREM_PRIOR_FLOOR);
         }
@@ -1125,7 +967,7 @@ static EMResult run_squarem(
                 step_scale_max = std::max(step_scale_max, step);
                 ++step_scale_count;
                 for (size_t i = 0; i < nc; ++i) {
-                    // At step 1 the jump IS the plain double step: copied, because recomputing it rounds
+                    // At step 1 the jump is the plain double step: copied, because recomputing it rounds
                     // on the scale of state0 and could carry a small live component below the floor.
                     state_extrap[i] = (step == 1.0)
                         ? state2[i]
@@ -1146,10 +988,9 @@ static EMResult run_squarem(
                       unambig_totals, aggregate_prior, em_totals.data(),
                       state_new.data(), n_components, ig);
 
-            // Floor-clamp + convergence check on normalized theta
+            // Clamp to the floor, then test convergence on normalised theta.
             double sum_old = 0.0, sum_new = 0.0;
             for (size_t i = 0; i < nc; ++i) {
-                // Clamp stabilisation output to prior floor.
                 double floor_i = VBEM_SQUAREM_PRIOR_FLOOR;
                 if (!std::isfinite(state_new[i])) {
                     state_new[i] = floor_i;
@@ -1183,7 +1024,6 @@ static EMResult run_squarem(
             completed_iterations = iter + 1;
         }
 
-        // alpha_out = state0 (converged Dirichlet params)
         std::copy(state0.begin(), state0.end(), alpha_out.begin());
 
         // theta = normalized alpha, over the locus's own components
@@ -1201,8 +1041,7 @@ static EMResult run_squarem(
         }
 
     } else {
-        // ---- MAP-EM with SQUAREM acceleration ----
-        // state = normalized theta
+        // ---- MAP-EM under SQUAREM; the state is the normalised theta ----
         double total = 0.0;
         for (size_t i = 0; i < n_locus; ++i) {
             state0[i] = nonnegative_finite(init_counts[i]);
@@ -1297,7 +1136,6 @@ static EMResult run_squarem(
             completed_iterations = iter + 1;
         }
 
-        // theta = state0 (converged normalized theta)
         std::copy(state0.begin(), state0.end(), theta.begin());
         if (ig.idx >= 0) {
             data_count_out = state0[ig.idx] * ig.n_all;
@@ -1331,7 +1169,7 @@ struct LocalCandidate {
 // Per-locus sub-problem (stack-allocated, reused across loci)
 struct LocusSubProblem {
     int n_t;           // number of transcripts in locus
-    int n_components;  // n_t + 1
+    int n_components;  // n_t + 1, or n_t + 2 with the intergenic term
     int gdna_idx;      // = n_t     (single gDNA component)
     int ig_idx = -1;   // = n_t + 1 when a unit has an intergenic place (the intergenic term), else -1
     int n_local_units;
@@ -1347,35 +1185,22 @@ struct LocusSubProblem {
     // Per-component
     std::vector<double>   unambig_totals;   // [n_components]
     std::vector<double>   log_eff_len;      // [n_components] log L̃ per component
-    //: [n_components] the RNA prior's per-component ALLOCATION WEIGHT, remapped from the flat
-    //: per-transcript lane. Empty when the caller supplied none, and the prior update then allocates
-    //: in proportion to current evidence — the shipped rule, bit-identical.
+    // [n_components] the RNA prior's allocation weight, remapped from the per-transcript lane; empty when the
+    // caller supplies none, and the prior then follows the evidence.
     std::vector<double>   component_rna_prior_weight;
 
     // Local→global transcript mapping
     std::vector<int32_t>  local_to_global_t; // [n_t]
 };
 
-// Assign each unit's posterior after EM convergence and scatter it into the accumulators.
-//
-// FRACTIONAL scatters every unit's posterior as it stands.
-//
-// SAMPLE gives each unit to ONE component, COUNT FIRST. Each component's fractional count in the locus — every
-// transcript and the gDNA component alike — is rounded within the locus by largest remainder, so the locus total
-// is exact and a component expecting under about half a fragment rounds to zero. Then one pass over the units in
-// order draws each unit from its own posterior re-weighted, per candidate, by (count still owed / posterior mass
-// still to come), so a component short of its count is favoured exactly as far as it is behind. A unit whose
-// candidates are all full keeps its most probable one and is counted as STRANDED; the repair then moves chains of
-// units, each to another of its own candidates, until every count is back on its target (augmenting paths: each
-// fixes one fragment of excess, so it cannot cycle), and where the exact targets are unreachable it settles every
-// count within one of its fractional count, which is always reachable. Whether a transcript is real shows in its
-// total, never in one fragment's share of it, so no candidate is dropped per fragment.
-// ⚠ This is a FEASIBLE assignment, not an optimal one: it trades optimality for one pass and a small repair. The
-// assignment putting the most fragments on their true origin under the same counts is a transportation problem
-// this function does not solve; the draw instead gives each component a representative sample of the fragments it
-// could have produced, and the repair moves fragments without regard to their posteriors.
-// Held by tests/test_estimator.py (TestWholeCounts).
-// rng: this locus's SplitMix64 stream (SAMPLE only).
+// Assign each unit's posterior at the converged theta and scatter it into the accumulators. FRACTIONAL scatters
+// every posterior as it stands. SAMPLE gives each unit to one component, count first: each component's fractional
+// count in the locus (transcripts and gDNA alike) is rounded by largest remainder, then one pass draws each unit from
+// its posterior re-weighted per candidate by (count still owed / posterior mass still to come). A unit whose
+// candidates are all full keeps its most probable one (stranded) and a repair along augmenting paths puts every
+// count back on target, or within one of its fractional count where the exact targets are unreachable. The result
+// is feasible, not optimal: no candidate is dropped per fragment, and the repair ignores posteriors.
+// Gate: tests/test_estimator.py (TestWholeCounts). rng: this locus's SplitMix64 stream (SAMPLE only).
 static void assign_posteriors(
     const LocusSubProblem& sub,
     const double* theta,
@@ -1388,17 +1213,8 @@ static void assign_posteriors(
     double* em_counts_2d,          // [N_T, n_cols], row-major
     double* posterior_sum,         // [N_T]
     double* n_assigned,            // [N_T]
-    // Per-locus accumulation.
-    //
-    // ``rna_total`` is the sum of posterior mass assigned to ANY
-    // transcript-like component in the locus — this includes annotated
-    // mRNA AND synthetic nRNA components (both are RNA), which the
-    // solver treats identically (see scatter loop below).  It is NOT
-    // "mRNA" alone.  The caller must split annotated vs synthetic
-    // after the fact by subtracting per-transcript synthetic counts.
-    // Invariant:
-    //   rna_total + gdna_total == sum of assigned posteriors
-    //                          ≈ n_units entering the EM.
+    // Per-locus totals. rna_total is the mass on every transcript component, annotated transcripts and synthetic
+    // spans alike; the caller separates the two. rna_total + gdna_total + ig_total is the assigned mass.
     double& rna_total,
     double& gdna_total,
     int N_T_TOTAL,  // total transcripts for bounds checking
@@ -1456,7 +1272,7 @@ static void assign_posteriors(
     // SAMPLE's decision: one candidate position per unit (-1: the unit has no posterior and gets nothing).
     std::vector<int> choice;
     if (assignment_mode == ASSIGN_SAMPLE) {
-        // COUNT FIRST: each component's fractional count, rounded within the locus by largest remainder.
+        // Count first: each component's fractional count, rounded within the locus by largest remainder.
         std::vector<double> to_come(nc, 0.0);  // each component's posterior mass among the units not yet drawn
         for (size_t k = 0; k < n_cand; ++k) to_come[sub.t_indices[k]] += post[k];
         const std::vector<double> n_frac(to_come);   // the fractional counts themselves
@@ -1483,7 +1299,7 @@ static void assign_posteriors(
             for (int64_t i = 0; i < short_by && i < nc; ++i) quota[order[i]] += 1;
         }
 
-        // THE DRAW: units in order, each from its own posterior re-weighted by (count owed / mass to come).
+        // The draw: units in order, each from its own posterior re-weighted by (count owed / mass to come).
         std::vector<int64_t> owed(quota);
         choice.assign(n_units, -1);
         for (int ui = 0; ui < n_units; ++ui) {
@@ -1523,10 +1339,9 @@ static void assign_posteriors(
             for (auto k = s; k < e; ++k) to_come[sub.t_indices[k]] -= post[k];
         }
 
-        // THE REPAIR: a stranded unit left its component one over its count and another one under. A breadth-first
-        // search over components links each over-full component to an under-full one through units that can move
-        // — every unit moves only to another of its own candidates, with a posterior above zero — and moving the
-        // chain puts both back on their counts. A path exists whenever the rounded counts are reachable at all.
+        // The repair: a breadth-first search links each over-full component to an under-full one through units that
+        // can move (each only to another of its own candidates with a posterior above zero); moving the chain puts
+        // both on their counts. A path exists whenever the rounded counts are reachable at all.
         if (stranded > 0) {
             std::vector<std::vector<int>> members(nc);
             std::vector<int> slot(n_units, -1);
@@ -1589,12 +1404,10 @@ static void assign_posteriors(
             unrepaired = 0;
             for (int c = 0; c < nc; ++c) if (over[c] > 0) unrepaired += static_cast<int>(over[c]);
 
-            // THE FALLBACK. The exact targets were unreachable: some set of components was rounded up past the
-            // fragments that can reach it. A count within one of every fractional count is still always reachable
-            // — the posterior itself is a fractional assignment inside [floor(n_c), ceil(n_c)], so an integral one
-            // exists (flow integrality) — and the same augmenting paths find it: every count above its ceiling
-            // sheds along a path to a component below its ceiling, then every count below its floor draws along a
-            // path from a component above its floor. Each path fixes one unit of violation and none creates one.
+            // Fallback when the exact targets are unreachable. Counts within one of every fractional count always are
+            // reachable: the posterior is a fractional assignment inside [floor(n_c), ceil(n_c)], so by flow
+            // integrality an integral one exists. The same augmenting paths find it: counts above their ceiling shed,
+            // then counts below their floor draw; each path fixes one unit of violation and creates none.
             if (unrepaired > 0) {
                 std::vector<int64_t> lo(nc), hi(nc);
                 for (int c = 0; c < nc; ++c) {
@@ -1737,10 +1550,8 @@ static void assign_posteriors(
             if (p == 0.0) continue;
 
             if (comp < n_t) {
-                // Transcript component (annotated mRNA or synthetic nRNA
-                // — both are RNA and accumulate into rna_total;
-                // annotated-vs-synthetic splitting is deferred to the
-                // Python caller).
+                // A transcript component, annotated transcript or synthetic span: RNA, into rna_total
+                // (the Python caller separates the two).
                 int32_t global_t = local_to_global[comp];
                 uint8_t col = sub.count_cols[s + j];
                 if (global_t < 0 || global_t >= N_T_TOTAL || col >= n_cols) continue;
@@ -1765,14 +1576,8 @@ static void assign_posteriors(
 // Partition scatter functions — array-by-array global→per-locus scatter
 // ================================================================
 
-/// Build per-locus CSR offsets from global offsets and per-locus unit lists.
-///
-/// For each locus li with units [u0, u1, ...]:
-///   partition_offsets[li][0] = 0
-///   partition_offsets[li][k+1] = partition_offsets[li][k]
-///                                + (g_offsets[u+1] - g_offsets[u])
-///
-/// Returns a Python list of int64 numpy arrays, one per locus.
+/// Per-locus CSR offsets from the global offsets and each locus's unit list: offsets[li][0] = 0 and
+/// offsets[li][k+1] = offsets[li][k] + (g_offsets[u+1] - g_offsets[u]) for its k-th unit u. One int64 array per locus.
 static nb::list build_partition_offsets(
     i64_1d g_offsets,
     nb::list locus_units,
@@ -1791,7 +1596,7 @@ static nb::list build_partition_offsets(
         unit_infos[li] = {arr.data(), static_cast<int>(arr.shape(0))};
     }
 
-    // Compute offsets (sequential — I/O bound)
+    // Compute offsets (sequential)
     struct PartOffsets {
         int64_t* data;
         int n;  // n_units for this locus
@@ -1809,7 +1614,6 @@ static nb::list build_partition_offsets(
         results[li] = {out, n_u};
     }
 
-    // Wrap results as numpy arrays
     nb::list result_list;
     for (int li = 0; li < n_loci; ++li) {
         int64_t* ptr = results[li].data;
@@ -1823,13 +1627,8 @@ static nb::list build_partition_offsets(
     return result_list;
 }
 
-/// Scatter per-candidate data from global CSR into per-locus arrays.
-///
-/// For each locus, copies candidate segments:
-///   For unit k with global index u = locus_units[li][k]:
-///     memcpy(dst + p_off[k], src + g_off[u], (g_off[u+1]-g_off[u]) * sizeof(T))
-///
-/// Returns a Python list of numpy arrays, one per locus.
+/// Scatter a per-candidate global CSR array into per-locus arrays: the segment of the locus's k-th unit u,
+/// src[g_off[u], g_off[u+1]), is copied to dst + p_off[k]. One array per locus.
 template <typename T>
 static nb::list scatter_candidates_impl(
     nb::ndarray<const T, nb::ndim<1>, nb::c_contig> global_arr,
@@ -1876,7 +1675,6 @@ static nb::list scatter_candidates_impl(
         results[li] = {dst, info.n_candidates};
     }
 
-    // Wrap as numpy arrays
     nb::list result_list;
     for (int li = 0; li < n_loci; ++li) {
         T* ptr = results[li].data;
@@ -1890,11 +1688,7 @@ static nb::list scatter_candidates_impl(
     return result_list;
 }
 
-/// Scatter per-unit data from global array into per-locus arrays.
-///
-/// For each locus, gathers elements: dst[k] = src[units[k]]
-///
-/// Returns a Python list of numpy arrays, one per locus.
+/// Gather a per-unit global array into per-locus arrays: dst[k] = src[units[k]]. One array per locus.
 template <typename T>
 static nb::list scatter_units_impl(
     nb::ndarray<const T, nb::ndim<1>, nb::c_contig> global_arr,
@@ -1924,7 +1718,6 @@ static nb::list scatter_units_impl(
         results[li] = {dst, n_u};
     }
 
-    // Wrap as numpy arrays
     nb::list result_list;
     for (int li = 0; li < n_loci; ++li) {
         T* ptr = results[li].data;
@@ -1951,7 +1744,7 @@ struct PartitionView {
     const uint8_t* count_cols;
     const uint8_t* is_spliced;
     const float*   gdna_log_liks;
-    const float*   intergenic_log_liks = nullptr;  // per unit; nullptr: no unit has an intergenic place
+    const float*   intergenic_log_liks = nullptr;  // per unit; -inf where a unit has no intergenic place
     int     n_units;
     int64_t n_candidates;
 
@@ -1961,25 +1754,11 @@ struct PartitionView {
 
 };
 
-// Extract per-locus sub-problem from a PartitionView.
-//
-// Remaps global transcript indices to local component indices [0, n_t),
-// appends a gDNA component (index n_t) for unspliced units, and sorts
-// candidates within each unit by component index (required by the
-// equivalence-class builder downstream).
-//
-// Populates ``sub.log_eff_len`` from per-transcript effective lengths
-// (``all_t_eff_lens`` is the EM's capture-contracted effective length,
-// computed in Python: the FL-marginal containment length L̃_t scaled by the
-// transcript's share-weighted mean capture efficiency, and L̃_t itself off
-// capture) and the per-locus gDNA component's capture-contracted effective
-// length.
-//
-// Candidates are written to pre-allocated output arrays via a write cursor
-// to avoid dynamic allocation in the inner loop. A reusable sort buffer
-// (std::vector<LocalCandidate>) is shared across all units — resize() is
-// a no-op when existing capacity is sufficient, so after the first unit
-// there are effectively zero allocations.
+// Extract one locus's sub-problem from its PartitionView: remap global transcript indices to local components
+// [0, n_t), append the gDNA component (n_t) to unspliced units and the intergenic term (n_t + 1) to units with an
+// intergenic place, and sort each unit's candidates by component, as the equivalence-class builder requires.
+// `all_t_eff_lens` is the EM's capture-contracted effective length per transcript (computed in Python) and
+// `gdna_eff_len` the locus's gDNA counterpart. The inner loop writes through a cursor and allocates nothing.
 static void extract_locus_sub_problem_from_partition(
     LocusSubProblem& sub,
     const PartitionView& pv,
@@ -1999,30 +1778,19 @@ static void extract_locus_sub_problem_from_partition(
     sub.has_gdna_candidate = false;
     // The intergenic term is a component only where some unit has an intergenic place.
     bool any_intergenic = false;
-    if (pv.intergenic_log_liks != nullptr) {
-        for (int ui = 0; ui < n_u && !any_intergenic; ++ui)
-            any_intergenic = std::isfinite(static_cast<double>(pv.intergenic_log_liks[ui]));
-    }
+    for (int ui = 0; ui < n_u && !any_intergenic; ++ui)
+        any_intergenic = std::isfinite(static_cast<double>(pv.intergenic_log_liks[ui]));
     sub.ig_idx = any_intergenic ? n_t + 1 : -1;
     sub.n_components = n_t + (any_intergenic ? 2 : 1);
     int nc = sub.n_components;
 
-    // --- Build global→local mapping ---
-    int max_global = 0;
-    for (int i = 0; i < n_t; ++i) {
-        int gt = t_arr[i];
-        if (gt + 1 > max_global) max_global = gt + 1;
-    }
-    if (max_global > local_map_size) max_global = local_map_size;
-
-    for (int i = 0; i < max_global; ++i) local_map[i] = -1;
+    // --- Build global→local mapping --- (every entry arrives -1: the scratch is allocated so and reset below)
     for (int i = 0; i < n_t; ++i) {
         int gt = t_arr[i];
         if (gt >= 0 && gt < local_map_size) local_map[gt] = i;
     }
 
-    // --- Pre-allocate output arrays to worst-case size ---
-    // Maximum output candidates = input RNA candidates + one gDNA per unit.
+    // Pre-size to the worst case: the input candidates plus one gDNA and one intergenic candidate per unit.
     size_t max_out = static_cast<size_t>(pv.n_candidates)
                    + static_cast<size_t>(n_u) * (any_intergenic ? 2 : 1);
 
@@ -2068,9 +1836,8 @@ static void extract_locus_sub_problem_from_partition(
             sort_buf[k++] = {local, log_lik, coverage_wt, pv.count_cols[j]};
         }
 
-        // Append gDNA candidate (component = n_t, always the largest index).
-        // The scorer supplies log h_G(ell_f) and non-length terms; the EM
-        // applies the per-locus -log L̃_gDNA component correction.
+        // The gDNA candidate (component n_t): the scorer supplies log h_G(ell_f) and the non-length terms; the EM
+        // applies the locus's -log L̃_gDNA.
         if (has_gdna) {
             sort_buf[k++] = {sub.gdna_idx, gdna_ll, 1.0, 0};
             sub.has_gdna_candidate = true;
@@ -2084,9 +1851,7 @@ static void extract_locus_sub_problem_from_partition(
         // Trim to actual count (candidates may have been skipped above)
         int actual = k;
 
-        // Sort by local component index (required by equiv-class builder).
-        // For n <= 1 this is a no-op. std::sort handles small n efficiently
-        // via insertion sort internally.
+        // Sort by local component index (required by the equivalence-class builder).
         if (actual > 1) {
             std::sort(sort_buf.begin(), sort_buf.begin() + actual,
                       [](const LocalCandidate& a, const LocalCandidate& b) {
@@ -2122,11 +1887,8 @@ static void extract_locus_sub_problem_from_partition(
         sub.unambig_totals[i] = all_unambig_row_sums[t_arr[i]];
     }
 
-    // The RNA prior's per-component allocation weight, remapped off the same flat per-transcript lane
-    // `t_eff_lens` rides. ⭐ Left EMPTY when the caller supplied none, so the evidence-proportional
-    // rule is reached by the same `nullptr` test everywhere and a run that plumbs this without
-    // supplying it is bit-identical. ⚠ The gDNA component (index n_t) has no weight and keeps 0 — it
-    // is not a recipient of the RNA prior.
+    // The RNA prior's allocation weight, left empty when the caller supplies none (every site then tests the same
+    // nullptr). The gDNA component is not a recipient and keeps 0.
     sub.component_rna_prior_weight.clear();
     if (all_t_rna_prior_weight != nullptr) {
         sub.component_rna_prior_weight.assign(nc, 0.0);
@@ -2143,10 +1905,7 @@ static void extract_locus_sub_problem_from_partition(
         double Le = all_t_eff_lens[t_arr[i]];
         sub.log_eff_len[i] = Le > 0.0 ? std::log(Le) : kInf;
     }
-    // gDNA component: the capture-contracted effective length of this
-    // MultiLocus's gDNA (uncontracted off capture). The scorer contributes
-    // log h_G(ell_f); the EM applies -log L̃_gDNA here, matching the RNA
-    // component contract.
+    // gDNA: this MultiLocus's capture-contracted effective length (uncontracted off capture), as for the RNA ones.
     double GLe = gdna_eff_len;
     sub.log_eff_len[sub.gdna_idx] = (GLe > 0.0 ? std::log(GLe) : kInf);
 
@@ -2172,7 +1931,7 @@ static std::tuple<
     double       // total_intergenic_em: the intergenic term's mass, outside every locus
 >
 batch_locus_em_partitioned(
-    // Per-locus partition data (list of 7-tuples)
+    // Per-locus partition data (list of 8-tuples)
     nb::list partition_tuples,
     // Per-locus transcript membership (list of int32[])
     nb::list locus_transcript_indices,
@@ -2184,12 +1943,10 @@ batch_locus_em_partitioned(
     // Per-transcript globals
     f64_2d   unambig_counts,
     f64_1d   t_eff_lens_arr,
-    //: ⭐ The RNA prior's per-transcript ALLOCATION WEIGHT, on the same flat lane. EMPTY means
-    //: "allocate in proportion to current evidence" — the shipped rule, bit-identical.
+    // The RNA prior's per-transcript allocation weight; empty allocates in proportion to current evidence.
     f64_1d   t_rna_prior_weight_arr,
-    //: ⭐ WARM_START_COVERAGE = the shipped coverage-weighted seed; WARM_START_PRIOR = the PRIOR ALONE
-    //: (the seed is zeroed, so theta starts proportional to the per-component prior instead of to a
-    //: product of two methods); WARM_START_UNIFORM (every component equal — the seed asserts nothing).
+    // A WARM_START_* code: COVERAGE (the coverage-weighted seed), PRIOR (seed zeroed: theta starts from the
+    // prior alone) or UNIFORM (every component equal).
     int      warm_start_mode,
     // Mutable output accumulators
     f64_2d_mut em_counts_out,
@@ -2209,9 +1966,8 @@ batch_locus_em_partitioned(
     // The intergenic gDNA rate, fragments per start in the efficiencies' unit; 0 reads no intergenic term.
     double intergenic_rate)
 {
-    // A code this module does not define is refused rather than read: an unknown assignment code would
-    // index the per-unit draw that only ASSIGN_SAMPLE fills (`assign_posteriors`), and an unknown warm
-    // start would run the coverage seed.
+    // An undefined code is refused: an unknown assignment code would index the per-unit draw only ASSIGN_SAMPLE
+    // fills, and an unknown warm start would silently run the coverage seed.
     if (assignment_mode != ASSIGN_FRACTIONAL && assignment_mode != ASSIGN_SAMPLE) {
         throw std::invalid_argument(
             "batch_locus_em_partitioned: assignment_mode must be ASSIGN_FRACTIONAL or ASSIGN_SAMPLE; got " +
@@ -2232,18 +1988,19 @@ batch_locus_em_partitioned(
     std::vector<PartitionView> views(n_loci);
     for (int i = 0; i < n_loci; ++i) {
         nb::tuple tup = nb::borrow<nb::tuple>(partition_tuples[i]);
+        if (nb::len(tup) != 8)
+            throw std::invalid_argument("batch_locus_em_partitioned: a locus's partition is an 8-tuple");
         auto& v = views[i];
         auto off_arr = nb::cast<i64_1d>(tup[0]);
         v.offsets          = off_arr.data();
         v.t_indices        = nb::cast<i32_1d>(tup[1]).data();
-        // The float payloads are cast without conversion, so a float64 array
-        // raises instead of being copied into a temporary.
+        // Float payloads are cast without conversion: a float64 array raises rather than being copied.
         v.log_liks         = nb::cast<f32_1d>(tup[2], false).data();
         v.coverage_wts     = nb::cast<f32_1d>(tup[3], false).data();
         v.count_cols       = nb::cast<u8_1d>(tup[4]).data();
         v.is_spliced       = nb::cast<u8_1d>(tup[5]).data();
         v.gdna_log_liks    = nb::cast<f32_1d>(tup[6], false).data();
-        v.intergenic_log_liks = nb::len(tup) > 7 ? nb::cast<f32_1d>(tup[7], false).data() : nullptr;
+        v.intergenic_log_liks = nb::cast<f32_1d>(tup[7], false).data();
         v.n_units = static_cast<int>(off_arr.shape(0)) - 1;
         v.n_candidates = v.offsets[v.n_units];
 
@@ -2270,9 +2027,8 @@ batch_locus_em_partitioned(
     const double*   gel_ptr = locus_gdna_eff_lens.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
-    // ⚠ Length-checked against the TRANSCRIPT axis, not the locus one. The two lanes differ by orders
-    // of magnitude here, so a wrong-axis array would index far out of bounds rather than merely read
-    // the wrong number — which is why this is a hard refusal and not a resize.
+    // Checked against the transcript axis, not the locus one: a wrong-axis array would index out of bounds,
+    // so it is refused rather than resized.
     if (t_rna_prior_weight_arr.size() != 0 &&
         static_cast<int>(t_rna_prior_weight_arr.shape(0)) != n_transcripts_total) {
         throw std::runtime_error(
@@ -2429,7 +2185,7 @@ batch_locus_em_partitioned(
                 ig.n_all = n_all;
             }
 
-            // 5. Grouped aggregate prior + coverage-weighted warm start.
+            // 5. Grouped aggregate prior and warm start.
             AggregatePrior aggregate_prior{
                 nonnegative_finite(gp_ptr[li]),
                 nonnegative_finite(rp_ptr[li]),
@@ -2547,9 +2303,8 @@ batch_locus_em_partitioned(
         }
 
         // ---- Phase 2: work-steal normal loci, one at a time ----
-        // The order is heaviest first, so a worker that took several loci at once would take the heaviest
-        // together and run them back to back while the others idle. Which worker runs a locus changes no
-        // number: each locus draws from its own stream and the totals are summed in locus order.
+        // One at a time because the order is heaviest first: a chunk would put the heaviest on one worker. Which
+        // worker runs a locus changes no number: each locus has its own stream and totals are summed in locus order.
         int n_phase2 = n_loci - mega_end;
         if (n_phase2 > 0) {
             std::atomic<int> next_idx{0};
@@ -2674,14 +2429,8 @@ batch_locus_em_partitioned(
 // ================================================================
 // Union-Find connected components
 // ================================================================
-//
-// Uses disjoint-set (union-find) with path compression and union by rank.
-// Time: O(N_candidates * α(N_transcripts)) ≈ O(N_candidates).
-//
-// For each EM unit, all candidate transcripts in that unit are connected.
-// We union the first transcript in each unit with every other transcript
-// in that unit.  After processing all units, find() on each transcript
-// gives its component root, which we relabel to sequential 0-based IDs.
+// Every candidate transcript of a unit is united with the unit's first; find() then gives each transcript its
+// component root, relabelled to sequential 0-based IDs. O(N_candidates · α(N_transcripts)).
 
 namespace {
 
@@ -2715,17 +2464,9 @@ struct UnionFind {
 }  // anonymous namespace
 
 
-/// Build loci (connected components) from the global CSR fragment data.
-///
-/// Arguments:
-///   offsets      — int64[n_units + 1]: CSR row pointers
-///   t_indices    — int32[n_candidates]: candidate transcript indices
-///   n_transcripts — int32: number of transcripts
-///
-/// Returns a tuple of:
-///   n_components — int32: number of connected components
-///   comp_t_offsets, comp_t_flat — CSR of transcript indices per component
-///   comp_u_offsets, comp_u_flat — CSR of unit indices per component
+/// The loci: connected components of the global CSR (offsets int64[n_units + 1], t_indices int32[n_candidates]).
+/// Returns (n_components, comp_t_offsets, comp_t_flat, comp_u_offsets, comp_u_flat), each component's transcript
+/// and unit indices as a sorted CSR.
 static nb::tuple connected_components_native(
     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig>  offsets_arr,
     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig>  t_indices_arr,
@@ -2766,8 +2507,7 @@ static nb::tuple connected_components_native(
         int64_t end   = offsets[u + 1];
         if (start >= end) continue;
 
-        // Collect all transcript indices from this unit.
-        // All candidates are now direct transcript indices.
+        // Unite every candidate transcript of the unit with its first.
         int32_t first_t = -1;
         for (int64_t j = start; j < end; ++j) {
             int32_t t = t_idx[j];
@@ -2782,8 +2522,7 @@ static nb::tuple connected_components_native(
         }
     }
 
-    // Assign sequential component labels to active transcripts.
-    // labels[t] = component index (0-based) for active transcripts, -1 otherwise.
+    // labels[t]: the 0-based component of an active transcript, -1 otherwise.
     std::vector<int32_t> labels(n_transcripts, -1);
     std::unordered_map<int32_t, int32_t> root_to_label;
     int32_t n_comp = 0;
@@ -2955,9 +2694,9 @@ NB_MODULE(_em_impl, m) {
           nb::arg("emit_assignments") = false,
           nb::arg("intergenic_rate") = 0.0,
           "Run locus EM from per-locus partition data.\n\n"
-          "Accepts a list of 7-tuples (one per locus) of partition arrays.\n"
+          "Accepts a list of 8-tuples (one per locus) of partition arrays.\n"
           "Returns (total_gdna_em, locus_rna_total, locus_gdna, locus_stats,\n"
-          " out_winner_tid, out_winner_post, out_n_candidates).\n"
+          " out_winner_tid, out_winner_post, out_n_candidates, total_intergenic_em).\n"
           "\n"
           "locus_rna_total is the sum of posteriors assigned to any\n"
           "transcript-like component (annotated transcripts and synthetic spans);\n"
@@ -2986,27 +2725,10 @@ NB_MODULE(_em_impl, m) {
     m.attr("WARM_START_UNIFORM")     = WARM_START_UNIFORM;
     m.attr("EM_WINNER_INTERGENIC")   = EM_WINNER_INTERGENIC;
 
-    // ----------------------------------------------------------------
-    // Test-only: expose the grouped prior update, so the one identity the
-    // design rests on can be GATED instead of asserted in a comment.
-    //
-    // ⛔ `apply_grouped_prior_update` is `static`, so nothing outside this
-    // translation unit could call it and its conservation identity — for a
-    // GIVEN `raw_counts`, the RNA components sum to `rna_count + rna_prior` —
-    // had no test and could not have one. Gate:
-    // `tests/native/test_grouped_prior_update.py`.
-    //
-    // ⚠ The identity is PER CALL, not end to end. The EM iterates around this
-    // function: a different `rna_prior` gives a different `theta`, hence a
-    // different E-step, hence a different `raw_counts` next iteration and a
-    // different converged gDNA total. A test asserting the library gDNA
-    // fraction cannot move is asserting something FALSE BY DESIGN — that
-    // mistake has been made three times.
-    //
-    // ⚠ An EMPTY `carried_state` / `rna_prior_weight` means `nullptr`, which is
-    // the convention `batch_locus_em_partitioned` already uses on its flat
-    // per-transcript lane — one spelling for "this locus has none", not two.
-    // ----------------------------------------------------------------
+    // Test-only: the static `apply_grouped_prior_update`, exposed so its conservation identity can be tested (for
+    // given raw_counts, the RNA components sum to rna_count + rna_prior). The identity holds per call, not end to
+    // end: a different rna_prior changes theta, hence the next E-step's raw_counts and the converged gDNA total.
+    // An empty carried_state / rna_prior_weight means nullptr, as on batch_locus_em_partitioned's lane.
     m.def("_apply_grouped_prior_update_test",
           [](f64_1d raw_counts,
              f64_1d carried_state,
@@ -3056,14 +2778,11 @@ NB_MODULE(_em_impl, m) {
           "Run one grouped prior update and return out_counts (test-only).\n\n"
           "Empty carried_state / rna_prior_weight mean nullptr.");
 
-    // ----------------------------------------------------------------
-    // Test-only: expose fast_exp for accuracy validation from Python
-    // ----------------------------------------------------------------
+    // Test-only: fast_exp over an array, for accuracy tests.
     m.def("_fast_exp_test_array",
           [](nb::ndarray<double, nb::ndim<1>, nb::c_contig> inputs) {
               const size_t n = inputs.shape(0);
               const double* src = inputs.data();
-              // Allocate output array
               double* out = new double[n];
               size_t i = 0;
 #if RIGEL_HAS_AVX512F

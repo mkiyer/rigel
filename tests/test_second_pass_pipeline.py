@@ -1,15 +1,12 @@
 """The second pass is wired in ahead of calibration, and the gDNA length pools do not move.
 
-The drain runs BETWEEN the scan and calibration, which is what lets calibration run exactly once on
-the complete tally. Two things follow that are worth gating rather than assuming: that calibration
-really does see the drained tally, and that the drain's seed is its own rather than the EM's. The
-gDNA control is EXACT and structural — the four gDNA length pools move by exactly zero, not by less
-than some tolerance — because a held fragment's gap contains an annotated intron whose endpoints are
-region boundaries, so choosing the empty path makes the molecule a multi-boundary crossing, which
-gets no pool at all as a gDNA/RNA mixture, while choosing a spliced path uses an annotated sj and
-makes it ``RNA_SPLICED``. The drain therefore reaches fragments it is SUPPOSED to reach — a real
-gDNA fragment whose mate gap spans an annotated intron is genuinely ambiguous — and what the gate
-says is that a drained fragment never lands in a pool that is supposed to be pure.
+The drain runs between the scan and calibration, so calibration runs once on the complete tally. The gates check
+that calibration sees the drained tally, that the drain's seed is its own rather than the EM's, and that the four
+gDNA length pools move by exactly zero: a held fragment's gap contains an annotated intron whose endpoints are region
+boundaries, so choosing the empty path makes the molecule a multi-boundary crossing, which gets no pool as a gDNA/RNA
+mixture, while choosing a spliced path uses an annotated sj and makes it ``RNA_SPLICED``. The drain does reach real
+gDNA fragments whose mate gap spans an annotated intron, which are genuinely ambiguous; a drained fragment just never
+lands in a pool that is supposed to be pure.
 """
 
 from __future__ import annotations
@@ -41,11 +38,11 @@ GDNA_POOLS = (
 
 @pytest.fixture(scope="module")
 def scenario():
-    """A scenario with gDNA and multi-isoform genes, so fragments are genuinely HELD."""
+    """A scenario with gDNA and multi-isoform genes, so fragments are genuinely held."""
     from rigel.sim import ReadSimConfig, Scenario
 
     sc = Scenario("p4", genome_length=20_000, seed=SEED)
-    # Two isoforms differing in ONE internal intron is what makes a mate gap ambiguous, and it is the
+    # Two isoforms differing in one internal intron is what makes a mate gap ambiguous, and it is the
     # only geometry that fills the side buffer at all.
     sc.add_gene(
         "gA",
@@ -73,7 +70,7 @@ def scenario():
         seed=SEED,
     )
     # Deep enough that many held fragments have hypotheses that both carry weight, so a seed has
-    # something to decide: at 4,000 fragments only 4 of 344 held did, and two seeds drew alike.
+    # something to decide; a shallower library holds too few, and two seeds can draw alike.
     result = sc.build_oracle(n_fragments=20_000, sim_config=sim, gdna_fraction=0.25)
     yield result
     sc.cleanup()
@@ -110,7 +107,7 @@ def test_the_fixture_actually_HOLDS_fragments(scanned):
 
 
 def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
-    """The control, and it is EXACT: the four pure-gDNA pools are byte-identical after the drain.
+    """The control, and it is exact: the four pure-gDNA pools are byte-identical after the drain.
 
     Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are region
     boundaries, so a chosen empty path crosses two boundaries — a multi-boundary crossing, which
@@ -140,11 +137,11 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
 
 
 def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
-    """The structural claim: the drain runs BEFORE calibration, so calibration runs once on the whole
+    """The structural claim: the drain runs before calibration, so calibration runs once on the whole
     tally. Gated through ``run_pipeline`` rather than by reading the wiring.
 
     The observable is the fragment-length model, because that is what the drained mass actually
-    changes — the held fragments are the LONG ones, so the anchor an undrained calibration sees is
+    changes: the held fragments are the long ones, so the anchor an undrained calibration sees is
     biased short.
     """
     from rigel.calibration.fl import build_fl_models
@@ -162,14 +159,14 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     )
     assert drained.drain is not None and drained.drain.offered > 0
 
-    # The eff lengths the pipeline shipped must match the DRAINED payload's RNA pmf, not pass one's.
+    # The eff lengths the pipeline shipped must match the drained payload's RNA pmf, not pass one's.
     from rigel.frag_length_model import FragmentLengthModel
 
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
     shipped = np.asarray(result.estimator.effective_lengths, dtype=np.float64)
     for label, payload in (("drained", drained), ("pass one", pass_one)):
-        # `TRAPS: divide-by-a-probability`: the de-tilt is part of production's route to the RNA pmf,
-        # so it is part of this reproduction. It is the same array for both arms, so it cannot decide
+        # The de-tilt is part of production's route to the RNA pmf, so it is part of this
+        # reproduction. It is the same array for both arms, so it cannot decide
         # which one matches.
         fl = build_fl_models(
             payload,

@@ -2,39 +2,35 @@
 
 The E-step scores an unspliced fragment's length by the ratio of the two origins' tables, ``f_R(l) / f_G(l)``. Under
 hybrid capture a fragment's capture weight belongs to its placement, which both hypotheses share, so it cancels from
-that ratio; capture enters only the normalisers (:mod:`rigel.calibration.capture_eff_length`). The two laws the tool
-measures are read in different frames, though. gDNA's (``FLModels.gdna_pmf``) is read off target, uncaptured; RNA's
-(``FLModels.rna_pmf``) is the spliced census, captured wherever RNA is. On equal chemistry they still differ by what
-capture did to RNA's census, and a scorer handed the two as they stand reads that frame difference as chemistry.
-
-So RNA's law is the table of both origins by default, and gDNA's table moves away from it only as far as the data show
-a difference capture cannot have made, in two steps.
+that ratio and enters only the normalisers (:mod:`rigel.calibration.capture_eff_length`). The two measured laws are
+read in different frames, though: gDNA's (``FLModels.gdna_pmf``) off target and uncaptured, RNA's
+(``FLModels.rna_pmf``) from the spliced census, captured wherever RNA is, and a scorer handed the two as they stand
+reads that frame difference as chemistry. So RNA's law is both origins' table by default, and gDNA's moves away from
+it only as far as the data show a difference capture cannot have made, in two steps. Layer 2, opportunity.
 
 1. **The capture mixture.** gDNA's law with a captured fraction ``c`` size-biased, ``G_c = (1 - c) g + c g l / mu_g``,
    ``c`` the fraction that best explains RNA's census, between none and ``kappa``, RNA's captured fraction from
-   calibration's own efficiencies (:func:`rigel.calibration.capture_eff_length.rna_captured_fraction`). Its
-   log-likelihood is concave in ``c``, with slope ``mu_r / mu_g - 1`` at ``c = 0``: capture only lengthens, so where
-   RNA's census is no longer than gDNA's law, ``c = 0``. This step shapes gDNA's table at full trust; it does not
-   decide how much to trust it.
+   calibration's efficiencies (:func:`rigel.calibration.capture_eff_length.rna_captured_fraction`). The
+   log-likelihood is concave in ``c`` with slope ``mu_r / mu_g - 1`` at ``c = 0``: capture only lengthens, so where
+   RNA's census is no longer than gDNA's law, ``c = 0``. This shapes gDNA's table at full trust.
 2. **The decision.** ``D``, the Hellinger distance between the two measured laws less what sampling noise adds,
    against ``B``, the most capture at ``kappa`` can make: ``w = clip(D / B - 1, 0, 1)``. Hellinger distance is a
-   metric, so by the triangle inequality the true difference is at least ``D - B``; ``w`` is that guaranteed-real
-   part as a fraction of the largest artifact, whole once it is as large. One law while ``D <= B``; the tilted law
-   whole from ``D >= 2B``; continuous between, with no threshold. The table lies on the geometric path from RNA's
-   law (``w = 0``) to ``G_c`` (``w = 1``), exact at both ends.
+   metric, so the true difference is at least ``D - B``, and ``w`` is that guaranteed-real part as a fraction of the
+   largest artifact: one law while ``D <= B``, the tilted law whole from ``D >= 2B``, continuous between. The table
+   lies on the geometric path from RNA's law (``w = 0``) to ``G_c`` (``w = 1``), exact at both ends.
 
-``B`` is a bound, not a guess. If a fragment's capture weight grows at most in proportion to its length — its overlap
-with the probes does, and saturates — the captured census's likelihood ratio to the uncaptured law is dominated in
-convex order by the size-biased one, so the size-biased mixture at ``kappa`` is the worst case for every f-divergence,
-Hellinger's included (gate: ``tests/calibration/test_shared_length_law.py``). A response that rewards length faster
-than proportionally lies outside that premise and can exceed it.
+``B`` is a bound: if a fragment's capture weight grows at most in proportion to its length (its probe overlap does,
+and saturates), the captured census's likelihood ratio to the uncaptured law is dominated in convex order by the
+size-biased one, so the size-biased mixture at ``kappa`` is the worst case for every f-divergence, Hellinger's
+included. A response that rewards length faster than proportionally lies outside that premise.
 
-The decision is a ramp to full trust and never a blend weighted by evidence: a real gap partly shrunk shifts the
-balance between the two origins as surely as a false gap kept. Off capture ``kappa = 0``, so ``B = 0``, ``c = 0`` and
-any resolved difference is kept whole: each origin's own law. The sampling noise is each law's own estimator's
-variance (RNA's the own-count law's normalised posterior at its fitted smoothing, gDNA's its plug-in at its
-empirical-Bayes weight), read at the null's common law. An RNA law no spliced fragment measured is the anchor, a
-fallback rather than a measurement, so it shows no difference: one law.
+``w`` is a ramp to full trust, never a blend weighted by evidence, because a real gap partly shrunk shifts the origin
+split as surely as a false gap kept. Off capture ``kappa = 0``, so ``B = 0``, ``c = 0`` and any resolved difference is
+kept whole. The sampling noise is each law's own estimator's variance (RNA's own-count posterior at its fitted
+smoothing, gDNA's plug-in at its empirical-Bayes weight), read at the null's common law. An RNA law no spliced
+fragment measured is the anchor, a fallback rather than a measurement, so it shows no difference: one law.
+
+Gate: ``tests/calibration/test_shared_length_law.py``.
 """
 
 from __future__ import annotations
@@ -145,10 +141,10 @@ def capture_bound(g: np.ndarray, kappa: float) -> float:
 
 
 def sampling_noise(g: np.ndarray, r: np.ndarray, var_g: np.ndarray, var_r: np.ndarray) -> float:
-    """The squared Hellinger distance two noisy estimates of ONE law would show: ``Σ_l (Var g_l + Var r_l) / 4 M_l``,
+    """The squared Hellinger distance two noisy estimates of one law would show: ``Σ_l (Var g_l + Var r_l) / 4 M_l``,
     ``M = (g + r) / 2``, the delta method at the null's common law. The reference is the null's, not each law's own: at
-    a length where one law is all but empty and the other is not, its own delta method divides its noise by nearly
-    nothing and would call any gap noise."""
+    a length where one law is all but empty, its own delta method would divide its noise by nearly nothing and call
+    any gap noise."""
     m = 0.5 * (g + r)
     on = m > 0.0
     return float(((var_g + var_r)[on] / (4.0 * m[on])).sum())

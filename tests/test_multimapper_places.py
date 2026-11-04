@@ -1,27 +1,25 @@
 """A fragment observed at several places: every place it could have come from enters the EM, gDNA sums over its
 places, each place weighs its candidates by its capture, and an intergenic place's gDNA comes at a fixed rate no
-locus carries (`ISSUES: multimapper-intergenic-alignments`, `ISSUES: the-gdna-term-is-a-mean-over-places`,
-`ISSUES: mismatch-gate-nan-in-multimapper-gdna`).
+locus carries.
 
 The model. A fragment is observed as its usable hits ``S``; the molecule came from one component at one place, and
 the aligner reported the set, so ``P(fragment | c) = Σ_{p ∈ S(c)} w(p) · f_c(ℓ_p) · s_c(p) · e(p) / Z_c``, ``S(c)`` the
 places ``c`` can be at and ``Z_c`` the EM's capture-contracted length of ``c``. Three consequences:
 
-* Every component's term is the SUM over its places, never the mean: a place is the hits whose extents overlap on one
+* Every component's term is the sum over its places, never the mean: a place is the hits whose extents overlap on one
   reference, alternatives read at the most likely of them, and distinct places add, for a transcript and for gDNA
   alike. A term at ``−∞`` adds nothing, so the hits' order cannot matter, in a library with no mismatch too.
 * ``w(x) = Σ_o m_o(x) · c_o``, the deposit rule's mass of the placement at each object it deposits on times the
   object's capture efficiency, is the weight whose sum over a component's placements, on the law the efficiencies are
   read on, is that component's normaliser. Every candidate at a place carries it; on a unique fragment it is common
-  to every candidate and is not applied. An intergenic place weighs 1: intergenic sequence is uncaptured (owner,
-  2026-10-27).
+  to every candidate and is not applied. An intergenic place weighs 1: intergenic sequence is uncaptured.
 * An intergenic place is in no locus. Its gDNA is a per-unit background ``λ · b_u`` beside the locus's components,
   whose absolute rates are ``M θ_c / L_c``, with ``M`` the locus's own data count re-estimated at every M-step: the
   maximiser of ``Σ_u log(Σ_c M θ_c q_uc / L_c + λ b_u) + Σ_d log(M θ_d) − M`` under the grouped prior on ``θ``. Its
   mass leaves the locus and joins the intergenic gDNA. It competes at its rate, so no difference of scores prunes it;
   and a multimapper whose only places the gates leave are intergenic is intergenic gDNA outright.
 
-The owner's five cases (2026-10-19): intergenic only, unique, unspliced — certified gDNA; intergenic only, unique,
+The five cases: intergenic only, unique, unspliced — certified gDNA; intergenic only, unique,
 spliced — withheld; a multimapper all of whose alignments are intergenic and unspliced — certified gDNA; one with
 intergenic spliced and unspliced alignments — the spliced ones rejected, gDNA by the unspliced; one with genic and
 intergenic alignments, spliced or not — the transcript alignments and the intergenic unspliced ones compete in the EM.
@@ -53,7 +51,7 @@ from rigel.strand_model import StrandModel, StrandModels
 from rigel.types import Strand
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  1. THE SCAN — the owner's five cases on hand-built multimappers
+#  1. The scan: the five cases on hand-built multimappers
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 #
 # The toy reference: one gene, tA (+), exons [1000, 1300) and [2000, 2300) with the intron [1300, 2000) between; every
@@ -194,8 +192,7 @@ def test_case_5_a_genic_and_intergenic_multimapper_brings_both_places_to_the_em(
     toy_index, tmp_path
 ):
     """The intergenic hit is buffered beside the genic one, the template counted once and not intergenic: the
-    EM sees the place gDNA most likely came from. Today the scan drops it, and the fragment reaches the EM at
-    its genic place alone."""
+    EM sees the place gDNA most likely came from."""
     stats, rows = _scan(tmp_path, toy_index, _template("c5", GENIC, INTERGENIC))
     assert stats.n_fragments == 1 and stats.n_intergenic == 0 and stats.n_placed_multimapping == 1
     assert sorted(rows) == [
@@ -234,7 +231,7 @@ def _place_masses(chunks):
 def test_a_genic_place_on_a_later_reference_names_its_objects_on_the_flat_axes(
     two_ref_index, tmp_path
 ):
-    """The masses are written at the objects' FLAT ids, the axes the efficiencies are indexed on: a place inside the
+    """The masses are written at the objects' flat ids, the axes the efficiencies are indexed on: a place inside the
     second reference's first exon names that exon's region, past every region of the first reference."""
     import rigel.native as N
     from rigel.calibration.region_arrays import RegionArrays
@@ -262,7 +259,7 @@ def test_the_place_masses_survive_a_spill_to_disk(toy_index, tmp_path):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  2. THE SCORE — gDNA sums over its places; the intergenic term; each place's weight
+#  2. The score: gDNA sums over its places; the intergenic term; each place's weight
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -449,9 +446,8 @@ def test_two_identical_places_give_gdna_twice_one_places_term():
 @pytest.mark.parametrize("order", list(itertools.permutations(range(3))))
 def test_in_a_library_with_no_mismatch_the_gdna_term_is_the_same_in_every_hit_order(order):
     """In a library with no mismatch a mismatched place's term is ``−∞`` and adds nothing to the sum, so the
-    fragment's gDNA term is its one perfect place's, whichever order the hits arrive in. Two ``−∞`` terms ahead of a
-    finite one once made the running log-sum-exp NaN and gDNA was dropped, and in the other orders the mean divided by
-    three."""
+    fragment's gDNA term is its one perfect place's, whichever order the hits arrive in: two ``−∞`` terms ahead of a
+    finite one must not make the running log-sum-exp NaN."""
     hits = [Hit((0,), nm=2), Hit((1,), nm=3), Hit((2,), nm=0)]
     gate = -math.inf
     em = _route([[hits[i] for i in order]], mismatch_log_penalty=gate)
@@ -470,7 +466,7 @@ def test_a_case5_units_intergenic_place_is_its_intergenic_term_and_not_the_loci(
 
 def test_a_case5_unit_with_a_spliced_genic_place_competes_rather_than_being_certified():
     """RNA's only reading is the spliced place, gDNA's the intergenic one: no locus gDNA candidate, an intergenic
-    term, and the unit is not certified RNA (owner, 2026-10-19: case 5, spliced or not, competes in the EM)."""
+    term, and the unit is not certified RNA (case 5, spliced or not, competes in the EM)."""
     em = _route([[Hit((0,), SpliceType.SPLICED_ANNOT, footprint=400), Hit((), footprint=300)]])
     assert em.gdna_log_liks[0] == -np.inf
     assert float(_intergenic(em)[0]) == pytest.approx(_term(300), abs=1e-5)
@@ -492,8 +488,8 @@ def _geometric_fl():
 
 def test_the_intergenic_term_is_kept_wherever_its_place_survives():
     """It competes at the intergenic rate against the locus's rates and lengths, none of which are in the scores, so
-    no difference of scores bounds its posterior (the EM gate scaling a weight and a length together shows it): it is
-    kept at every footprint, those the locus's gDNA bound would prune included, and the unit is never certified."""
+    no difference of scores bounds its posterior: it is kept at every footprint, those the locus's gDNA bound would
+    prune included, and the unit is never certified."""
     fl = _geometric_fl()
     delta = -math.log(FragmentScoringConfig().pruning_min_posterior)
     beyond = 0
@@ -585,8 +581,8 @@ def test_a_transcript_sums_over_its_distinct_places():
 
 def test_a_transcripts_overlapping_hits_are_one_place_read_at_the_more_likely():
     """Hits whose extents overlap are alternatives at one place: they count once, at the more likely, whose overhang
-    and mismatches are already in its score. The least-overhang rule took the hit with no overhang and NM 3 over the
-    one with overhang 1 and NM 0, 4.6 nats more likely (`ISSUES: merge-keeps-least-overhang`)."""
+    and mismatches are already in its score. A least-overhang rule would take the hit with no overhang and NM 3 over
+    the one with overhang 1 and NM 0, 4.6 nats more likely."""
     em = _route([[Hit((0,), start=1000, nm=3), Hit((0,), start=1020, exon_bp=99)]])
     alone = _route([[Hit((0,), start=1020, exon_bp=99), Hit((1,), start=9000)]])
     assert _rna(em) == pytest.approx(_rna(alone), abs=1e-5)
@@ -594,7 +590,7 @@ def test_a_transcripts_overlapping_hits_are_one_place_read_at_the_more_likely():
 
 def test_in_a_library_with_no_mismatch_a_transcript_keeps_its_surviving_alternative():
     """A library with no mismatch takes the hit with one, and the transcript is still read at its other alternative;
-    the least-overhang rule kept the excluded one and lost the transcript."""
+    a least-overhang rule would keep the excluded one and lose the transcript."""
     em = _route(
         [[Hit((0,), start=1000, nm=1), Hit((0,), start=1020, exon_bp=99)]],
         mismatch_log_penalty=-math.inf,
@@ -613,7 +609,7 @@ def test_gdnas_overlapping_hits_are_one_place_and_the_same_coordinates_on_two_re
 
 def test_a_unique_fragment_is_untouched_by_a_place_weight():
     """One place: its weight is common to every candidate and cancels, so it is not applied and the fragment
-    scores bit for bit as it does without one (a guard for the change; it holds today)."""
+    scores bit for bit as it does without one."""
     for hit_kw, fclass in ((dict(t=(0, 1)), FRAG_UNAMBIG), (dict(t=(0,)), FRAG_UNAMBIG)):
         plain = _route([[Hit(**hit_kw)]], [fclass])
         weighted = _route([[Hit(**hit_kw, log_weight=math.log(5.0))]], [fclass])
@@ -622,7 +618,7 @@ def test_a_unique_fragment_is_untouched_by_a_place_weight():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  3. THE PLACE WEIGHT — the deposit rule's mass at each object, times its efficiency
+#  3. The place weight: the deposit rule's mass at each object, times its efficiency
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 #: Two outer regions longer than every fragment, so no placement meets a wall the shares do not see, and a cluster
@@ -784,7 +780,7 @@ def test_a_place_weighs_its_objects_by_mass_and_an_intergenic_place_weighs_one()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  4. THE EM — the intergenic term is a fixed rate in absolute units
+#  4. The EM: the intergenic term is a fixed rate in absolute units
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 _SENSE = int(SpliceStrandCol.UNSPLICED_SENSE)
@@ -908,8 +904,8 @@ def test_with_no_intergenic_place_the_rate_is_inert():
 
 def test_scaling_a_places_weight_and_its_transcripts_length_together_changes_nothing():
     """``(q_t, L_t) → (a q_t, a L_t)`` leaves the transcript's rate ``M θ_t q_t / L_t`` where it was, so the answer must
-    not move. A prune of the intergenic term by its score against the transcript's put 14.26 of these 50 units on the
-    background at ``a = 1`` and none at ``a = 10⁶`` (the independent review's replay, 2026-10-27)."""
+    not move. A prune of the intergenic term by its score against the transcript's would move the background's share
+    with ``a``."""
     from rigel.estimator import TranscriptGeometry
 
     n_units, rate = 50, 0.1
@@ -1109,7 +1105,7 @@ def test_at_rate_zero_the_intergenic_term_is_inert():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  5. THE ACCOUNTING — the intergenic term's mass is intergenic gDNA, outside the loci
+#  5. The accounting: the intergenic term's mass is intergenic gDNA, outside the loci
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 

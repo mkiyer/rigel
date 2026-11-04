@@ -1,12 +1,10 @@
 """`calibrate()`: the schema and the structural invariants of one single-pass calibration.
 
-These pin the mechanics — a valid result, conservation on each axis, bounded masses, a sane exposure,
-κ_rna's provenance, the confidence knob. Converged biology (paralog rescue, exon→RNA) needs realistic
-data and is covered by the scenario suite instead. Every expected number here is arithmetic on
-``_synthetic.make_synthetic_payload``'s banks rather than a recorded output, so a change in the solver
-moves the composition but never the totals, and a change in the AXES fails immediately. The fixture's
-three axes are deliberately three different lengths (3 regions / 2 boundaries / 1 sj), because equal
-lengths would let an axis mix-up pass.
+These pin the mechanics: a valid result, conservation on each axis, bounded masses, a sane exposure, κ_rna's provenance
+and the confidence knob. Converged biology (paralog rescue, exon→RNA) needs realistic data and belongs to the scenario
+suite. Every expected number is arithmetic on ``_synthetic.make_synthetic_payload``'s banks rather than a recorded
+output, so a solver change moves the composition but never the totals, and an axis change fails immediately. The three
+axes have three different lengths (3 regions / 2 boundaries / 1 sj), so an axis mix-up cannot pass.
 """
 
 from __future__ import annotations
@@ -62,9 +60,9 @@ def test_mass_conserved_per_region():
 
 
 def test_mass_conserved_per_boundary_INCLUDING_the_spliced_crossings():
-    """A boundary's gDNA + RNA equals unspliced + spliced. ``count_rna_boundary`` is spliced-INCLUSIVE — a
-    certified-RNA crossing is RNA whatever the unspliced mixture resolves to, since gDNA cannot splice
-    — so dropping it here would lose 6 of boundary 1's 11 fragments."""
+    """A boundary's gDNA + RNA equals unspliced + spliced. ``count_rna_boundary`` is spliced-inclusive (a certified-RNA
+    crossing is RNA whatever the unspliced mixture resolves to, since gDNA cannot splice), so dropping it would lose 6
+    of boundary 1's 11 fragments."""
     result = _run()
     np.testing.assert_allclose(
         result.count_gdna_boundary + result.count_rna_boundary, BOUNDARY_TOTAL
@@ -74,39 +72,31 @@ def test_mass_conserved_per_boundary_INCLUDING_the_spliced_crossings():
 
 
 def test_sj_flux_is_exported_VERBATIM_and_never_deconvolved():
-    """The third axis. A sj boundary is pure mature RNA by construction, so there is nothing to
-    split: the result carries ``sj_count`` summed over the genome-strand columns, exactly.
-
-    It is a different population from ``count_rna_spliced_boundary`` — a molecule that JUMPED rather
-    than one that crossed contiguously — and the two are far apart in magnitude even in this toy, so
-    folding them into one "mature" number would name nothing.
+    """A sj boundary is pure mature RNA by construction, so there is nothing to split: the result carries ``sj_count``
+    summed over the genome-strand columns, exactly. It is a different population from ``count_rna_spliced_boundary`` (a
+    molecule that jumped rather than crossed contiguously), and the two differ widely even in this toy.
     """
     result = _run()
     np.testing.assert_array_equal(result.count_rna_sj, SJ_FLUX)
 
 
 def test_the_conserved_sj_mass_recovers_the_ACCUMULATORS_OWN_sj_mass_BANK():
-    """``sj_conserved_mass`` is ``sj_count × (sj_mass / sj_count)``, so it must come back as
-    ``sj_mass`` itself — the bank the scanner wrote, not an approximation of it.
-
-    This is the gate that says the published quantity is the CONSERVED one. The fixture's sj carries
-    13 incidences against an ``sj_mass`` of 1.3, so the two cannot be confused by coincidence — which
-    they could on real data at a boundary where every fragment used exactly one sj.
+    """``sj_conserved_mass`` is ``sj_count × (sj_mass / sj_count)``, so it must come back as ``sj_mass`` itself, the
+    bank the scanner wrote. The fixture's sj carries 13 incidences against an ``sj_mass`` of 1.3, so the two cannot
+    coincide.
     """
     payload, _ = make_synthetic_payload()
     result = _run()
-    # SUMMED over the strand columns: `sj_mass` is per strand and `substrate` folds it, because the
-    # incidence→fragment conversion has no strand in it. This gate therefore pins the FOLD as well as
-    # the conversion — and the fixture's columns are unequal (0.9 / 0.4), so a fold that took one
-    # column or their mean cannot pass.
+    # Summed over the strand columns: `sj_mass` is per strand and `substrate` folds it, because the incidence→fragment
+    # conversion has no strand in it. This pins the fold as well as the conversion, and the fixture's columns are
+    # unequal (0.9 / 0.4), so a fold that took one column or their mean cannot pass.
     np.testing.assert_allclose(
         result.sj_conserved_mass, payload.sj_mass.sum(axis=1), rtol=0, atol=1e-12
     )
     assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], (
         "the fixture cannot separate the fold rules"
     )
-    # Could this have failed? The incidence is 10× the mass here, so passing by accident is not
-    # available (`TRAPS: could-the-arm-have-fired`).
+    # The incidence is 10× the mass here, so the test cannot pass by accident.
     assert not np.allclose(payload.sj_mass.sum(axis=1), SJ_FLUX)
 
 
@@ -121,9 +111,10 @@ def test_masses_bounded_by_their_own_totals():
 
 
 def test_an_intergenic_region_is_ALL_gDNA():
-    """Region 2 carries no exon or intron bit, so no RNA can be contained in it — a structural lock,
-    not an inference. ``count_rna_region[2] == 0`` exactly; a floored or smoothed answer here would be
-    manufacturing RNA where the annotation says none exists."""
+    """Region 2 carries no exon or intron bit, so no RNA can be contained in it: a structural lock, not an inference.
+    ``count_rna_region[2] == 0`` exactly; a floored or smoothed answer would manufacture RNA where the annotation says
+    none exists.
+    """
     result = _run()
     assert result.count_rna_region[2] == 0.0
     assert result.count_gdna_region[2] == REGION_TOTAL[2]
@@ -133,13 +124,13 @@ def test_an_intergenic_region_is_ALL_gDNA():
 
 
 def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
-    """Arithmetic, not a recorded number. Every region is 100 bp and the gDNA pmf is a delta at 50:
+    """Arithmetic, not a recorded number. Every region is 100 bp and the gDNA pmf is a delta at 50::
 
-        contained  E_f[(100 − 50 + 1)+]                    = 51   — starts that FIT inside
-        crossing   E_f[min(w−1, R_lo, R_hi, ...)] at R = ∞  = 49   — offsets that SPAN the boundary
+        contained  E_f[(100 − 50 + 1)+]                    = 51   starts that fit inside
+        crossing   E_f[min(w−1, R_lo, R_hi, ...)] at R = ∞  = 49   offsets that span the boundary
 
-    The two differ by 2 and neither is the region length, which is the whole point: ``region_size_bp``
-    ignores the fit-inside constraint and ``mean_FL`` ignores the ``−1``.
+    The two differ by 2 and neither is the region length: ``region_size_bp`` ignores the fit-inside constraint and
+    ``mean_FL`` ignores the ``−1``.
     """
     result = _run()
     np.testing.assert_allclose(result.gdna_region_eff_len, [51.0, 51.0, 51.0])
@@ -147,8 +138,8 @@ def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
 
 
 def test_gdna_density_global_is_a_ratio_of_SUMS_over_both_axes():
-    """Σ gDNA mass / Σ gDNA support, pooled across regions AND boundaries — never a mean of per-object
-    ratios, which is a different number whenever the supports differ."""
+    """Σ gDNA mass / Σ gDNA support, pooled across regions and boundaries, never a mean of per-object ratios, which
+    differs whenever the supports differ."""
     result = _run()
     expected = (result.count_gdna_region.sum() + result.count_gdna_boundary.sum()) / (
         result.gdna_region_eff_len.sum() + result.gdna_boundary_eff_len.sum()
@@ -176,25 +167,12 @@ def _strand_models_from(n_sense, n_antisense):
     return StrandModels(exonic_spliced=StrandModel.from_sj_table(table))
 
 
-def test_the_strand_overdispersion_is_binomial_by_policy():
-    """Both overdispersions are exactly 0 whatever the junction and seed spreads (owner, 2026-09-30).
-
-    This table's sj splits are far wider than binomial about their κ — the estimator it replaced
-    returned the 0.2 ceiling for both components on it — and the result still carries 0."""
-    result = _run(strand=_strand_models_from([40, 40, 20, 36], [0, 0, 20, 4]))
-    assert result.gdna_strand_overdispersion == 0.0
-    assert result.rna_strand_overdispersion == 0.0
-
-
 def test_an_empty_spliced_census_calibrates_as_unstranded():
-    """No spliced read gives κ = ½, od = 0 and a dead strand channel — never an exception: the fallback
-    must work with no RNA (owner, 2026-09-30)."""
+    """No spliced read gives κ = ½ and a dead strand channel, never an exception: calibration must work with no RNA."""
     from rigel.calibration.region_init import strand_discriminability
 
     result = _run(strand=_strand_models_from([], []))
     assert result.rna_sense_frac == 0.5
-    assert result.gdna_strand_overdispersion == 0.0
-    assert result.rna_strand_overdispersion == 0.0
     assert strand_discriminability(result.rna_sense_frac, 0) == 0.0
 
 
@@ -214,14 +192,12 @@ def test_density_and_supports_sane():
     assert 0.0 <= result.rna_sense_frac <= 1.0
 
 
-# --- the sj axis is CHECKED, not assumed ------------------------------------------------
+# --- the sj axis is checked, not assumed ------------------------------------------------
 
 
 def test_a_mismatched_sj_axis_is_REFUSED():
-    """⛔ A sj axis built against a different graph would place every splice on the wrong boundary,
-    and nothing downstream would fault on it — the shape is plausible either way, and almost a whole
-    library's fragments can vanish inside a deposit with every golden test still green. So refuse at
-    the door."""
+    """A sj axis built against a different graph would place every splice on the wrong boundary with a plausible shape
+    and nothing downstream faulting, so it is refused at the door."""
     with pytest.raises(ValueError, match="sj axis"):
         _run(sj=None)  # the payload declares one sj; an empty axis is not it
 

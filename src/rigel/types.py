@@ -1,10 +1,6 @@
-"""
-rigel.types — Foundational data types used across the rigel pipeline.
+"""rigel.types — the strand and interval types shared across the pipeline.
 
-This module defines the core types for genomic coordinates, strand
-orientation and interval representation.
-
-Coordinate convention: all coordinates are 0-based, half-open (BED style).
+All coordinates are 0-based, half-open (BED style).
 """
 
 from enum import IntEnum
@@ -15,16 +11,14 @@ from typing import NamedTuple
 # Strand
 # ---------------------------------------------------------------------------
 
-# Pre-computed mapping for Strand.from_str() — lives at module level
-# because IntEnum's metaclass interprets class-level dicts as members.
+# Strand.from_str()'s table, at module level because IntEnum would read a class-level dict as a member.
 _STRAND_STR_MAP: dict[str, int] = {".": 0, "+": 1, "-": 2, "?": 3}
 
 
 class Strand(IntEnum):
     """Genomic strand with bitwise OR semantics.
 
-    Values are designed so that ``POS | NEG == AMBIGUOUS``, enabling
-    efficient accumulation when a fragment spans both strands::
+    ``POS | NEG == AMBIGUOUS``, so strands accumulate::
 
         combined = Strand.NONE
         combined |= Strand.POS   # → POS
@@ -40,10 +34,7 @@ class Strand(IntEnum):
 
     @classmethod
     def from_str(cls, s: str) -> "Strand":
-        """Convert a single-character strand string to a Strand value.
-
-        Accepted values: ``'.'``, ``'+'``, ``'-'``, ``'?'``.
-        """
+        """The Strand of a one-character string: ``'.'``, ``'+'``, ``'-'`` or ``'?'``."""
         try:
             return cls(_STRAND_STR_MAP[s])
         except KeyError:
@@ -60,11 +51,8 @@ class Strand(IntEnum):
 
 
 class Interval(NamedTuple):
-    """A simple 0-based half-open interval (start, end).
-
-    Used by ``Transcript`` to store exon coordinates. For intervals
-    positioned on a specific reference/strand, use ``GenomicInterval``.
-    """
+    """A 0-based half-open interval ``(start, end)``, such as a ``Transcript``'s exon; ``GenomicInterval`` adds a
+    reference and strand."""
 
     start: int
     end: int
@@ -76,11 +64,8 @@ class Interval(NamedTuple):
 
 
 class GenomicInterval(NamedTuple):
-    """An interval located on a specific reference and strand.
-
-    Used for an aligned block passed to :meth:`rigel.index.TranscriptIndex.query`,
-    and anywhere a positioned interval is needed without annotation metadata.
-    """
+    """An interval on a reference and strand, such as an aligned block passed to
+    :meth:`rigel.index.TranscriptIndex.query`."""
 
     ref: str
     start: int
@@ -94,13 +79,9 @@ class GenomicInterval(NamedTuple):
 
 
 class IntervalType(IntEnum):
-    """Classification of a genomic interval relative to gene annotations.
-
-    ``EXON`` is one exon of one transcript.  ``TRANSCRIPT`` marks the
-    full transcript span ``[start, end)`` — intron overlap is derived as
-    ``transcript_bp - exon_bp``.  ``INTERGENIC`` covers the reference outside
-    every transcript.
-    """
+    """An interval's class relative to the annotation. ``EXON`` is one exon of one transcript; ``TRANSCRIPT`` is a
+    transcript's full span ``[start, end)``, so intron overlap is ``transcript_bp - exon_bp``; ``INTERGENIC`` covers
+    the reference outside every transcript."""
 
     EXON = 0
     TRANSCRIPT = 1
@@ -113,12 +94,8 @@ class IntervalType(IntEnum):
 
 
 class AnnotatedInterval(NamedTuple):
-    """A reference-annotated genomic interval with index metadata.
-
-    Used for the tiling intervals (EXON/TRANSCRIPT/INTERGENIC in the
-    cgranges overlap index).  Gene index is derived from the transcript
-    table at load time — not stored per-interval.
-    """
+    """A tiling interval of the cgranges overlap index (EXON, TRANSCRIPT or INTERGENIC). Its gene comes from the
+    transcript table at load time, not from the interval."""
 
     ref: str
     start: int

@@ -1,24 +1,15 @@
 """gDNA / RNA fragment-length laws: the pools, RNA's own-count law, gDNA's smooth-EB build and two-pool contrast, and
 each law's sampling variance.
 
-The pools are defined by structure and none is pure: only the RNA pool is certified, since gDNA
-cannot splice, while RNA inside introns and unannotated transcription reach the gDNA pools too. The
-partition gates hold the pool accessors exhaustive and disjoint. RNA's gates hold that its law is its own counts',
-read as counts at their junction-crossing chance: a small pool is not pulled toward the majority's law, a length the
-pool could reach and did not is evidence, an unreachable one is not, and an empty pool is the global anchor exactly.
-gDNA's build gates hold that a sparse pool shrinks smoothly toward the global anchor with no threshold anywhere, and
-the accessor gates hold the raw empirical views the QC report reads. ``gdna_pmf`` is the UNIFORM-FRAME law the
-chemistry makes and the opportunity and prior mathematics assume: the contrast's alone. Each component pmf carries
-its per-length sampling variance (RNA's its posterior's, gDNA's its raw law's plug-in at its empirical-Bayes weight
-squared), which the EM's two length tables read to tell a difference from noise
-(``tests/calibration/test_shared_length_law.py``).
-
-PERTURBATION (`TRAPS: perturb-every-gate`): dropping the variance's EB weight, reading a de-tilted law's own counts
-as its evidence, or giving an empty length a variance each fire their own gate. For RNA's law, each of these fires
-at least one gate: reading an unreached length as no evidence, dropping the selection, a pseudo-count toward the
-anchor, no variance, an empty pool other than the anchor, reading an unreachable length as reached, the builder
-handing over de-tilted counts, the deviation's variance in place of the normalised law's, the normalisation's sign
-flipped, and the Cholesky factor's band misaligned.
+The pools are defined by structure and none is pure: only the RNA pool is certified, since gDNA cannot splice, while RNA
+inside introns and unannotated transcription reach the gDNA pools too. The partition tests hold the pool accessors
+exhaustive and disjoint. RNA's law is its own counts', read at their junction-crossing chance: a small pool is not
+pulled toward the majority's law, a length the pool could reach and did not is evidence, an unreachable one is not, and
+an empty pool is the global anchor exactly. gDNA's build shrinks a sparse pool smoothly toward the global anchor with no
+threshold, and the accessor tests cover the raw empirical views the QC report reads. ``gdna_pmf`` is the uniform-frame
+law the chemistry makes and the opportunity and prior mathematics assume: the contrast's alone. Each component pmf
+carries its per-length sampling variance (RNA's from its posterior, gDNA's its raw law's plug-in at its empirical-Bayes
+weight squared), which the EM's two length tables read to tell a difference from noise.
 """
 
 from __future__ import annotations
@@ -62,11 +53,9 @@ def _pools(n_bins: int = 5) -> np.ndarray:
 
 
 def test_the_pool_indices_ARE_the_specifications_FragmentPool():
-    """The three-way contract: the reference enum, the C++ enum and these constants are one axis.
-
-    A silent disagreement here re-labels every pool — the gDNA model would be fitted from the RNA pool
-    and nothing would look wrong. Checked against the executable specification itself, not a written-out
-    list, for the same reason the payload schema test does.
+    """The reference enum, the C++ enum and these constants are one axis. A disagreement would re-label every pool (the
+    gDNA model fitted from the RNA pool) with nothing looking wrong, so this checks against the executable specification
+    itself.
     """
     from native._accumulator_reference import FragmentPool
 
@@ -79,54 +68,45 @@ def test_the_pool_indices_ARE_the_specifications_FragmentPool():
 
 
 def test_gdna_fl_mass_is_ALL_FOUR_gdna_pools():
-    """All four, because the contained pair alone measures the SHORT HALF of one population.
-
-    Under hybrid capture the surviving off-target gDNA sits beside a probe, and a fragment beside a
-    probe *reaches* the exon boundary — so it stops being contained and becomes crossing. Fitting from
-    the contained pair alone therefore reads short under capture, while all four, each divided by its
-    own opportunity, stay close to truth in both regimes.
-
-    This histogram is only meaningful paired with the matching divisor: the four pools tilt in
-    opposite directions, so the raw sum is biased long (TRAPS: opposite-tilts-must-not-pool). Nothing
-    in the tool consumes this sum on its own.
+    """All four, because the contained pair alone measures the short half of one population. Under hybrid capture the
+    surviving off-target gDNA sits beside a probe, and a fragment beside a probe reaches the exon boundary, so it
+    becomes crossing rather than contained; the contained pair alone reads short under capture, while all four, each
+    divided by its own opportunity, stay close to truth in both regimes. The histogram means something only with the
+    matching divisor: the four pools tilt in opposite directions, so the raw sum is biased long, and nothing consumes it
+    alone.
     """
     g = gdna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
     np.testing.assert_allclose(g, [0.0, 0.0, 701.0, 903.0, 0.0])
 
 
 def test_gdna_contained_fl_mass_is_the_pair_and_is_the_NO_DIVISOR_FALLBACK():
-    """The honest fallback, not the convenient one.
-
-    With no annotation offered there is no opportunity function, and pooling the four raw would be
-    measurably WORSE than either the contained pair or the de-tilted four. So "no divisor" falls back to
-    the pair — a model that is right off capture and knowably short under it — rather than to a sum that
-    is wrong everywhere.
+    """With no annotation there is no opportunity function, and pooling the four raw would be worse than the contained
+    pair or the de-tilted four. So "no divisor" falls back to the pair, right off capture and knowably short under it,
+    rather than to a sum that is wrong everywhere.
     """
     c = gdna_contained_fl_mass(SimpleNamespace(pool_lengths=_pools()))
     np.testing.assert_allclose(c, [0.0, 0.0, 1.0, 3.0, 0.0])
 
 
 def test_gdna_fl_mass_excludes_the_RNA_pool():
-    """The circularity guard: the gDNA length model must never see a certified-RNA fragment."""
+    """The gDNA length model must never see a certified-RNA fragment."""
     pools = np.zeros((N_FRAGMENT_POOLS, 5), dtype=np.int64)
     pools[POOL_RNA_SPLICED, 1] = 12345
     assert float(gdna_fl_mass(SimpleNamespace(pool_lengths=pools)).sum()) == 0.0
 
 
 def test_rna_fl_mass_is_the_ANNOTATED_SJ_pool_alone():
-    """gDNA cannot be spliced, so a fragment on an annotated sj certifies RNA — and only that pool
-    does. The accumulator admits a splice whether it was sequenced or implied by the one hypothesis
-    that survived arbitration: pool membership is by determinacy, not provenance."""
+    """gDNA cannot be spliced, so a fragment on an annotated sj certifies RNA, and only that pool does. The accumulator
+    admits a splice whether sequenced or implied by the one hypothesis that survived arbitration: pool membership is by
+    determinacy, not provenance."""
     r = rna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
     np.testing.assert_allclose(r, [0.0, 0.0, 0.0, 0.0, 11.0])
 
 
 def test_the_two_COMPONENT_accessors_partition_every_pool():
-    """Teeth on the partition itself: no pool double-counted, none unreachable.
-
-    ``gdna_fl_mass`` and ``rna_fl_mass`` are the two COMPONENT accessors and they must be exhaustive and
-    disjoint — a pool no accessor returns is silently discarded evidence, and one two accessors return is
-    double-counted. Both are invisible in any single-accessor test.
+    """``gdna_fl_mass`` and ``rna_fl_mass`` are the two component accessors and must be exhaustive and disjoint: a pool
+    no accessor returns is discarded evidence, and one two return is double-counted; neither shows in a single-accessor
+    test.
     """
     payload = SimpleNamespace(pool_lengths=_pools())
     total = float(gdna_fl_mass(payload).sum()) + float(rna_fl_mass(payload).sum())
@@ -144,7 +124,7 @@ def test_the_two_COMPONENT_accessors_partition_every_pool():
 
 def test_build_fl_large_pool_is_empirical():
     glob = _spike(100, 1.0e6)
-    gdna = _spike(300, 1.0e7)  # huge gDNA pool ⇒ dominated by its own evidence
+    gdna = _spike(300, 1.0e7)  # huge gDNA pool, dominated by its own evidence
     fl = _fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
     )
@@ -178,7 +158,7 @@ def test_build_fl_small_pool_shrinks_toward_global_no_cliff():
 
 
 def test_build_fl_just_below_5000_is_not_a_cliff():
-    # 4999 vs 5001 differ only marginally — there is no GOOD/WEAK jump to land on.
+    # 4999 vs 5001 differ only marginally: there is no threshold jump.
     glob = _spike(100, 1.0e6)
     lo = _fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 4999.0), max_size=1000
@@ -205,10 +185,10 @@ def test_build_fl_stores_raw_aligned_counts():
     assert fl.global_counts.shape == (1001,)
     assert int(np.argmax(fl.rna_counts)) == 200
     assert int(np.argmax(fl.gdna_counts)) == 300
-    # Raw counts are the empirical evidence — NOT the EB-smoothed pmf.
+    # Raw counts are the empirical evidence, not the EB-smoothed pmf.
     assert fl.rna_counts[200] == 300.0
     assert fl.gdna_counts[300] == 40.0
-    assert fl.n_global == 500.0
+    assert float(fl.global_counts.sum()) == 500.0
     assert fl.n_rna == 300.0
     assert fl.n_gdna == 40.0
 
@@ -371,7 +351,7 @@ def _h2(a: np.ndarray, b: np.ndarray) -> float:
 
 def test_a_small_rna_pool_reads_its_own_law_not_the_all_fragment_one():
     """2,000 spliced fragments in a 98 %-gDNA library: RNA's law is its own counts', not gDNA's shape at a weight no
-    measurement supplied (`ISSUES: eb-shrinkage-magic-ess`: the shrink read 175.6 bp against a census of 123.6)."""
+    measurement supplied."""
     from rigel.calibration.fl import build_fl_models
 
     payload, pi, truth = _rna_payload(2_000)
@@ -535,16 +515,16 @@ def test_the_contrasts_variance_falls_as_its_evidence_grows():
     from rigel.calibration.fl import _deconvolved_gdna_counts
 
     payload, opp, regions = build_fixture()
-    counts, var, diag = _deconvolved_gdna_counts(payload, opp, regions)
-    assert diag.applied and counts is not None
+    counts, var = _deconvolved_gdna_counts(payload, opp, regions)
+    assert counts is not None
     assert np.all(np.isfinite(var)) and np.all(var >= 0.0) and var.sum() > 0.0
     scaled = dataclasses.replace(
         payload,
         pool_lengths=np.asarray(payload.pool_lengths, dtype=np.float64) * 10.0,
         region_contained_count=np.asarray(payload.region_contained_count, dtype=np.float64) * 10.0,
     )
-    counts10, var10, diag10 = _deconvolved_gdna_counts(scaled, opp, regions)
-    assert diag10.applied
+    counts10, var10 = _deconvolved_gdna_counts(scaled, opp, regions)
+    assert counts10 is not None
     np.testing.assert_allclose(
         counts10 / counts10.sum(), counts / counts.sum(), rtol=1e-9, atol=1e-15
     )
@@ -552,10 +532,10 @@ def test_the_contrasts_variance_falls_as_its_evidence_grows():
 
 
 def _clipping_contrast_payload(scale: float = 1.0):
-    """The fixture with RNA in BOTH contained pools at different shares and with different laws, so the two-pool
+    """The fixture with RNA in both contained pools at different shares and with different laws, so the two-pool
     inversion's premise (one contaminant shape) fails and it runs negative, and clips, at the intron's RNA lengths:
-    intergenic region 0 carries RNA, region 4 is the clean object the one-sided rate reads, the intron carries more and
-    longer RNA."""
+    intergenic region 0 carries RNA, region 4 is the clean object the one-sided rate reads, and the intron carries more
+    and longer RNA."""
     import dataclasses
 
     from _fl_fixture import MAX_SIZE, RHO, build_fixture
@@ -583,19 +563,20 @@ def _clipping_contrast_payload(scale: float = 1.0):
 
 
 def test_the_contrasts_variance_is_its_own_estimators_through_the_clip():
-    """Drawn again and again from the pools' own Poisson counts and pushed through the contrast itself, the law's
-    per-length variance is the plug-in the contrast reports: the inverse's coefficient where the inversion is open, the
-    mixture's alone where the clip holds it at zero. Charging the inverse's coefficient through the clip overstates a
-    clipped length's variance many times over."""
+    """Redrawn many times from the pools' own Poisson counts and pushed through the contrast, the law's per-length
+    variance matches the plug-in the contrast reports: the inverse's coefficient where the inversion is open, the
+    mixture's alone where the clip holds it at zero. Charging the inverse's coefficient through the clip would overstate
+    a clipped length's variance many times over.
+    """
     import dataclasses
 
-    from rigel.calibration.fl import _deconvolved_gdna_counts
+    from rigel.calibration.fl import _contained_purities, _deconvolved_gdna_counts
 
     payload, opp, regions, _rho = _clipping_contrast_payload()
-    counts, var, diag = _deconvolved_gdna_counts(payload, opp, regions)
-    assert diag.applied and diag.separation > 0.0
+    counts, var = _deconvolved_gdna_counts(payload, opp, regions)
+    _rate, (a0, a1), _n = _contained_purities(payload, regions)
+    assert counts is not None and a0 > a1
     law = counts / counts.sum()
-    a0, a1 = diag.intergenic_gdna_share, diag.intronic_gdna_share
     pools = np.asarray(payload.pool_lengths, dtype=np.float64)
     inverse = (1.0 - a1) * pools[0] / pools[0].sum() - (1.0 - a0) * pools[1] / pools[1].sum()
     open_ = (inverse > 0.0) & (law > 1e-3)
@@ -609,10 +590,10 @@ def test_the_contrasts_variance_is_its_own_estimators_through_the_clip():
     for _ in range(400):
         drawn = pools.copy()
         drawn[:2] = rng.poisson(pools[:2]).astype(np.float64)
-        c, _v, d = _deconvolved_gdna_counts(
+        c, _v = _deconvolved_gdna_counts(
             dataclasses.replace(payload, pool_lengths=drawn), opp, regions
         )
-        assert d.applied
+        assert c is not None
         draws.append(c / c.sum())
     mc = np.var(np.array(draws), axis=0, ddof=1)
     ratio = mc[open_] / var[open_]
@@ -630,15 +611,13 @@ def test_the_contrasts_variance_is_its_own_estimators_through_the_clip():
 
 
 def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
-    """Four intergenic and four intronic 20-kb regions of pure gDNA at the uniform expectation, and four
-    probed exons: the contained pools carry the uniform-frame law ``g`` (mean 150), the two crossing pools
-    a capture-selected law (mean 200) at ten times their mass. Every off-target region holds exactly its
-    expected count, so the one-sided rate lands just above it and BOTH purities clip at 1 — the exact
-    tie of a near-pure captured library (``g98 ss.99 ON``). ``rna_in_introns`` adds RNA (mean 120) to
-    the introns per unit of opportunity; enough of it pulls the intronic purity below 1 and resolves the
-    tie; the same amount in both pools (``rna_in_intergenic``, its own RNA law, mean 100) keeps the
-    purities tied at a value below 1 with the two pools' shapes apart.
-    Returns ``(payload, opportunity, regions, L)``."""
+    """Four intergenic and four intronic 20-kb regions of pure gDNA at the uniform expectation, and four probed exons:
+    the contained pools carry the uniform-frame law ``g`` (mean 150), the two crossing pools a capture-selected law
+    (mean 200) at ten times their mass. Every off-target region holds exactly its expected count, so the one-sided rate
+    lands just above it and both purities clip at 1, the exact tie of a near-pure captured library. ``rna_in_introns``
+    adds RNA (mean 120) to the introns per unit of opportunity; enough of it pulls the intronic purity below 1 and
+    resolves the tie. The same amount in both pools (``rna_in_intergenic``, its own RNA law, mean 100) keeps the
+    purities tied below 1 with the two pools' shapes apart. Returns ``(payload, opportunity, regions, L)``."""
     from _fl_fixture import regions_of
 
     from rigel.calibration.effective_length import contained_eff_length
@@ -700,32 +679,33 @@ def _mean_length(p, L) -> float:
 
 
 def test_a_purity_tie_returns_the_contained_pairs_own_mixture():
-    """At an exact purity tie (``a_0 = a_1``) the contrast's resolution weight is 0, so its answer is the
-    contained pair's own de-tilted mixture — the limit its fade approaches, and what the boundary pair
-    already returns at its own tie. It is NOT a decline: declining handed the uniform-frame law to the
-    capture-selected four-pool census, 245 bp against a true 217 at ``g98 ss.99 ON``
-    (`ISSUES: the-gdna-length-law-falls-back-at-identical-purities`)."""
-    from rigel.calibration.fl import _deconvolved_gdna_counts
+    """At an exact purity tie (``a_0 = a_1``) the contrast's resolution weight is 0, so its answer is the contained
+    pair's own de-tilted mixture, the limit its fade approaches and what the boundary pair returns at its own tie. It
+    does not decline: declining would hand the uniform-frame law to the capture-selected four-pool census, which reads
+    long.
+    """
+    from rigel.calibration.fl import _contained_purities, _deconvolved_gdna_counts
 
     payload, opp, regions, L = _tie_fixture(0.0)
     with np.errstate(divide="raise", invalid="raise"):  # a tie never divides by its zero separation
-        counts, _var, contrast = _deconvolved_gdna_counts(payload, opp, regions)
-    assert contrast.intergenic_gdna_share == contrast.intronic_gdna_share == 1.0
-    assert contrast.separation == 0.0
-    assert counts is not None and contrast.applied
+        counts, _var = _deconvolved_gdna_counts(payload, opp, regions)
+    _rate, (a0, a1), _n = _contained_purities(payload, regions)
+    assert a0 == a1 == 1.0
+    assert counts is not None
     assert _mean_length(counts, L) == pytest.approx(150.0, abs=0.5)
 
 
 def test_the_uniform_law_is_continuous_through_a_purity_tie():
-    """The anti-cliff gate at the purity axis, end to end through ``build_fl_models``: the uniform-frame
-    law just past the tie (the intronic purity pulled below 1) and at the tie must agree, and both must
-    read the uniform-frame law, not the capture-selected census 50 bp longer."""
-    from rigel.calibration.fl import _deconvolved_gdna_counts, build_fl_models
+    """No cliff at the purity axis, end to end through ``build_fl_models``: the uniform-frame law just past the tie
+    (intronic purity below 1) and at the tie must agree, and both must read the uniform-frame law, not the
+    capture-selected census 50 bp longer."""
+    from rigel.calibration.fl import _contained_purities, build_fl_models
 
     means, seps = [], []
     for rna in (0.0005, 0.001):
         payload, opp, regions, L = _tie_fixture(rna)
-        seps.append(_deconvolved_gdna_counts(payload, opp, regions)[2].separation)
+        _rate, (a0, a1), _n = _contained_purities(payload, regions)
+        seps.append(a0 - a1)
         m = build_fl_models(payload, gdna_opportunity=opp, regions=regions)
         means.append(_mean_length(m.gdna_pmf, L))
     assert seps[0] == 0.0 < seps[1]  # the fixture straddles the tie
@@ -736,21 +716,19 @@ def test_the_uniform_law_is_continuous_through_a_purity_tie():
 
 
 def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
-    """Two pools of EQUAL purity carry no contrast whatever that purity is, so a tie below 1 answers with
-    the pair's own de-tilted mixture too — contaminant and all, since nothing separates it there.
-
-    PERTURBATION: deleting the tie branch so the inversion runs at ``sep = 0`` changes no ANSWER — bin
-    ``L = 0`` is empty in both pools, so ``0/0`` makes the inverted law's sum NaN and the code falls
-    through to the mixture by accident — and is caught only by the ``errstate`` guards here and above,
-    which hold that a tie never divides by its zero separation. Restoring the decline fires all three."""
-    from rigel.calibration.fl import _deconvolved_gdna_counts
+    """Two pools of equal purity carry no contrast whatever that purity is, so a tie below 1 also answers with the
+    pair's de-tilted mixture, contaminant included. The ``errstate`` guards hold that a tie never divides by its zero
+    separation: at ``sep = 0`` the inversion's ``0/0`` would only fall through to the mixture by accident.
+    """
+    from rigel.calibration.fl import _contained_purities, _deconvolved_gdna_counts
     from rigel.calibration.sj_opportunity import detilt_pool
 
     payload, opp, regions, L = _tie_fixture(0.005, 0.005)
     with np.errstate(divide="raise", invalid="raise"):
-        counts, _var, contrast = _deconvolved_gdna_counts(payload, opp, regions)
-    assert contrast.separation == 0.0 and contrast.intergenic_gdna_share < 1.0
-    assert counts is not None and contrast.applied and np.isfinite(counts).all()
+        counts, _var = _deconvolved_gdna_counts(payload, opp, regions)
+    _rate, (a0, a1), _n = _contained_purities(payload, regions)
+    assert a0 - a1 == 0.0 and a0 < 1.0
+    assert counts is not None and np.isfinite(counts).all()
     pools = np.asarray(payload.pool_lengths)
     f = [
         detilt_pool(pools[p], np.asarray(opp.pools[i]) / opp.total)
@@ -761,12 +739,12 @@ def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
     np.testing.assert_allclose(counts / counts.sum(), mixture / mixture.sum(), atol=1e-12)
 
 
-# ── the CONVERGENCE law: no cliffs, and the two estimands merge when the split is unresolvable ───
+# ── the convergence law: no cliffs, and the two estimands merge when the split is unresolvable ───
 
 
 def test_resolution_weight_is_a_smooth_signal_to_noise_ratio():
-    """`lam = S/(S+N)`: 0 when the split is pure noise, 1 when noise vanishes, ½ at S = N, and
-    MONOTONE in between. No threshold, so there is no value of the data at which behaviour jumps."""
+    """`lam = S/(S+N)`: 0 when the split is pure noise, 1 when noise vanishes, ½ at S = N, and monotone in between. No
+    threshold, so behaviour never jumps."""
     from rigel.calibration.fl import _resolution_weight
 
     assert _resolution_weight(0.0, 1.0) == 0.0
@@ -792,12 +770,12 @@ _PIECES = [[], [5_000, 5_000]] + [[20_000]] * 6
 
 
 def _masked_fixture(rna_intergenic: float, rna_intronic: float = 0.05, mask=_UNKNOWN):
-    """`_tie_fixture`'s genome — four intergenic and four intronic 20-kb regions and four probed exons — with the
-    unknown sequence a real assembly has. No fragment is drawn on N, so every count is per OBSERVABLE start: gDNA
-    (mean 150) at ``RHO``, RNA of one law (mean 120) at *rna_intronic* in two introns and at *rna_intergenic* in two
-    intergenic regions, so the contrast's premise — one contaminant law in both pools — holds exactly. The opportunity is the
-    frame's own (`observable_gdna_opportunity`), so each contained pool is its exact expectation. Returns
-    ``(payload, opportunity, regions, L)``."""
+    """`_tie_fixture`'s genome (four intergenic and four intronic 20-kb regions and four probed exons) with the unknown
+    sequence a real assembly has. No fragment is drawn on N, so every count is per observable start: gDNA (mean 150) at
+    ``RHO``, RNA of one law (mean 120) at *rna_intronic* in two introns and at *rna_intergenic* in two intergenic
+    regions, so the contrast's premise (one contaminant law in both pools) holds exactly. The opportunity is the frame's
+    own (`observable_gdna_opportunity`), so each contained pool is its exact expectation. Returns ``(payload,
+    opportunity, regions, L)``."""
     from _fl_fixture import regions_of
 
     from rigel.calibration.effective_length import contained_eff_length
@@ -849,51 +827,54 @@ def _masked_fixture(rna_intergenic: float, rna_intronic: float = 0.05, mask=_UNK
 
 
 def test_the_one_sided_rate_and_the_purities_read_observable_support():
-    """A region of N carries no fragment. Read over its whole length it is the cleanest region of all — a zero
-    count against 20 kb of exposure — and it pulls the one-sided rate to a hundredth of the truth, which is what
-    the fair panel's all-N regions did to its gDNA law; read over its pieces it is no object at all, and a half-N
-    region is the density it holds. So the rate is the estimator on each region's OBSERVABLE support — here every
-    region's pieces are written out by hand — and each pool's gDNA share reads the same support: the half-N region
-    read whole overstates the intergenic share by a fifth. (On these exact-expectation counts the estimator itself
-    reads a few percent above ``RHO``, its dispersion term expecting scatter below the mean that exact counts lack;
-    that is the estimator's, the same on any genome, and not what this gate is about.)"""
-    from rigel.calibration.fl import _deconvolved_gdna_counts, _pool_sum, _normalized
+    """A region of N carries no fragment. Read over its whole length it would be the cleanest region of all (a zero
+    count against 20 kb of exposure) and pull the one-sided rate to a hundredth of the truth; read over its pieces it is
+    no object at all, and a half-N region is the density it holds. So the rate is the estimator on each region's
+    observable support (written out by hand here), and each pool's gDNA share reads the same support; the half-N region
+    read whole would overstate the intergenic share by a fifth. On exact-expectation counts the estimator itself reads a
+    few percent above ``RHO``, because its dispersion term expects scatter that exact counts lack; that is independent
+    of the genome and not what this test is about.
+    """
+    from rigel.calibration.fl import (
+        _contained_purities,
+        _deconvolved_gdna_counts,
+        _normalized,
+        _pool_sum,
+    )
     from rigel.calibration.effective_length import contained_eff_length
     from rigel.calibration.gdna_density import one_sided_rate
 
     payload, opportunity, regions, _L = _masked_fixture(rna_intergenic=0.005)
-    _counts, _var, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
+    counts_law, _var = _deconvolved_gdna_counts(payload, opportunity, regions)
+    got_rate, (a_ig, a_in), _n = _contained_purities(payload, regions)
     pooled = _normalized(_pool_sum(payload, (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)))
     support = np.array([contained_eff_length(np.array(ps, float), pooled).sum() for ps in _PIECES])
     counts = payload.region_contained_count[:8].sum(axis=1)
     live = support > 0.0  # the all-N region is no object
     rate = one_sided_rate(counts[live], support[live]).rate
-    assert contrast.applied
-    assert contrast.gdna_density == pytest.approx(rate, rel=1e-12)
-    for share, pool in (
-        (contrast.intergenic_gdna_share, slice(0, 4)),
-        (contrast.intronic_gdna_share, slice(4, 8)),
-    ):
+    assert counts_law is not None
+    assert got_rate == pytest.approx(rate, rel=1e-12)
+    for share, pool in ((a_ig, slice(0, 4)), (a_in, slice(4, 8))):
         assert share == pytest.approx(
             min(rate * support[pool].sum() / counts[pool].sum(), 1.0), rel=1e-12
         )
-    assert (
-        0.9 < contrast.intergenic_gdna_share < 1.0
-    )  # RNA in the intergenic pool: the share does not clip
+    assert 0.9 < a_ig < 1.0  # RNA in the intergenic pool: the share does not clip
 
 
 def test_over_observable_bases_the_contrast_recovers_the_uniform_law():
-    """End to end through the contrast, the design's case: with the intergenic pool pure its gDNA share clips at 1,
-    and the contrast is that pool's de-tilted histogram — the uniform-frame law, mean 150 bp — moved toward the pools'
-    mixture only by the resolution weight, which resolves the shares' separation almost whole. With the rate read
-    over whole lengths it collapses, both shares fall near zero, their separation drowns in its own error, the
-    resolution weight goes to zero and the law is the pools' mixture, which the introns' RNA (mean 120) pulls short."""
-    from rigel.calibration.fl import _deconvolved_gdna_counts
+    """End to end through the contrast: with the intergenic pool pure, its gDNA share clips at 1 and the contrast is
+    that pool's de-tilted histogram, the uniform-frame law (mean 150 bp), moved toward the pools' mixture only by the
+    resolution weight, which resolves the shares' separation almost whole. With the rate read over whole lengths, both
+    shares would fall near zero, their separation drown in its error, the resolution weight go to zero, and the law
+    become the pools' mixture, pulled short by the introns' RNA (mean 120).
+    """
+    from rigel.calibration.fl import _contained_purities, _deconvolved_gdna_counts
 
     payload, opportunity, regions, L = _masked_fixture(rna_intergenic=0.0)
-    counts, _var, contrast = _deconvolved_gdna_counts(payload, opportunity, regions)
-    assert contrast.applied
-    assert contrast.intergenic_gdna_share == 1.0
+    counts, _var = _deconvolved_gdna_counts(payload, opportunity, regions)
+    _rate, (a_ig, _a_in), _n = _contained_purities(payload, regions)
+    assert counts is not None
+    assert a_ig == 1.0
     assert _mean_length(counts, L) == pytest.approx(150.0, abs=0.1)
 
 
@@ -930,7 +911,7 @@ def test_the_length_law_reads_the_index_mask(tmp_path, monkeypatch):
 
 def test_a_frame_of_another_partition_is_refused():
     """The contrast reads each region's count against that region's support, so the frame must be the partition the
-    payload was deposited into: one with another region count is refused, never truncated to the shorter of the two."""
+    payload was deposited into: one with another region count is refused, never truncated."""
     from _fl_fixture import regions_of
 
     from rigel.calibration.fl import _deconvolved_gdna_counts

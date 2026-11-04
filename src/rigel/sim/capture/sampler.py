@@ -1,40 +1,22 @@
-"""Hybrid-capture runtime: probe loading, and the three questions the read engine asks of a panel.
+"""Hybrid-capture runtime: probe loading, and the questions the read engine asks of a panel.
 
-``CaptureSampler`` holds one probe panel as sparse weighted intervals in two coordinate spaces —
-``"mrna"``, keyed by transcript row (the nascent entities are rows like any other), and ``"gdna"``,
-keyed by reference — and answers, for a template and a fragment width: its capture-aware effective
-length (:meth:`CaptureSampler.partition`, :meth:`CaptureSampler.partition_array`), where fragments
-start on it (:meth:`CaptureSampler.sample_starts`), and what one concrete fragment weighs
-(:meth:`CaptureSampler.fragment_weight`). A sampler built with no probe file is disabled and gives
-uniform starts and plain effective lengths. The weight model's parameters are :mod:`capture.config`;
-generating synthetic panels is :mod:`capture.design`.
+``CaptureSampler`` holds one probe panel as weighted intervals in two coordinate spaces, ``"mrna"`` keyed by
+transcript row (nascent entities included) and ``"gdna"`` keyed by reference. For a template and a fragment width it
+gives the capture-aware effective length (:meth:`~CaptureSampler.partition_array`), draws fragment starts
+(:meth:`~CaptureSampler.sample_starts`) and weighs one fragment (:meth:`~CaptureSampler.fragment_weight`). Without a
+probe file the sampler is disabled: uniform starts and plain effective lengths.
 
-Sequence the reference does not know (`N`, an assembly gap) is masked per template (:meth:`mask_unknown`,
-:meth:`mask_unknown_sequence`): a fragment that would overlap an unknown base is never drawn and adds no
-opportunity, with capture or without, so neither the allocation across templates nor the placement within one ever
-reaches a gap (`tests/test_sim_unknown_sequence.py`).
+A fragment weighs ``off_target_weight + binding_per_base * overlap``, ``overlap`` being its best overlap with one
+contiguous probe part in its own template. A molecule hybridises through one contiguous stretch, so a probe split
+across a splice junction is whole in a transcript holding the junction and two parts elsewhere (gDNA, a nascent
+span, an isoform without the junction), where a fragment binds the better part, never their sum. Each probe maps by
+genomic overlap, not containment, onto gDNA and onto every transcript whose exons it touches, on either strand,
+since the library is DNA at capture.
 
-A fragment's weight is ``off_target_weight + binding_per_base * overlap``, where ``overlap`` is the
-fragment's best overlap with a single CONTIGUOUS part of a probe in the fragment's own template. A molecule
-hybridises through one contiguous stretch, so a probe split across a splice junction is one part in a
-transcript that holds the junction and two separate parts everywhere else — in gDNA, in a nascent
-entity's span, in an isoform without the junction — and a fragment there binds the better part, never
-their sum; overlapping probes do not stack either. That geometry is the whole of gDNA's disadvantage at a
-junction probe: the part a molecule holds binds as it would for any other molecule (owner, 2026-09-19).
-Probes arrive as a transcript TSV or BED12, autodetected, and each is mapped by genomic overlap onto gDNA
-and onto every transcript on that reference whose exons it touches — any gene, any isoform, any strand,
-since the library is DNA at capture time. Mapping is by overlap, not containment: a probe hanging off an
-exon edge still binds the bases that are there.
-
-Everything reduces to one vectorised computation over merged probe runs
-(:meth:`CaptureSampler._run_landscape`), so the effective length and the start distribution cannot
-disagree, and the buffer is sized by probe neighbourhoods rather than by template length — which is
-what makes the gDNA space, where a template is a whole chromosome, tractable at all. The
-per-fragment-width results are memoised, and that memo is bounded by construction: it holds exactly
-one ``(space, keys, lengths)`` population and clears when the population changes, so it grows to at
-most the number of distinct fragment widths and every entry is one a later call reads back
-(``tests/test_sim_capture.py::TestNoUnboundedCache``). Nothing else is cached, because
-every other ``(key, fragment width)`` pair is visited exactly once per run.
+Bases the reference does not know (``N``) are masked per template: a fragment overlapping one is never drawn and adds
+no opportunity. The effective length and the start distribution read one vectorised computation over merged probe
+runs (:meth:`~CaptureSampler._run_landscape`), so they cannot disagree, and its buffer is sized by probe
+neighbourhoods, not template length, which keeps whole-chromosome gDNA templates tractable.
 """
 
 from __future__ import annotations
@@ -123,27 +105,19 @@ class CaptureSampler:
             arr = np.array(idxs, dtype=np.int64)[order]
             self._tx_index[ref] = (starts, ends, arr)
 
-        #: One transcript space: a probe is mapped to every transcript whose exons its genomic blocks
-        #: overlap — any gene, any isoform, any strand — and to gDNA by the same overlap. The nascent
-        #: entities are single-exon transcripts in this list, so a probe on another gene's exon inside
-        #: an entity's span reaches the entity exactly as it reaches the gDNA there. There is
-        #: deliberately no per-transcript nascent space: scoping a pre-mRNA's capture to its own
-        #: transcript's probes would under-enrich nascent RNA against the gDNA beside it.
+        #: One transcript space: a probe maps to every transcript whose exons it overlaps, and to gDNA by the same
+        #: overlap. A nascent entity is a single-exon row here, so a probe on another gene's exon inside its span
+        #: reaches it as it reaches the gDNA there. Nascent capture must not be scoped to its own transcript's
+        #: probes, or nascent RNA would be under-enriched against the gDNA beside it.
         self._mrna_intervals: dict[int, list[ProbeInterval]] = defaultdict(list)
         self._gdna_intervals: dict[str, list[ProbeInterval]] = defaultdict(list)
 
-        #: Probe layout per space, flattened once. Independent of fragment length, so it is built on
-        #: first use and never rebuilt; see `_flat_probes`.
+        #: Probe layout per space, flattened on first use (`_flat_probes`); it does not depend on fragment length.
         self._flat_probe_cache: dict[str, tuple] = {}
-        #: Partition memo. The capture-aware effective length depends only on the probe panel, the
-        #: templates and the fragment width — never on abundances, gDNA rate, strand specificity or
-        #: nascent level — so every condition sharing a capture panel computes the same vectors, and
-        #: recomputing them per condition costs minutes each time.
-        #: It is bounded by construction, which is not optional: it holds one
-        #: ``(space, keys, lengths)`` population at a time and a call with a different population
-        #: clears it, so its size is at most the number of distinct fragment widths and every entry
-        #: is one a later condition reads back
-        #: (`tests/test_sim_capture.py::TestNoUnboundedCache`).
+        #: Partition memo, keyed by fragment width. The effective length depends only on the panel, the templates and
+        #: the width, so every condition sharing a panel reads the same vectors. It must stay bounded: it holds one
+        #: ``(space, keys, lengths)`` population and clears when the population changes, so it holds at most one
+        #: entry per distinct width.
         self._partition_memo: dict[tuple, np.ndarray] = {}
         self._partition_memo_population: tuple | None = None
         #: Per template, the runs of bases the reference does not know: ``{space: {key: int64[n, 2]}}``, sorted,
@@ -157,9 +131,8 @@ class CaptureSampler:
         return int(key) if space == "mrna" else str(key)
 
     def mask_unknown(self, space: str, key: int | str, runs) -> None:
-        """Install one template's unknown runs, ``[start, end)`` pairs in any order (replacing any before); they are
-        kept sorted and merged. An unchanged mask keeps the partition memo, which every condition of a panel
-        shares; a changed one clears it."""
+        """Install one template's unknown runs, ``[start, end)`` pairs in any order, replacing any before; they are
+        kept sorted and merged. A changed mask clears the partition memo; an unchanged one keeps it."""
         runs = np.asarray(runs, dtype=np.int64).reshape(-1, 2)
         if len(runs):
             if (runs[:, 1] <= runs[:, 0]).any() or (runs[:, 0] < 0).any():
@@ -186,10 +159,8 @@ class CaptureSampler:
         return np.empty((0, 2), dtype=np.int64) if runs is None else runs
 
     def mask_unknown_sequence(self, fasta, gdna_refs) -> None:
-        """Mask every template from the reference: each gDNA reference in ``gdna_refs`` at its own `N` runs, and
-        each transcript row at the runs of its template as the read engine builds it (its exons in genomic order,
-        reverse-complemented on the minus strand, so a run's coordinates are read 5′ to 3′). ``fasta`` is a
-        ``pysam.FastaFile`` of the panel's genome."""
+        """Mask every template from ``fasta`` (a ``pysam.FastaFile``): each reference in ``gdna_refs`` at its own
+        ``N`` runs, and each transcript row at the runs of its spliced template, read 5′ to 3′."""
         gdna_refs = {str(r) for r in gdna_refs}
         for ref in fasta.references:
             rows = self._tx_by_ref.get(ref, ())
@@ -250,8 +221,8 @@ class CaptureSampler:
     def _zero_blocked(
         self, buffer, run_offset, run_start, run_keys, eff, keys, space, width
     ) -> None:
-        """Zero the landscape at every start whose fragment overlaps an unknown base. Runs are disjoint and
-        ascending within a key, so each blocked stretch meets a contiguous slice of the key's runs."""
+        """Zero the landscape at every start whose fragment overlaps an unknown base. Runs are disjoint and ascending
+        within a key, so each blocked stretch meets a contiguous slice of the key's runs."""
         run_end = run_start + np.diff(run_offset)
         for kp, key in self._masked_among(space, keys):
             sel = np.flatnonzero(run_keys == kp)
@@ -350,19 +321,14 @@ class CaptureSampler:
             n = self.admissible_counts(space, [key], np.array([int(seq_len)]), frag_len)[0]
             return float(self.config.off_target_weight * n)
 
-        # Prefer the batched path even for a single key: it covers only the merged probe
-        # neighbourhoods and caches nothing, where a per-key path materialises and sorts an array
-        # over every probe on the key — in the gDNA space, every probe on a whole chromosome.
+        # The batched path, even for one key: it covers only the merged probe neighbourhoods.
         lengths = np.array([int(seq_len)], dtype=np.int64)
         return float(self.partition_array(space, [key], lengths, frag_len)[0])
 
     def _flat_probes(self, space: str) -> tuple[np.ndarray, ...] | None:
-        """Flatten a space's probe intervals once — the layout does not depend on fragment length.
-
-        Returns ``(keys, start, end)`` in ``(key, start)`` order, which is what lets `partition_array`
-        find merged probe runs with a single prefix maximum. Every entry is one contiguous probe part and
-        a fragment binds the best of them, so no probe identity is carried. Built on first use and never
-        rebuilt.
+        """A space's probe parts as ``(keys, start, end)`` in ``(key, start)`` order, which lets `_run_landscape` find
+        merged runs with one prefix maximum. A fragment binds the best part, so no probe identity is carried. Built
+        once per space.
         """
         cached = self._flat_probe_cache.get(space)
         if cached is not None:
@@ -397,18 +363,10 @@ class CaptureSampler:
         lengths: np.ndarray,
         frag_len: int,
     ) -> np.ndarray:
-        """Vector of capture-aware effective lengths for a pool, computed for every key at once.
+        """Capture-aware effective lengths of a pool of templates at one fragment width, every key at once.
 
-        This is essentially the whole cost of a capture-on simulation, and it is batched for that
-        reason: the caller loops over every distinct fragment length, so a per-template body inside
-        that loop pays its per-call overhead once per (template, width) pair. The arithmetic is not
-        the cost; the number of calls is, and a realistic fragment-length distribution draws several
-        hundred distinct widths.
-
-        Results are memoised per width within one template population (see ``_partition_memo``), and
-        nothing else is cached here: each ``(key, fragment length)`` pair is visited exactly once per
-        call, so a per-pair cache would be pure growth with no reuse
-        (`tests/test_sim_capture.py::TestNoUnboundedCache`).
+        The caller loops over every distinct width, so the work is batched per width, not per template. Results are
+        memoised per width within one template population (``_partition_memo``).
         """
         keys = list(keys)
         lengths = np.asarray(lengths, dtype=np.int64)
@@ -456,15 +414,12 @@ class CaptureSampler:
         return result.copy()
 
     def _run_landscape(self, positions, starts, ends, eff, width):
-        """The capture landscape over merged probe runs — the one hot computation, shared by both users.
+        """The capture landscape over merged probe runs: `partition_array` sums it per key and `_extra_landscape` reads
+        its nonzero positions, so the effective length and the start distribution cannot disagree.
 
-        `partition_array` reduces it to a per-key sum and `_extra_landscape` reads out its nonzero
-        positions, so the effective length and the start distribution are the same computation and
-        cannot disagree.
-
-        Returns ``(buffer, run_offset, run_start, run_first, positions)`` or ``None`` if nothing is live.
-        The buffer holds ``w(s)`` — the best overlap with a single contiguous probe part — over the
-        concatenated runs, so run ``r`` covers template positions ``[run_start[r], run_start[r] + run_len[r])``.
+        Returns ``(buffer, run_offset, run_start, run_first, positions)``, or ``None`` if nothing is live. The buffer
+        holds ``w(s)``, the best overlap with one contiguous probe part, over the concatenated runs: run ``r`` covers
+        template positions ``[run_start[r], run_start[r] + run_len[r])``.
         """
         key_eff = np.where(positions >= 0, eff[positions], 0)
         lo = np.maximum(0, starts - width + 1)
@@ -481,16 +436,13 @@ class CaptureSampler:
         )
         counts = hi - lo
 
-        # ── merged runs: the buffer covers probe neighbourhoods, never whole templates ─────────────
-        # Sizing it by template length is unusable in the gDNA space, where a template is a whole
-        # chromosome. Probes arrive grouped by key and sorted by start, so `lo` is non-decreasing within
-        # a key and a run ends where the next `lo` clears every `hi` seen so far in that key.
+        # Merged runs: the buffer covers probe neighbourhoods, never whole templates. Probes arrive grouped by key and
+        # sorted by start, so a run ends where the next `lo` clears every `hi` seen so far in that key.
         key_rank = np.concatenate(([0], np.cumsum(positions[1:] != positions[:-1]))).astype(
             np.int64
         )
         stride = int(hi.max()) + 1
-        # Offsetting by the key's dense rank makes a global prefix max come out per-key correct: every
-        # entry of key k sits above every entry of key k-1, so it cannot carry across a key boundary.
+        # Offsetting by the key's dense rank keeps a global prefix max from carrying across a key boundary.
         running_hi = np.maximum.accumulate(hi + key_rank * stride) - key_rank * stride
         opens_run = np.empty(len(lo), dtype=bool)
         opens_run[0] = True
@@ -504,11 +456,8 @@ class CaptureSampler:
         buffer = np.zeros(int(run_offset[-1]), dtype=np.float64)
         base = run_offset[run_id] - run_start[run_id]
 
-        # ── slots: a part's rank within its run ────────────────────────────────────────────────────
-        # Ranking within the key does not work in the gDNA space, where one chromosome carries every
-        # probe. Within a run it is a handful, and two parts sharing a slot are then always in
-        # different runs — disjoint buffer ranges, which keeps the scatter duplicate-free. Parts are in
-        # (key, start) order and a run is a contiguous stretch of them, so the rank is an offset.
+        # Slots: a part's rank within its run. Two parts sharing a slot are always in different runs, whose buffer
+        # ranges are disjoint, so each slot's scatter is duplicate-free.
         slot = np.arange(len(lo)) - run_first[run_id]
 
         def scatter(selection):
@@ -705,16 +654,11 @@ class CaptureSampler:
         self._add_genomic_probe(str(transcript.ref), blocks)
 
     def _add_genomic_probe(self, ref: str, blocks: Sequence[tuple[int, int]]) -> None:
-        """One probe, as genomic blocks, mapped by overlap to gDNA and to every transcript on the
-        reference whose exons it touches.
+        """Map one probe, as genomic blocks, by overlap to gDNA and to every transcript whose exons it touches.
 
-        What each template receives is the probe's CONTIGUOUS parts in its own coordinates, because a
-        molecule hybridises through one contiguous stretch: a transcript holding the junction a probe
-        spans receives it whole (its landed pieces merge into one interval), while gDNA, a nascent
-        entity's span and an isoform without the junction receive the separate parts, and a fragment
-        there binds the better one. Per transcript each block is clipped to the exons it overlaps and
-        projected into transcript coordinates — overlap, not containment: a fragment carries whatever
-        probe bases it holds, exactly as it does for gDNA at an exon edge.
+        Each template receives the probe's contiguous parts in its own coordinates: a transcript holding the
+        junction a probe spans receives it whole, since its landed pieces merge, while gDNA, a nascent span and an
+        isoform without the junction receive the separate parts.
         """
         self._add_gdna_blocks(ref, merge_intervals(blocks))
         lo = min(b[0] for b in blocks)
@@ -750,16 +694,8 @@ class CaptureSampler:
         seq_len: int,
         frag_len: int,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Return start positions and best single-part overlap weights, ascending by position.
-
-        Reads out `_run_landscape`, the same vectorised computation `partition_array` uses, so the
-        start distribution and the effective length cannot disagree. Doing it per probe in Python
-        instead is unaffordable in the gDNA space, where a key is a whole chromosome carrying every
-        probe and one call would sort tens of thousands of entries to place a handful of fragments.
-
-        Nothing is cached: `sample_starts` asks for each ``(key, fragment length)`` pair exactly
-        once, the caller iterating a counts dict keyed by exactly that, so a cache here would be
-        written and never read.
+        """Start positions and their best single-part overlap weights, ascending by position, read out of
+        `_run_landscape`. Not cached: `sample_starts` asks for each ``(key, fragment length)`` pair once.
         """
         width = int(frag_len)
         eff_len = int(seq_len) - width + 1
@@ -793,8 +729,7 @@ class CaptureSampler:
             width,
         )
 
-        # Runs are disjoint and ascending within a key, so concatenating their positions is already
-        # sorted — which is the contract `sample_starts` relies on.
+        # Runs are disjoint and ascending, so the concatenated positions are sorted.
         run_len = np.diff(run_offset)
         position = np.repeat(run_start, run_len) + (
             np.arange(len(buffer)) - np.repeat(run_offset[:-1], run_len)
@@ -839,7 +774,7 @@ def _detect_probe_format(lines: list[str], configured: str) -> str:
     }
     if fmt not in aliases:
         raise ValueError(
-            "capture.probe_format must be one of auto, transcript, transcript_tsv, bed12"
+            "capture.probe_format must be one of auto, transcript, transcript_tsv (or tsv), bed12 (or bed)"
         )
     fmt = aliases[fmt]
     if fmt != "auto":
@@ -892,17 +827,11 @@ def _clip_interval(start: int, end: int, length: int) -> ProbeInterval | None:
     return ProbeInterval(start, end)
 
 
-# Interval helpers (merge_intervals / project_genomic_block_to_transcript) live in
-# rigel.sim.intervals.
-
-
 def _clip_blocks_to_transcript(
     transcript: Transcript, blocks: Sequence[tuple[int, int]]
 ) -> list[tuple[int, int]]:
-    """The parts of genomic ``blocks`` that fall inside ``transcript``'s exons, in transcript
-    coordinates (strand-oriented). Unlike `intervals.project_genomic_block_to_transcript` this does
-    not require a block to be fully exonic — capture binds by overlap, so a probe hanging off an exon
-    edge still binds the bases that are there."""
+    """The parts of genomic ``blocks`` inside ``transcript``'s exons, in strand-oriented transcript coordinates. A
+    block need not be fully exonic: a probe hanging off an exon edge still binds the bases that are there."""
     tx_len = int(transcript.length or transcript.compute_length())
     out: list[tuple[int, int]] = []
     for block_start, block_end in blocks:

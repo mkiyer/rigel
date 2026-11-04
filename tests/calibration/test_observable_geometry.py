@@ -2,11 +2,11 @@
 over it keeps.
 
 A start counts only where its fragment touches no base of the index's unobservable mask (`rigel.observable`). The
-geometry is each region cut at the mask into pieces, each boundary's bases to the nearest masked base on either side,
-and each reference's maximal observable runs, gated here against a walk over the bases; the closed forms read over it
-are gated against every placement beside their plain forms (``test_effective_length.py``, ``test_gdna_opportunity.py``).
-With nothing masked each reading is its plain form's number to the bit, so an index with an empty mask — the test
-chromosome, every synthetic genome — moves no number.
+geometry (each region cut at the mask into pieces, each boundary's bases to the nearest masked base on either side, and
+each reference's maximal observable runs) is checked against a walk over the bases; the closed forms read over it are
+checked against every placement beside their plain forms in ``test_effective_length.py`` and
+``test_gdna_opportunity.py``. With nothing masked each reading is its plain form's number to the bit, so an index with
+an empty mask (the test chromosome, every synthetic genome) moves no number.
 """
 
 from __future__ import annotations
@@ -156,7 +156,7 @@ def test_with_nothing_masked_the_geometry_is_the_partition():
     assert observable_stretches(ra).tolist() == [b[-1] for b in REFS.values()]
 
 
-# ── with nothing masked, today's numbers ──────────────────────────────────────────────────────────
+# ── with nothing masked, the plain numbers ──────────────────────────────────────────────────────────
 
 
 def _pmf():
@@ -180,8 +180,8 @@ def test_an_index_of_known_sequence_has_nothing_masked(unmasked_index):
 
 
 def test_with_nothing_masked_every_function_is_its_plain_forms_number_to_the_bit(unmasked_index):
-    """The fixed point: on an index with nothing masked each observable reading returns exactly what its plain form
-    returns, so the switch from one to the other moves no number anywhere a genome has no unobservable base."""
+    """On an index with nothing masked each observable reading returns exactly what its plain form returns, so a genome
+    with no unobservable base moves no number."""
     ra = RegionArrays.from_index(unmasked_index)
     pmf = _pmf()
     np.testing.assert_array_equal(

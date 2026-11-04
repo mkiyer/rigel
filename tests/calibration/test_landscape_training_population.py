@@ -1,22 +1,15 @@
-"""The gDNA landscape prior's training population: which slots are allowed to train it.
+"""The gDNA landscape prior's training population: which slots may train it.
 
-A slot that holds no COMPOSITION — no own composition channel, no composition row received from a
-neighbour, not structurally locked — is not in the training population. A level, a ceiling (a lane's,
-or the node's own flux's) and a cube row are all BOUNDS: the value the solve settles on inside the
-admitted half-line is the prior's own, so training the prior on it is training the prior on its echo
-(`ISSUES: gdna-landscape-trains-on-false-positives`). `sweep.solve_chain` publishes the predicate as
-`RegionBelief.has_composition`, read off the held messages, and `calibrate._fit_gdna_hyperprior` selects on
-it AND on whether the solve LOCATES the slot: a posterior wider than one nat² in ``log f_g``
-(``CONSTANTS.landscape.located_var``, the estimator's one-fragment wall through ``Var(log c) = 1/c``) has no
-location whatever its evidence — a strand term at a pure-RNA vertex, an empty intron's factory row, a
-one-sided delivered row — and its median is the reference's under its bound. The zero-count anchor
-trains regardless, being a structural statement rather than a solve. "Any non-flat λ-row" is NOT the
-predicate — the delivered rows fuse compositions and bounds together, so that reading keeps exactly
-the bound-only slots this rule excludes.
-
-PERTURBATION, each watched: with `has_composition` forced True everywhere, with the held compositions
-dropped from the predicate, and with "any non-flat row" in place of the held composition, the
-identity gates fail; with the selector ignoring the predicate, the population gates fail.
+A slot that holds no composition (no own composition channel, no composition row received from a neighbour, not
+structurally locked) is not in the training population. A level, a ceiling (a lane's, or the node's own flux's) and a
+cube row are all bounds: the value the solve settles on inside the admitted half-line is the prior's own, so training on
+it would train the prior on its echo. `sweep.solve_chain` publishes the predicate as `RegionBelief.has_composition`,
+read off the held messages, and `calibrate._fit_gdna_hyperprior` selects on it and on whether the solve locates the
+slot: a posterior wider than one nat² in ``log f_g`` (``CONSTANTS.landscape.located_var``, the estimator's one-fragment
+wall through ``Var(log c) = 1/c``) has no location whatever its evidence (a strand term at a pure-RNA vertex, an empty
+intron's factory row, a one-sided delivered row), and its median is the reference's under its bound. The zero-count
+anchor trains regardless, being structural. "Any non-flat λ-row" is not the predicate: the delivered rows fuse
+compositions and bounds, so that reading would keep the bound-only slots this rule excludes.
 """
 
 from __future__ import annotations
@@ -32,17 +25,22 @@ from rigel.calibration.blocks import SweepCapture
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_geometry import g1_locked
-from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.calibration.signature import RegionType
+from rigel.native import transfer_rows as R
 from _transfer_harness import _ctx_of, _full_policy, _native_passes, _prepared
 
 CAL = sys.modules["rigel.calibration.calibrate"]
 
 
+def has_own_composition_evidence(tau_lam) -> np.ndarray:
+    """A slot's own composition channel is live: ``tau_lam`` above the kernel's divide-by-zero guard."""
+    return np.asarray(tau_lam, np.float64) > float(R.OWN_EVIDENCE_EPS)
+
+
 def _expected_has_composition(sweep_inputs, policy, capture):
-    """The predicate re-derived INDEPENDENTLY of the solve: the two passes driven here on the same
-    prepared policy, a slot has a composition iff either held message carries a COMPOSITION, or its own channel
-    is live, or it is structurally certain. A level, a ceiling or a cube row does not count."""
+    """The predicate re-derived independently of the solve: the two passes driven here on the same prepared policy; a
+    slot has a composition iff either held message carries a composition, or its own channel is live, or it is
+    structurally certain. A level, a ceiling or a cube row does not count."""
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(policy, ctx)
     from_left, from_right = _native_passes(prepared, ctx)
@@ -60,14 +58,14 @@ def test_the_solve_publishes_the_informed_predicate_as_the_solve_used_it(sweep_i
     has_composition = np.asarray(out.has_composition, bool)
     assert has_composition.shape == (int(sweep_inputs["args"][0].n_slots),)
     assert np.array_equal(has_composition, _expected_has_composition(sweep_inputs, policy, capture))
-    # not vacuous: the toy has both kinds
+    # the toy has both kinds
     assert has_composition.any() and (~has_composition).any()
 
 
 def test_silence_shrinks_the_informed_set_to_own_evidence_and_certainty(sweep_inputs):
-    """PERTURBATION: with no messages, the delivered rows vanish and the ``has_composition`` set must shrink to
-    the own channel plus structural certainty — and at least one slot must change, or the message
-    layer's contribution to the predicate is not being read."""
+    """With no messages the delivered rows vanish and the ``has_composition`` set must shrink to the own channel plus
+    structural certainty, and at least one slot must change, or the message layer's contribution to the predicate is not
+    being read."""
     policy, *_ = _full_policy(sweep_inputs)
     live = np.asarray(
         SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=policy).has_composition,
@@ -136,7 +134,7 @@ def test_a_flat_likelihood_slot_is_not_in_the_training_population(monkeypatch):
     full = _training_counts(monkeypatch, belief, parts)
     # all three expressed regions plus the anchor train when every slot has a composition
     assert full["count"].shape == (4,) and full["anchor"].sum() == 1
-    # PERTURBATION: the exon's likelihood was flat -> it leaves the population; nothing else moves
+    # the exon's likelihood is flat, so it leaves the population; nothing else moves
     blind = SimpleNamespace(
         f_g=belief.f_g,
         var_gdna=belief.var_gdna,
@@ -146,20 +144,19 @@ def test_a_flat_likelihood_slot_is_not_in_the_training_population(monkeypatch):
     assert part["count"].shape == (3,)
     assert np.array_equal(part["count"], np.array([0.0, 80.0, 54.0]))
     assert part["anchor"].sum() == 1
-    # THE GRID IS THE CONSUMERS' DOMAIN: every slot with opportunity, boundaries included, reaches the
-    # estimator as ``domain`` — the exon that left the training set is still on the axis the prior is
-    # read at, and so is every boundary
+    # The grid is the consumers' domain: every slot with opportunity, boundaries included, reaches the estimator as
+    # ``domain``; the exon that left the training set is still on the axis the prior is read at, and so is every
+    # boundary
     assert np.array_equal(part["domain_mass"], np.array([0.0, 5.0, 100.0, 5.0, 80.0, 5.0, 60.0]))
 
 
 def test_a_slot_wider_than_one_nat_does_not_train_whatever_its_evidence(monkeypatch):
-    """THE LOCATION FLOOR: with a composition and a solve narrower than a nat² the exon trains; with the
-    same composition and a solve wider than that it leaves the population (a pure-RNA vertex read at its
-    resolution, the poison of the gDNA-free stranded rows: 3,771 false fragments trained at the first
-    refit); at exactly one nat² it stays, the floor being the count rule's inclusive wall; and a slot
-    with a narrow solve but no composition still does not train — the no-echo rule and the floor are a
-    conjunction, since a bound-only slot sharpened by the prior alone is the prior's echo. The intron
-    (var 0.5) and the locked region (var 0) are untouched throughout."""
+    """With a composition and a solve narrower than a nat² the exon trains; with the same composition and a wider solve
+    (a pure-RNA vertex read at its resolution, which would train false gDNA) it leaves the population; at exactly one
+    nat² it stays, the floor being the count rule's inclusive wall. A slot with a narrow solve but no composition still
+    does not train: the no-echo rule and the floor are a conjunction, since a bound-only slot sharpened by the prior
+    alone is the prior's echo. The intron (var 0.5) and the locked region (var 0) are untouched throughout.
+    """
     parts = _synthetic_population()
     chain, belief, *_ = parts
     full = _training_counts(monkeypatch, belief, parts)
@@ -187,8 +184,8 @@ def test_a_slot_wider_than_one_nat_does_not_train_whatever_its_evidence(monkeypa
 
 
 def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):
-    """With the cut leaving only the anchor, the prior still fits as long as the DOMAIN has enough
-    substrate — otherwise a gDNA-free toy loses its refit and invents gDNA in its place."""
+    """With the cut leaving only the anchor, the prior still fits as long as the domain has enough substrate; otherwise
+    a gDNA-free toy would lose its refit and invent gDNA in its place."""
     parts = _synthetic_population()
     _, belief, *_ = parts
     # the domain (4) passes, the cut population (1) would not
@@ -214,9 +211,8 @@ def test_the_anchor_trains_whatever_the_predicate_says(monkeypatch):
 
 
 def test_a_belief_without_the_predicate_trains_the_old_population(monkeypatch):
-    """An initial belief (`init_beliefs`, no solve yet) carries no predicate; the selector then reads
-    the annotation alone — the population before this rule — so nothing upstream of the first sweep
-    changes shape."""
+    """An initial belief (`init_beliefs`, no solve yet) carries no predicate, so the selector reads the annotation alone
+    and nothing upstream of the first sweep changes shape."""
     parts = _synthetic_population()
     _, belief, *_ = parts
     old = SimpleNamespace(f_g=belief.f_g, var_gdna=belief.var_gdna, has_composition=None)
@@ -224,15 +220,13 @@ def test_a_belief_without_the_predicate_trains_the_old_population(monkeypatch):
     assert seen["count"].shape == (4,)
 
 
-# ── THE E-STEP ON THE KERNELS THAT HAVE NO LOCATION ──────────────────────────────────────────────────
+# ── the E-step on the kernels that have no location ──────────────────────────────────────────────────
 #
-# A region trained at less than one fragment has no location of its own: the estimator already centres
-# it at its resolution wall (``max(count, 1)``), and its Poisson kernel is flat below that wall. Summing
-# such a kernel normalised to unit mass spreads that mass uniformly under the wall — so short empty
-# regions would deposit prior mass at exon densities. The refit loop already holds the previous fit, and
-# the deconvolution's E-step places a location-free kernel where the population is: kernel × previous
-# landscape, renormalised. Counted kernels keep their own location, so an enriched minority cannot be
-# competed away.
+# A region trained at less than one fragment has no location of its own: the estimator centres it at its resolution wall
+# (``max(count, 1)``), and its Poisson kernel is flat below that wall. Summed at unit mass, such a kernel would spread
+# uniformly under the wall, so short empty regions would deposit prior mass at exon densities. The refit loop holds the
+# previous fit, and the deconvolution's E-step places a location-free kernel where the population is: kernel × previous
+# landscape, renormalised. Counted kernels keep their own location, so an enriched minority cannot be competed away.
 
 
 def _prev_at_floor(grid_log10):
@@ -258,14 +252,14 @@ def test_the_estep_moves_a_location_free_kernel_to_the_population_and_leaves_a_c
     def mean(k):
         return float((k * grid).sum() / k.sum())
 
-    # the two location-free kernels (0 and 0.4 fragments) move DOWN toward the floor
+    # the two location-free kernels (0 and 0.4 fragments) move down toward the floor
     assert mean(out[0]) < mean(base[0]) - 0.5
     assert mean(out[1]) < mean(base[1]) - 0.5
     # the counted kernel is bit-identical
     assert np.array_equal(out[2], base[2])
     # every kernel still has unit mass
     assert np.allclose(out.sum(1), 1.0)
-    # PERTURBATION: no previous landscape -> nothing moves
+    # no previous landscape: nothing moves
     assert np.array_equal(LS._estep_kernels(base.copy(), count, grid, None), base)
 
 
@@ -276,7 +270,7 @@ def test_fit_landscape_without_a_previous_fit_is_the_shipped_fit():
     n = 40
     eff = np.exp(rng.uniform(np.log(50), np.log(20000), n))
     count = np.where(rng.random(n) < 0.5, 0.0, 1.0 + rng.poisson(3.0, n).astype(float))
-    mass = np.where(count > 0, count + rng.poisson(5.0, n), 0.0)  # the zero-count rows are ANCHORS
+    mass = np.where(count > 0, count + rng.poisson(5.0, n), 0.0)  # the zero-count rows are anchors
     var = np.where(count > 0, 0.5, np.inf)
     anchor = mass <= 0.0
     assert anchor.sum() >= 10 and (~anchor).sum() >= 10
@@ -284,7 +278,7 @@ def test_fit_landscape_without_a_previous_fit_is_the_shipped_fit():
     b = LS.fit_landscape(count, mass, eff, var, anchor=anchor, prev=None)
     assert np.array_equal(a.logP, b.logP)
     assert np.array_equal(a.logP_free, b.logP_free)
-    # and WITH a previous fit at the floor the mass above the floor's neighbourhood falls
+    # with a previous fit at the floor the mass above the floor's neighbourhood falls
     c = LS.fit_landscape(
         count, mass, eff, var, anchor=anchor, prev=_prev_at_floor(a.log_rho / np.log(10.0))
     )
@@ -320,10 +314,10 @@ def test_a_failed_later_refit_keeps_the_landscape_the_final_solve_ran_under(
     sweep_inputs, monkeypatch
 ):
     """When a later refit fits no landscape, the final belief was still solved under the previous one, so the result
-    carries THAT landscape: the capture reader reads it and the result publishes its bulk. A loop that overwrote the
-    landscape with the failed fit's ``None`` skipped the reader and published no landscape at all — every efficiency
-    1, no bulk — for a belief solved under one: a silent loss of the capture correction (MANUAL: the bulk is null
-    only when calibration fitted no landscape)."""
+    carries that landscape: the capture reader reads it and the result publishes its bulk. Overwriting it with the
+    failed fit's ``None`` would skip the reader and publish every efficiency 1 and no bulk for a belief solved under a
+    landscape, silently losing the capture correction.
+    """
     from rigel.config import CalibrationConfig
 
     fits, reads = [], []
@@ -355,10 +349,11 @@ def test_a_failed_later_refit_keeps_the_landscape_the_final_solve_ran_under(
 
 
 def test_the_result_publishes_the_capture_reading_of_the_last_landscape(sweep_inputs, monkeypatch):
-    """The efficiencies, the bulk density and the saturated level that the ruler and the prior assembler read
-    are the capture reader's answer on the LAST refit's landscape, published as they are; with no refit there
-    is no landscape, no bulk, a saturated level of 1 and every efficiency 1. PERTURBATION: with the reader
-    forced to answer, the result carries exactly that answer."""
+    """The efficiencies, the bulk density and the saturated level that the ruler and the prior assembler read are the
+    capture reader's answer on the last refit's landscape, published as they are; with no refit there is no landscape,
+    no bulk, a saturated level of 1 and every efficiency 1. With the reader forced to answer, the result carries exactly
+    that answer.
+    """
     from rigel.calibration.capture_efficiency import CaptureReading
     from rigel.config import CalibrationConfig
 

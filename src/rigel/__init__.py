@@ -1,14 +1,12 @@
-"""rigel — Bayesian RNA-seq transcript quantification.
+"""rigel — Bayesian RNA-seq transcript quantification that separates RNA from genomic-DNA contamination.
 
-Single-pass BAM quantification with locus-level EM, strand-aware gDNA
-filtering, and empirical Bayes priors.  Python orchestration backed by
-C++ hot paths (htslib BAM I/O, fragment scoring, EM solver).
+A single-pass C++ BAM scan tallies the fragments, calibration deconvolves the library into gDNA and RNA, and a
+per-locus EM assigns the RNA to transcripts.
 """
 
 import os as _os
 
-# Prevent numpy/OpenMP from spawning idle thread pools that compete with
-# rigel's own C++ parallelism for cache and scheduling resources.
+# Keep numpy's OpenMP from spawning idle thread pools that compete with rigel's own C++ threads.
 _os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from importlib.metadata import version as _version, PackageNotFoundError

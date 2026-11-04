@@ -1,29 +1,11 @@
-"""
-rigel.pipeline — Single-pass BAM quantification pipeline with locus-level EM.
+"""The quantification pipeline: one BAM scan, the second pass, calibration, then the per-locus EM.
 
-Architecture
-------------
-The pipeline reads the BAM file **once** via the C++ native BAM scanner
-(``_bam_impl``) and processes fragments in two logical stages:
-
-**BAM Scan** (``scan_and_buffer``): Parse all fragments in C++ via htslib,
-resolve each against the reference index, train the strand models from
-unique-mapper fragments, tally the calibration payload, and buffer all
-resolved fragments into a memory-efficient columnar buffer (``FragmentBuffer``).
-
-**The second pass and calibration** (``run_pipeline``): drain the held
-fragments, fit the fragment-length models on the drained payload, and
-calibrate.
-
-**Quantification** (``quant_from_buffer``): score buffered fragments,
-construct MultiLoci, assemble the per-locus gDNA/RNA split prior from the
-calibration result (``calibration.priors.assemble_priors``), partition the
-CSR data, and run locus-level native EM.
-
-``scoring.py`` assembles the native scorer's parameters.  Locus
-construction lives in ``locus.py``; the EM's warm start is computed inside
-the native solver (``em_solver.cpp``).  The router that scores the buffer
-and builds the CSR lives in ``routing.py``.  This module is a thin orchestrator.
+The native scanner reads the BAM once. ``scan_and_buffer`` resolves every fragment against the index, trains the
+strand models, tallies the calibration payload and buffers the resolved fragments (``FragmentBuffer``).
+``run_pipeline`` drains the held fragments, fits the fragment-length models on the drained payload and calibrates.
+``quant_from_buffer`` scores the buffer, builds the loci, assembles each locus's gDNA prior from the calibration
+result (``calibration.priors.assemble_priors``) and runs the native locus EM. This module only orchestrates: the
+scorer is ``scoring.py``, the router ``routing.py``, the loci ``locus.py`` and the EM ``em_solver.cpp``.
 """
 
 from __future__ import annotations
@@ -271,10 +253,9 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
 
 
 def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
-    """Warn when calibration's strand decision (`region_init.strand_discriminability`, on the spliced
-    sense fraction `strand_balance.fit_strand_balance` fits) reads the library as unstranded. With no
-    spliced observation it says nothing: the balance falls back to κ = ½ and calibration reads the library as
-    unstranded, and the empty spliced census is warned about where it is counted."""
+    """Warn when calibration's strand decision (`region_init.strand_discriminability` on the sense fraction
+    `strand_balance.fit_strand_balance` fits) reads the library as unstranded. Silent with no spliced observation,
+    which is warned about where it is counted."""
     from .calibration.region_init import strand_discriminability
     from .calibration.strand_balance import fit_strand_balance
 
@@ -360,10 +341,7 @@ def scan_and_buffer(
     FragmentBuffer,
     "object",  # AccumulatorPayload
 ]:
-    """Single-pass C++ BAM scan: resolve, train models, buffer — all in one pass.
-
-    The entire BAM parsing, fragment construction, overlap resolution,
-    model training and columnar buffering happens in C++ via htslib.
+    """One native BAM pass: parse, resolve, train the strand models and buffer the fragments.
 
     Parameters
     ----------
@@ -379,9 +357,8 @@ def scan_and_buffer(
     tuple
         ``(stats, strand_models, buffer, calibration_payload)``.
 
-    No fragment-length model comes out of here. Every fragment-length distribution the tool uses is
-    built from the payload by :func:`rigel.calibration.fl.build_fl_models`, so length is measured by
-    one rule — the accumulator's ``L`` — over one stated population.
+    No fragment-length model comes out of here: every length law is built from the payload by
+    :func:`rigel.calibration.fl.build_fl_models`, so length is measured by one rule, the accumulator's ``L``.
     """
     _check_bam_header(bam_path, index)
     stats = PipelineStats()
@@ -394,13 +371,8 @@ def scan_and_buffer(
     # The index installs what it knows (the transcript strands among it); the scan sets what is a setting.
     resolve_ctx = index.resolver
 
-    # Intron-overhang tolerance K (bp): how many bases an aligned read end may lie inside an annotated
-    # intron, at the edge of an unsequenced gap or at a fragment's outer end. The pair rule applies it
-    # along a witness transcript, and the resolver when it enumerates a fragment's gap hypotheses: an
-    # intron in an unaligned gap is cut whole within the gap widened by K, and a transcript is
-    # contradicted only by an intron holding more than K aligned bases. So K decides which pairs are
-    # one molecule, the candidates' lengths, calibration's tally (the scan-cache key includes it) and
-    # which unspliced fragments are relabelled SPLICED_IMPLICIT.
+    # The intron-overhang tolerance K (`BamScanConfig.intron_overhang_tolerance`): it decides which pairs are one
+    # molecule, the candidates' lengths, calibration's tally and which unspliced fragments become SPLICED_IMPLICIT
     resolve_ctx.set_intron_overhang_tolerance(int(scan.intron_overhang_tolerance))
     # The pair rule's fragment-length limit: no pair whose molecule is longer is one.
     resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
@@ -414,15 +386,14 @@ def scan_and_buffer(
         include_multimap=scan.include_multimap,
     )
 
-    # Calibration region wiring: install the splice graph's region partition into the scanner so
-    # per-region evidence is collected during the scan. The loader refuses an index without the graph.
+    # The splice graph's region partition, so the scan tallies per-region evidence
     _wire_calibration_regions(
         scanner,
         index,
         scan.max_frag_length,
     )
 
-    # Streaming chunk callback — receives zero-copy dict from C++
+    # Streaming chunk callback: a zero-copy dict from C++
     def _on_chunk(raw: dict) -> None:
         chunk = _FinalizedChunk.from_raw(raw)
         buffer.inject_chunk(chunk)
@@ -450,14 +421,11 @@ def scan_and_buffer(
     _apply_scan_stats(stats, result["stats"])
     _check_scan_accounting(stats)
 
-    # Build the strand models from the scanner's observations. Immutable and built
-    # once — the spliced 2×2 is the marginal of its per-sj strand table.
+    # The strand models, built once; the spliced 2×2 is the marginal of the per-sj strand table
     strand_models = StrandModels.from_scan(result["strand_observations"])
-    # ONE strand-qualified fragment credits ONE sj. That is what makes the 2×2
-    # exactly the table's marginal, so both halves of the RNA strand Beta-Binomial are
-    # fitted on one population. The
-    # C++ counts the fragments independently of the table it builds, so this is a real
-    # cross-check, and it is the invariant to break if the crediting rule ever changes.
+    # One strand-qualified fragment credits one sj, so the 2×2 is exactly the table's marginal and both halves of
+    # the RNA strand Beta-Binomial are fitted on one population. The C++ counts the fragments independently of the
+    # table, so this is a real cross-check.
     n_credited = strand_models.sj_table.n_observations
     if n_credited != stats.n_strand_trained:
         raise RuntimeError(
@@ -481,9 +449,8 @@ def scan_and_buffer(
     # The calibration payload: the C++ scanner's accumulator tally, typed.
     from .scan_payload import AccumulatorPayload
 
-    # The provenance covers regions AND boundaries. The payload is boundary-keyed by
-    # construction — its sj axis is meaningless against a different sj CSR — whereas
-    # `partition_hash` covers `regions.feather` only, deliberately.
+    # Keyed by `graph_hash` (regions and boundaries), because the payload's sj axis is meaningless against a
+    # different sj CSR
     calibration_payload = AccumulatorPayload.from_scan_result(result, graph_hash=index.graph_hash)
 
     return stats, strand_models, buffer, calibration_payload
@@ -492,18 +459,15 @@ def scan_and_buffer(
 def library_fl_models(payload, index: TranscriptIndex) -> "FLModels":
     """The fragment-length models from one payload, exactly as production builds them.
 
-    All three histograms come from the PAYLOAD — one frame, one definition of length. A fragment
-    enters a pool when exactly one hypothesis survived, so its ``L`` is not in doubt. The RNA pool is read at
-    its own sj opportunity ("used an annotated sj" is a length-dependent selection), and
-    the gDNA pools — none of them pure — are deconvolved by the two-pool contrast, which needs the
-    partition the scanner deposits into (`calibration.fl`). Every gDNA opportunity is read over the
-    index's observable genome: the pools' and the regions' (`gdna_opportunity.observable_gdna_opportunity`,
-    the frame's `region_arrays.observable_pieces`). RNA's law is its own counts', the unconditional anchor only
-    the law an empty pool returns; gDNA's is smooth-EB shrunk toward that anchor.
+    All three histograms come from the payload, so there is one definition of length; a fragment enters a pool
+    only when exactly one hypothesis survived. The RNA pool is read at its own sj opportunity (using an annotated sj
+    is a length-dependent selection), and the gDNA pools, none of them pure, are deconvolved by the two-pool
+    contrast over the partition the scanner deposits into (`calibration.fl`). Every gDNA opportunity is read over
+    the index's observable genome (`gdna_opportunity.observable_gdna_opportunity`). RNA's law is its own counts';
+    gDNA's is empirical-Bayes shrunk toward the all-fragment anchor.
 
-    The one home for this call: the second pass scores on pass one's payload, calibration fits on the
-    drained one, and an instrument that measured a different length model than production's would be
-    measuring a tool that does not ship.
+    The one home for this call: the second pass scores on pass one's payload and calibration fits on the drained
+    one, and an instrument must read the same models.
     """
     from .calibration.fl import build_fl_models
     from .calibration.gdna_opportunity import observable_gdna_opportunity
@@ -543,33 +507,21 @@ def length_tables(
 def _drain_side_buffer(
     payload, index: TranscriptIndex, strand_models, *, seed: int, _lift: dict | None = None
 ):
-    """THE SECOND PASS: score the held fragments, draw one hypothesis each, re-deposit.
+    """The second pass: score the held fragments, draw one hypothesis each, and re-deposit them.
 
-    Pass 1 holds two kinds of fragment WHOLE: one whose unsequenced gap has more than one surviving
-    explanation — systematically the long ones, because a longer gap admits more hypotheses — and a
-    multimapping fragment more than one of whose placements admits a surviving (placement,
-    hypothesis) pair. Nothing is lost, but nothing is tallied either until this runs.
+    Pass 1 holds two kinds of fragment whole: one whose unsequenced gap has more than one surviving explanation
+    (mostly the long ones, since a longer gap admits more hypotheses), and a multimapping fragment more than one of
+    whose placements admits a surviving (placement, hypothesis). Nothing is tallied for them until this runs.
 
-    It runs HERE, between the scan and calibration, and that is a structural decision. Every input the
-    score needs — the densities at each object, the fragment-length models, the strand model — comes
-    from pass 1 alone, so no calibration output is required. That is what lets calibration run exactly
-    once, on the complete tally, instead of once before the drain and again after it.
+    It runs between the scan and calibration: every input the score needs comes from pass 1 alone, so calibration
+    runs once, on the complete tally. The scorer uses pass one's models and calibration the drained tally's. Fit
+    once, score once, drain once: the confident set is biased short, so feeding the drained law back into the score
+    would favour the shorter, more-spliced path, and the loop could run away.
 
-    The models the SCORER uses are pass one's; the models CALIBRATION uses are the drained tally's. Fit
-    once, score once, drain once, stop: the confident set is biased short, so feeding the drained anchor
-    back into the score would prefer the shorter — that is, the more-spliced — path, and that loop can
-    run away.
-
-    ``_lift`` is the out-parameter an origin-split ORACLE needs. The drain conditions on the WHOLE
-    tally, so partitions drained independently do not sum to the whole drained.
-    `second_pass.lift_choices` repairs that by replaying the
-    whole's already-drawn choices inside each partition — which needs the choices, the undrained whole
-    they were drawn on, and the two index-derived arrays `drain` takes. All four exist only inside this
-    function, so it publishes them into ``_lift`` rather than letting a caller re-derive them and drift.
-    Same convention as ``calibrate(_debug=)`` /
-    ``solve_chain(_capture=)``, and inert in production, where nobody passes it. An empty side buffer
-    leaves ``_lift`` UNTOUCHED — the early return below is the "nothing was drained" signal on this
-    path too.
+    ``_lift`` is an out-parameter for an origin-split oracle (``lift_choices`` in `tests/calibration/_oracle.py`):
+    the drain conditions on the whole tally, so the oracle replays the whole's drawn choices inside each partition,
+    and needs the choices, the undrained payload and the two index-derived arrays `drain` takes, which exist only
+    here. Like ``calibrate(_debug=)``, it is inert in production. An empty side buffer leaves ``_lift`` untouched.
     """
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
@@ -587,13 +539,10 @@ def _drain_side_buffer(
     sj = build_sj_arrays(index)
     scores = score_held_fragments(
         payload,
-        # Pass one's length models, de-tilted the way calibration's are: the scorer weighs a candidate
-        # length by `f(L)`, so the raw sj-tilted RNA pool would make it prefer the longer hypothesis for
-        # the same reason that pool is long. Calibration refits on the drained tally — fit once, score
-        # once, drain once (the docstring above).
+        # Pass one's length models, de-tilted as calibration's are: the scorer weighs a candidate length by
+        # `f(L)`, and the raw sj-tilted RNA pool would favour the longer hypothesis
         fl_models=library_fl_models(payload, index),
-        # `P(align_strand agrees | RNA)`. On an R1-antisense (dUTP) library it is near 0, so
-        # DISAGREEMENT is the likely case.
+        # `P(align_strand agrees | RNA)`: near 0 on an R1-antisense (dUTP) library, where disagreement is likely
         rna_sense_frac=strand_models.p_r1_sense,
         regions=RegionArrays.from_index(index),
         sj=sj,
@@ -601,7 +550,7 @@ def _drain_side_buffer(
     choices = choose_hypotheses(scores, payload, seed=seed)
     drained = drain(payload, choices, region_types=region_types, sj=sj)
     if _lift is not None:
-        # ``undrained`` is the payload as it entered here, NOT ``drained``: the drained bank is empty by
+        # ``undrained`` is the payload as it entered here, not ``drained``: the drained bank is empty by
         # design ("after it nothing is held"), so it cannot supply `lift_choices`' key pool.
         _lift.update(undrained=payload, choices=choices, region_types=region_types, sj=sj)
     report = drained.drain
@@ -634,10 +583,8 @@ def _wire_calibration_regions(
     flat region_bound index. Both are derived from ``index.regions_df``/``index.edges_df`` and ordered to match
     ``index.ref_names``, which is the resolver's reference-id space.
 
-    Two calls, and both are required. ``set_regions`` refuses to run twice, which is why the sj are
-    separate; and ``scan`` refuses to run if the second call is missing, because a missing sj table is
-    invisible — every observed intron would simply read as unannotated, so every sj boundary and both
-    spliced banks would come back empty from a scan that looked perfectly well-formed.
+    Both calls are required: ``set_regions`` refuses to run twice, and ``scan`` refuses to run without ``set_sj``,
+    because a missing sj table would read every intron as unannotated and leave the spliced banks silently empty.
     """
     from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
 
@@ -650,9 +597,8 @@ def _wire_calibration_regions(
         np.ascontiguousarray(region_types, dtype=np.uint8),
         int(max_frag_length),
     )
-    # ``edge_row`` is deliberately NOT passed. It is a join key back to ``index.edges_df``, not the
-    # sj-boundary id — that IS the CSR slot — and using it to index a sj bank would write far past
-    # the end of the array.
+    # ``edge_row`` is not passed: it is a join key back to ``index.edges_df``, not the sj id (the CSR slot is), and
+    # indexing a sj bank with it would write past the end of the array
     sj = build_sj_arrays(index)
     scanner.set_sj(
         np.ascontiguousarray(sj.offsets, dtype=np.int64),
@@ -676,13 +622,11 @@ def _setup_geometry_and_estimator(
 ) -> AbundanceEstimator:
     """Compute the transcripts' effective lengths and create the AbundanceEstimator.
 
-    The EM effective lengths (``effective_lengths_em``) are capture-contracted by the rule the gDNA component's
-    length takes too — each transcript's conserved share of every region, boundary and junction its fragments
-    deposit on, at that object's capture efficiency carried to the EM's two length tables — so every component
-    competes on one contracted footing under capture. The output ``effective_lengths`` (used for TPM) stay the full
-    FL-marginal length over the template's observable starts (a fragment touching the index's unobservable mask is
-    never observed). No reference (capture off, or no gDNA) ⇒ ``effective_lengths_em`` == ``effective_lengths``
-    (bit-identical). See ``calibration/capture_eff_length.py``.
+    ``effective_lengths_em`` are capture-contracted by the rule the gDNA component's length takes too (each
+    transcript's share of every region, boundary and junction its fragments deposit on, at that object's capture
+    efficiency), so every component competes on one footing under capture. ``effective_lengths``, TPM's, stay the
+    full FL-marginal length over the observable starts. Off capture, or with no gDNA, the two are bit-identical
+    (``calibration/capture_eff_length.py``).
     """
     if rna_fl.n_observations <= 0:
         raise ValueError(
@@ -823,21 +767,19 @@ def em_pseudocounts(
 ) -> tuple[np.ndarray, np.ndarray]:
     """The locus EM's two pseudocounts, ``(gdna_prior_count, rna_prior_count)``, per locus.
 
-    THE ODDS ARE CALIBRATION'S gDNA SHARE OF THE LOCUS. The EM's theta is each component's share of every
-    fragment in the locus — the E-step's units and the deterministic spliced fragments, which skip the
-    E-step but enter every M-step — and the grouped prior update is exact EM for
-    ``P_g log theta_g + P_R log(1 − theta_g)``. It leaves the EM's own answer in place iff
-    ``P_g : P_R = G : (N − G)``. Calibration counts ``gdna_count`` from its own sample of the locus, and
-    ``n_calibrated`` counts that sample's unique fragments (no multimapper, no fragment whose every junction the
-    blacklist rejected), so the share is read over that sample and applied to the whole locus: which fragments
-    either stage calls spliced never enters, and a fragment calibration never saw carries the locus's share, not
-    RNA. Calibration also deposits each multimapper at the placement its second pass draws, and
-    ``n_calibrated`` does not count those, so in a locus holding multimappers the count covers more fragments
-    than the share is read over.
+    The odds are calibration's gDNA share of the locus. The EM's theta is each component's share of every fragment
+    in the locus (the E-step's units and the deterministic spliced fragments, which skip the E-step but enter every
+    M-step), and the grouped prior update is exact EM for ``P_g log theta_g + P_R log(1 − theta_g)``, which leaves
+    the EM's own answer in place iff ``P_g : P_R = G : (N − G)``. ``gdna_count`` is calibration's count from its own
+    sample of the locus and ``n_calibrated`` that sample's unique fragments (no multimapper, no fragment whose every
+    junction the blacklist rejected), so the share is read over that sample and applied to the whole locus; a
+    fragment calibration never saw carries the locus's share, not RNA. Calibration also deposits each multimapper
+    at its drawn placement, which ``n_calibrated`` does not count, so in a locus holding multimappers the count
+    covers more fragments than the share is read over.
 
-    THE STRENGTH is one pseudocount per unit that has a gDNA candidate, the shipped total before the odds
-    were corrected; it is not derived (``tests/test_em_pseudocounts.py``). A share above one is a share of
-    one, and a locus with no gDNA candidate, or none of whose fragments calibration counted, gets no prior.
+    The strength is one pseudocount per unit that has a gDNA candidate; it is chosen, not derived. A share above
+    one is a share of one, and a locus with no gDNA candidate, or none of whose fragments calibration counted, gets
+    no prior.
     """
     gdna_count = np.asarray(gdna_count, dtype=np.float64)
     n_calibrated = np.asarray(n_calibrated, dtype=np.float64)
@@ -867,21 +809,16 @@ def _run_locus_em_partitioned(
 ) -> None:
     """Run the per-locus batch EM and record lean per-locus results.
 
-    Packs each ``LocusPartition`` into the C++ 7-tuple, runs the whole batch in
-    one ``run_batch_locus_em_partitioned`` call (the solver runs its own
-    ``std::thread`` workers), and appends a per-locus dict to ``estimator.locus_results`` for
-    ``get_loci_df``. Calibration enters as its per-locus gDNA count, which :func:`em_pseudocounts` reads
-    against the unique part of the locus calibration counts from: its non-multimapper units that the blacklist
-    did not reject, plus the deterministic fragments of its transcripts (the multimappers calibration deposits
-    at their drawn placements are not counted). The
-    loci table's ``has_gdna`` reports the structural eligibility (any unspliced unit carrying a finite
-    gDNA log-lik — the rule the C++ extractor applies).
+    Packs each ``LocusPartition`` into the C++ 8-tuple, runs the whole batch in one
+    ``run_batch_locus_em_partitioned`` call (the solver runs its own threads), and appends a per-locus dict to
+    ``estimator.locus_results`` for ``get_loci_df``. Calibration enters as its per-locus gDNA count, which
+    :func:`em_pseudocounts` reads against the unique part of the locus calibration counted: its non-multimapper
+    units the blacklist did not reject, plus its transcripts' deterministic fragments. The loci table's
+    ``has_gdna`` is structural: some unspliced unit carries a finite gDNA log-likelihood.
 
-    ``rna_prior_weight`` is the one PER-TRANSCRIPT array here and it is passed FLAT, while every
-    other prior array is subscripted by ``ids`` into per-locus order. That asymmetry is the point: the
-    RNA prior's TOTAL is a property of the locus, its ALLOCATION is a property of the transcripts, and
-    the C++ remaps the latter itself when it builds each sub-problem. ⛔ Subscripting it by ``ids``
-    would silently read transcript rows at locus positions.
+    ``rna_prior_weight`` is per transcript and passed flat, while every other prior array is subscripted by ``ids``
+    into locus order: the RNA prior's total belongs to the locus, its allocation to the transcripts, and the C++
+    remaps the allocation per sub-problem. Subscripting it by ``ids`` would read transcript rows at locus positions.
     """
     if not multi_loci:
         return
@@ -908,8 +845,7 @@ def _run_locus_em_partitioned(
         dtype=np.float64,
     )
     # The unique part of calibration's sample: the deterministic fragments (unique by construction) and every
-    # unit it deposits that is not a multimapper or a fragment whose every junction the blacklist rejected. The
-    # multimappers it deposits at their drawn placements are not counted.
+    # deposited unit that is neither a multimapper nor a fragment whose every junction the blacklist rejected
     deterministic = estimator.unambig_counts.sum(axis=1)
     n_calibrated = np.array(
         [
@@ -933,11 +869,7 @@ def _run_locus_em_partitioned(
         locus_t_lists,
         gdna_prior,
         rna_prior_count=rna_prior,
-        # FLAT and per-TRANSCRIPT — deliberately not `[ids]`. If this boundary is dropped the
-        # parameter is accepted and silently ignored, and every allocation, however extreme, produces
-        # byte-identical output. A fire counter cannot see that — it counts nonzero weights, not
-        # weights the solver read; only an arm that injects a maximally WRONG allocation and checks
-        # that the result MOVED can.
+        # flat and per transcript, never `[ids]`: the C++ remaps it per sub-problem
         rna_prior_weight=rna_prior_weight,
         gdna_eff_len=g_eff,
         intergenic_rate=intergenic_rate,
@@ -1082,8 +1014,8 @@ def run_pipeline(
 ) -> PipelineResult:
     """Run the complete quantification pipeline with locus-level EM.
 
-    Opens the BAM **once** via the C++ BAM scanner, scans all fragments,
-    trains models, buffers resolved fragments, then quantifies via per-locus EM.
+    Reads the BAM once with the native scanner, drains the held fragments, calibrates, then quantifies with the
+    per-locus EM.
 
     Parameters
     ----------
@@ -1113,7 +1045,7 @@ def run_pipeline(
     _log_record_tags(stats)
     _log_hit_verdicts(stats)
 
-    # -- The second pass: drain the side buffer, BEFORE calibration --
+    # -- The second pass: drain the side buffer, before calibration --
     calibration_payload = _drain_side_buffer(
         calibration_payload, index, strand_models, seed=config.second_pass_seed
     )
@@ -1134,18 +1066,15 @@ def run_pipeline(
         strand_ci_eps,
     )
 
-    # No alignment check here: CalibrationSubstrate.from_payload runs the identical one inside
-    # calibrate(), microseconds later, and two copies of an invariant is one too many.
+    # No alignment check here: calibrate() runs it (CalibrationSubstrate.from_payload)
     region_arrays = RegionArrays.from_index(index)
     boundary_flags = build_boundary_flags_array(index)
-    # The sj axis, in the accumulator's own sj slot order: where each sj attaches,
-    # its TRANSCRIPT strand, and its exonic reach either side. The calibrator places it as a FACTOR on
-    # its two endpoint regions — never as a message channel, since every sj closes an undirected
-    # loop and the graph is not a polytree.
+    # The sj axis, in the accumulator's sj slot order: where each sj attaches, its transcript strand and its exonic
+    # reach either side. The calibrator places each sj as a factor on its two endpoint regions, never as a message
+    # channel, because every sj closes a loop and the graph is not a tree.
     sj = build_sj_geometry_arrays(index)
 
-    # The two COMPONENT fragment-length models the calibrator's effective lengths need, refit on the
-    # drained tally.
+    # The two component length models the calibrator's effective lengths need, refit on the drained tally
     fl_models = library_fl_models(calibration_payload, index)
     gdna_fl_pmf = fl_models.gdna_pmf
     _bins = np.arange(gdna_fl_pmf.size, dtype=np.float64)
@@ -1157,7 +1086,7 @@ def run_pipeline(
         float(np.dot(_bins, fl_models.global_pmf)),
     )
 
-    # NOTE: the buffer is NOT freed here — quant_from_buffer routes it below.
+    # The buffer stays: quant_from_buffer routes it below
     calibration = calibrate(
         payload=calibration_payload,
         region_arrays=region_arrays,
@@ -1169,11 +1098,9 @@ def run_pipeline(
         boundary_flags=boundary_flags,
     )
 
-    # FRAGMENTS, not object incidences. The sum still runs over all three axes — gDNA is contained
-    # in a region or crosses a boundary, RNA also jumps, and at a donor boundary the sj flux IS the
-    # RNA that spliced there — but each axis is converted by its own population's
-    # mass-per-crossing first. Adding the raw banks would count one fragment once per boundary it
-    # crossed AND once per sj it used, which reads `f_gdna` badly low on a contaminated library.
+    # Fragments, not object incidences: each axis (regions, boundaries, sj) is converted by its own population's
+    # mass per crossing before the sum, since raw banks count a fragment once per boundary it crosses and once
+    # per sj it uses
     logger.info(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
         "gDNA_fragments=%.0f RNA_fragments=%.0f (sj incidences %.0f)",
@@ -1234,8 +1161,7 @@ def run_pipeline(
     finally:
         buffer.cleanup()
 
-    # Genome-wide gDNA track for the QC report (+ bedGraph). Pure persistence of
-    # the per-region calibration solution.
+    # The genome-wide gDNA track for the QC report and the bedGraph: the per-region calibration solution
     from .calibration.track import build_gdna_track
 
     calibration_track = build_gdna_track(calibration, region_arrays, index.ref_names)

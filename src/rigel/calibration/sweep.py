@@ -1,61 +1,32 @@
-"""THE BACKBONE — the self-solve, two directional passes, one ψ solve, one write-back, two assertions.
+"""The backbone of the calibration solve: the self-solve, two directional passes, one ψ solve and one write-back.
 
-       Gate: ``tests/calibration/test_sweep_backbone.py``
+Each slot's unspliced fragment mass is deconvolved into ``(f_pos, f_neg, f_g)`` (sense RNA, antisense RNA, gDNA) over
+the ``N E N E … N`` chain (``region_chain``). Every node states its own claim; a forward then a backward pass lets
+each recipient receive what its neighbour sends; and each node is solved once from its own evidence, the two held
+messages and the prior. The chain is a forest of linear paths, so this is exact belief propagation, not an iteration.
 
-Each slot's unspliced fragment mass is deconvolved into a pie ``(f_pos, f_neg, f_g)`` — sense-RNA /
-antisense-RNA / gDNA — over the ``N E N E … N`` chain (`region_chain`), on the TWO-PHASE shape: every
-node's own claim, a forward pass then a backward pass in which each RECIPIENT receives what its
-neighbour sends, and ONE solve per node from its own evidence, the two held messages and the prior. The
-chain is a forest of linear paths, so that is exact belief propagation, not an iteration.
+The sweep is one native call (``native.solve_blocks``, ``native/solve_kernel.cpp``). This module cuts the chain into
+locus blocks, reduces the policy's library over the whole chain, hands the kernel the chain's arrays, the blocks and
+the landscape's curve, and reads back the belief, ``has_composition`` and the assertions' counts. The kernel solves
+the blocks on a thread pool and reduces only integer counts across them, so the answer is bit-identical at every
+thread count.
 
-THE SWEEP IS ONE NATIVE CALL (`native.solve_blocks`, `native/solve_kernel.cpp`). This file cuts the chain
-into locus blocks, reduces the policy's library over the whole chain, hands the kernel the chain's arrays,
-the blocks and the landscape's curve, and reads back the belief, ``has_composition`` and the
-assertions' counts.
-Inside the call a pool of threads pulls the blocks one at a time; each block runs the whole pipeline on
-its own thread and arena — the prior rows, the self-solve ψ, the own-evidence precision, the policy's
-builders, the two passes, the solve, the final ψ, the write-back, the counts — and nothing is reduced
-across blocks but integer counts, so the answer is BIT-IDENTICAL at every thread count.
+What a message says belongs to a :mod:`~.messages` policy, built in the kernel; this module must not name what a
+message is about. It owns the shape of the solve and two invariants no policy may break:
 
-This file knows nothing about capture, splice in, levels, lanes or enrichment — those words do not appear
-in it, and that is the design rather than tidiness. Everything about *what a message says* is a
-:mod:`~.messages` policy, built in the kernel. What is left here is the shape of the solve and the two
-invariants no policy may break — the first counted in the kernel on every block's owned slots and
-judged here, the second enforced by construction:
+- every delivered row is one finite row per slot, which catches a NaN reaching ψ (counted per block by the kernel and
+  judged in :class:`AssertionCounts`);
+- the kernel sees only the two neighbour states: each destination's row is built from the source's claim and what the
+  source holds, never from the destination's own belief (enforced by construction).
 
-===================================================  ====================================================
-the backbone asserts                                 it would have caught
-===================================================  ====================================================
-every delivered row is one row per slot, finite      a NaN reaching ψ (a row off the solve grid cannot be
-                                                     built: the kernel's rows are the grid's)
-the kernel sees only the two NEIGHBOUR states        a message built from the destination's own belief —
-                                                     enforced by construction: the pass builds each
-                                                     destination's row from the source's claim and what
-                                                     the source holds; own claims read observations
-===================================================  ====================================================
+A terminal, a region that admits no RNA strand and so is structurally pure gDNA, receives nothing. Nothing crosses a
+terminal, so the chain splits into independent loci there (``region_chain.locus_blocks``).
 
-The assertions' semantics live HERE (`AssertionCounts`), not in the policy, and that is the entire point:
-a future policy can be as wrong as it likes and still cannot commit any of them, and each has shipped at
-least once.
+Both gates on a slot read the region signature, never the counts. The solve gate (``solvable``): a slot is solved iff
+it admits at least one RNA strand and has unspliced mass. A slot with no admissible RNA strand is a locked all-gDNA
+object that keeps its signature-binary init. The emission gate, which messages a slot sends, is the policy's.
 
-And ONE structural rule, which is what lets the chain be solved a locus at a time: a TERMINAL — a REGION
-that admits no RNA strand, so it is structurally pure gDNA, solved and fixed before any message exists —
-RECEIVES NOTHING. The pass never asks the kernel for a hop into one; the terminal holds silence from a side
-it has a neighbour on. Nothing can therefore cross a terminal, and the chain breaks into independent loci
-at every one (`region_chain.locus_blocks`). Measured on the human chain before it was made structural: of
-1,206,202 composition faces and 4,621,302 lane faces the shipped policy built, none delivered into a
-terminal, so the rule moved no number; it is written so that no future policy can move the boundary
-condition a block solve depends on.
-
-Two gates on this slot in the pipeline
---------------------------------------
-Both come from the region SIGNATURE and never from the counts:
-
-* the SOLVE gate (``solvable``) — a slot deconvolves its own split iff it admits >= 1 RNA strand and has
-  unspliced mass. A slot with no admissible RNA strand (an intergenic region, or a gene boundary) is a
-  LOCKED all-gDNA object; it is not solved and keeps its signature-binary init, because RNA cannot cross a
-  gene boundary so its unspliced mass is purely gDNA.
-* the EMISSION gate — which MESSAGES a slot sends. That is a policy question and lives there.
+Gate: ``tests/calibration/test_sweep_backbone.py``.
 """
 
 from __future__ import annotations
@@ -64,10 +35,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..native import solve_blocks
+from ..native import POLICY_SILENT, POLICY_TRANSFER, solve_blocks
 from .blocks import SweepCapture, view_fields
 from .messages import ChainView
-from .messages.silent import SilentPolicy
 from .region_geometry import (
     RegionBelief,
     RegionGeometry,
@@ -87,14 +57,8 @@ __all__ = [
 ]
 
 
-# ⛔ ASSERTIONS A SHIPPED POLICY IS KNOWN TO VIOLATE, each entered with the measurement that proved it.
-# An entry is COUNTED and PUBLISHED rather than raised, because widening an assertion to fit a defect is
-# how a gate becomes vacuous. The dict is EMPTY, so anything violated raises.
-#: ``name -> why it is not fatal yet``.
-_KNOWN_VIOLATIONS: dict[str, str] = {}
-
-#: the kernel's name for each policy (`native/solve_kernel.cpp`): the silent policy runs no layer
-_POLICY_KERNEL = {"silent": 0, "transfer": 1}
+#: the kernel's code for each policy name (`native/solve_kernel.cpp`): the silent policy runs no layer
+_POLICY_KERNEL = {"silent": POLICY_SILENT, "transfer": POLICY_TRANSFER}
 
 #: the two assertions that run only where a channel was delivered — the kernel says per block whether it was
 _DELIVERED = {"lam_rows_finite": "rows_delivered", "cube_rows_finite": "cube_delivered"}
@@ -103,20 +67,18 @@ _DELIVERED = {"lam_rows_finite": "rows_delivered", "cube_rows_finite": "cube_del
 class AssertionCounts(dict):
     """How many slots violated each backbone assertion, published into the diagnostics capture.
 
-    A count rather than a bool: before believing "the arm changed nothing", check it COULD have changed
-    something. An assertion reporting 0 violations on a substrate where the predicate can never fire is
-    not evidence, so the report also carries how many slots were ELIGIBLE for each check.
+    Each count carries the number of eligible slots beside it, because zero violations where the predicate can never
+    fire is not evidence.
     """
 
     def note(self, name: str, violations: int, eligible: int) -> None:
         n_v, n_e = int(violations), int(eligible)
         self._add(name, n_v, n_e)
-        if n_v and name not in _KNOWN_VIOLATIONS:
+        if n_v:
             raise AssertionError(
                 f"backbone assertion {name!r} violated at {n_v:,} of {n_e:,} eligible slots. "
                 f"The policy may not do this — see rigel.calibration.sweep's module docstring for what "
-                f"each assertion catches. If this is a NEW and PROVEN defect whose fix is panel-negative "
-                f"alone, add it to _KNOWN_VIOLATIONS with the measurement, never widen the predicate."
+                f"each assertion catches; never widen the predicate."
             )
 
     def _add(self, name: str, n_v: int, n_e: int) -> None:
@@ -125,12 +87,13 @@ class AssertionCounts(dict):
 
     @classmethod
     def of_blocks(cls, names, counts, delivered: dict, n_owned) -> "AssertionCounts":
-        """The kernel's per-block ``(violations, eligible)`` summed to the chain's, each assertion noted
-        once (so a violation raises). Each assertion runs only where its channel was delivered and is
-        absent from the report when no block delivered it; the λ-row check's ELIGIBLE set reads as the
-        chain's — where any block delivered rows, a block that delivered none holds zero rows, which are
-        finite rows that were checked — so the published count does not depend on how the chain was
-        cut."""
+        """The kernel's per-block ``(violations, eligible)`` summed over the chain, each assertion noted once (so a
+        violation raises).
+
+        An assertion runs only where its channel was delivered and is absent when no block delivered it. For the λ-row
+        check, a block that delivered no rows counts its owned slots as eligible (zero rows are finite rows), so the
+        published count does not depend on how the chain was cut.
+        """
         out = cls()
         counts = np.asarray(counts, np.int64)
         n_owned = np.asarray(n_owned, np.int64)
@@ -153,53 +116,41 @@ def solve_chain(
     region_arrays,
     *,
     rna_sense_frac: float,
-    gdna_strand_overdispersion: float = 0.0,
-    rna_strand_overdispersion: float = 0.0,
     n_rna_obs: float = 0.0,
     n_grid: int,
     logodds_window: float,
     gdna_prior=None,
-    policy=None,
+    policy,
     block_slots: int | None = None,
     n_threads: int = 1,
     _capture: SweepCapture | None = None,
 ) -> RegionBelief:
-    """One forward-backward sweep over the chain. Returns the resolved :class:`RegionBelief`.
+    """One forward-backward sweep over the chain; returns the resolved :class:`RegionBelief`.
 
-    THE SWEEP IS SOLVED A LOCUS BLOCK AT A TIME, IN ONE NATIVE CALL. The chain breaks at every TERMINAL —
-    a region that admits no RNA strand, structurally pure gDNA, which receives nothing (the module
-    docstring) — into loci, and `region_chain.locus_blocks` merges consecutive loci into blocks of up to
-    ``block_slots`` slots (``None``: the whole chain as one block). Each block is solved on its own slice
-    of every input — its own claims, the policy's claims and rules, the two passes, the solve and the
-    write-back — reading one slot beyond its own range where that slot is the terminal its last node
-    receives from. The only information that crosses a block boundary is the policy's LIBRARY
-    (:meth:`~.messages.Policy.library`), reduced once over the whole chain from observations and
-    geometry, and the answer is the same for every ``block_slots`` because ψ's read-out is
-    chunk-exact (`simplex_logodds`); the block size sets only the working set — a block's
-    ``(slots, K)`` arrays instead of the chain's — against the per-block overhead.
+    The chain breaks into loci at every terminal, and ``region_chain.locus_blocks`` merges consecutive loci into blocks
+    of up to ``block_slots`` slots (``None``: the whole chain as one block). Each block is solved on its own slice of
+    every input, reading one slot past its range where that slot is the terminal its last node receives from. Only the
+    policy's library (``policy.library``, reduced once over the whole chain) crosses a block boundary, and ψ's read-out
+    is chunk-exact (``simplex_logodds``), so the answer is the same for every ``block_slots``; the block size trades
+    working set against per-block overhead.
 
-    ``policy`` is the message-composition policy (:mod:`~.messages`): a NAME the kernel switches on, a
-    strand model and a library reduction. It defaults to :class:`~.messages.silent.SilentPolicy`, which
-    sends nothing. The shipped answer is :class:`~.messages.transfer.TransferPolicy`, which ``calibrate``
-    passes explicitly.
+    ``policy`` is the message policy (:mod:`~.messages`): a name the kernel switches on, a strand model and a library
+    reduction. It has no default; ``calibrate`` installs the one the config names,
+    :class:`~.messages.transfer.TransferPolicy` or :class:`~.messages.silent.SilentPolicy`.
 
-    ``n_threads`` is the thread budget (`CalibrationConfig.n_threads`; 0 is every core): the blocks are
-    pulled one at a time by a pool, bit-identically at every count.
+    ``n_threads`` is the thread budget (``CalibrationConfig.n_threads``; 0 is every core).
 
-    ``gdna_prior`` is the fitted landscape (`landscape.DensityLandscape`) or ``None`` — a first-class
-    PRIOR-FREE solve: ψ then carries the Jeffreys reference measure alone on both arms. Prior-free is not
-    reference-free. That pass's only job is to be a training substrate for the population gDNA hyperprior
-    — it is not the deliverable, and it does not have to answer objects it cannot solve. The kernel reads
-    the curve at every cell itself, on each slot's own gDNA support (`region_geometry.region_gdna_geometry`).
-
+    ``gdna_prior`` is the fitted landscape (``landscape.DensityLandscape``), or ``None`` for a prior-free solve in which
+    ψ carries the Jeffreys reference measure alone on both arms. The prior-free pass only trains the population gDNA
+    hyperprior, so it need not answer objects it cannot solve. The kernel reads the curve at every cell on each slot's
+    own gDNA support (``region_geometry.region_gdna_geometry``).
     """
-    policy = policy if policy is not None else SilentPolicy()
     n = int(chain.n_slots)
     structure = _structure(chain, region_arrays)
     kappa = float(rna_sense_frac)
     disc = strand_discriminability(kappa, n_rna_obs)
-    # THE LIBRARY — the policy's reductions over the WHOLE chain, once, from observations and geometry
-    # alone: the only information a message may carry across a locus boundary
+    # the library: the policy's reductions over the whole chain, from observations and geometry alone; the only
+    # information a message may carry across a locus boundary
     view = ChainView(
         **view_fields(chain, statics, geometry, structure),
         strand_live=disc > 0.0,
@@ -224,13 +175,10 @@ def solve_chain(
         belief_fg=np.ascontiguousarray(belief.f_g, np.float64),
         blocks=np.array([(b.start, b.stop, b.end) for b in blocks], np.int64).reshape(-1, 3),
         kappa=kappa,
-        od_g=float(gdna_strand_overdispersion),
-        od_r=float(rna_strand_overdispersion),
         disc=float(disc),
         lam=lam,
         n_tilt=int(_TILT_NODES),
         policy=_POLICY_KERNEL[policy.name],
-        has_strand=policy.kappa is not None,
         rho_gdna=float(library.rho_gdna) if library is not None else 0.0,
         rho_rna=float(library.rho_rna) if library is not None else 0.0,
         split_live=bool(library.split_live) if library is not None else False,
@@ -259,8 +207,8 @@ def solve_chain(
 
 
 def _chain_arrays(view: ChainView, terminal) -> dict:
-    """The chain's arrays by the kernel's argument names, each C-contiguous in the kernel's dtype — the
-    observations and the geometry of the :class:`~.messages.ChainView`, and the terminal bits."""
+    """The chain's arrays under the kernel's argument names, each C-contiguous in the kernel's dtype: the view's
+    observations and geometry, and the terminal bits."""
 
     def f64(a):
         return np.ascontiguousarray(a, np.float64)
@@ -293,12 +241,9 @@ def _chain_arrays(view: ChainView, terminal) -> dict:
 
 @dataclass(frozen=True, slots=True)
 class _Structure:
-    """The structural classes per slot, from the signature and once for the chain: the EXON region (the
-    SPLICE IN's destination class, a policy input rather than a gate), and the signature's two EXON bits
-    per slot — a strand's opportunity geometry, which the RNA level lanes read to tell a strand's intron
-    from its exon inside an overlapping locus. The TERMINAL — a region with no admissible RNA strand, the
-    same predicate the SOLVE gate locks — which receives nothing and where the chain breaks, is not here:
-    it is the view's own predicate (`ChainView.terminal`)."""
+    """The per-slot structural classes, from the signature: the exon region (the splice-in message's destination
+    class, a policy input rather than a gate) and the signature's two exon bits, which tell a strand's intron from its
+    exon inside an overlapping locus. The terminal is the view's own predicate (``ChainView.terminal``)."""
 
     is_exon_region: np.ndarray
     exon_pos: np.ndarray
@@ -318,8 +263,8 @@ def _structure(chain, region_arrays) -> _Structure:
 
 
 def _gather_diagnostics(view, out, diag, res, blocks, geometry, lam) -> SweepCapture:
-    """The diagnostic capture of one sweep — the instruments' view (:class:`~.blocks.SweepCapture`),
-    assembled from the kernel's per-slot arrays and its per-block cube rows and received tables."""
+    """The diagnostic capture of one sweep (:class:`~.blocks.SweepCapture`), assembled from the kernel's per-slot
+    arrays and its per-block cube rows and received tables."""
     fp, fn = np.asarray(view.free_pos, bool), np.asarray(view.free_neg, bool)
     mass_global, _ = region_gdna_geometry(geometry)
     cubes = []
@@ -362,19 +307,16 @@ def _gather_diagnostics(view, out, diag, res, blocks, geometry, lam) -> SweepCap
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
-# THE OUTPUT CONTRACT — projecting the chain belief back onto the two payload axes.
-# Not part of the solve: this is what ``CalibrationResult`` / ``priors`` / ``derive`` consume.
+# The output contract: the chain belief projected back onto the two payload axes for ``CalibrationResult``,
+# ``priors`` and ``derive``. Not part of the solve.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
 def chain_region_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> RegionDeconv:
-    """Project the chain belief's REGION slots back onto the REGION axis as a :class:`RegionDeconv` — what
-    ``CalibrationResult`` / ``priors`` / ``derive`` consume.
+    """Project the chain belief's region slots onto the region axis as a :class:`RegionDeconv`.
 
-    A region's contained population carries no spliced term, and that is structural: the accumulator
-    credits ``region_contained`` only when the fragment used no sj, so a contained fragment is unspliced
-    by construction. ⛔ Do not add a ``+ mass_spliced`` term here — the quantity is identically zero on
-    the region axis, so adding it would be adding a channel that cannot exist.
+    The RNA mass has no spliced term: the accumulator credits ``region_contained`` only when the fragment used no sj,
+    so a contained fragment is unspliced by construction.
     """
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, dtype=np.int64)
@@ -398,16 +340,13 @@ def chain_region_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> 
 
 
 def chain_boundary_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> RegionDeconv:
-    """Project the chain belief's BOUNDARY slots onto the CONTIGUOUS-BOUNDARY axis — the crossing flux that
-    ``priors`` and ``derive`` consume.
+    """Project the chain belief's boundary slots onto the contiguous-boundary axis as a :class:`RegionDeconv`.
 
-    ONE per-boundary result, not a ``(left, right)`` pair of per-region ones: splitting each boundary's
-    flux onto its two flanking regions only for ``priors`` to pool the halves back together is a no-op,
-    and that sum-then-halve pattern is what hides a factor of 2. ``CalibrationResult`` carries
-    per-boundary arrays for this reason.
+    One result per boundary, not a ``(left, right)`` pair of per-region halves: splitting a boundary's flux onto its
+    flanks only for ``priors`` to pool them again is a no-op that invites a lost factor of 2.
 
-    The RNA mass is spliced-inclusive: a boundary's certified-RNA crossings (``boundary_spliced``) are RNA
-    whatever the unspliced mixture resolves to, since gDNA cannot be spliced.
+    The RNA mass includes the boundary's spliced crossings (``boundary_spliced``), which are RNA whatever the unspliced
+    mixture resolves to, since gDNA cannot be spliced.
     """
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, dtype=np.int64)
@@ -420,12 +359,9 @@ def chain_boundary_deconv(chain: RegionChain, belief: RegionBelief, substrate) -
     f_pos = np.zeros(n)
     f_neg = np.zeros(n)
     f_g[ei] = np.asarray(belief.f_g, dtype=np.float64)[boundary]
-    # THE PER-STRAND RNA SPLIT, PROJECTED ON THIS AXIS TOO. ψ solves the simplex
-    # ``(f_g, f_pos, f_neg)`` at EVERY slot — AXIOM 0's `T(slot)`, which is a function of the two
-    # `free_*` bits and never of the slot's kind — so a BOUNDARY slot has the same three-way composition
-    # a REGION slot does. ⛔ Emitting zeros for both RNA strands here would publish a composition on the
-    # crossing axis that sums to ``f_g`` alone, which a per-transcript prior reading composition per
-    # object then believes.
+    # ψ solves the full simplex at every slot (the population set depends on the ``free_*`` bits, never on the slot's
+    # kind), so a boundary carries a per-strand RNA split like a region; zeros here would publish a composition that
+    # sums to ``f_g`` alone
     f_pos[ei] = np.asarray(belief.f_pos, dtype=np.float64)[boundary]
     f_neg[ei] = np.asarray(belief.f_neg, dtype=np.float64)[boundary]
     return RegionDeconv(

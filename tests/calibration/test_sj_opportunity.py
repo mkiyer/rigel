@@ -1,13 +1,12 @@
 """The sj pool's opportunity function, and the de-tilt it feeds.
 
-``RNA_SPLICED`` is selected on "the path used an annotated sj", and that population is genuinely
-longer than the library, so the pool the RNA fragment-length model is fitted from is tilted long
-and dividing it by its own opportunity ``A_j(w) = (L−w+1)+ − Σ_i (e_i−w+1)+`` removes the tilt. The
-correction divides by the theta-weighted crossing probability ``A(w)/T(w)`` rather than by ``A``
-alone, because ``A`` recovers the distribution lengths were drawn from while the pool must become
-the one the library realizes — the drawn distribution weighted by each length's placements, which
-is ``T``. Not cosmetic: under ``A`` alone a badly wrong theta makes the correction worse than none.
-Every oracle here enumerates and none calls the module under test (TRAPS: self-checking-validator).
+``RNA_SPLICED`` is selected on "the path used an annotated sj", and that population is longer than the library, so the
+pool the RNA fragment-length model is fitted from is tilted long; dividing it by its own opportunity ``A_j(w) = (L−w+1)+
+− Σ_i (e_i−w+1)+`` removes the tilt. The correction divides by the theta-weighted crossing probability ``A(w)/T(w)``
+rather than by ``A`` alone, because ``A`` recovers the distribution lengths were drawn from, while the pool must become
+the one the library realizes: the drawn distribution weighted by each length's placements, which is ``T``. Under ``A``
+alone a badly wrong theta makes the correction worse than none. Every oracle here enumerates and none calls the module
+under test.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ from rigel.calibration.sj_opportunity import (
 )
 
 # ---------------------------------------------------------------------------
-# oracles — enumerating, and sharing no code with the module under test
+# oracles: enumerating, and sharing no code with the module under test
 # ---------------------------------------------------------------------------
 
 
@@ -37,7 +36,7 @@ def _oracle_a_j(exon_lengths, w: int) -> int:
 
 
 def _oracle_total(exon_lengths, w: int) -> int:
-    """Count every start position — the placements a length-``w`` window has at all."""
+    """Count every start position, the placements a length-``w`` window has at all."""
     return max(0, int(sum(exon_lengths)) - w + 1)
 
 
@@ -62,12 +61,9 @@ def _aggregate(transcripts, theta, max_length):
 
 
 def test_A_j_matches_an_ENUMERATING_oracle_over_every_small_configuration():
-    """The derivation, re-proven in the suite rather than cited from a document.
-
-    Exhaustive over 1-4 exons x exon lengths 1-7 x every ``w`` up to ``L + 2``. The oracle walks every
-    start position and tests it against every sj coordinate; the formula works with the
-    complement (a window crossing nothing lies wholly inside ONE exon, and exons are disjoint). They
-    share no code, so agreement is evidence.
+    """Exhaustive over 1-4 exons x exon lengths 1-7 x every ``w`` up to ``L + 2``. The oracle walks every start position
+    and tests it against every sj coordinate; the formula works with the complement (a window crossing nothing lies
+    wholly inside one exon, and exons are disjoint). They share no code, so agreement is evidence.
     """
     checked = 0
     for k in range(1, 5):
@@ -84,8 +80,8 @@ def test_A_j_matches_an_ENUMERATING_oracle_over_every_small_configuration():
     [[1, 2000], [2000, 1], [50] * 20, [1, 1, 1], [500, 500], [713], [1], [200, 1, 200]],
 )
 def test_A_j_matches_the_oracle_at_REALISTIC_scales_too(exons):
-    """The exhaustive sweep is all tiny. A 1 bp exon beside a 2 kb one is the shape that breaks
-    an off-by-one, and 20 x 50 bp is the many-short-exons transcript the tilt is steepest on."""
+    """The exhaustive sweep is all tiny. A 1 bp exon beside a 2 kb one is the shape that breaks an off-by-one, and 20 x
+    50 bp is the many-short-exons transcript the tilt is steepest on."""
     total = int(sum(exons))
     _, a = _aggregate([exons], [1.0], total + 2)
     for w in {1, 2, 49, 50, 51, 200, 499, 500, 501, total, total + 1, total + 2} - {0}:
@@ -94,7 +90,7 @@ def test_A_j_matches_the_oracle_at_REALISTIC_scales_too(exons):
 
 
 def test_the_five_properties_the_derivation_CLAIMS_are_CHECKED_not_stated():
-    """P1-P5 of the derivation, each one a thing the correction silently depends on."""
+    """P1-P5 of the derivation, each a property the correction depends on."""
     # P1 — a single-exon transcript can never populate the sj pool
     _, a = _aggregate([[500]], [1.0], 600)
     assert not a.any()
@@ -103,18 +99,18 @@ def test_the_five_properties_the_derivation_CLAIMS_are_CHECKED_not_stated():
     _, a = _aggregate([[10, 10, 10]], [1.0], 40)
     assert a[1] == 0
 
-    # P3 — A_j rises with w up to the longest exon. This is the tilt being corrected.
+    # P3: A_j rises with w up to the longest exon. This is the tilt being corrected.
     _, a = _aggregate([[100, 100]], [1.0], 200)
     rising = a[1:101]
     assert np.all(np.diff(rising) >= 0) and rising[-1] > rising[0]
 
-    # P4 — beyond the longest exon every placement crosses, so the tilt SATURATES
+    # P4: beyond the longest exon every placement crosses, so the tilt saturates
     total_a, a = _aggregate([[100, 100]], [1.0], 200)
     for w in range(101, 201):
         assert a[w] == total_a[w] == max(0, 200 - w + 1)
 
-    # P5 — two transcripts of equal length but different structure differ, so the aggregate
-    #      depends on which transcripts are expressed. This is the whole reason theta appears.
+    # P5: two transcripts of equal length but different structure differ, so the aggregate depends on which transcripts
+    # are expressed, which is why theta appears.
     _, few = _aggregate([[100, 100]], [1.0], 200)
     _, many = _aggregate([[20] * 10], [1.0], 200)
     assert not np.array_equal(few, many)
@@ -122,11 +118,8 @@ def test_the_five_properties_the_derivation_CLAIMS_are_CHECKED_not_stated():
 
 
 def test_the_vectorised_aggregate_is_the_SCALAR_formula_SUMMED():
-    """Two implementations of one quantity, checked against each other on a mixed transcriptome.
-
-    The kernel builds ``T`` and ``A`` from two length spectra with a double reverse-cumsum; this
-    re-derives them one transcript at a time by direct enumeration — two implementations of one
-    quantity that would otherwise never be diffed.
+    """The kernel builds ``T`` and ``A`` from two length spectra with a double reverse-cumsum; this re-derives them one
+    transcript at a time by direct enumeration on a mixed transcriptome.
     """
     transcripts = [[7], [3, 11], [50] * 4, [1, 400], [120, 5, 9, 60]]
     theta = [3.0, 0.0, 17.5, 1.0, 250.0]
@@ -146,9 +139,9 @@ def test_the_vectorised_aggregate_is_the_SCALAR_formula_SUMMED():
 def test_the_crossing_probability_is_a_PROBABILITY_and_saturates_at_one():
     pi = crossing_probability(*_csr([[10, 10]]), np.array([1.0]), 30)
     assert np.all((pi >= 0.0) & (pi <= 1.0))
-    # Bin 0 included: the complement identity is negative there (a zero-length window sits on a
-    # boundary, so every internal one is counted twice and `A_j(0) = 1 - K`). It is not a fragment
-    # length, but a negative divisor left in the array is a landmine for the next consumer.
+    # Bin 0 included: the complement identity is negative there (a zero-length window sits on a boundary, so every
+    # internal one is counted twice and `A_j(0) = 1 - K`). It is not a fragment length, but a negative divisor must not
+    # be left in the array.
     assert pi[0] == 0.0
     assert pi[1] == 0.0
     # every placement of a window longer than the longest exon must cross
@@ -159,8 +152,8 @@ def test_the_crossing_probability_is_a_PROBABILITY_and_saturates_at_one():
 
 
 def test_a_SINGLE_EXON_annotation_makes_the_correction_INERT_not_a_division_by_zero():
-    """No sj anywhere means no opportunity anywhere. The correction must have nothing to say, and
-    in particular must not divide by zero or delete the pool."""
+    """No sj anywhere means no opportunity anywhere, so the correction has nothing to say and must neither divide by
+    zero nor delete the pool."""
     pi = crossing_probability(*_csr([[500], [900]]), np.array([1.0, 1.0]), 600)
     assert not pi.any()
     counts = np.zeros(601)
@@ -169,17 +162,15 @@ def test_a_SINGLE_EXON_annotation_makes_the_correction_INERT_not_a_division_by_z
 
 
 # ---------------------------------------------------------------------------
-# The falsification: does the correction actually recover the library distribution?
+# Does the correction recover the library distribution?
 # ---------------------------------------------------------------------------
 
 
 def _enumerate_library(transcripts, theta, pmf):
-    """Every placement, enumerated: ``(library, pool)`` histograms over fragment length.
-
-    A fragment of length ``w`` is drawn with probability ``pmf[w]`` and placed uniformly over the
-    start positions available to it on a transcript chosen with probability proportional to
-    ``theta``. ``library`` counts every placement; ``pool`` counts only those crossing a sj.
-    This is the generative model the opportunity function claims to invert, written out by hand.
+    """Every placement, enumerated: ``(library, pool)`` histograms over fragment length. A fragment of length ``w`` is
+    drawn with probability ``pmf[w]`` and placed uniformly over the start positions available to it on a transcript
+    chosen with probability proportional to ``theta``. ``library`` counts every placement; ``pool`` only those crossing
+    a sj. This is the generative model the opportunity function claims to invert.
     """
     n = len(pmf)
     library = np.zeros(n)
@@ -198,12 +189,9 @@ def _enumerate_library(transcripts, theta, pmf):
 
 
 def test_the_correction_RECOVERS_the_library_distribution_from_an_ENUMERATED_pool():
-    """The gate TRAPS: divide-by-a-probability exists to pass, with nothing tuned and no tolerance
-    beyond float.
-
-    Build a transcriptome and a fragment-length distribution, enumerate every placement to get both
-    the library histogram and the sj-crossing subset of it, then de-tilt the subset. It must
-    come back to the library histogram — shape-exactly, because the de-tilt preserves the total.
+    """Enumerate every placement to get the library histogram and its sj-crossing subset, then de-tilt the subset: it
+    must come back to the library histogram, shape-exactly since the de-tilt preserves the total, with nothing tuned and
+    no tolerance beyond float.
     """
     transcripts = [[30, 40], [12] * 6, [70], [25, 8, 61], [100, 3]]
     theta = [5.0, 2.0, 9.0, 1.0, 4.0]
@@ -225,7 +213,7 @@ def test_the_correction_RECOVERS_the_library_distribution_from_an_ENUMERATED_poo
 
 
 def test_the_correction_moves_the_pool_MEAN_onto_the_librarys():
-    """The same statement in the one number the calibrator actually consumes."""
+    """The same statement in the one number the calibrator consumes."""
     transcripts = [[30, 40], [12] * 6, [70], [25, 8, 61], [100, 3]]
     theta = [5.0, 2.0, 9.0, 1.0, 4.0]
     pmf = np.zeros(91)
@@ -241,12 +229,9 @@ def test_the_correction_moves_the_pool_MEAN_onto_the_librarys():
 
 
 def test_the_ratio_form_is_what_makes_a_WRONG_theta_SAFE():
-    """The worked examples of the derivation divide by ``A``; production divides by ``A / T``.
-
-    With a deliberately wrong theta — all the weight on the transcript with the shortest exons, which
-    has the steepest tilt — the ``A``-only form OVERSHOOTS past the library mean, i.e. it is worse
-    than not correcting. The ratio form must not, because a reweighting moves ``A`` and ``T``
-    together.
+    """With a deliberately wrong theta (all the weight on the transcript with the shortest exons, which has the steepest
+    tilt), dividing by ``A`` alone overshoots past the library mean, worse than no correction. The ratio form ``A / T``
+    must not, because a reweighting moves ``A`` and ``T`` together.
     """
     transcripts = [[30, 40], [6] * 12, [70], [25, 8, 61], [100, 3]]
     theta = [5.0, 2.0, 9.0, 1.0, 4.0]
@@ -276,11 +261,9 @@ def test_the_ratio_form_is_what_makes_a_WRONG_theta_SAFE():
 
 
 def test_the_detilt_preserves_the_EVIDENCE_COUNT():
-    """It changes the pool's shape, never how much evidence the pool represents.
-
-    ``build_fl_models`` shrinks each pool toward the anchor with a Dirichlet pseudo-count, and the
-    strength of that shrink is the pool total. A shape correction that also inflated the total would
-    silently weaken the shrinkage as a side effect — two things varied, one of them by accident.
+    """The de-tilt changes the pool's shape, never how much evidence it represents: ``build_fl_models`` shrinks each
+    pool toward the anchor with a Dirichlet pseudo-count whose strength is the pool total, so inflating the total would
+    weaken the shrinkage as a side effect.
     """
     pi = crossing_probability(*_csr([[40, 60], [10] * 10]), np.array([3.0, 1.0]), 120)
     counts = np.zeros(121)
@@ -305,12 +288,9 @@ def test_the_detilt_cannot_INVENT_mass_where_the_pool_has_none():
 
 
 def test_the_index_adapter_uses_the_REAL_transcripts_and_only_those(mini_index):
-    """``~is_synthetic``, alone. The manufactured nascent spans are not molecules anyone sequenced,
-    and weighting them would put opportunity on exon structures the library does not contain.
-
-    Not ``~is_synthetic & ~is_single_exon``: a real single-exon transcript is a real transcript, and
-    using that flag as a realness filter deletes real transcripts
-    (TRAPS: nrna-does-not-mean-synthetic).
+    """``~is_synthetic`` alone: the synthetic nascent spans are not sequenced molecules, and weighting them would put
+    opportunity on exon structures the library does not contain. ``is_single_exon`` is not a realness filter: a real
+    single-exon transcript is a real transcript.
     """
     max_length = 400
     pi = crossing_probability_from_index(mini_index, max_length)
@@ -323,7 +303,7 @@ def test_the_index_adapter_uses_the_REAL_transcripts_and_only_those(mini_index):
     want = crossing_probability(*_csr(transcripts), np.ones(len(transcripts)), max_length)
     np.testing.assert_allclose(pi, want, rtol=0, atol=0)
 
-    # and it is not the answer you get by weighting everything, or the filter is doing nothing
+    # and it differs from weighting everything, or the filter would be doing nothing
     assert int((~real).sum()) > 0, "MINI_GTF grew no synthetic rows — this test proves nothing"
     every = []
     for i in range(len(mini_index.t_df)):
@@ -334,8 +314,8 @@ def test_the_index_adapter_uses_the_REAL_transcripts_and_only_those(mini_index):
 
 
 def test_the_index_adapter_agrees_with_the_ENUMERATING_oracle_on_a_real_index(mini_index):
-    """One more rung: the adapter, the kernel and a hand enumeration all on the same three
-    transcripts, so a wrong exon-length unpacking cannot hide behind the kernel."""
+    """The adapter, the kernel and a hand enumeration on the same three transcripts, so a wrong exon-length unpacking
+    cannot hide behind the kernel."""
     pi = crossing_probability_from_index(mini_index, 400)
     real = np.nonzero(~mini_index.t_df["is_synthetic"].to_numpy())[0]
     transcripts = [[int(b - a) for a, b in mini_index.get_exon_intervals(int(i))] for i in real]
@@ -351,9 +331,8 @@ def test_the_index_adapter_agrees_with_the_ENUMERATING_oracle_on_a_real_index(mi
 
 
 def test_build_fl_models_WITHOUT_the_divisor_is_unchanged():
-    """``None`` means "no annotation was offered", and then the pool is what it always was.
-
-    That is what makes the correction one thing varied rather than a rewrite of the EB path.
+    """``None`` means "no annotation was offered", and then the pool is unchanged, so the correction is one thing varied
+    rather than a rewrite of the EB path.
     """
     from types import SimpleNamespace
 

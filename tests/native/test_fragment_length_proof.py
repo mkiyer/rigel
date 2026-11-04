@@ -1,20 +1,17 @@
 """The accumulator's fragment length ``L`` and its deposit geometry, proved against an independent oracle.
 
-``L`` is the one definition of fragment length in the tool, so it is held here against a DIFFERENT
-ALGORITHM rather than a different spelling of the same one: the molecule's covered bases are re-derived
-by integer set arithmetic, ``set(range(start, end))`` minus each intron's range, with no sorting, no
-merging, no cursor walk and no searchsorted. Every malformed intron list the production path handles by
-explicit logic — overlapping, nested, abutting, duplicated, zero-length, out-of-range — the oracle
-handles by construction, because set subtraction is idempotent and order-free; an oracle that called the
-builder's own helper would validate nothing. ``L``, the crossed boundaries (the molecule holds the bases
-on both sides) and the containing region all follow from that one set, which is what makes this a proof
-of the GEOMETRY and not only of the length: whatever counts toward ``L`` must also count as coverage for
-crossing, or the density estimator is biased, and both are asserted together. The space is enumerated
-exhaustively at up to two introns over a 12 bp reference and sampled at BAM-scale coordinates with up to
-four, because a tiny coordinate space cannot produce a 300 bp molecule spanning a 10 kb intron. The
-fixture carries no annotated sj, so spliced routing belongs to ``test_accumulator_spec.py``; proving
-this reference proves the C++ too, since ``test_accumulator_native_parity.py`` gates the native
-accumulator on byte-identity to it.
+``L`` is the tool's one definition of fragment length, so it is checked against a different algorithm, not a different
+spelling of the same one: the molecule's covered bases are re-derived by integer set arithmetic, ``set(range(start,
+end))`` minus each intron's range, with no sorting, merging, cursor walk or searchsorted. Malformed intron lists
+(overlapping, nested, abutting, duplicated, zero-length, out of range) that production handles by explicit logic, the
+oracle handles by construction, because set subtraction is idempotent and order-free. ``L``, the crossed boundaries and
+the containing region all follow from that one set, so the tests prove the geometry as well as the length: whatever
+counts toward ``L`` must also count as coverage for crossing, or the density estimator is biased.
+
+The space is enumerated exhaustively up to two introns over a 12 bp reference and sampled at BAM-scale coordinates with
+up to four. The fixture carries no annotated sj; spliced routing is ``test_accumulator_spec.py``'s.
+``test_accumulator_native_parity.py`` holds the C++ byte-identical to this reference, so proving the reference proves
+the C++.
 """
 
 from __future__ import annotations
@@ -32,11 +29,8 @@ from ._accumulator_reference import Accumulator, DepositOutcome, GapHypothesis, 
 
 
 def covered_bases(ref_len: int, start: int, end: int, introns) -> set[int]:
-    """The molecule's covered genomic bases, by SET ARITHMETIC — the independent algorithm.
-
-    Clipping to the reference is part of the definition: a fragment overhanging a reference end is
-    clipped, and ``L`` is the clipped length.
-    """
+    """The molecule's covered genomic bases, by set arithmetic. A fragment overhanging a reference end is clipped, and
+    ``L`` is the clipped length."""
     s, e = max(int(start), 0), min(int(end), ref_len)
     if e <= s:
         return set()
@@ -49,20 +43,18 @@ def covered_bases(ref_len: int, start: int, end: int, introns) -> set[int]:
 def oracle_deposits(region_bounds, ref_len: int, start: int, end: int, introns, spliced: bool):
     """Every population the deposit rule credits, derived from the covered set alone.
 
-    Returns ``(L, crossed_boundaries, contained_region)`` with local indices, or ``None`` for a fragment
-    that deposits nothing. ``region_bounds`` are this reference's region-bound positions. The oracle
-    derives nothing an assertion does not read: a quantity nobody asserts is dead weight that reads as
-    coverage.
+    Returns ``(L, crossed_boundaries, contained_region)`` with local indices, or ``None`` for a fragment that deposits
+    nothing. ``region_bounds`` are this reference's region-bound positions. The oracle derives only what an assertion
+    reads.
     """
     covered = covered_bases(ref_len, start, end, introns)
     if not covered:
         return None
     length = len(covered)
-    # A boundary at region_bound position p is crossed iff the molecule holds the bases on BOTH sides of it.
-    # Reported as BOUNDARY indices: region bound ``i`` is boundary ``i − 1`` (the deposit writes
-    # ``boundary_base + boundary - 1``), because bound 0 is the reference start and owns no interior
-    # boundary. The oracle re-derives that offset rather than importing it, and catching an offset error
-    # is exactly what it is for.
+    # A boundary at region-bound position p is crossed iff the molecule holds the bases on both sides of it. Reported as
+    # boundary indices: region bound ``i`` is boundary ``i − 1`` (the deposit writes ``boundary_base + boundary - 1``),
+    # because bound 0 is the reference start and owns no interior boundary. The oracle re-derives that offset rather
+    # than importing it, so an offset error shows.
     crossed = {i - 1 for i, p in enumerate(region_bounds) if (p - 1) in covered and p in covered}
 
     def region_of(pos):
@@ -136,8 +128,7 @@ def _check_one(start: int, end: int, introns) -> None:
     got_crossed, got_contained = _observed(acc)
     ctx = f"[{start},{end}) introns={introns}"
 
-    # L, read back from the DEPOSIT itself rather than from an accessor — the number that actually
-    # reached the tally is the one that matters.
+    # L is read back from the deposit itself, the number that reached the tally.
     t = acc.tally
     n_cross = int(t.boundary_unspliced_count.sum())
     if n_cross:
@@ -151,11 +142,11 @@ def _check_one(start: int, end: int, introns) -> None:
 
     assert got_crossed == crossed, f"{ctx}: crossed boundaries {got_crossed} != oracle {crossed}"
     assert got_contained == contained, f"{ctx}: contained {got_contained} != oracle {contained}"
-    # the start-count invariant: exactly one, at the region holding the first COVERED base
+    # the start-count invariant: exactly one, at the region holding the first covered base
     assert int(t.region_start_count.sum()) == 1, ctx
 
 
-# --- EXHAUSTIVE: every configuration with up to two introns ------------------------------------------
+# --- Exhaustive: every configuration with up to two introns ------------------------------------------
 
 
 def _all_intervals(n: int):
@@ -164,11 +155,8 @@ def _all_intervals(n: int):
 
 @pytest.mark.parametrize("n_introns", [0, 1, 2])
 def test_exhaustive_against_the_set_oracle(n_introns):
-    """EVERY fragment and EVERY intron list with ``n_introns`` introns over a 12 bp reference.
-
-    Not a sample — the complete space. Zero-length introns, introns outside the fragment, nested,
-    overlapping, abutting and duplicated pairs all occur here by enumeration rather than by being
-    thought of.
+    """Every fragment and every intron list with ``n_introns`` introns over a 12 bp reference: the complete space, so
+    zero-length, outside, nested, overlapping, abutting and duplicated introns all occur by enumeration.
     """
     spans = [(s, e) for s, e in _all_intervals(_REF_LEN) if e > s]
     intron_lists = list(
@@ -183,16 +171,13 @@ def test_exhaustive_against_the_set_oracle(n_introns):
     print(f"\n  n_introns={n_introns}: {checked:,} configurations checked against the set oracle")
 
 
-# --- RANDOMISED: realistic coordinates, up to four introns -------------------------------------------
+# --- Randomised: realistic coordinates, up to four introns -------------------------------------------
 
 
 def test_randomised_at_realistic_scale():
-    """The same oracle at coordinates a real BAM produces, with up to 4 introns.
-
-    Exhaustive enumeration is only affordable in a tiny coordinate space, and a tiny space cannot
-    produce a 300 bp molecule spanning a 10 kb intron — the shape that shows the length limit applies
-    to ``L`` and never to the span. Fixed seed: this is a proof, not a smoke test, so it must be
-    reproducible.
+    """The same oracle at coordinates a real BAM produces, with up to 4 introns. Only this scale can produce a 300 bp
+    molecule spanning a 10 kb intron, the shape that shows the length limit applies to ``L`` and never to the span. The
+    seed is fixed so the proof is reproducible.
     """
     rng = np.random.default_rng(20260731)
     region_bounds = np.array([0, 137, 138, 400, 401, 1200, 5000, 5001, 9000], dtype=np.int64)
@@ -240,17 +225,14 @@ def test_randomised_at_realistic_scale():
     )
 
 
-# --- the property the audit turns on ------------------------------------------------------------------
+# --- Coverage and length share one set ----------------------------------------------------------------
 
 
 def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
-    """Whatever counts toward ``L`` must also count as coverage for crossing, or the density estimator
-    is biased.
-
-    A mate gap must count toward ``L`` and cross boundaries; an intron must do neither. Both are
-    asserted here from ONE set, which is the only way the two rules are held against each other.
+    """Whatever counts toward ``L`` must also count as coverage for crossing, or the density estimator is biased. A mate
+    gap counts toward ``L`` and crosses boundaries; an intron does neither. Both are asserted from one set.
     """
-    # a paired-end molecule with an unsequenced mate gap: the gap IS part of the molecule
+    # a paired-end molecule with an unsequenced mate gap: the gap is part of the molecule
     acc = _acc()
     acc.deposit(0, 1, 11, observed_introns=[])
     assert int(acc.tally.region_contained_count.sum()) == 0
@@ -259,7 +241,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
         "the mate gap must carry the molecule across every interior boundary"
     )
 
-    # the same span with the middle excised as an intron: L shrinks AND the boundaries under it go uncrossed
+    # the same span with the middle excised as an intron: L shrinks and the boundaries under it go uncrossed
     acc2 = _acc()
     acc2.deposit(0, 1, 11, observed_introns=[(3, 9)])
     got2, _ = _observed(acc2)
@@ -269,17 +251,15 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     assert len(covered_bases(_REF_LEN, 1, 11, [(3, 9)])) == 4
 
 
-# --- the unconditional histogram, and its invariant (TRAPS: a-purity-filter-is-a-length-filter) -----
+# --- The unconditional length histogram and its invariant -------------------------------------------
 
 
 def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
-    """``Σ deposited_lengths == Σ region_start_count == qc.deposited`` (TRAPS:
-    a-purity-filter-is-a-length-filter).
+    """``Σ deposited_lengths == Σ region_start_count == qc.deposited``.
 
-    Three counters over one population, so they cannot drift by construction. This is a different
-    statement from the start-count invariant: that one says every fragment was located in space, this
-    one that every fragment was binned by length. A histogram that is the anchor for every FL model in
-    the tool must not be allowed to run one fragment short.
+    Three counters over one population. The start-count invariant says every fragment was located in space; this one
+    says every fragment was binned by length. The histogram anchors every fragment-length model in the tool, so it must
+    not run one fragment short.
     """
     acc = _acc(max_fragment_length=64)
     lengths = []
@@ -297,7 +277,7 @@ def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
     assert int(t.deposited_lengths.sum()) == len(lengths)
     assert int(t.deposited_lengths.sum()) == int(t.region_start_count.sum())
     assert int(t.deposited_lengths.sum()) == t.qc[DepositOutcome.DEPOSITED.value]
-    # and it is binned at L — the ORACLE's L, not the accumulator's own
+    # and it is binned at L, the oracle's L rather than the accumulator's own
     expected = np.zeros_like(t.deposited_lengths)
     for length in lengths:
         expected[length] += 1
@@ -305,21 +285,19 @@ def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
 
 
 def test_a_REJECTED_fragment_is_not_binned():
-    """The histogram is unconditional GIVEN DEPOSIT, and the given matters. A fragment over the
-    length limit, or one
-    whose path is undetermined, deposits nothing and must bin nothing; each is counted in ``qc``
-    instead. That is what makes this the right empirical-Bayes anchor rather than merely a convenient
-    one: it describes exactly the population the pure pools are drawn from, and an anchor over a wider
-    population than the pools would re-create the frame mismatch in a new place.
+    """The histogram is unconditional given deposit. A fragment over the length limit, or one whose path is
+    undetermined, deposits nothing and bins nothing; each is counted in ``qc`` instead. So the histogram describes
+    exactly the population the pure pools are drawn from; an anchor over a wider population would mismatch the pools'
+    frame.
     """
     acc = _acc(max_fragment_length=4)
     assert acc.deposit(0, 0, 12, observed_introns=[]) is DepositOutcome.TOO_LONG
     assert int(acc.tally.deposited_lengths.sum()) == 0
     assert acc.tally.qc[DepositOutcome.TOO_LONG.value] == 1
 
-    # A DEFERRED fragment: two hypotheses about its unsequenced gap survive, so its L is not one number
-    # and there is nothing to bin. The deferral is the ACCUMULATOR's verdict rather than the caller's,
-    # so it has to be produced by handing over a hypothesis set with two answers in it.
+    # A deferred fragment: two hypotheses about its unsequenced gap survive, so its L is not one number and there is
+    # nothing to bin. The deferral is the accumulator's own verdict, so the test hands it a hypothesis set with two
+    # answers.
     acc2 = _acc()
     outcome = acc2.deposit(0, 0, 5, hypotheses=(GapHypothesis(((1, 3),)), GapHypothesis()))
     assert outcome is DepositOutcome.DEFERRED
@@ -332,12 +310,9 @@ def test_a_REJECTED_fragment_is_not_binned():
 
 
 def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
-    """The property that makes it usable as the anchor: every pooled fragment is also binned here, at
-    the SAME length. The pools are conditioned subsets of this population, not a different one.
-
-    It is a strict superset in general — an exonic contained fragment and a multi-boundary crossing
-    enter no pool at all, an impure pool being worse than a missing one — which is precisely why the
-    pools could never serve as their own anchor.
+    """Every pooled fragment is also binned here, at the same length: the pools are conditioned subsets of this
+    population. The superset is strict (an exonic contained fragment or a multi-boundary crossing enters no pool, since
+    an impure pool is worse than a missing one), which is why the pools cannot anchor themselves.
     """
     acc = _acc(max_fragment_length=64)
     for start, end in ((0, 2), (0, 5), (1, 11), (3, 4), (5, 9), (2, 12)):
@@ -351,8 +326,7 @@ def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
     assert int(t.deposited_lengths.sum()) == t.qc[DepositOutcome.DEPOSITED.value]
 
 
-#: One convention: fractions are float64, so `n` round-to-nearest additions differ from the real
-#: answer by at most `n` ulp. Derived from the machine, never fitted.
+#: Fractions are float64, so `n` round-to-nearest additions differ from the exact answer by at most `n` ulp.
 EPS = float(np.finfo(np.float64).eps)
 
 

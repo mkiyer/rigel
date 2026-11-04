@@ -1,9 +1,9 @@
-"""SHADOW TRANSCRIPTS — unannotated transcription the simulator draws from and the index never sees.
+"""Shadow transcripts: unannotated transcription the simulator draws from and the index never sees.
 
-The gate on the MERGE: shadows are appended to the index's transcript list for SIMULATION with
-``t_index`` continuing after the index's rows, no nascent, and are REFUSED if the index already knows
-their id — a shadow the tool can see is not a shadow. Their fragments are named like any RNA fragment, so
-the oracle files them as ``mrna`` without a read-name change (``rigel.sim.read_name.parse_origin``).
+The merge appends shadows to the index's transcript list for simulation, with ``t_index`` continuing after the
+index's rows and no nascent span, and refuses one whose id the index already knows: a shadow the tool can see is not
+a shadow. Their fragments are named like any RNA fragment, so the oracle files them as ``mrna`` without a read-name
+change (``rigel.sim.read_name.parse_origin``).
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def test_shadows_are_appended_after_the_index_rows_with_no_nascent(tmp_path):
 
 
 def test_a_shadow_the_index_already_knows_is_refused(tmp_path):
-    """PERTURBATION of the premise: name a shadow after an annotated transcript and the merge must refuse."""
+    """A shadow named after an annotated transcript is refused by the merge."""
     index_tx = [_tx("A", "chr1", [(100, 200)], t_index=0)]
     gtf = _gtf(tmp_path, [("A", "blank", "+", (1000, 2000))])
     with pytest.raises(ValueError, match="KNOWN to the index"):

@@ -1,6 +1,6 @@
-"""``second_pass.score_held_fragments`` on fragments held on their PLACEMENTS: the placement term decides.
+"""``second_pass.score_held_fragments`` on fragments held on their placements: the placement term decides.
 
-A two-contig scan with the same exon geometry on both, UNIQUE contained depth at the first exon of each
+A two-contig scan with the same exon geometry on both, unique contained depth at the first exon of each
 contig in a known ratio, and multimapping fragments (``NH = 2``, one hit per contig) contained in both.
 The multimapper's two placements tie on every existing factor — the same length, the same unspliced
 path, no contested intron, no motif — so only the placement abundance ``A_p`` separates them, and it
@@ -287,8 +287,8 @@ def test_a_copy_with_no_unique_traffic_reads_the_bulk_beside_one_that_has_some(
     uniform rate before capture and capture only enriches, so a place gDNA can be holds at least the bulk. The silent
     copy reads the library's bulk, not a hard zero, and the draw weighs the copies by their terms.
 
-    PERTURBATION: without the floor the silent copy reads 0 and is never drawn; with a sum in place of the bound the
-    copy WITH traffic reads its own density plus the bulk.
+    Perturbation: without the floor the silent copy reads 0 and is never drawn; with a sum in place of the bound the
+    copy with traffic reads its own density plus the bulk.
     """
     from rigel.calibration.effective_length import observable_contained_eff_length
 
@@ -313,7 +313,7 @@ def test_two_copies_one_mismatch_apart_are_drawn_at_the_mismatch_price(one_misma
     """The draw reads a multimapper's sequence at the EM's own prices: at the library's mismatch rate 0.01 a copy
     with one more mismatch is weighed by ``ε / (3(1 − ε))`` against the one it matches, everything else tied.
 
-    PERTURBATION: a draw that reads no sequence splits these records evenly.
+    Perturbation: a draw that reads no sequence splits these records evenly.
     """
     from rigel.scoring import sequence_log_penalties
 

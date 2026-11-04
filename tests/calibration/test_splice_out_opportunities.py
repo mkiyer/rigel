@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration import splice_graph as SG
-from rigel.native import transfer_prepare
+from rigel._solve_impl import transfer_prepare
 from _transfer_harness import NONE, Prepared, _rule
 
 GAPS = [(250, 78), (78, 250), (150, 150)]
@@ -67,9 +67,9 @@ def test_terminus_outside_face_preserves_each_component_opportunity(
 def test_each_face_reads_its_own_junction_route_in_every_orientation(
     kind, mirror, strand, junction_opportunity
 ):
-    """A junction's RNA rate is its count over ITS OWN opportunity — not the boundary's ``Er`` — read
-    from the route on the junction's exon side: lo or hi, on either strand. A terminus boundary adds
-    its own spliced crossing, and its junction's route when that leaves from the outside exon."""
+    """A junction's RNA rate is its count over its own opportunity, not the boundary's ``Er``, read from the route on
+    the junction's exon side (lo or hi, on either strand). A terminus boundary adds its own spliced crossing, and its
+    junction's route when that leaves from the outside exon."""
     for gdna_length, rna_length in GAPS:
         case = _density_case(
             gdna_length,
@@ -129,11 +129,10 @@ def _density_case(
     crossing_rate=0.0,
     rna_opportunity_scale=(1.0, 1.0, 1.0),
 ):
-    """Three slots — region, boundary, region — with known gDNA, unspliced and spliced densities.
-
-    ``near`` is the exon on the junction's side (left, or right when ``mirror``), ``far`` the other
-    region: an intron (``kind="intron"``) or an exon. The junction's count is its rate times ITS OWN
-    opportunity, ``junction_opportunity`` times the boundary's ``Er``; its route carries the rate.
+    """Three slots (region, boundary, region) with known gDNA, unspliced and spliced densities. ``near`` is the exon on
+    the junction's side (left, or right when ``mirror``), ``far`` the other region: an intron (``kind="intron"``) or an
+    exon. The junction's count is its rate times its own opportunity, ``junction_opportunity`` times the boundary's
+    ``Er``; its route carries the rate.
     """
     near, far = (2, 0) if mirror else (0, 2)
     tss, tes, donor, acceptor = BITS[strand]
@@ -196,7 +195,6 @@ def _density_case(
         eff_gdna=ag,
         eff_rna=ar,
         has_own_composition=np.ones(3, bool),
-        has_strand=True,
         kappa=0.99,
         rho_gdna=depth,
         rho_rna=depth,

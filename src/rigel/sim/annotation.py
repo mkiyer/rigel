@@ -1,11 +1,5 @@
-"""
-rigel.sim.annotation — Gene/transcript builder with splice-motif injection.
-
-Provides a ``GeneBuilder`` that accumulates gene and transcript
-definitions, injects canonical splice-site motifs (GT-AG for +strand,
-CT-AC for −strand) into the ``MutableGenome``, and writes
-GENCODE-style GTF annotation files.
-"""
+"""``GeneBuilder``: accumulates gene and transcript definitions, writes their canonical splice-site motifs into a
+``MutableGenome``, and writes a GENCODE-style GTF."""
 
 import logging
 from dataclasses import dataclass
@@ -44,8 +38,8 @@ _TRANSCRIPT_REQUIRED = frozenset({"t_id", "exons"})
 
 
 def check_transcript_keys(gene_id: str, tdef: dict) -> None:
-    """Refuse a transcript entry with a key ``add_gene`` does not read (a misspelled ``abundance`` would simulate the
-    default of 100) or without one it needs."""
+    """Refuse a transcript entry with a key ``add_gene`` does not read (a misspelt ``abundance`` would simulate the
+    default) or without one it needs."""
     unknown = sorted(set(tdef) - TRANSCRIPT_KEYS)
     missing = sorted(_TRANSCRIPT_REQUIRED - set(tdef))
     if unknown or missing:
@@ -57,18 +51,8 @@ def check_transcript_keys(gene_id: str, tdef: dict) -> None:
 
 
 class GeneBuilder:
-    """Accumulates gene/transcript annotations and edits the genome.
-
-    For each intron (gap between consecutive exons), the builder injects
-    canonical splice-site motifs into the ``MutableGenome``:
-
-    - **Positive strand** (FR convention):
-      ``genome[intron_start:intron_start+2] = 'GT'`` (5′ donor)
-      ``genome[intron_end-2:intron_end] = 'AG'`` (3′ acceptor)
-
-    - **Negative strand** (reverse complement on genomic + strand):
-      ``genome[intron_start:intron_start+2] = 'CT'`` (rev-comp acceptor)
-      ``genome[intron_end-2:intron_end] = 'AC'`` (rev-comp donor)
+    """Accumulates gene and transcript annotations, writing each intron's splice-site motifs into the genome
+    (GT…AG on the plus strand, CT…AC on the minus strand, as read on the plus strand).
 
     Parameters
     ----------
@@ -107,13 +91,11 @@ class GeneBuilder:
 
             - ``"t_id"`` (str): transcript ID
             - ``"exons"`` (list[tuple[int,int]]): 0-based half-open exon coords
-            - ``"abundance"`` (float, optional): mature mRNA molecular
-              abundance, default 100.  Proportional to molecule count
-              after length normalisation (TPM-like).
-            - ``"nrna_abundance"`` (float, optional): nascent RNA molecular
-              abundance, default 0.  **Independent** of ``"abundance"``;
-              the two values are NOT coupled by subtraction.  Read
-              fractions depend on ``abundance × spliced_eff_len`` vs.
+            - ``"abundance"`` (float, optional): the transcript's molecular
+              abundance, default 100 (TPM-like).
+            - ``"nrna_abundance"`` (float, optional): its nascent molecular
+              abundance, default 0, independent of ``"abundance"``. Read
+              fractions follow ``abundance × spliced_eff_len`` against
               ``nrna_abundance × genomic_span_eff_len``.
         gene_name : str or None
             Gene symbol. Defaults to *gene_id*.
@@ -132,11 +114,9 @@ class GeneBuilder:
             abundance = tdef.get("abundance", _TranscriptSpec.abundance)
             nrna_abundance = tdef.get("nrna_abundance", _TranscriptSpec.nrna_abundance)
 
-            # Build sorted Interval list
             exons = sorted(Interval(s, e) for s, e in raw_exons)
             self._validate_exons(t_id, exons)
 
-            # Inject splice-site motifs for each intron
             for i in range(1, len(exons)):
                 intron_start = exons[i - 1].end
                 intron_end = exons[i].start
@@ -182,18 +162,7 @@ class GeneBuilder:
     # -- Splice motif injection -----------------------------------------------
 
     def _inject_splice_motif(self, intron_start: int, intron_end: int, strand: Strand) -> None:
-        """Edit the genome to place canonical splice-site dinucleotides.
-
-        For a positive-strand intron (GT-AG):
-            genome[intron_start:intron_start+2] = 'GT'  (5' donor)
-            genome[intron_end-2:intron_end]     = 'AG'  (3' acceptor)
-
-        For a negative-strand intron (CT-AC on genomic + strand):
-            genome[intron_start:intron_start+2] = 'CT'
-            genome[intron_end-2:intron_end]     = 'AC'
-
-        Delegates the placement to :func:`place_intron_motif`, which raises on an intron < 4 bp.
-        """
+        """Write one intron's splice-site dinucleotides (:func:`place_intron_motif`, which raises below 4 bp)."""
         place_intron_motif(self.genome.edit, intron_start, intron_end, strand)
 
     # -- Output ---------------------------------------------------------------
@@ -227,10 +196,8 @@ class GeneBuilder:
             t.compute_length()
             transcripts.append(t)
 
-        # Sort by genomic position
         transcripts.sort(key=lambda t: (t.ref, t.start, t.end, t.strand))
 
-        # Assign sequential t_index after sorting
         for ti, t in enumerate(transcripts):
             t.t_index = ti
 

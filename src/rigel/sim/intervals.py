@@ -1,8 +1,5 @@
-"""Shared genomic-interval helpers for the sim package.
-
-Two operations the capture sampler and the probe designer both need: merging overlapping genomic
-intervals, and projecting one genomic block onto a transcript's spliced coordinates.
-"""
+"""Interval helpers shared by the capture sampler and the probe designer: merging intervals, and projecting a
+genomic block onto a transcript's spliced coordinates."""
 
 from __future__ import annotations
 
@@ -32,12 +29,8 @@ def project_genomic_block_to_transcript(
     block_start: int,
     block_end: int,
 ) -> list[tuple[int, int]] | None:
-    """Project one genomic block onto transcript coordinates (None if not fully exonic).
-
-    Returns the transcript-space intervals the genomic ``[block_start, block_end)`` maps to,
-    oriented to the transcript's strand. ``None`` if any base of the block falls outside the
-    transcript's exons (i.e. the block is not fully contained in the spliced transcript).
-    """
+    """The transcript-space intervals, strand-oriented, that genomic ``[block_start, block_end)`` maps to; ``None``
+    if any base of the block falls outside the transcript's exons."""
     tx_len = int(transcript.length or transcript.compute_length())
     consumed = 0
     projected: list[tuple[int, int]] = []

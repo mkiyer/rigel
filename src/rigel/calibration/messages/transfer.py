@@ -1,103 +1,20 @@
-"""TransferPolicy — the COMPOSITION TRANSFER policy on the two-phase backbone: every node states its
-own claim, every directed face carries a recipient's rule, and the two passes do the rest.
+"""The composition-transfer message policy: its name, its strand model and its library reduction.
 
-       Gate: ``tests/calibration/test_transfer_policy.py``
+A message is either a composition profile (a max-normalised log-likelihood over the solve grid of the destination's
+gDNA share, carried across one face by a derived map) or a population level (an absolute profile over the log
+density, carried where composition cannot cross, as a bound). Each node states its own claim from data only; each
+directed face carries the recipient's rule (stop, forward, or a map); and the two passes and the solve do the rest. A
+message is built from the source's claim and the recipient's constants and observations, never from the recipient's
+belief; a flat profile is no claim, never a zero-filled one; and no node hears its own claim back. The builders
+(``splice_faces``, ``edge_level``, ``terminus_rules``, ``alternative_splice_site``, ``gdna_lane``, ``rna_lane``), the
+passes and the solve are native: ``native/transfer_kernel.h``, with the row constructors in ``native/transfer_rows.h``,
+run per block by ``native/solve_kernel.cpp``.
 
-Every message is a COMPOSITION PROFILE — a max-normalised log-likelihood over the solve grid of the
-destination's gDNA share — carried across ONE face by a derived map (the row constructors of
-`native/transfer_rows.h`), or a population's LEVEL — an absolute profile over the log density — carried
-where composition cannot cross, so no level ever crosses a capture cliff and no constant is anywhere. The
-policy has three parts, all of them the kernel's (`native/transfer_kernel.h`, run per block by
-`native/solve_kernel.cpp`); ``prepare_block`` is a table of contents: one named BUILDER per shipped
-message.
+What stays in Python is the library (:meth:`TransferPolicy.library`): the level lanes' two coordinates and whether the
+strand split is a live witness, reduced once per sweep over the whole chain from observations and geometry. They are
+the only things a message knows about slots outside its own block.
 
-* Every node's OWN CLAIM (``claims``): an eligible single-strand region's or boundary's conditional
-  binomial likelihood from its observed strand counts, where the library's strand protocol decision
-  declares the channel live (``strand``); an intergenic|exon edge's gDNA COUNT (the level lane: the edge's crossing is
-  structurally pure gDNA). ⛔ A claim is data only — never a belief, which already holds the prior and
-  the neighbours.
-* The RECIPIENT's rule per directed face: absent = STOP (composition cannot cross: the recipient
-  holds silence); FORWARD preserves the shared density mixture, shifting count odds by the component
-  opportunities where they differ; a
-  map = MODIFY (the face's arithmetic with its counting width and, where two witnesses exist, the
-  pair's own discrepancy). The rules are TYPED TABLES: every directed face is one of a node's two
-  sides — it hears from its left neighbour or its right — so a rule is a KIND and its parameters at
-  ``(destination, side)``, five kinds in all, and the passes read the table. The rules ARE the shipped
-  messages, each built by the builder named:
-
-  - ``splice_faces`` — the intron|exon face. intron ⇄ boundary: FORWARD both ways (one shared
-    unspliced population, expressed in each object's count frame; into the intron only under a shared
-    single strand). boundary → exon at a
-    LICENSED face (no terminus, the same strand set): the splice-in face map, the certified flux
-    capping the claimable gDNA share, widened by the face's counting. exon → boundary at that face:
-    the splice-in map read backwards, marginalised over the face's spliced-to-unspliced ratio.
-  - ``edge_level`` — intergenic|exon edge → exon: THE EDGE'S LEVEL, one-sided: the exon has at least
-    the edge's gDNA density, at the count's Poisson width; nothing above (no local witness prices
-    capture's enrichment of the interior), a zero count vacuous (darkness is not absence).
-  - ``terminus_rules`` — the exon|exon TERMINUS boundary ⇄ its OUTSIDE exon: the licence counts the
-    spliced crossing, using each component's geometric opportunity and the crossing's RNA rate — the outside exon's message travels the
-    splice-out map, the boundary's the face map with the spliced density. And a TERMINUS boundary →
-    the region INSIDE it (exon|exon and exon|intron alike): THE LEVEL RULE. Composition cannot cross
-    a terminus (new transcription starts or ends there), the gDNA LEVEL can: the boundary's OWN
-    strand profile — a measurement, never what it holds — carried through the level-kept map (the
-    inside's gDNA share is the boundary's share times its crossing density, over the inside's own
-    total), its shape preserved, blurred by the two totals' counting and by the pair's own
-    discrepancies: the excess of the totals' disagreement over counting, and, where the inside exon's
-    strand channel is live, the excess of the two strand modes' disagreement over counting. Value
-    kept, nothing pooled, no hypothesis chosen for the discrepancy. With no own claim the boundary
-    still sends what every library measures: its crossing's total bounds the inside's gDNA density
-    above. At an sj+terminus boundary a junction sharing the terminus does not change which flank is
-    inside; its flux belongs to the flank on the junction's exon side.
-  - ``alternative_splice_site`` — the ALTERNATIVE SPLICE SITE ⇄ both flanks: the intron-side flank
-    shares the full unspliced crossing, the exon-of-both flank the crossing plus the leaving isoform
-    measured as the route flux; each pair widened by its own disagreement beyond counting, nothing
-    pooled.
-  - ``gdna_lane`` — EVERY OTHER DIRECTED FACE (a strand change, termini pointing both ways, the AMBIG
-    complex, and every face into or out of an EMPTY node — a piece with no total) carries THE LEVEL
-    LANE: the gDNA level as an ABSOLUTE profile over the log density, which needs no map and no
-    recipient. An empty node forwards it unchanged; a full node emits the intersection of its own
-    level's lower side and the level it holds; the recipient prices the hop (both totals' counting
-    plus the abundance discrepancy beyond it) and takes it as a LOWER bound — a level that crosses a
-    face says "at least this much gDNA" and nothing more. The only faces with no rule at all lead
-    into intergenic regions (structurally pure gDNA) or off the chain.
-  - ``rna_lane`` — THE RNA LEVEL LANES: one lane per strand, its FACES from the flag bits (strand
-    ``s`` crosses a face iff the boundary carries none of ``s``'s bits and both nodes admit ``s``;
-    across ``s``'s own junction it enters ``s``'s INTRON — the intron test is per strand, from the
-    chain's ``exon_pos`` / ``exon_neg`` — and not ``s``'s exon; a terminus of ``s`` stops ``s``),
-    TWO-SIDED only between an intron of ``s`` and its own boundary (one shared unspliced population:
-    the whole profile), lower-only everywhere else, and EVERY hop priced by the pair — both counts'
-    counting plus the disagreement between the two nodes' estimates of the strand's abundance.
-    SOURCES: a single-strand node's own claim read as its live strand's RNA level; the certified flux
-    at each of an exon's junctions as that strand's level at the exon (one hop, boundary → exon; two
-    junctions pay their pair's disagreement beyond counting) — at an EMPTY exon piece too, which emits
-    it with the flux's own witness. DELIVERED at AMBIG nodes as one row over ψ's (λ, θ) cube
-    (`simplex_logodds.CubeRows`): a lower bound on RNA+ is an upper bound on the gDNA share through
-    the node's own strand counts — the side the gDNA lane cannot give (the bracket theorem, gated);
-    and at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face that sent no
-    composition (the solve). The tilt needs no lane of its own.
-
-* The two passes and the solve (``pass_block``, ``solve_block``): a node SENDS two things apart — its
-  own claim (a measurement) and what it holds from its far side (an imputation) — and the recipient's
-  rule decides what to do with each: a composition rule composes them (a witness product: profiles
-  add) and maps the product; a level rule reads the measurement only, because an imputation is never
-  re-issued as a level; a lane intersects them as bounds; either may stop — so a claim travels as far
-  as the faces admit it, each hop charging its own counting width, and no node ever hears its own
-  claim back (the forward pass composes only what came from the left, the backward pass only what came
-  from the right). At the solve the two held profiles add, the two held levels intersect and join them
-  as a constraint, and ψ fuses the row with the slot's own evidence and the prior.
-
-The laws the policy keeps: the sender publishes its claim unchanged; the recipient decides; a no-claim
-stays a no-claim — a flat profile is no claim on that channel, never a
-zero-filled one; a message is built from the source's claim and the recipient's constants
-and observations, never the recipient's belief.
-
-THE LIBRARY (`TransferPolicy.library`, once per sweep over the whole chain, `_Library`): the level
-lanes' two coordinates — the library's structurally pure gDNA density, and one RNA density both strands'
-lanes share — and whether the strand split is a live RNA witness anywhere. They are ratios of sums
-over structurally selected slots and one boolean, read from observations and geometry only, and they
-are the ONLY things a message knows about slots outside its own block. The gates hold the kernel's
-tables to independent recomputes through `native.transfer_prepare`, `transfer_pass` and
-`transfer_solve` (`tests/calibration/_transfer_harness.py`).
+Gate: ``tests/calibration/test_transfer_policy.py``.
 """
 
 from __future__ import annotations
@@ -114,15 +31,14 @@ __all__ = ["TransferPolicy"]
 
 @dataclass(frozen=True, slots=True)
 class _Library:
-    """What the whole library says, reduced once per sweep and read by every block — the only
-    cross-block information a message may use. ``rho_gdna``: the structurally pure gDNA density, the
-    gDNA lane's coordinate (``0.0``: no positive density anywhere, so no level lane can be built).
-    ``rho_rna``: the RNA lanes' one coordinate — the unspliced RNA density over the library's
-    single-strand exons, both strands pooled, or over every exon when none has RNA opportunity.
-    When that origin is zero, available RNA count/opportunity pairs supply a numerical scale
-    (a level is absolute and the coordinate only its origin, so one serves both strands and a strand with
-    no single-strand exon of its own still builds its flux levels). ``split_live``: an available
-    strand model and the library's protocol verdict permit local strand-difference witnesses."""
+    """What the whole library says, reduced once per sweep and read by every block.
+
+    ``rho_gdna``: the structurally pure gDNA density, the gDNA lane's coordinate (``0.0``: no positive density
+    anywhere, so no level lane can be built). ``rho_rna``: the RNA lanes' one coordinate, the unspliced RNA density
+    over the single-strand exons with both strands pooled, or over every exon when none has RNA opportunity; when that
+    is zero, the available RNA count/opportunity pairs supply the scale. A level is absolute and the coordinate only
+    its origin, so one coordinate serves both strands. ``split_live``: whether the library's protocol verdict permits
+    local strand-difference witnesses."""
 
     rho_gdna: float
     rho_rna: float
@@ -130,16 +46,13 @@ class _Library:
 
 
 class TransferPolicy:
-    """Observed strand claims use the fitted RNA sense fraction ``kappa``.
-
-    ``None`` leaves strand claims off; eligible regions and boundaries otherwise
-    supply the conditional-binomial likelihood of their observed strand counts.
-    """
+    """The composition-transfer policy. Observed strand claims use the fitted RNA sense fraction ``kappa``: eligible
+    regions and boundaries supply the conditional-binomial likelihood of their observed strand counts."""
 
     name = "transfer"
 
-    def __init__(self, kappa: float | None = None):
-        self.kappa = None if kappa is None else float(kappa)
+    def __init__(self, kappa: float):
+        self.kappa = float(kappa)
 
     # ── the library: the lanes' coordinates and the strand witness's liveness, once ─────────────────
     def library(self, view: ChainView) -> _Library:
@@ -149,31 +62,26 @@ class TransferPolicy:
         a_g = np.asarray(view.eff_gdna, np.float64)
         a_r = np.asarray(view.eff_rna, np.float64)
         cnt = np.asarray(view.unspliced_count, np.float64)
-        # the gDNA lane's coordinate: the library's structurally pure gDNA density, over the intergenic
-        # regions (`ChainView.terminal`). It is a REFERENCE for a log axis, so any positive density
-        # serves; when the intergenic count is zero (a zero-gDNA library with no intergenic reads) the
-        # library-wide density stands in. ⛔ Without that fallback the coordinate is zero and the gDNA
-        # lane is never built.
+        # the gDNA lane's coordinate: the structurally pure gDNA density over the intergenic regions
+        # (``ChainView.terminal``). It is only the reference of a log axis, so any positive density serves; with no
+        # intergenic reads the library-wide density stands in, because a zero coordinate would build no gDNA lane.
         pure = view.terminal & (a_g > 0.0)
         rho = float(n_u[pure].sum() / a_g[pure].sum()) if a_g[pure].sum() > 0.0 else 0.0
         if not rho > 0.0:
             den = float(a_g[a_g > 0.0].sum())
             rho = float(n_u[a_g > 0.0].sum()) / den if den > 0.0 else 0.0
         kappa = self.kappa
-        # the split is a witness of a strand's RNA only where the library's strand channel is live —
-        # the protocol decision (`ChainView.strand_live`). Availability does not depend on expression
-        # at disconnected exons; each hop reads its own observations.
+        # the split is a witness of a strand's RNA only where the library's strand channel is live
+        # (``ChainView.strand_live``); each hop reads its own observations.
         single = fp != fn
-        split_live = kappa is not None and bool(view.strand_live)
-        # the RNA lanes' coordinate: the unspliced RNA density over the single-strand exons, each strand
-        # read on its own column (the kernel's `read_column`: its own under a sense protocol, the other
-        # under an antisense one), both strands pooled; every exon when none has RNA opportunity
+        split_live = bool(view.strand_live)
+        # the RNA lanes' coordinate: the unspliced RNA density over the single-strand exons, each strand read on its
+        # own column (the kernel's ``read_column``: its own under a sense protocol, the other under an antisense one),
+        # both strands pooled; every exon when none has RNA opportunity
         num = den = 0.0
         for free, col in ((fp, 0), (fn, 1)):
             sel = is_exon & free & single & (a_r > 0.0)
-            col_read = int(
-                _rows.read_column(col, kappa is not None, 0.0 if kappa is None else kappa)
-            )
+            col_read = int(_rows.read_column(col, kappa))
             num += float(cnt[sel, col_read].sum())
             den += float(a_r[sel].sum())
         if den <= 0.0:
@@ -181,8 +89,8 @@ class TransferPolicy:
             num, den = float(cnt[sel].sum()), float(a_r[sel].sum())
         rho_rna = num / den if den > 0.0 else 0.0
         if rho_rna <= 0.0:
-            # A log coordinate must stay positive wherever local RNA evidence can exist.
-            # These pairs set only its units; the native builders still select the sources.
+            # a log coordinate must stay positive wherever local RNA evidence can exist; these pairs set only its
+            # units, and the native builders still select the sources
             available = (fp | fn) & (n_u > 0.0) & (a_r > 0.0)
             num, den = float(n_u[available].sum()), float(a_r[available].sum())
             for flux, rate in (

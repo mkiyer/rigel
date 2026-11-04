@@ -1,17 +1,10 @@
-"""Region signature encoding — the 4-bit exon/intron x strand annotation.
+"""Region signature encoding: the 4-bit exon/intron × strand annotation (layer 0).
 
-Every genome position carries a 4-bit *signature* recording which transcript features cover it:
-``{intron_pos, intron_neg, exon_pos, exon_neg}``. A calibration *region* (see
-:mod:`rigel.calibration.region_arrays`) is a maximal interval over which this signature is constant.
-
-This module is the pure encoding layer: the bit constants, the ``RegionType`` / ``RegionStrand``
-enums, and the small functions that derive a coarse class from a signature. It has no tunable
-parameters — the bit values and enum integers are a wire encoding, not heuristics — and it depends
-on nothing else in the package, so every other calibration module may import it freely.
-
-The derivations here are the vocabulary the rest of calibration is written in: the coarse type
-(exon wins over intron), the transcript-strand class, and the two per-strand activity masks that
-say which RNA populations the annotation admits at a position.
+Every genome position carries a 4-bit signature ``{intron_pos, intron_neg, exon_pos, exon_neg}`` recording which
+transcript features cover it; a calibration region (:mod:`rigel.calibration.region_arrays`) is a maximal interval of
+constant signature. This module holds the bit constants, the ``RegionType`` / ``RegionStrand`` enums and the coarse
+classes derived from a signature: the type (exon wins over intron), the transcript-strand class and the per-strand RNA
+masks. The bit values are a wire encoding, and the module imports nothing else in the package.
 """
 
 from __future__ import annotations
@@ -53,14 +46,9 @@ class RegionStrand(IntFlag):
     AMBIG = 3  # POS | NEG
 
 
-# Transcript-strand class for a region's signature — the int8 encoding used by
-# :class:`rigel.calibration.region_arrays.RegionArrays`. These are ALIASES of
-# :class:`RegionStrand` (which mirrors :class:`rigel.types.Strand`): there is ONE
-# strand-value convention across the codebase — NONE=0, POS=1, NEG=2, AMBIG=3.
-# All consumers compare against these named constants (equality, no sign
-# arithmetic), so a value in the Strand convention — e.g. the accumulator's
-# per-boundary splice-junction strand (Strand POS=1 / NEG=2) — routes directly
-# against TS_POS / TS_NEG with no conversion.
+# The int8 transcript-strand class :class:`~rigel.calibration.region_arrays.RegionArrays` carries: aliases of
+# :class:`RegionStrand`, which mirrors :class:`rigel.types.Strand`, so a value in the Strand convention (such as a
+# splice junction's strand) compares against TS_POS / TS_NEG with no conversion.
 TS_NONE: int = int(RegionStrand.NONE)  # 0
 TS_POS: int = int(RegionStrand.POS)  # 1
 TS_NEG: int = int(RegionStrand.NEG)  # 2
@@ -75,9 +63,8 @@ TS_AMBIG: int = int(RegionStrand.AMBIG)  # 3
 def coarse_type_array(signature: np.ndarray) -> np.ndarray:
     """Map a signature array to its uint8 :class:`RegionType` (exon > intron).
 
-    Returns ``0`` (INTERGENIC) / ``1`` (INTRON) / ``2`` (EXON) per region — the
-    region-type axis of the gDNA fragment-length pools, and the same convention as
-    the C++ accumulator's ``fl_pool_idx``.
+    Returns ``0`` (INTERGENIC) / ``1`` (INTRON) / ``2`` (EXON) per region: the region-type axis of the gDNA
+    fragment-length pools, the same convention as the C++ accumulator's ``fl_pool_idx``.
     """
     sig = np.asarray(signature)
     has_exon = (sig & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
@@ -108,11 +95,10 @@ def transcript_strand_class(signature: np.ndarray) -> np.ndarray:
 def rna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per-strand RNA-active masks from a signature array — ``(pos, neg)``.
 
-    RNA can be present wherever a transcript is (exon OR intron: RNA inside an intron is RNA
-    that has not spliced there), so the mask on strand ``s`` is the union of that strand's exon
-    and intron bits. This is the boundary solver's transcript-continuity gate ``free_s``: a
-    region's mask is its own bits; a boundary's is the AND of its two flanks, because both flanks
-    must carry the strand for an unspliced fragment to cross.
+    RNA can be present wherever a transcript is, exon or intron (RNA inside an intron is RNA that has not spliced
+    there), so the mask on strand ``s`` is the union of that strand's exon and intron bits. It is the solver's
+    transcript-continuity gate ``free_s``: a region's mask is its own bits, and a boundary's is the AND of its two
+    flanks, because both must carry the strand for an unspliced fragment to cross.
     """
     sig = np.asarray(signature)
     return (sig & (BIT_EXON_POS | BIT_INTRON_POS)) != 0, (

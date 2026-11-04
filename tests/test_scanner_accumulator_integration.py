@@ -59,8 +59,7 @@ def blacklisted_oracle(tmp_path):
     **every sj the simulator wrote**.
 
     This exists so the ``SPLICE_ARTIFACT`` term of the census identity is exercised rather than
-    asserted over a zero. A gate that can only ever see 0 on the term it was built for is green
-    because nothing ever made the check matter (`TRAPS: could-the-arm-have-fired`).
+    asserted over a zero: a gate that only ever sees 0 on the term it was built for checks nothing.
     """
     import pandas as pd
     import pysam
@@ -90,7 +89,7 @@ def blacklisted_oracle(tmp_path):
     )
     result = sc.build_oracle(n_fragments=200, sim_config=sim_config)
 
-    # The sj are read back OUT OF THE BAM rather than derived from the exon list above, so
+    # The sj are read back out of the BAM rather than derived from the exon list above, so
     # the fixture cannot silently blacklist nothing if the simulator's coordinate convention moves.
     introns: set[tuple[str, int, int]] = set()
     with pysam.AlignmentFile(str(result.bam_path), "rb") as bam:
@@ -146,14 +145,13 @@ class TestScannerAccumulatorIntegration:
         payload = _scan(oracle)
         assert payload is not None
         assert isinstance(payload, AccumulatorPayload)
-        assert payload.n_strand_columns == 2
 
     def test_payload_shape_matches_index_partition(self, oracle):
         """The payload's three axes must be exactly what the index's partition implies.
 
-        ``region_bounds`` are the region-bound POSITIONS: a reference with ``k`` of them owns
+        ``region_bounds`` are the region-bound positions: a reference with ``k`` of them owns
         ``k − 1`` regions and ``k − 2`` interior boundaries. Counting ``k`` boundary objects per
-        reference instead — the interiors plus two data-free terminals — gives an axis two entries
+        reference instead (the interiors plus two data-free terminals) gives an axis two entries
         too long, and every per-boundary array then addresses the wrong rows.
         """
         index = oracle.index
@@ -175,8 +173,8 @@ class TestScannerAccumulatorIntegration:
         assert payload.n_boundaries == payload.n_regions - n_live_refs
 
     def test_fl_pools_emitted(self, oracle):
-        """The scan emits the FIVE PURE fragment-length pools, binned at the same L as every other
-        bank. The pools are integer counts on a ``(N_FRAGMENT_POOLS, max_length + 1)`` grid — there
+        """The scan emits the five pure fragment-length pools, binned at the same L as every other
+        bank. The pools are integer counts on a ``(N_FRAGMENT_POOLS, max_length + 1)`` grid: there
         is no ``fl_pool_mass`` and no separate ``fl_max_size``, because a pool is a histogram of the
         same molecule length the accumulator deposits by."""
         from rigel.calibration.fl import gdna_fl_mass
@@ -191,25 +189,22 @@ class TestScannerAccumulatorIntegration:
 
     def test_at_least_some_mass_deposited(self, oracle):
         payload = _scan(oracle)
-        # ONE tally answers this: region_start_count is incremented once per ACCEPTED fragment, so its
-        # total IS the deposit count. Summing five arrays across two dtypes would be the alternative,
-        # and only because mass was once fractional and carried separately from the integer flux.
+        # One tally answers this: region_start_count is incremented once per accepted fragment, so its
+        # total is the deposit count.
         assert int(np.asarray(payload.region_start_count).sum()) > 0, "scanner deposited nothing"
         assert int(payload.qc.deposited) == int(np.asarray(payload.region_start_count).sum())
 
 
 class TestFragmentLengthAnchor:
-    """The empirical-Bayes anchor is the ACCUMULATOR's unconditional histogram.
+    """The empirical-Bayes anchor is the accumulator's unconditional histogram.
 
     ``build_fl_models`` EB-shrinks the accumulator's pure pools toward an anchor. An anchor taken
-    from the scanner instead measures fragment length by another rule over another population, so
-    accumulator-frame pools would be shrunk toward a scanner-frame anchor
-    (`TRAPS: pure-and-length-censored`).
+    from the scanner would measure fragment length by another rule over another population, so
+    accumulator-frame pools would be shrunk toward a scanner-frame anchor.
 
-    These tests use the blacklist fixture on purpose. On the plain oracle the two histograms are
-    byte-identical — a perfect BAM with no ambiguity makes the competing definitions agree — so a
-    value gate there passes no matter which anchor is wired in, and a byte-identical result is no
-    evidence.
+    These tests use the blacklist fixture on purpose: on the plain oracle a perfect BAM with no
+    ambiguity makes the competing definitions agree, so a value gate there passes whichever anchor
+    is wired in.
     """
 
     @staticmethod
@@ -218,11 +213,11 @@ class TestFragmentLengthAnchor:
         return scan_and_buffer(str(bam_path), index, config.scan)
 
     def test_the_anchor_is_the_accumulators_own_deposited_histogram(self, blacklisted_oracle):
-        """The anchor IS ``deposited_lengths``, over exactly the population the pools are drawn from.
+        """The anchor is ``deposited_lengths``, over exactly the population the pools are drawn from.
 
-        "Unconditional GIVEN DEPOSIT" — an anchor over a WIDER population would re-create the
-        frame mismatch somewhere new, so ``n_global`` must equal ``qc.deposited`` and not the count
-        of everything the scanner classified.
+        "Unconditional given deposit": an anchor over a wider population would re-create the frame
+        mismatch somewhere new, so the anchor's total must equal ``qc.deposited`` and not the count of
+        everything the scanner classified.
         """
         from rigel.calibration.fl import build_fl_models
 
@@ -231,26 +226,20 @@ class TestFragmentLengthAnchor:
 
         fl = build_fl_models(payload)
         np.testing.assert_array_equal(fl.global_counts, np.asarray(payload.deposited_lengths))
-        assert fl.n_global == float(payload.qc.deposited)
+        assert float(fl.global_counts.sum()) == float(payload.qc.deposited)
         np.testing.assert_allclose(
             fl.global_pmf, np.asarray(payload.deposited_lengths) / payload.qc.deposited
         )
 
-    # There is no gate comparing the anchor against a scanner histogram, because there is no scanner
-    # histogram: tests/test_one_fragment_length_definition.py asserts the machinery is gone from the
-    # source, which no comparison of values could establish.
+    # No gate compares the anchor against a scanner histogram, because the scanner builds none.
 
     def test_a_FOREIGN_ANCHOR_CANNOT_BE_PASSED_AT_ALL(self):
-        """The real gate here is STRUCTURAL, not a value.
+        """The gate here is structural, not a value.
 
-        The two tests above pin what ``build_fl_models`` RETURNS; neither can catch a CALL SITE that
-        hands it the wrong array, and a correct function called with the wrong argument is exactly
-        the mixed-frame defect at issue. So the public entry point takes the PAYLOAD and all three
-        histograms are read off that one object in that one frame: there is no ``global_counts``
-        parameter to get wrong.
-
-        Making the mixed-frame call unrepresentable is a stronger remedy than any assertion about
-        the value it would have produced.
+        The two tests above pin what ``build_fl_models`` returns; neither can catch a call site that
+        hands it the wrong array, which is the mixed-frame defect at issue. So the public entry point
+        takes the payload and all three histograms are read off that one object in that one frame:
+        there is no ``global_counts`` parameter to get wrong.
         """
         import inspect
 
@@ -266,17 +255,13 @@ class TestFragmentLengthAnchor:
 
 
 class TestSpliceCensus:
-    """The per-fragment splice breakdown is SCANNER QC, and it closes the books.
+    """The per-fragment splice breakdown is scanner QC, and it closes the books.
 
-    Reading `rigel report`'s five splice-type counts off the fragment-length category models counts
-    only the fragments that contributed a length observation — a population gated by the
-    transcript-space unanimity test and by the single-block rule on the intergenic path, and stated
-    nowhere. The counts belong where the classification is MADE
-    (`TRAPS: pure-and-length-censored`).
-
-    Nothing is routed through the accumulator to obtain them. The accumulator's subject is
-    fragment length; the scanner's subject is what it saw and what it held out. A QC count with no
-    algorithmic consumer does not earn a trip through another subsystem's schema.
+    Reading `rigel report`'s splice-type counts off the fragment-length category models would count
+    only the fragments that contributed a length observation, a population gated by the
+    transcript-space unanimity test and by the single-block rule on the intergenic path. The counts
+    belong where the classification is made, and nothing is routed through the accumulator to obtain
+    them: its subject is fragment length, the scanner's is what it saw and what it held out.
     """
 
     def test_every_splice_type_is_censused(self, oracle):
@@ -302,23 +287,19 @@ class TestSpliceCensus:
         subsystems.
 
             Σ census − census[SPLICE_ARTIFACT]
-                == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap + n_deposit_not_offered
+                == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap
 
         Every fragment of this fixture has one placement, so the census, which counts placements,
         and the ``qc`` counters, which count fragments, count the same fragments.
 
         ``SPLICE_ARTIFACT`` is subtracted because it is censused and then **held out by the
-        scanner**: a blacklisted CIGAR-N sj may be a real-but-rejected sj OR a wholly
+        scanner**: a blacklisted CIGAR-N sj may be a real-but-rejected sj or a wholly
         incorrect alignment, so the span that would be deposited is derived from an alignment the
         scanner has already refused to believe. Identifying and filtering those is the scanner's
         job, and the census is where that decision becomes visible.
 
-        ``n_deposit_not_offered`` covers the fragments the deposit adapter cannot offer: no
-        accumulator installed, or no aligned block. Such a return is silent without the counter, and
-        the identity is what makes it countable.
-
         This is the same externally-checkable form as ``sum(deposited_lengths) == qc.deposited`` and
-        a DIFFERENT statement: that one says every deposited fragment was binned by length, this one
+        a different statement: that one says every deposited fragment was binned by length, this one
         says every classified fragment was accounted for on its way to the deposit.
         """
         from rigel.splice import SpliceType, census_field
@@ -334,21 +315,18 @@ class TestSpliceCensus:
             + int(qc.dropped_empty)
             + int(qc.dropped_strand_undefined)
             + int(qc.deferred_undetermined_gap)
-            + int(stats.n_deposit_not_offered)
         )
         assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted, (
             f"census {census} (artifacts held out: {census[SpliceType.SPLICE_ARTIFACT]}) does not "
             f"reconcile with deposited={qc.deposited} dropped=("
             f"too_long={qc.dropped_too_long}, empty={qc.dropped_empty}, "
             f"strand_undefined={qc.dropped_strand_undefined}, "
-            f"deferred_undetermined_gap={qc.deferred_undetermined_gap}) "
-            f"not_offered={stats.n_deposit_not_offered}"
+            f"deferred_undetermined_gap={qc.deferred_undetermined_gap})"
         )
 
     def test_the_census_has_teeth_on_this_fixture(self, oracle):
         """The identity above is satisfiable by an all-zero census. This fixture must populate at
-        least two categories, so that dropping any single category's increment is detectable — a
-        gate that can only fire on data it never sees is not a gate."""
+        least two categories, so that dropping any single category's increment is detectable."""
         from rigel.splice import SpliceType, census_field
 
         stats, _ = _scan_full(oracle)
@@ -360,11 +338,10 @@ class TestSpliceCensus:
         )
 
     def test_the_identity_holds_when_fragments_are_held_out_as_artifacts(self, blacklisted_oracle):
-        """The identity, on a library where the hold-out term is the DOMINANT one.
+        """The identity, on a library where the hold-out term is the dominant one.
 
         Without this the ``− census[SPLICE_ARTIFACT]`` term is asserted only over zero, and any
-        mistake in it — counting artifacts as deposited, as not-offered, or not at all — is
-        invisible.
+        mistake in it (counting artifacts as deposited, as not-offered, or not at all) is invisible.
         """
         from rigel.splice import SpliceType, census_field
 
@@ -383,30 +360,28 @@ class TestSpliceCensus:
             + int(qc.dropped_empty)
             + int(qc.dropped_strand_undefined)
             + int(qc.deferred_undetermined_gap)
-            + int(stats.n_deposit_not_offered)
         )
         assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted
 
     def test_the_artifact_census_is_confirmed_by_the_deposit_TOTAL(
         self, oracle, blacklisted_oracle
     ):
-        """The artifact count, derived a SECOND way — from a subsystem that has never heard of an
+        """The artifact count, derived a second way, from a subsystem that has never heard of an
         artifact.
 
         The same BAM is scanned twice against the same annotation, differing only in whether the
         index carries a splice blacklist. Blacklisting relabels fragments ``SPLICED_ANNOT →
         SPLICE_ARTIFACT``; the scanner then holds exactly those out. So the accumulator's own
-        ``qc.deposited`` — which knows nothing of splice types, blacklists or artifacts — must fall
+        ``qc.deposited``, which knows nothing of splice types, blacklists or artifacts, must fall
         by **exactly** the artifact census:
 
             deposited(no blacklist) − deposited(blacklisted) == census[SPLICE_ARTIFACT]
 
-        A check that re-derives the number by the same route
-        checks nothing. This one crosses a subsystem boundary, so a census placed AFTER the hold-out
-        return — reading a confident zero for the very category the report names — cannot survive it.
+        This crosses a subsystem boundary, so a census placed after the hold-out return, reading a
+        confident zero for the very category the report names, cannot survive it.
 
         The two supporting equalities are asserted as well, because the subtraction is only
-        attributable to the relabel if nothing else moved: the census TOTAL is unchanged (the same
+        attributable to the relabel if nothing else moved: the census total is unchanged (the same
         fragments were classified), and the artifacts came out of ``SPLICED_ANNOT``.
         """
         from rigel.splice import SpliceType, census_field
@@ -432,7 +407,7 @@ class TestSpliceCensus:
             f"by {int(clean_payload.qc.deposited) - int(bl_payload.qc.deposited)}"
         )
 
-    # The census being a SUPERSET of the fragment-length observation population is the entire reason
-    # it exists, but there is no separate observation counter left to compare it against. The
-    # population statement that survives is the identity above: every censused fragment either
-    # deposits, is a named rejection, is held for the second pass, or is a named hold-out.
+    # The census is a superset of the fragment-length observation population, and no separate
+    # observation counter exists to compare it against; the population statement is the identity
+    # above: every censused fragment either deposits, is a named rejection, is held for the second
+    # pass, or is a named hold-out.

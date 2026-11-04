@@ -50,7 +50,7 @@ def _sequence(length: int, edits: dict[int, str]) -> str:
 
 
 #: A genome that exercises the unknown-base rule: a run at a reference's start, a single N, a lower-case run, a mixed
-#: case run, an IUPAC code that is NOT unknown, a run ending at the reference's end, a reference with none, and one
+#: case run, an IUPAC code that is not unknown, a run ending at the reference's end, a reference with none, and one
 #: that is unknown end to end.
 GENOME = {
     "chr1": _sequence(
@@ -132,7 +132,7 @@ def test_without_a_store_the_index_records_the_fastas_unknown_runs(tmp_path):
 # ── with a store ──────────────────────────────────────────────────────────────────────────────────
 
 
-#: The store's measure of chr1 and chr2. At its longest bin (100) chr1's zero set holds its N runs but NOT the single N
+#: The store's measure of chr1 and chr2. At its longest bin (100) chr1's zero set holds its N runs but not the single N
 #: at 100, a short gap the store's pairs span with both mates on known sequence, and a repeat at [400, 650) the shorter
 #: bin (50) also reaches past; chr2 has a zero run across [930, 1000). chr3 is not in the store.
 STORE_ZERO = {

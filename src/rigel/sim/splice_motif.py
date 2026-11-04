@@ -1,8 +1,5 @@
-"""Canonical splice-site motif injection for the simulator.
-
-:func:`splice_donor_acceptor` gives the dinucleotide convention and :func:`place_intron_motif` places it;
-the caller is ``annotation.GeneBuilder._inject_splice_motif``.
-"""
+"""Canonical splice-site motifs for the simulator: :func:`splice_donor_acceptor` gives the dinucleotides and
+:func:`place_intron_motif` writes them into a genome."""
 
 from __future__ import annotations
 
@@ -31,12 +28,9 @@ def place_intron_motif(
     intron_end: int,
     strand: Strand,
 ) -> None:
-    """Place the canonical ``(donor, acceptor)`` dinucleotides for ONE intron via ``edit(pos, bases)``.
-
-    ``edit(pos, bases)`` overwrites ``len(bases)`` bases at 0-based ``pos`` in the caller's substrate.
-    The donor lands at ``intron_start`` and the acceptor at ``intron_end - 2`` (genomic-coordinate
-    convention, :func:`splice_donor_acceptor`). Raises on an intron shorter than 4 bp (no room for both
-    dinucleotides).
+    """Place one intron's ``(donor, acceptor)`` dinucleotides through ``edit(pos, bases)``, which overwrites
+    ``len(bases)`` bases at 0-based ``pos``: the donor at ``intron_start``, the acceptor at ``intron_end - 2``.
+    Raises on an intron shorter than 4 bp.
     """
     if intron_end - intron_start < 4:
         raise ValueError(

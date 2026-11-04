@@ -2,7 +2,6 @@
 //
 // Macros for selecting the SIMD code path across ARM64 (NEON) and x86_64 (AVX2/AVX-512), set by
 // -march=native or explicit -m flags:
-//   RIGEL_ARCH_ARM64      — AArch64 (Apple Silicon, AWS Graviton, etc.)
 //   RIGEL_ARCH_X86_64     — x86-64 (Intel / AMD)
 //   RIGEL_HAS_NEON        — ARM NEON (always 1 on AArch64)
 //   RIGEL_HAS_AVX2        — x86 AVX2 (set by -march=native on capable CPUs)
@@ -15,14 +14,9 @@
 // 1. Architecture detection
 // ================================================================
 
-#if defined(__aarch64__) || defined(_M_ARM64)
-    #define RIGEL_ARCH_ARM64  1
-    #define RIGEL_ARCH_X86_64 0
-#elif defined(__x86_64__) || defined(_M_X64)
-    #define RIGEL_ARCH_ARM64  0
+#if defined(__x86_64__) || defined(_M_X64)
     #define RIGEL_ARCH_X86_64 1
 #else
-    #define RIGEL_ARCH_ARM64  0
     #define RIGEL_ARCH_X86_64 0
 #endif
 

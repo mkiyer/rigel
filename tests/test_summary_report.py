@@ -1,11 +1,9 @@
 """The report substrate ``rigel quant`` writes, and the contract the report builder reads it under.
 
-The v2 ``summary.json`` keeps the fragment-length section stats-only, so the raw per-bin histograms
-do not bloat it; those live in a tidy ``(category, length, count)`` companion feather, whose per
-category sums must reconcile with the summary's own observation counts. The reported categories are
-the anchor, the two models and the five pure pools, and the modelled aggregates must be exact sums
-of the primitives beneath them — two files describing one library have to agree, or the report
-shows two truths. The splice-type breakdown and the strand-contamination diagnostic are surfaced.
+``summary.json`` keeps the fragment-length section stats-only; the per-bin histograms live in a tidy
+``(category, length, count)`` companion feather whose per-category sums reconcile with the summary's observation
+counts. The reported categories are the anchor, the two models and the five pure pools, and the modelled aggregates
+are exact sums of the primitives beneath them, so two files describing one library agree.
 """
 
 import argparse
@@ -34,8 +32,7 @@ def _fl_models(max_size: int = 1000):
     """An ``FLModels`` built straight from pool histograms, the shape production produces.
 
     Built through the EB kernel rather than through ``build_fl_models``, because that entry point takes
-    a whole payload, which is exactly what a unit test of the REPORT does not want to fabricate
-    (`TRAPS: pure-and-length-censored`).
+    a whole payload, which a unit test of the report should not fabricate.
     """
     from rigel.calibration.fl import _fl_models_from_histograms
     from rigel.scan_payload import (
@@ -96,10 +93,9 @@ def test_fragment_length_report_splits_lean_summary_from_histograms():
 def test_the_reported_categories_are_the_anchor_the_two_models_and_the_FIVE_PURE_POOLS():
     """The report's output contract: the anchor, the two models, and the five pure pools.
 
-    There is no per-``SpliceType`` histogram (``unspliced``, ``spliced_annot``, …) in the set. Those
-    were the scanner's, measured by two rules that were neither each other nor the accumulator's ``L``;
-    the five pure pools are a structural gDNA/RNA classification in one frame, and the two ``*_exon``
-    rows are ON-TARGET gDNA, which nothing else surfaces (`TRAPS: pure-and-length-censored`).
+    There is no per-``SpliceType`` histogram (``unspliced``, ``spliced_annot``, …) in the set: the five pure
+    pools are a structural gDNA/RNA classification in the accumulator's one frame, and the two ``*_exon``
+    rows are on-target gDNA, which nothing else surfaces.
     """
     summary, _ = cli._fragment_length_report(_fl_models())
     assert set(summary) == {
@@ -117,10 +113,9 @@ def test_the_reported_categories_are_the_anchor_the_two_models_and_the_FIVE_PURE
 def test_the_modelled_pools_are_SUMS_OF_the_reported_pure_pools():
     """The aggregates and the primitives must reconcile, or the report shows two truths.
 
-    ``rna`` IS ``pool_rna_spliced``; ``gdna`` is the two CONTAINED rows and deliberately excludes the
-    two crossing ones. That exclusion is the whole point of ``splash`` being separate: summing four
-    differently-tilted pools reports a gDNA mean far above what the pure intergenic pool measures
-    (`TRAPS: pure-and-length-censored`).
+    ``rna`` is ``pool_rna_spliced``; ``gdna`` is the two contained rows and excludes the two crossing
+    ones, because summing four differently-tilted pools reports a gDNA mean far above what the pure
+    intergenic pool measures.
     """
     summary, _ = cli._fragment_length_report(_fl_models())
     n = {k: v["n_observations"] for k, v in summary.items()}
@@ -188,8 +183,8 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
 
     summary = json.loads((out / "summary.json").read_text())
 
-    # versioned schema, ONE constant: the report targets the version the writer writes, so a bump of the
-    # writer's moves the report's with it — the bumped summary reads clean and the older one now warns. A
+    # versioned schema, one constant: the report targets the version the writer writes, so a bump of the
+    # writer's moves the report's with it: the bumped summary reads clean and the older one warns. A
     # copy restated in the report would stay behind and warn on the bumped one.
     from rigel.report.substrate import load_substrate
 
@@ -228,7 +223,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert summary["quantification"]["n_nascent"] == int(is_synthetic.sum()) > 0
     assert summary["quantification"]["n_transcripts"] == int((~is_synthetic).sum())
 
-    # fragment_length is stats-only — the histogram bloat is gone
+    # fragment_length is stats-only: no per-bin histogram
     fl = summary["fragment_length"]
     assert "global" in fl
     for d in fl.values():
@@ -267,7 +262,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
         "depth_median",
         "depth_max",
     } <= set(junc)
-    # The table's total IS the 2x2's total — one observation per qualified fragment.
+    # The table's total is the 2x2's total: one observation per qualified fragment.
     assert junc["n_observations"] == summary["strand_model"]["n_training_fragments"]
 
     # strand contamination diagnostic present
@@ -306,7 +301,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
 
     # The calibration block is the library scalars and nothing else: calibration's capture answer is the bulk
     # density it reads capture against (null when no landscape was fitted) and the saturated level over it.
-    # The MANUAL's listing of the block is the same set, so the two cannot drift apart.
+    # The user manual's listing of the block is the same set, so the two cannot drift apart.
     written = set(summary["calibration"])
     assert written == {
         "gdna_density_global",
@@ -322,7 +317,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert listed, "docs/MANUAL.md lists no summary.json calibration block"
     assert set(re.findall(r'^\s+"(\w+)":', listed.group(1), re.M)) == written
 
-    # The observable genome the run read: the index's record of its mask, every reference's bases, and the MANUAL's
+    # The observable genome the run read: the index's record of its mask, every reference's bases, and the manual's
     # listing of the block, the same set.
     observable = summary["observable_genome"]
     assert observable == cli._observable_genome_summary(result.index)
@@ -333,7 +328,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert listed, "docs/MANUAL.md lists no summary.json observable_genome block"
     assert set(re.findall(r'^    "(\w+)":', listed.group(1), re.M)) == set(observable)
 
-    # The EM's two length tables: the decision the pipeline made, as written, and the MANUAL's listing of it.
+    # The EM's two length tables: the decision the pipeline made, as written, and the manual's listing of it.
     tables = summary["length_tables"]
     d = pr.length_tables.decision
     assert (
@@ -408,7 +403,7 @@ def test_the_strand_block_carries_the_junction_diagnostics_and_one_overdispersio
         assert sum(shares.values()) == pytest.approx(1.0, abs=1e-6)
     assert strand["strand_live"] is True  # the scenario is stranded at 0.9
     assert strand["strand_overdispersion"] == {"value": 0.0, "model": "binomial"}
-    # calibration's density at full precision: rounded to 8 places, a human-genome density below ~15 fragments was 0.0
+    # calibration's density at full precision: rounded to 8 places, a human-genome density below ~15 fragments reads 0
     assert (
         summary["calibration"]["gdna_density_global"]
         == float(pr.calibration.gdna_density_global)
@@ -445,8 +440,8 @@ def test_a_dead_strand_channel_publishes_the_kappa_calibration_reads_and_no_clas
 
 
 def test_a_reused_output_directory_keeps_no_optional_file_this_run_did_not_write(tmp_path):
-    """The TSV mirrors and the locus statistics are written only on request. A rerun into the same directory without
-    them used to leave the earlier run's copies, so a quant.tsv could disagree with the quant.feather beside it."""
+    """The TSV mirrors and the locus statistics are written only on request, so a rerun into the same directory
+    without them removes the earlier run's copies: a stale quant.tsv would disagree with the quant.feather beside it."""
     sc, result = _build_scenario(tmp_path / "work")
     cfg = PipelineConfig(
         em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),
@@ -474,8 +469,8 @@ def test_a_reused_output_directory_keeps_no_optional_file_this_run_did_not_write
 
 
 def test_the_nascent_table_writes_exactly_the_columns_the_manual_lists(tmp_path):
-    """``nascent_quant.feather`` is ``get_nascent_quant_df``: one row per synthetic span, and the MANUAL's table names
-    exactly its columns, in the file's order, so the two cannot drift apart."""
+    """``nascent_quant.feather`` is ``get_nascent_quant_df``: one row per synthetic span, and the user manual's table
+    names exactly its columns, in the file's order, so the two cannot drift apart."""
     sc, result = _build_scenario(tmp_path / "work")
     cfg = PipelineConfig(
         em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),

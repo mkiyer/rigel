@@ -195,8 +195,8 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
         pre_capture_abundances="molecular.tsv",
     )
 
-    # Each quantity in one column: the molecules before capture, then the fragments realised. The
-    # realised count's copies under molar names (`mrna_abundance`, ...) and as `post_capture_*` are gone.
+    # Each quantity in one column: the molecules before capture, then the fragments realised, with no
+    # copy of the realised count under a molar name (`mrna_abundance`, ...) or as `post_capture_*`.
     header = (tmp_path / "truth_abundances.tsv").read_text().splitlines()[0].split("\t")
     assert header == [
         "transcript_id",
@@ -281,8 +281,7 @@ def _molar_transcripts() -> list[Transcript]:
 def test_the_molar_table_is_written_exactly_and_reads_back_as_an_abundance_input(tmp_path):
     """The suite-level molar table: the molecules each transcript was simulated at, to four decimals,
     under the simulator's own input names, so it reads back as ``abundance.file`` and writes the same
-    bytes again. Its writer once had no gate, and a fix reached it unguarded: the genomic span of a
-    transcript starting at base 0 (``spliced``), recorded as 0 behind a truthiness test of its start.
+    bytes again, a transcript starting at base 0 (``spliced``) with its whole genomic span.
 
     Perturbation: that truthiness test in ``truth._transcript_metadata`` writes ``spliced``'s span as
     0, and ``.3f`` in ``truth._molar_row`` moves every abundance column."""
@@ -314,9 +313,9 @@ def test_the_molar_table_is_written_exactly_and_reads_back_as_an_abundance_input
 
 def test_a_condition_truth_table_is_refused_as_an_abundance_input(tmp_path):
     """A condition's table holds the fragments that condition realised, never molecules, so it is no
-    abundance input. The table this writer writes carries no molar-named column at all; every panel
-    simulated before it carries the realised counts under ``mrna_abundance`` / ``nrna_abundance`` too,
-    which the ``sim`` format would read as molecules — so both are refused by the realised column.
+    abundance input. The table this writer writes carries no molar-named column at all; an older table
+    also carries the realised counts under ``mrna_abundance`` / ``nrna_abundance``, which the ``sim``
+    format would read as molecules, so both are refused by the realised column.
 
     Perturbation: dropping the refusal in ``whole_genome._detect_abundance_format`` reads the second
     table's fragment counts as molar abundances."""
@@ -330,7 +329,7 @@ def test_a_condition_truth_table_is_refused_as_an_abundance_input(tmp_path):
         tmp_path / "cond" / "truth_summary.json",
         fastq_path=fastq,
     )
-    # the header of every condition table on disk before the duplicate columns were dropped
+    # the header of an older condition table, the realised counts also under molar names
     on_disk_columns = [
         "transcript_id",
         "gene_id",
@@ -395,9 +394,7 @@ def test_manifest_round_trip(tmp_path):
 
 def test_the_condition_grid_names_each_truth_file_under_one_key(tmp_path):
     """A condition's manifest entry and its ``truth_summary.json`` record where its truth tables are, and
-    each path is under one key, the same key in both files. The entry once named every path twice
-    (``truth_abundances`` beside ``post_capture_abundances``, ...), the manifest a third time at its top
-    level, and the summary repeated its paths under ``files``.
+    each path is under one key, the same key in both files.
 
     Perturbation: a second key for a path in ``orchestrator.run_condition_grid``'s entry, a top-level
     copy in ``manifest.write_manifest``, or a summary key spelt otherwise."""
@@ -458,7 +455,7 @@ def test_the_condition_grid_names_each_truth_file_under_one_key(tmp_path):
 
 
 def test_a_transcript_at_position_zero_has_its_whole_genomic_span():
-    """The span was computed behind a truthiness test, so a transcript starting at base 0 recorded a span of 0."""
+    """A transcript starting at base 0 has its whole span, not the 0 a truthiness test of its start gives."""
     from rigel.sim.truth import _transcript_metadata
     from rigel.transcript import Transcript
     from rigel.types import Interval

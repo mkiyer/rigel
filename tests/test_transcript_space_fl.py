@@ -1,17 +1,11 @@
-"""A fragment's length on each candidate transcript is the length of the path the candidate implies: its
-genomic span less the junctions the reads observed and less the candidate's own introns lying in an
-unsequenced gap, within K of the gap's ends. An intron the reads cover is the molecule's own sequence and is
-never cut. It is the length calibration deposits for the same path (``Accumulator.length_under``).
+"""A fragment's length on each candidate transcript: the length of the path the candidate implies.
 
-Spliced and unspliced fragments; overhang past either end of the transcript and into an intron; both ends
-overhanging at once; a large unsequenced mate gap spanning one, two or three introns, so the cut has to
-remove every intron in the gap rather than the first; nascent single-exon candidates, whose length is the
-genomic span; negative-strand transcripts, where the length is strand-agnostic; and several candidates of
-different exon structure, which imply DIFFERENT lengths for the same fragment. That last point is why the
-length is per candidate and not per fragment. ``TestOneLengthRule`` reads one molecule three ways and gets
-one length. ``TestLengthRuleByEnumeration`` holds every candidate of thousands of fragments, whose mates
-stop short of introns, overrun them and run through them, to a base-by-base count and to the accumulator's
-own length.
+That is the genomic span less the junctions the reads observed and less the candidate's own introns lying in an
+unsequenced gap within K of the gap's ends; an intron the reads cover is the molecule's own sequence and is never cut.
+Calibration deposits the same length for the same path (``Accumulator.length_under``). Candidates of different exon
+structure imply different lengths for one fragment, so the length is per candidate, not per fragment. The cases cover
+overhang past either end and into an intron, mate gaps spanning one to three introns, nascent spans,
+negative-strand transcripts, and an enumeration of thousands of fragments against a base-by-base count.
 """
 
 import contextlib
@@ -193,9 +187,7 @@ class TestOneLengthRule:
 
     An intron the reads cover is the molecule's own sequence: whether the mates overlap (one block) or each
     runs into the intron (25 and 15 bases, more than K = 3), T2's length is the span, 170. Only an intron in
-    the unsequenced gap is cut, and only by the candidate that has it: T2 110, the nascent span 170. The
-    endpoint rule cut every intron of the candidate between the fragment's ends, and read the mates that run
-    into the intron as 110 on T2.
+    the unsequenced gap is cut, and only by the candidate that has it: T2 110, the nascent span 170.
     """
 
     @pytest.mark.parametrize(
@@ -380,8 +372,8 @@ class TestIntronicOverhang:
         """The mates run 5 and 4 bases into t_basic's intron (2000, 4999), more than K = 3.
 
         The reads show those bases, so on t_basic the intron is the molecule's own sequence and is not cut: the
-        length is the span, 5149 - 1855 = 3294, and the EM prices the covered bases as overhang. The endpoint
-        rule cut the intron and gave 295, a plausible length for a molecule t_basic cannot have made.
+        length is the span, 5149 - 1855 = 3294, and the EM prices the covered bases as overhang. Cutting the
+        intron would give 295, a plausible length for a molecule t_basic cannot have made.
         """
         frag = make_fragment(
             exons=(
@@ -419,7 +411,7 @@ class TestIntronicOverhang:
         gstart = 2003 is 3 bp into the intron, so the first read lies wholly in it and the fragment
         jumps no intron: under t_basic the molecule is 4999 - 2003 = 2996 bp of overhang before exon2's
         start plus 401 exonic bases, FL = 3397 = 5400 - 2003, its genomic span. Measured forward from
-        exon1's END instead, the start lands one intron length downstream and reads |3397 - 2999| = 398.
+        exon1's end instead, the start would land one intron length downstream and read |3397 - 2999| = 398.
         """
         frag = make_fragment(
             exons=(
@@ -465,7 +457,7 @@ class TestMultiIntronGap:
         assert fl == 1101
 
     def test_gap_spanning_two_introns(self, three_exon_index):
-        """Paired-end with gap spanning TWO introns (exon1 → exon3).
+        """Paired-end with gap spanning two introns (exon1 → exon3).
 
         t_three exons: (999,2000), (4999,6000), (8999,10000)
         Fragment: blocks (1800, 1900) + (9200, 9300)
@@ -489,7 +481,7 @@ class TestMultiIntronGap:
         assert fl == 1502
 
     def test_gap_spanning_three_introns(self, four_exon_index):
-        """Paired-end with gap spanning THREE introns (exon1 → exon4).
+        """Paired-end with gap spanning three introns (exon1 → exon4).
 
         t_four exons: (999,2000), (4999,6000), (8999,10000), (12999,14000)
         Fragment: blocks (1900, 1950) + (13500, 13550)
@@ -685,29 +677,16 @@ class TestNegativeStrand:
 
 
 # =====================================================================
-# nRNA (nascent RNA) — single synthetic exon
+# Nascent spans — one synthetic exon
 # =====================================================================
 
 
 class TestNRNAFragLength:
-    """nRNA uses a single synthetic exon covering the full genomic interval.
-
-    For nRNA candidates, FL should equal the genomic span between
-    fragment endpoints (no introns to skip).
-    """
+    """A nascent span is one synthetic exon over the gene's genomic interval, so a candidate's length on it is the
+    fragment's genomic span (no introns to skip)."""
 
     def test_nrna_fl_equals_genomic_span(self, basic_index):
-        """Fragment in a region covered by nRNA synthetic transcript.
-
-        The build_test_index creates synthetic nRNA transcripts.
-        nRNA for g1 covers the full gene span as a single exon.
-        For a fragment entirely within the nRNA span,
-        FL = genomic distance between endpoints.
-
-        Fragment: blocks (1500, 1600) + (5500, 5600)
-        gstart=1500, gend=5600
-        For nRNA (single exon), all positions map linearly → FL = 5600-1500 = 4100
-        """
+        """Blocks (1500, 1600) + (5500, 5600), inside g1's nascent span: the length on it is 5600 - 1500 = 4100."""
         frag = make_fragment(
             exons=(
                 _exon("chr1", 1500, 1600),
@@ -717,7 +696,7 @@ class TestNRNAFragLength:
         )
         result = resolve_fragment(frag, basic_index)
         assert result is not None
-        # Find the nRNA candidate (synthetic nRNA has "is_synthetic" flag)
+        # The nascent spans are the synthetic transcripts
         t_df = basic_index.t_df
         nrna_mask = t_df["is_synthetic"].values if "is_synthetic" in t_df.columns else None
         if nrna_mask is not None:
@@ -725,7 +704,6 @@ class TestNRNAFragLength:
             fl_dict = result.frag_lengths
             for t_idx in nrna_tidxs:
                 if t_idx in fl_dict:
-                    # nRNA: FL = genomic footprint between endpoints
                     assert fl_dict[t_idx] == 4100
 
 
@@ -760,7 +738,7 @@ class TestCombinedOverhangGap:
         assert fl == 2306
 
     def test_end_overhang_plus_intron_endpoint(self, three_exon_index):
-        """Fragment gend extends past last exon AND gstart in intron.
+        """Fragment gend extends past last exon and gstart in intron.
 
         t_three exons: (999,2000), (4999,6000), (8999,10000); introns (2000,4999), (6000,8999)
         Fragment: blocks (2003, 2100) + (9950, 10007)
@@ -1005,10 +983,8 @@ class TestLengthRuleByEnumeration:
     of the path it implies (`_path_length`), and is the accumulator's length for that path.
 
     The mates' ends sit at and beside exon boundaries, so the mates stop short of introns, overrun them within
-    K and past it, and run through them whole; a third of the fragments carry an observed junction. The
-    endpoint rule this replaced cut every intron of the candidate between the fragment's two ends, so it
-    shortened a candidate whose intron the reads cover: it fails here wherever a mate runs into or through an
-    intron by more than K.
+    K and past it, and run through them whole; a third of the fragments carry an observed junction. A rule that
+    cuts every intron between the fragment's two ends fails here wherever a mate covers an intron by more than K.
     """
 
     @pytest.mark.parametrize("K", [0, 3])
@@ -1042,7 +1018,7 @@ class TestLengthRuleByEnumeration:
                         n_within_k += any(_overlap(i, x) > 0 for i in implied for x in blocks)
                         if got != want:
                             wrong.append((name, blocks, observed, int(t), got, want))
-        # ⚠ The enumeration must reach each case it exists for, or a pass means nothing: observed junctions,
+        # The enumeration must reach each case it exists for, or a pass means nothing: observed junctions,
         # introns the reads cover by more than K, and (K > 0) introns cut although a mate runs into them.
         assert n_spliced > 100, n_spliced
         assert n_covered > 100, n_covered
@@ -1087,7 +1063,7 @@ class TestLengthRuleByEnumeration:
                         n_clipped += any(a < start or b > end for a, b in implied)
                         if got != want:
                             wrong.append((name, blocks, observed, int(t), got, want))
-        assert n_clipped > 10, n_clipped  # ⚠ the cases a second formula gets wrong are reached
+        assert n_clipped > 10, n_clipped  # the cases a second formula gets wrong are reached
         assert not wrong, (
             f"{len(wrong)} of {n_checked} lengths wrong (index, blocks, observed, t, got, want): {wrong[:4]}"
         )

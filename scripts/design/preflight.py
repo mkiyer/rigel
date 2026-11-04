@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """Can this session run and regenerate everything? One command, one verdict, before anything else.
 
-A session that assumes its environment is fine discovers otherwise hours in, usually as a confusing
-wrong number rather than an error. This checks first that the toolchain (the `rigel` conda env, the
-compiled native extension, the `rigel` CLI), both references (the panel's genome/GTF/index/probes and
-the test chromosome's YAML with its renders), both panels (scan caches and oracle caches carrying every
-part `panel.py` requires, each one VALID: its key checked against this build and the panel's index by the
-cache module's own check, so a stale cache never reads as present; the certified `slot_truth.npz`) and
-every `scripts/design/` instrument (each one imports) are present and working. It changes nothing and
-measures nothing: every check is a read or an import, and a failed check prints the exact command that
-regenerates the missing or stale artifact, because most of this data is derived and a missing derived
-artifact is a command not yet run rather than damage. An import break is the check that actually rots
-after a `src/` deletion or a rename, so the default path is the fast one; the `--self-test` sweep over
-every instrument is opt-in via `--full`, runs each one in a subprocess, and is what to run after a
-deposit-rule change, a default flip, or before a commit that touches many instruments.
+A broken environment otherwise surfaces hours in, as a wrong number rather than an error. This checks the
+toolchain (the `rigel` conda env, the compiled native extension, the `rigel` CLI), both references (the
+panel's genome, GTF, index and probes; the test chromosome's YAML and its renders), both panels (scan caches
+and oracle caches with every part `panel.py` requires, each keyed against this build and the panel's index by
+the cache module's own check, so a stale cache never reads as present; the certified `slot_truth.npz`) and that
+every `scripts/design/` instrument imports. It changes and measures nothing: every check is a read or an
+import, and a failed check prints the command that regenerates the missing or stale artifact. `--full` adds
+every instrument's `--self-test`, each in a subprocess: run it after a deposit-rule change, a default flip,
+or before a commit that touches many instruments.
 
 Usage::
 
@@ -199,7 +195,7 @@ def _load_index(index_dir: Path):
 
 
 def check_panel(rep: Report, root: Path, index_dir: Path, label: str, rebuild: str) -> None:
-    """A panel's caches, each VALID: keyed to this build and the panel's index, as the instruments that read it
+    """A panel's caches, each keyed to this build and the panel's index as the instruments that read it
     require, so a stale cache never reads as present."""
     conds = _conditions(root)
     if not conds:
@@ -251,9 +247,8 @@ def check_instruments(rep: Report, full: bool) -> None:
         rep.add(True, "instrument --self-test sweep",
                 "SKIPPED (default; --full runs it)")
         return
-    # the outer pool is deliberately narrow because several instruments parallelise themselves (by
-    # arm or by condition), so a wide outer pool oversubscribes the machine and starves the one that
-    # dominates the wall time; three lets the quick instruments overlap while leaving cores for it
+    # a narrow outer pool: several instruments parallelise themselves (by arm or by condition), so a wide one
+    # would oversubscribe the machine; three lets the quick instruments overlap
     have = [p for p in files if '"--self-test"' in p.read_text()]
     workers = max(1, min(3, (os.cpu_count() or 2) - 1))
 

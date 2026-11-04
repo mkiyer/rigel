@@ -1,17 +1,15 @@
-"""``capture_eff_length``: a transcript's effective length under capture is its conserved share of every
-object it deposits on, each at that object's capture efficiency.
+"""``capture_eff_length``: a transcript's effective length under capture is its conserved share of every object it
+deposits on, each at that object's capture efficiency.
 
-The geometry half: ``transcript_objects`` must map every transcript to every piece its exons overlap, on any
-partition it is handed (the coarse partition built here by hand still has exon boundaries in a region's
-interior, which the shipped partition no longer produces — losing that fixture would retire the guard); each
-object's share must be what the deposit rule gives it, per object, through the reference accumulator; and a
-transcript's shares must sum to its fl-marginal length exactly. The pricing half: every efficiency 1 (a library
-with no landscape, or one level) returns the FL-marginal lengths bit-identically; a piece prices at its region, a
-contiguous cut at its boundary, a junction at its two splice sites' boundaries less the intron beside them, bounded
-by the larger of the saturated level and the best object it touches; one factor on every efficiency is one factor
-on every length;
-a transcript of exons shorter than a fragment is read through its cuts; the ruler reads the result's
-efficiencies and the geometry, never the counts.
+The geometry half: ``transcript_objects`` maps every transcript to every piece its exons overlap on any partition it is
+handed (the hand-built coarse partition keeps exon boundaries inside a region, which the shipped partition does not
+produce); each object's share is what the deposit rule gives it, through the reference accumulator; and a transcript's
+shares sum to its fl-marginal length exactly. The pricing half: with every efficiency 1 (no landscape, or one level) the
+lengths are the fl-marginal ones bit-identically; a piece prices at its region, a contiguous cut at its boundary, a
+junction at its two splice sites' boundaries less the intron beside them, bounded by the larger of the saturated level
+and the best object it touches; one factor on every efficiency is one factor on every length; a transcript of exons
+shorter than a fragment is read through its cuts; and the ruler reads the result's efficiencies and the geometry, never
+the counts.
 """
 
 from __future__ import annotations
@@ -25,15 +23,21 @@ from _index_builder import build_test_index
 
 from rigel.calibration.capture_eff_length import (
     _cut_efficiencies,
+    _objects,
+    _transcript_pieces,
     rna_captured_fraction,
     transcript_capture_eff_lengths,
-    transcript_objects,
 )
 from rigel.calibration.effective_length import contained_eff_length
 from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
 from rigel.calibration.result import CalibrationResult
 from rigel.calibration.shared_length_law import LengthTables
 from rigel.calibration.signature import RegionType, coarse_type_array
+
+
+def transcript_objects(index, region_arrays, pmf):
+    """Every transcript's pieces and cuts with its conserved share of each, on one pmf."""
+    return _objects(_transcript_pieces(index, region_arrays), pmf)
 
 
 def _pmf(mean=200.0, sd=50.0, lo=100, hi=300) -> np.ndarray:
@@ -60,8 +64,8 @@ def _fl(lengths, pmf=PMF) -> np.ndarray:
 
 
 def _flank_mean(ra: RegionArrays, c) -> np.ndarray:
-    """A boundary's efficiency on a field where capture adds over bases and both flanks are longer than a
-    fragment: its crossing fragments lie half on each side, so it reads its two flanks' mean."""
+    """A boundary's efficiency on a field where capture adds over bases and both flanks are longer than a fragment: its
+    crossing fragments lie half on each side, so it reads its two flanks' mean."""
     lo, hi = boundary_region_indices(np.asarray(ra.ref_id))
     c = np.asarray(c, dtype=np.float64)
     return 0.5 * (c[lo] + c[hi])
@@ -70,12 +74,11 @@ def _flank_mean(ra: RegionArrays, c) -> np.ndarray:
 def _cal(
     ra: RegionArrays, efficiency, bulk: float | None, boundary=None, saturation: float = 1.0
 ) -> CalibrationResult:
-    """THE fixture: a result whose capture efficiencies are stated outright — a region's, and a boundary's
-    (its flanks' mean unless given) — with counts that carry nothing; the supports are the geometry the
-    ruler reads to find an intron piece too short to contain a fragment. ``bulk`` ``None`` is a library with
-    no landscape, where every efficiency must be 1. ``saturation`` is the landscape's saturated level in the
-    efficiencies' unit; at its default 1, with every efficiency at most 1, the unit is the fully captured
-    level and the junction's bound is 1."""
+    """A result whose capture efficiencies are stated outright (a region's, and a boundary's, its flanks' mean unless
+    given), with counts that carry nothing; the supports are the geometry the ruler reads to find an intron piece too
+    short to contain a fragment. ``bulk`` ``None`` is a library with no landscape, where every efficiency must be 1.
+    ``saturation`` is the landscape's saturated level in the efficiencies' unit; at its default 1, with every efficiency
+    at most 1, the unit is the fully captured level and the junction's bound is 1."""
     n = int(ra.n_regions)
     lo, _hi = boundary_region_indices(np.asarray(ra.ref_id))
     ne = lo.shape[0]
@@ -111,8 +114,6 @@ def _cal(
             _flank_mean(ra, c) if boundary is None else np.asarray(boundary, dtype=np.float64)
         ),
         rna_sense_frac=0.9,
-        gdna_strand_overdispersion=0.05,
-        rna_strand_overdispersion=0.05,
         n_regions=n,
         n_boundaries=ne,
         n_sj=0,
@@ -129,9 +130,9 @@ def _tidx(idx, tid: str) -> int:
     return int(tdf.loc[tdf["t_id"] == tid, "t_index"].iloc[0])
 
 
-# Two same-strand transcripts sharing gene g1. t1's first exon [150, 300) is a sub-interval of t0's
-# [100, 300); both halves carry the identical EXON_POS signature, so the coarse partition MERGES them
-# into a single region [100, 300) whose interior holds t1's exon start (150).
+# Two same-strand transcripts sharing gene g1. t1's first exon [150, 300) is a sub-interval of t0's [100, 300); both
+# halves carry the identical EXON_POS signature, so the coarse partition merges them into a single region [100, 300)
+# whose interior holds t1's exon start (150).
 _MISALIGNED_GTF = """\
 chr1\ttest\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
 chr1\ttest\texon\t501\t700\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
@@ -186,8 +187,8 @@ def two_ref_index(tmp_path_factory):
 
 
 def _coarsened(idx) -> RegionArrays:
-    """The index's regions with adjacent equal-signature neighbours MERGED — a deliberately coarse
-    partition whose regions contain interior exon boundaries."""
+    """The index's regions with adjacent equal-signature neighbours merged: a coarse partition whose regions contain
+    interior exon boundaries."""
     n = idx.regions_df
     ref = n["ref_name"].astype(str).to_numpy()
     sig = n["signature"].to_numpy(np.uint8)
@@ -214,7 +215,7 @@ _PIECES_GTF = (
     'chr1\ttest\texon\t511\t512\t.\t+\t.\tgene_id "gp"; transcript_id "t2";\n'
 )
 
-# two 500 bp exons around a 50 bp intron — shorter than the shortest fragment (100 bp)
+# two 500 bp exons around a 50 bp intron, shorter than the shortest fragment (100 bp)
 _SHORT_INTRON_GTF = "".join(
     f'chr1\ttest\texon\t{s + 1}\t{s + 500}\t.\t+\t.\tgene_id "gs"; transcript_id "si";\n'
     for s in (1000, 1550)
@@ -257,9 +258,8 @@ def short_intron_index(tmp_path_factory):
 
 @pytest.mark.parametrize("partition", ["coarse", "live"])
 def test_every_transcript_maps_to_the_pieces_its_exons_overlap(misaligned_index, partition):
-    """No transcript (mature or nascent entity) is dropped, and the piece covering the exon start that
-    sits INTERIOR to a merged region is mapped — the off-by-one that skipped it on the coarse partition
-    and the live partition, where that start is a region interface, both."""
+    """No transcript (mature or nascent entity) is dropped, and the piece covering an exon start interior to a merged
+    region is mapped, on the coarse partition and on the live one, where that start is a region interface."""
     idx = misaligned_index
     ra = _coarsened(idx) if partition == "coarse" else RegionArrays.from_index(idx)
     obj = transcript_objects(idx, ra, PMF)
@@ -287,8 +287,8 @@ def test_a_transcripts_shares_sum_to_its_fl_marginal_length(misaligned_index, pa
 
 
 def test_the_pieces_are_on_the_transcripts_own_reference(two_ref_index):
-    """A second reference numbers its regions after the first's: every piece of a transcript must lie on
-    the transcript's reference, or a region index would silently read another chromosome's efficiency."""
+    """A second reference numbers its regions after the first's: every piece of a transcript must lie on the
+    transcript's reference, or a region index would read another chromosome's efficiency."""
     idx = two_ref_index
     ra = RegionArrays.from_index(idx)
     obj = transcript_objects(idx, ra, PMF)
@@ -297,11 +297,11 @@ def test_the_pieces_are_on_the_transcripts_own_reference(two_ref_index):
 
 
 def test_each_share_is_what_the_deposit_rule_gives_the_object(pieces_index):
-    """THE GATE, per object, on the index path. Every placement of ``t0`` — cut into 1–48 bp pieces by its
-    siblings' exon ends, spliced twice — through the reference accumulator on the index's own partition:
-    each piece's contained units are its contained share, each boundary's and each junction's mass its cut
-    share, to 1e-12. PERTURBATION: pricing a crossing start once per cut it crosses (the incidence count)
-    overstates every cut beside a piece shorter than a fragment."""
+    """Per object, on the index path: every placement of ``t0`` (cut into 1–48 bp pieces by its siblings' exon ends,
+    spliced twice) through the reference accumulator on the index's own partition. Each piece's contained units are its
+    contained share, and each boundary's and junction's mass its cut share, to 1e-12. Pricing a crossing start once per
+    cut it crosses (the incidence count) would overstate every cut beside a piece shorter than a fragment.
+    """
     from native._accumulator_reference import Accumulator, DepositOutcome, Partition
 
     from rigel.types import Strand
@@ -359,8 +359,8 @@ def test_each_share_is_what_the_deposit_rule_gives_the_object(pieces_index):
 
 
 def test_no_landscape_returns_the_fl_marginal_lengths_bit_identically(multiexon_index):
-    """No landscape: every efficiency is 1 and the ruler is ``fl`` EXACTLY, not within float noise — a
-    contraction from rounding is a systematic bias, not a tolerance."""
+    """No landscape: every efficiency is 1 and the ruler is ``fl`` exactly, not within float noise, since a contraction
+    from rounding would be a systematic bias."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     fl = np.linspace(900.0, 2000.0, len(idx.t_df))
@@ -371,9 +371,9 @@ def test_no_landscape_returns_the_fl_marginal_lengths_bit_identically(multiexon_
 
 
 def test_efficiencies_of_one_everywhere_contract_nothing_bit_identically(multiexon_index):
-    """A landscape of one level reads every object at the bulk: the factor is exactly 1 on every transcript,
-    spliced and unspliced alike — a junction between two exons at 1, its introns at 1, prices at exactly 1 —
-    so a capture-OFF library's lengths are ``fl`` bit for bit, as with no landscape at all."""
+    """A landscape of one level reads every object at the bulk: the factor is exactly 1 on every transcript, spliced and
+    unspliced (a junction between two exons at 1, its introns at 1, prices at exactly 1), so a capture-OFF library's
+    lengths are ``fl`` bit for bit."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     fl = _fl(idx.t_df["length"].to_numpy())
@@ -384,9 +384,9 @@ def test_efficiencies_of_one_everywhere_contract_nothing_bit_identically(multiex
 
 
 def test_a_field_contracts_and_never_expands(multiexon_index):
-    """In the unit of the fully captured level (saturation 1, no object above it), on a field where capture
-    adds over bases — every boundary at its flanks' mean — a junction prices at its two exons' mean and no
-    transcript reads longer than its fl-marginal length."""
+    """In the unit of the fully captured level (saturation 1, no object above it), on a field where capture adds over
+    bases (every boundary at its flanks' mean), a junction prices at its two exons' mean and no transcript reads longer
+    than its fl-marginal length."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
@@ -417,14 +417,13 @@ def test_the_length_is_the_share_weighted_mean_of_the_objects_efficiencies(multi
 
 
 def test_a_junction_adds_its_two_sides_it_does_not_average_them(multiexon_index):
-    """THE FALSIFICATION TEST for the junction price. A fragment across a junction between two captured
-    exons is all captured exon; the gDNA fragments across its low and high boundaries are half exon,
-    half intron. With every exon at 1, every intron at 0.001 and every boundary at its flanks' mean
-    (0.5005), the mRNA's junctions price at ``0.5005 + 0.5005 − 0.001 = 1`` and the mRNA reads its full
-    length. PERTURBATION: pricing a junction at the mean of its two boundaries (0.5005) reads it near half —
-    the 1.68× under-price the gDNA-only prices measured. (Its adjacent pieces' mean is right on this uniform
-    field and wrong where a piece beside the junction holds no fragment: the tiny-exon and short-intron
-    tests below catch that one.)"""
+    """A fragment across a junction between two captured exons is all captured exon, while the gDNA fragments across its
+    low and high boundaries are half exon, half intron. With every exon at 1, every intron at 0.001 and every boundary
+    at its flanks' mean (0.5005), the mRNA's junctions price at ``0.5005 + 0.5005 − 0.001 = 1`` and the mRNA reads its
+    full length. Pricing a junction at the mean of its two boundaries (0.5005) would read it near half. (The mean of its
+    adjacent pieces is right on this uniform field but wrong where a piece beside the junction holds no fragment; the
+    tiny-exon and short-intron tests below cover that.)
+    """
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
@@ -437,15 +436,14 @@ def test_a_junction_adds_its_two_sides_it_does_not_average_them(multiexon_index)
 
 
 def test_a_junction_is_captured_no_more_than_a_fully_captured_piece(multiexon_index):
-    """THE FALSIFICATION TEST for the junction's cap. Capture saturates: a fragment binds its best single
-    probe part, so a fragment across a junction between two captured exons is captured no more than one
-    wholly inside either. Where probes tile the exons to their edges, a gDNA fragment crossing an exon's
-    boundary still binds most of a probe, so the boundary reads most of the exon's level (0.835 on the test
-    chromosome's panel) and not half of it, and the sum ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``
-    prices the junction near 1.67 (`ISSUES: the-junction-sum-over-prices-separately-probed-exons`). Every
-    exon at 1, every intron at 0.001, every boundary at 0.835: the mRNA's junctions price at 1, it reads its
-    full fl-marginal length, and no transcript reads longer than its own. PERTURBATION: the uncapped sum
-    reads the mRNA about 24 % long; a cap at the boundaries' own level (0.835) reads it short."""
+    """Capture saturates: a fragment binds its best single probe part, so a fragment across a junction between two
+    captured exons is captured no more than one wholly inside either. Where probes tile the exons to their edges, a gDNA
+    fragment crossing an exon's boundary still binds most of a probe, so the boundary reads most of the exon's level
+    rather than half, and the plain sum ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`` would price the junction well
+    above 1. With every exon at 1, every intron at 0.001 and every boundary at 0.835, the mRNA's junctions price at 1,
+    it reads its full fl-marginal length, and no transcript reads longer than its own. The uncapped sum would read the
+    mRNA long; a cap at the boundaries' own level would read it short.
+    """
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
@@ -473,12 +471,11 @@ def _mrna_length(fl_m: float, exon_levels, junction_prices) -> float:
 
 
 def test_a_junction_may_out_capture_every_object_it_touches_up_to_saturation(multiexon_index):
-    """THE FALSIFICATION TEST for the junction's bound in the bulk unit. A probe spanning a junction binds a
-    spliced RNA fragment as ONE part, where gDNA sees two: each exon side then reads part of the probe's level,
-    and the junction more than either. Saturation 100, every exon and boundary at 40, the introns at the bulk:
-    the junction prices at ``40 + 40 − ½(1 + 1) = 79``, above every object it touches and below saturation.
-    PERTURBATION: a bound at the best touched object prices it at 40 — the reviewed arm's rule, which cost the
-    deciding panels."""
+    """In the bulk unit a probe spanning a junction binds a spliced RNA fragment as one part, where gDNA sees two, so
+    each exon side reads part of the probe's level and the junction more than either. Saturation 100, every exon and
+    boundary at 40, the introns at the bulk: the junction prices at ``40 + 40 − ½(1 + 1) = 79``, above every object it
+    touches and below saturation. A bound at the best touched object would price it at 40.
+    """
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.ones(ra.n_regions)
@@ -495,11 +492,12 @@ def test_a_junction_may_out_capture_every_object_it_touches_up_to_saturation(mul
 
 
 def test_a_junction_beside_an_object_above_saturation_may_reach_that_objects_level(multiexon_index):
-    """Capture saturates per level: an object of a stronger probe reads above the library's saturated level, and
-    a junction beside it is captured as that object is, not cut back to the library's level. Saturation 100,
-    every exon and boundary at 300, the introns at the bulk: the sum ``599`` is bounded by the best touched
-    object, 300, and the mRNA reads every object at 300. PERTURBATION: a bound at saturation alone prices the
-    junctions at 100, under the exons beside them."""
+    """Capture saturates per level: an object of a stronger probe reads above the library's saturated level, and a
+    junction beside it is captured as that object is, not cut back to the library's level. Saturation 100, every exon
+    and boundary at 300, the introns at the bulk: the sum ``599`` is bounded by the best touched object, 300, and the
+    mRNA reads every object at 300. A bound at saturation alone would price the junctions at 100, under the exons beside
+    them.
+    """
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.ones(ra.n_regions)
@@ -515,9 +513,9 @@ def test_a_junction_beside_an_object_above_saturation_may_reach_that_objects_lev
 
 
 def test_one_factor_on_every_efficiency_is_one_factor_on_every_length(multiexon_index):
-    """The unit is free. Scaling every efficiency AND the saturated level by one factor scales every
-    transcript's length by exactly that factor — spliced, unspliced and nascent alike — so the EM, which reads
-    every component in the same unit, cannot tell the two units apart."""
+    """The unit is free: scaling every efficiency and the saturated level by one factor scales every transcript's length
+    by exactly that factor (spliced, unspliced and nascent alike), so the EM, which reads every component in the same
+    unit, cannot tell the units apart."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     rng = np.random.default_rng(5)
@@ -539,11 +537,10 @@ def test_one_factor_on_every_efficiency_is_one_factor_on_every_length(multiexon_
 
 
 def test_an_intron_piece_too_short_to_contain_a_fragment_reads_its_far_boundary(short_intron_index):
-    """A 50 bp intron holds no gDNA fragment against a 100–300 bp pmf, so its own efficiency is the
-    population's and says nothing about it: the junction reads the boundary on the intron's far side
-    instead — both splice sites' boundaries here, so the junction is their mean — and the intron's own
-    efficiency moves nothing. PERTURBATION: reading the intron region's own efficiency makes the length
-    follow it."""
+    """A 50 bp intron holds no gDNA fragment against a 100–300 bp pmf, so its own efficiency is the population's and
+    says nothing about it: the junction reads the boundary on the intron's far side instead (both splice sites'
+    boundaries here, so their mean), and the intron's own efficiency moves nothing.
+    """
     idx = short_intron_index
     ra = RegionArrays.from_index(idx)
     si = _tidx(idx, "si")
@@ -566,15 +563,14 @@ def test_an_intron_piece_too_short_to_contain_a_fragment_reads_its_far_boundary(
 
 
 def test_a_junction_reads_the_objects_beside_it_on_a_multi_region_intron(multi_region_intron_index):
-    """Every region and every boundary at its own efficiency, so no two objects agree and a junction read
-    through a wrong index cannot land on the right number. Each transcript is two 500 bp exons, so each holds
-    ``501 − E[w]`` of contained share per exon and ``E[w − 1]`` at its one junction; the junction's objects
-    are found by COORDINATE here, never by the module's index arithmetic: its low boundary is where the exon
-    below ends, its high boundary where the exon above starts, and the intron pieces beside them are the
-    regions touching those two positions — read at their own efficiency when they hold a fragment (``tk``,
-    400 bp), at the boundary on their far side when they cannot (``tj``, 50 bp). PERTURBATION: reading the
-    exons' other edges, the near side of a short intron piece, or one intron piece for both sides each moves
-    the number."""
+    """Every region and every boundary at its own efficiency, so no two objects agree and a junction read through a
+    wrong index cannot land on the right number. Each transcript is two 500 bp exons, holding ``501 − E[w]`` of
+    contained share per exon and ``E[w − 1]`` at its one junction. The junction's objects are found here by coordinate,
+    never by the module's index arithmetic: its low boundary is where the exon below ends, its high boundary where the
+    exon above starts, and the intron pieces beside them are the regions touching those two positions, read at their own
+    efficiency when they hold a fragment (``tk``, 400 bp) and at the boundary on their far side when they cannot
+    (``tj``, 50 bp).
+    """
     idx = multi_region_intron_index
     ra = RegionArrays.from_index(idx)
     starts, ends = np.asarray(ra.start), np.asarray(ra.end)
@@ -609,8 +605,8 @@ def test_a_junction_reads_the_objects_beside_it_on_a_multi_region_intron(multi_r
 
 
 def test_a_zero_length_fragment_places_nowhere(multiexon_index):
-    """A length model with mass at ``w = 0`` (a smoothed real library's once did) deposits no fragment
-    there: the lengths equal those of the same pmf with that mass removed, for every transcript."""
+    """A length model with mass at ``w = 0`` deposits no fragment there: the lengths equal those of the same pmf with
+    that mass removed, for every transcript."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
@@ -626,10 +622,11 @@ def test_a_zero_length_fragment_places_nowhere(multiexon_index):
 
 
 def test_a_transcript_of_exons_shorter_than_a_fragment_is_read_through_its_cuts(tiny_index):
-    """Ten 40 bp exons against a 100–300 bp pmf: no piece can contain a fragment, so the transcript's whole
-    length sits on its junctions. Its exons' own efficiencies carry no weight — they hold no share — and
-    with every junction priced at ½ (splice-site boundaries at ½, introns at ½) the factor is exactly ½.
-    PERTURBATION: an object set that drops the cuts reads this transcript as nothing."""
+    """Ten 40 bp exons against a 100–300 bp pmf: no piece can contain a fragment, so the transcript's whole length sits
+    on its junctions. Its exons' own efficiencies carry no weight (they hold no share), and with every junction priced
+    at ½ (splice-site boundaries at ½, introns at ½) the factor is exactly ½. An object set that dropped the cuts would
+    read this transcript as nothing.
+    """
     idx = tiny_index
     ra = RegionArrays.from_index(idx)
     t = _tidx(idx, "tiny")
@@ -673,9 +670,8 @@ def test_the_ruler_reads_the_efficiencies_and_nothing_from_the_counts(multiexon_
 
 
 def test_no_nascent_mature_inversion_under_capture(multiexon_index):
-    """On a field where capture adds over bases, a nascent parent holds its spliced child's captured exon
-    and more depleted bases besides, so ``eff(nascent) ≥ eff(mature)``; and the mature genuinely
-    contracts here."""
+    """On a field where capture adds over bases, a nascent parent holds its spliced child's captured exon plus more
+    depleted bases, so ``eff(nascent) ≥ eff(mature)``; and the mature length contracts here."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
@@ -862,9 +858,10 @@ def test_the_fixture_masks_what_it_says(masked_index):
 
 
 def test_a_templates_length_counts_only_the_starts_the_mask_leaves(masked_index):
-    """THE GATE, through the pipeline's own geometry step: each template's effective length is the pmf-weighted count
-    of its starts whose fragment touches no masked base, and one wholly masked keeps today's floor of one base (a
-    transcript shorter than every fragment does too)."""
+    """Through the pipeline's own geometry step: each template's effective length is the pmf-weighted count of its
+    starts whose fragment touches no masked base; a wholly masked template keeps the floor of one base, as does a
+    transcript shorter than every fragment.
+    """
     from rigel.config import EMConfig
     from rigel.frag_length_model import FragmentLengthModel
     from rigel.pipeline import _setup_geometry_and_estimator
@@ -902,8 +899,8 @@ def test_a_masked_templates_shares_partition_its_observable_starts(masked_index)
 
 
 def test_with_nothing_masked_the_lengths_and_shares_are_todays_bit_for_bit(multiexon_index):
-    """The fixed point: an index whose genome holds no unknown base gives every template the closed-form length and
-    the partition's pieces and cuts, to the bit."""
+    """An index whose genome holds no unknown base gives every template the closed-form length and the partition's
+    pieces and cuts, to the bit."""
     from rigel.config import EMConfig
     from rigel.frag_length_model import FragmentLengthModel
     from rigel.pipeline import _setup_geometry_and_estimator
@@ -944,12 +941,13 @@ def _path_placements(exons, w):
 
 @pytest.mark.parametrize("fixture", ["multiexon_index", "masked_index"])
 def test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law(fixture, request):
-    """``Σ_x g(ℓ_x) w(x) = eff_em_t`` over every observable placement of a template on its own path, junctions
-    included: ``w(x) = Σ_o m_o(x) c_o`` the native deposit's masses at the reader's efficiencies (a junction at its
-    price), the weight a multimapper's place carries (``place_log_weights``), and ``g`` the law the efficiencies are
-    read on (``tables.anchor``) — not the scorer's table, here another law (one law, ``T_R = T_G ≠ g``). So the weight
-    and the length the EM divides a transcript by are one rule, in the frame calibration measures capture in. A
-    placement touching a masked base is never observed and weighs nothing."""
+    """``Σ_x g(ℓ_x) w(x) = eff_em_t`` over every observable placement of a template on its own path, junctions included.
+    ``w(x) = Σ_o m_o(x) c_o`` is the native deposit's masses at the reader's efficiencies (a junction at its price), the
+    weight a multimapper's place carries (``place_log_weights``), and ``g`` is the law the efficiencies are read on
+    (``tables.anchor``), not the scorer's table, here another law (``T_R = T_G ≠ g``). So the weight and the length the
+    EM divides a transcript by follow one rule, in the frame calibration measures capture in. A placement touching a
+    masked base is never observed and weighs nothing.
+    """
     from rigel.calibration.capture_eff_length import (
         observable_fl_eff_lengths,
         place_efficiencies,

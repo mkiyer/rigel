@@ -83,7 +83,7 @@ def test_counted_introns_do_not_need_a_counted_exon_to_use_the_strand_protocol(k
     assert TransferPolicy(kappa).library(view).split_live
 
 
-@pytest.mark.parametrize("kappa, live", [(None, True), (None, False), (0.5, False), (0.95, False)])
+@pytest.mark.parametrize("kappa, live", [(0.5, False), (0.95, False)])
 def test_unavailable_strand_evidence_cannot_be_enabled_by_remote_expression(kappa, live):
     view = replace(_library_view(_local_context(), 100.0), strand_live=live)
     assert not TransferPolicy(kappa).library(view).split_live

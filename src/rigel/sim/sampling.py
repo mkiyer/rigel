@@ -1,9 +1,5 @@
-"""Shared fragment-length sampling for the simulator's read engine.
-
-The single shared fragment-length sampler: :func:`truncated_normal_frag_lengths` draws
-fragment lengths from a truncated normal via a rejection loop. Its one caller is the
-whole-genome read engine (:class:`wgs_engine.WholeGenomeSimulator`).
-"""
+"""The simulator's fragment-length sampler, a truncated normal drawn by rejection; its caller is
+:class:`wgs_engine.WholeGenomeSimulator`."""
 
 from __future__ import annotations
 
@@ -21,10 +17,9 @@ def truncated_normal_frag_lengths(
     frag_max: int,
 ) -> np.ndarray:
     """Sample ``n`` integer fragment lengths: a ``Normal(mean, std)`` draw rounded to the nearest integer,
-    truncated to ``[frag_min, frag_max]`` (inclusive), via rejection sampling against ``rng``. Rounding, never
-    truncation toward zero, is what makes the law `whole_genome.fl_pmf` states the one drawn."""
+    truncated to ``[frag_min, frag_max]`` (inclusive), by rejection against ``rng``. The draw must round, not
+    truncate toward zero, for `whole_genome.fl_pmf` to state the law drawn."""
     if frag_min > frag_max:
-        # The rejection loop would never fill: no draw lands in an empty window.
         raise ValueError(
             f"The fragment-length window [{frag_min}, {frag_max}] holds no length, so no fragment can be "
             "drawn: frag_min must not exceed frag_max (an RNA window's frag_max is capped at the longest "

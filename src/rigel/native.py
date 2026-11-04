@@ -1,29 +1,23 @@
-"""rigel.native — Public interface to Rigel's C++ native extensions.
+"""rigel.native — the one boundary between the Python package and its C++ extensions.
 
-All C++ functionality used by Python code is imported through this module.
-This is the single boundary between Python orchestration and C++ hot paths.
+Every C++ symbol the package uses is imported through this module:
 
-Modules
--------
-_bam_impl     : BAM scanning, annotation writing, SJ tag detection (htslib)
-_resolve_impl : Fragment overlap resolution against the reference index
-_scoring_impl : Per-fragment likelihood scoring (strand, coverage, splice)
-_em_impl      : Locus-level EM solver, connected components, effective-length normalization
-_solve_impl   : The calibration solve — the sweep's block pipeline in one call (`solve_blocks`), ψ (`psi_solve`
-               and its pieces for the gates), the composition transfer's builders, pass and solve on tables the
-               call allocates (for the gates), and `rows`: the row constructors, flag predicates and absorbed
-               constructions bound for the gates, with `read_column` and the shared constants production reads
-_cgranges_impl: Interval overlap queries (vendored cgranges)
+_bam_impl     : BAM scanning, annotation writing, junction-tag detection (htslib)
+_resolve_impl : fragment overlap resolution against the reference index
+_scoring_impl : per-fragment likelihood scoring (strand, coverage, splice)
+_em_impl      : the locus-level EM, connected components, effective-length normalization
+_solve_impl   : the calibration solve: the sweep's block pipeline in one call (``solve_blocks``), ψ (``psi_solve``),
+                and ``rows``, the row constructors and predicates the tests read, with ``read_column`` and the shared
+                constants production reads
+_cgranges_impl: interval overlap queries (vendored cgranges)
 """
 
 # -- BAM scanning ----------------------------------------------------------
 from ._bam_impl import BamScanner
 from ._bam_impl import BamAnnotationWriter
 
-# -- The accumulator --------------------------------------------------------
-# The native class directly: there is no Python row-view façade in front of it, so a caller reads the
-# banks the accumulator actually exports.
-from ._bam_impl import Accumulator, AccumulatorSet
+# -- The accumulator: the native class itself, so a caller reads the banks it exports -----------------
+from ._bam_impl import Accumulator
 
 # the kinds of object a placement's mass lands on, which the place weight reads
 from ._bam_impl import PLACE_REGION, PLACE_BOUNDARY, PLACE_SJ
@@ -64,21 +58,15 @@ from ._em_impl import WARM_START_UNIFORM
 # the winner code a unit the intergenic term wins carries, beside -2 for the locus's own gDNA
 from ._em_impl import EM_WINNER_INTERGENIC
 
-# -- The calibration solve: the sweep's block pipeline, ψ, the transfer kernels for the gates -----
+# -- The calibration solve: the sweep's block pipeline and ψ --------------------------------------
 from ._solve_impl import solve_blocks
 from ._solve_impl import psi_solve
-from ._solve_impl import psi_cube as psi_cube_native
-from ._solve_impl import posterior_median as psi_posterior_median
-from ._solve_impl import compose as psi_compose
-from ._solve_impl import gdna_arm as psi_gdna_arm
 
-# the transfer's three kernels on tables the call allocates, bound for the gates
-from ._solve_impl import transfer_prepare
-from ._solve_impl import transfer_pass
-from ._solve_impl import transfer_solve
+# the policy codes the block pipeline switches on; it refuses any other
+from ._solve_impl import POLICY_SILENT
+from ._solve_impl import POLICY_TRANSFER
 
-# the row constructors, the flag predicates and the constructions the block pipeline absorbed,
-# for the gates; and `read_column` and the shared constants, which production reads
+# the row constructors and predicates, for the tests; `read_column` and the shared constants, for production
 from ._solve_impl import rows as transfer_rows
 
 # -- Interval overlap -------------------------------------------------------
@@ -93,7 +81,6 @@ __all__ = [
     "PLACE_REGION",
     "PLACE_BOUNDARY",
     "PLACE_SJ",
-    "AccumulatorSet",
     # Resolution
     "FragmentResolver",
     "FragmentAccumulator",
@@ -123,16 +110,11 @@ __all__ = [
     "EM_WINNER_INTERGENIC",
     # The solve
     "solve_blocks",
-    "transfer_prepare",
-    "transfer_pass",
-    "transfer_solve",
+    "POLICY_SILENT",
+    "POLICY_TRANSFER",
     "transfer_rows",
     # ψ
     "psi_solve",
-    "psi_cube_native",
-    "psi_posterior_median",
-    "psi_compose",
-    "psi_gdna_arm",
     # Intervals
     "cgranges",
 ]

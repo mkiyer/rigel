@@ -2,11 +2,10 @@
 
 The YAML parser and its refusals; a run's refusals of a GTF its index was not built from and of a run
 that keeps no reads, and the manifest's record of that index; the fragment-length pmf the engine draws
-from; and the sparse nascent model: nascent lives on the index's nRNA entities, the on/off draw is per
-gene SPAN rather than per isoform, the level is log-uniform over the configured range, and it is drawn
+from; and the sparse nascent model: nascent lives on the index's synthetic spans, the on/off draw is per
+gene span rather than per isoform, the level is log-uniform over the configured range, and it is drawn
 independently of the mature level. Most of these properties are only observable statistically, so
-each gate states the band it uses and where that band comes from, and several exist because a
-perturbation to the mechanism passed every other gate in the file.
+each gate states the band it uses and where that band comes from.
 """
 
 import hashlib
@@ -43,7 +42,7 @@ def _transcript(
 
 
 def _entity(transcript_id: str, start: int, end: int, t_index: int) -> Transcript:
-    """An nRNA entity as the index makes it: single-exon over the clustered span, synthetic."""
+    """A nascent entity as the index makes it: single-exon over the clustered span, synthetic."""
     t = Transcript(
         ref="chr1",
         strand=Strand.POS,
@@ -60,11 +59,11 @@ def _entity(transcript_id: str, start: int, end: int, t_index: int) -> Transcrip
 
 
 def test_sparse_nascent_pools_onto_entities_and_the_SPAN_is_the_unit():
-    """Nascent molecules live on the index's nRNA ENTITIES, and under the sparse model the entity is
-    also the unit of the on/off draw — one gene span is transcribed or it is not, however many
-    isoforms share it. A span whose only contributor is SILENT gets nothing, single-exon transcripts
+    """Nascent molecules live on the index's nascent entities, and under the sparse model the entity
+    is also the unit of the on/off draw: one gene span is transcribed or it is not, however many
+    isoforms share it. A span whose only contributor is silent gets nothing, single-exon transcripts
     contribute nothing, and the contributors themselves end at ``nrna_abundance = 0``. Drawing per
-    CONTRIBUTOR instead compounds the probability over the isoforms, so the intron slots calibration
+    contributor instead compounds the probability over the isoforms, so the intron slots calibration
     reads would be several times less sparse than configured."""
     multi_a = _transcript("multi_a", 100.0, [(0, 100), (200, 300)])
     multi_b = _transcript("multi_b", 200.0, [(400, 500), (700, 800)])
@@ -80,7 +79,7 @@ def test_sparse_nascent_pools_onto_entities_and_the_SPAN_is_the_unit():
 
     realized_ratio = apply_sparse_nrna(transcripts, (150.0, 150.0), on_fraction=1.0, seed=17)
 
-    # the two contributors SHARE one span, so the span is ONE draw — not one per isoform
+    # the two contributors share one span, so the span is one draw, not one per isoform
     assert shared.nrna_abundance == pytest.approx(150.0)
     assert lone.nrna_abundance == 0.0, "a span whose only contributor is silent is not transcribed"
     assert all(t.nrna_abundance == 0.0 for t in (multi_a, multi_b, single, off))
@@ -102,8 +101,8 @@ def test_the_fl_pmf_is_the_one_the_engine_draws_from():
     """The share solve integrates over the fragment-length pmf. If that pmf were not the engine's,
     the solved ratio would be right about a distribution nothing samples.
 
-    PERTURBATION: the analytic pmf must match a large SAMPLE from `truncated_normal_frag_lengths`,
-    and must NOT match one drawn with a different sd.
+    Perturbation: the analytic pmf must match a large sample from `truncated_normal_frag_lengths`,
+    and must not match one drawn with a different sd.
     """
     import numpy as np
 
@@ -124,9 +123,9 @@ def test_the_fl_pmf_is_the_one_the_engine_draws_from():
 
 
 def test_an_empty_fragment_length_window_is_refused_not_drawn_from_forever():
-    """No length lies in [400, 300], so the rejection loop never fills: `rigel sim` hung on a scenario whose
-    frag_min exceeded its frag_max. The generator here raises after a bounded number of draws, so without the
-    refusal this gate fails instead of hanging. A one-length window is not empty."""
+    """No length lies in [400, 300], so the rejection loop would never fill and `rigel sim` would hang on a
+    scenario whose frag_min exceeds its frag_max. The generator here raises after a bounded number of draws, so
+    without the refusal this gate fails instead of hanging. A one-length window is not empty."""
     from rigel.sim.sampling import truncated_normal_frag_lengths
 
     class Bounded:
@@ -212,11 +211,10 @@ def test_an_unknown_key_is_refused_at_the_top_level_and_in_each_section(tmp_path
     ids=["shares", "transcript_filter"],
 )
 def test_a_retired_key_is_refused_not_run_on_a_default(tmp_path, body, key):
-    """`shares` belonged to the deleted fragment-share nascent mode. Still allowed and never read,
-    `nrna: {shares: [0.2], ratio_labels: [s20]}` ran `additive_ratio` at ratio 0.0: a nascent-free
-    condition named `s20`. `transcript_filter` has nothing to filter once the transcriptome is the
-    index's, and `all` was accepted silently. Both are unknown keys. PERTURBATION: putting either back
-    on its allow-list fails this gate."""
+    """`nrna.shares` and `transcript_filter` are read by nothing, so each is refused as an unknown key
+    rather than accepted: `nrna: {shares: [0.2], ratio_labels: [s20]}` would run `additive_ratio` at
+    ratio 0.0, a nascent-free condition named `s20`, and the transcriptome is the index's, so there is
+    nothing to filter. Perturbation: putting either back on its allow-list fails this gate."""
     config_path = tmp_path / "sim.yaml"
     config_path.write_text("genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\n" + body)
     with pytest.raises(ValueError, match=rf"unknown key\(s\) \['{key}'\]"):
@@ -226,7 +224,7 @@ def test_a_retired_key_is_refused_not_run_on_a_default(tmp_path, body, key):
 def test_no_oracle_bam_and_no_fastq_is_refused_when_the_config_is_read(tmp_path):
     """With no oracle BAM written and the FASTQs deleted once the truth is, a condition keeps no read
     and loses its resume key, so the run exits 0 with nothing to score and the next run simulates it
-    all again. Either output alone is a panel. PERTURBATION: `or` for `and` refuses the fl-gap panels'
+    all again. Either output alone is a panel. Perturbation: `or` for `and` refuses the fl-gap panels'
     `emit_fastq: false`; deleting the parse-time check passes the last config."""
     config_path = tmp_path / "sim.yaml"
     base = "genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\n"
@@ -248,7 +246,7 @@ def _paths_named(cfg) -> list[str]:
 def test_a_config_path_expands_its_variables_and_the_home_directory(tmp_path, monkeypatch):
     """The in-repo configs name their data root as `$RIGEL_RUNS`, so every path a config names goes
     through one expansion, `$NAME`, `${NAME}` and `~`, in each of the seven places a path is read.
-    PERTURBATIONS: dropping `expandvars` fails every `$` path, dropping `expanduser` the two `~`
+    Perturbations: dropping `expandvars` fails every `$` path, dropping `expanduser` the two `~`
     paths, and a call site that skips the expansion fails its own key."""
     root, home = tmp_path / "root", tmp_path / "home"
     monkeypatch.setenv("RIGEL_TEST_ROOT", str(root))
@@ -280,7 +278,7 @@ def test_a_config_path_expands_its_variables_and_the_home_directory(tmp_path, mo
 def test_a_config_path_naming_an_unset_or_empty_variable_is_refused_by_name(tmp_path, monkeypatch):
     """`os.path.expandvars` leaves an unset variable as written, so an unset `RIGEL_RUNS` would read and
     write a directory literally named `$RIGEL_RUNS`, and an empty one would move the path to `/`. Both
-    are refused, naming the key and the variable. PERTURBATIONS: deleting the refusal fails every row;
+    are refused, naming the key and the variable. Perturbations: deleting the refusal fails every row;
     testing that the name is in the environment rather than that its value is not empty fails the
     empty one."""
     monkeypatch.delenv("RIGEL_TEST_UNSET", raising=False)
@@ -303,7 +301,7 @@ def test_every_in_repo_sim_config_parses(monkeypatch):
     """A key the parser refuses would stop a panel from being re-simulated. The configs name their
     paths under `$RIGEL_RUNS`, set here as `panel.py` and `simulate_reads.py` set it, to the data root
     the instruments default to (`RUNS` in `scripts/design/_shared.py`), and every path such a config
-    names lands under it. PERTURBATIONS: without the variable every such config is refused; a path in
+    names lands under it. Perturbations: without the variable every such config is refused; a path in
     one written under another root fails the last assertion."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts" / "design"))
     runs = importlib.import_module("_shared").RUNS
@@ -321,8 +319,8 @@ def test_every_in_repo_sim_config_parses(monkeypatch):
 
 def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list[Transcript]]:
     """``n`` expressed multi-exon transcripts, one entity each, so an entity's ``nrna_abundance`` reads
-    back exactly one draw. Mature abundances span the ladder's own four decades (log-uniform 1 →
-    10,000), which is what lets the independence gate below see a correlation if there is one."""
+    back exactly one draw. Mature abundances span four decades (log-uniform 1 → 10,000), which is
+    what lets the independence gate below see a correlation if there is one."""
     rng = np.random.default_rng(seed)
     contributors, entities = [], []
     for i in range(n):
@@ -344,7 +342,7 @@ def test_the_on_fraction_leaves_most_gene_spans_at_EXACTLY_zero():
     ``on_fraction = 1.0`` the Bernoulli draw cannot be seen at all.
 
     Nascent RNA is absent from most gene spans and present in a minority, so ``on_fraction = 0.1``
-    must leave about 90 % of eligible spans at nascent EXACTLY zero — not small, zero — while the
+    must leave about 90 % of eligible spans at nascent exactly zero (not small: zero) while the
     rest carry a real level. The band is the binomial's own five sigma, derived rather than tuned.
     """
     n, frac = 400, 0.1
@@ -364,7 +362,7 @@ def test_the_on_fraction_leaves_most_gene_spans_at_EXACTLY_zero():
 
 
 def test_on_fraction_zero_transcribes_NOTHING_and_one_transcribes_EVERY_ELIGIBLE_span():
-    """The two closed ends, exactly — a fraction is a fraction only if its endpoints are honoured."""
+    """The two closed ends, exactly: a fraction is a fraction only if its endpoints are honoured."""
     contributors, entities = _sparse_population(40)
     assert apply_sparse_nrna(contributors + entities, (1.0, 1000.0), on_fraction=0.0, seed=5) == 0.0
     assert all(e.nrna_abundance == 0.0 for e in entities)
@@ -375,10 +373,10 @@ def test_on_fraction_zero_transcribes_NOTHING_and_one_transcribes_EVERY_ELIGIBLE
 
 
 def test_the_level_is_LOG_uniform_over_the_range_not_linear():
-    """Where nascent is present its level spans decades — very low in some spans, high in others.
-    A LINEAR draw on (1, 1000) puts 90 % of its mass in the top decade and cannot express "very low";
-    a log-uniform draw spreads the ORDERS OF MAGNITUDE evenly, so the decade occupancies are
-    near-equal. That is the property gated here, and it is what distinguishes the two draws.
+    """Where nascent is present its level spans decades, very low in some spans and high in others.
+    A linear draw on (1, 1000) puts 90 % of its mass in the top decade and cannot express "very low";
+    a log-uniform draw spreads the orders of magnitude evenly, so the decade occupancies are
+    near-equal, which is what distinguishes the two draws.
     """
     lo, hi = 1.0, 1000.0
     contributors, entities = _sparse_population(600)
@@ -387,7 +385,7 @@ def test_the_level_is_LOG_uniform_over_the_range_not_linear():
 
     assert levels.min() >= lo and levels.max() <= hi, "levels escaped the range"
     # three decades, so a log-uniform draw puts ~1/3 of the mass in each; a linear draw puts ~0.9 in
-    # the last one. The band is generous — it only has to separate 1/3 from 9/10.
+    # the last one. The band is generous: it only has to separate 1/3 from 9/10.
     per_decade = [np.mean((levels >= 10.0**k) & (levels < 10.0 ** (k + 1))) for k in range(3)]
     assert max(per_decade) < 0.5, (
         f"decade occupancies {[round(x, 3) for x in per_decade]} — the level is concentrated in one "
@@ -397,13 +395,12 @@ def test_the_level_is_LOG_uniform_over_the_range_not_linear():
 
 
 def test_the_nascent_LEVEL_IS_INDEPENDENT_OF_THE_MATURE_LEVEL():
-    """The decision this mode exists for: the nascent level is drawn INDEPENDENTLY of the mature
-    level, so ``nascent > mature`` is a real case the tool has to survive. A ratio model setting
-    ``nascent = mature x ratio`` makes the two perfectly rank-correlated and puts a ceiling under
-    exactly that case.
+    """The nascent level is drawn independently of the mature level, so ``nascent > mature`` is a real
+    case the tool has to survive. A ratio model setting ``nascent = mature x ratio`` makes the two
+    perfectly rank-correlated and puts a ceiling under exactly that case.
 
     Two things are asserted: the rank correlation between the mature and nascent levels is ~0 (a
-    ratio model reads 1.0), and spans where nascent EXCEEDS mature actually occur.
+    ratio model reads 1.0), and spans where nascent exceeds mature actually occur.
     """
     contributors, entities = _sparse_population(500, seed=9)
     apply_sparse_nrna(contributors + entities, (1.0, 1000.0), on_fraction=1.0, seed=23)
@@ -414,27 +411,26 @@ def test_the_nascent_LEVEL_IS_INDEPENDENT_OF_THE_MATURE_LEVEL():
     rank_n = np.argsort(np.argsort(nascent)).astype(float)
     rho = float(np.corrcoef(rank_m, rank_n)[0, 1])
     # 500 independent pairs: sd of Spearman's rho under the null is ~1/sqrt(n-1) = 0.045, so five
-    # sigma is 0.22 — derived from the sample size, not tuned
+    # sigma is 0.22, derived from the sample size, not tuned
     assert abs(rho) < 5.0 / (len(mature) - 1) ** 0.5, (
         f"rank correlation between mature and nascent levels is {rho:.3f} — the nascent level is "
         f"tracking the mature one, which is the ratio model this mode replaced"
     )
     assert (nascent > mature).mean() > 0.1, (
         f"only {(nascent > mature).mean():.1%} of spans carry more nascent than mature — the "
-        f"robustness case the owner asked for is not being exercised"
+        f"nascent-dominant robustness case is not being exercised"
     )
 
 
 def test_the_on_off_DRAW_IS_PER_SPAN_NOT_PER_ISOFORM():
-    """The unit of sparsity, gated where it is actually observable. With ``k`` isoforms sharing one
-    gene span, a per-CONTRIBUTOR draw gives that span a ``1 - (1 - p)^k`` chance of carrying nascent
-    — at ``p = 0.1`` and ``k = 5`` that is 41 %, four times the configured sparsity — while a
-    per-SPAN draw gives exactly ``p``. The intron slots calibration reads belong to the span, so the
-    per-span reading is the one that makes the configured number mean what it says.
+    """The unit of sparsity, gated where it is observable. With ``k`` isoforms sharing one gene span,
+    a per-contributor draw gives that span a ``1 - (1 - p)^k`` chance of carrying nascent (at
+    ``p = 0.1`` and ``k = 5`` that is 41 %, four times the configured sparsity), while a per-span draw
+    gives exactly ``p``. The intron slots calibration reads belong to the span, so the per-span reading
+    makes the configured number mean what it says.
 
-    PERTURBATION: switching to per-contributor drawing passes every other test in this file, because
-    the shared-span test runs at ``on_fraction = 1.0`` where the two are indistinguishable
-    (`TRAPS: perturb-every-gate`).
+    Perturbation: switching to per-contributor drawing passes every other test in this file, because
+    the shared-span test runs at ``on_fraction = 1.0`` where the two are indistinguishable.
     """
     n_spans, k, p = 300, 5, 0.1
     rng = np.random.default_rng(4)
@@ -466,12 +462,11 @@ def test_the_on_off_DRAW_IS_PER_SPAN_NOT_PER_ISOFORM():
 
 
 def test_the_SEED_actually_drives_the_draw():
-    """PERTURBATION: every other gate here is statistical, so replacing `default_rng(seed)` with a
-    constant seed passes all of them. The orchestrator adds `seed + nrna_index` precisely so a
-    multi-range sweep gets DIFFERENT on-sets, which would otherwise collapse to one pattern silently
-    (`TRAPS: perturb-every-gate`).
+    """Two seeds disagree, and one seed reproduces itself exactly.
 
-    Two seeds must disagree, and one seed must reproduce itself exactly.
+    Every other gate here is statistical, so replacing `default_rng(seed)` with a constant seed passes
+    all of them. The orchestrator adds `seed + nrna_index` so a multi-range sweep gets different
+    on-sets, which would otherwise collapse to one pattern silently.
     """
 
     def draw(seed):
@@ -488,8 +483,8 @@ def test_the_SEED_actually_drives_the_draw():
 
 
 def test_a_multi_exon_contributor_with_no_ENTITY_raises_in_the_SPARSE_path_too():
-    """PERTURBATION: with the rule gated only through `apply_nrna_ratio`, replacing the sparse path's
-    own raise with `continue` passes every test. A transcript list without entities is not a rigel
+    """The sparse path raises on its own: with the rule gated only through `apply_nrna_ratio`, replacing
+    its raise with `continue` would pass every test. A transcript list without entities is not a rigel
     index's, and dropping its molecules silently is the failure the rule exists to stop."""
     orphan = _transcript("orphan", 100.0, [(0, 100), (200, 300)])
     orphan.t_index = 0  # span_t_index stays unset/-1: no entity
@@ -500,7 +495,7 @@ def test_a_multi_exon_contributor_with_no_ENTITY_raises_in_the_SPARSE_path_too()
 def test_the_FUNCTION_validates_its_own_range_and_fraction_not_just_the_PARSER():
     """The parser is not the only door. `apply_sparse_nrna` is public, and a caller that builds its
     arguments directly never passes through `parse_yaml_config`, so the function's own guards are all
-    that stands between a range of `(0, 100)` and `log(0) = -inf` inside the draw. PERTURBATION:
+    that stands between a range of `(0, 100)` and `log(0) = -inf` inside the draw. Perturbation:
     deleting either guard passes every other gate in this file."""
     rows = sum(_sparse_population(4), [])
     for bad, why in [
@@ -558,8 +553,8 @@ def _tiny_config(path, genome, gtf, index, outdir, extra=""):
 def test_the_manifest_records_the_index_the_transcriptome_comes_from(tiny_reference, tmp_path):
     """The simulated transcriptome is the index's, so the manifest names the index: its resolved path and
     its own manifest, which carries the sha256 of the FASTA and the GTF it was built from. The config's
-    `gtf:` here is a byte-identical COPY at another path; the check is on content, so the run proceeds
-    and the record still names the file the index was built from. PERTURBATIONS: comparing paths instead
+    `gtf:` here is a byte-identical copy at another path; the check is on content, so the run proceeds
+    and the record still names the file the index was built from. Perturbations: comparing paths instead
     of digests refuses this run; dropping the record fails the equality."""
     genome, gtf, index = tiny_reference
     copy = tmp_path / "copy_of_genes.gtf"
@@ -582,8 +577,8 @@ def test_the_manifest_records_the_index_the_transcriptome_comes_from(tiny_refere
 
 def test_a_gtf_the_index_was_not_built_from_is_refused(tiny_reference, tmp_path):
     """`run_simulation` reads its transcriptome from `index:` and never parses `gtf:`, so a config naming
-    another GTF simulated the index's transcripts while its manifest named the other file. A one-byte
-    edit is refused, before any condition is simulated. PERTURBATION: deleting the digest comparison
+    another GTF would simulate the index's transcripts while its manifest names the other file. A one-byte
+    edit is refused, before any condition is simulated. Perturbation: deleting the digest comparison
     simulates this config."""
     genome, gtf, index = tiny_reference
     edited = tmp_path / "edited.gtf"
@@ -599,9 +594,9 @@ def test_a_gtf_the_index_was_not_built_from_is_refused(tiny_reference, tmp_path)
 def test_no_oracle_on_a_config_without_fastqs_is_refused_before_anything_is_simulated(
     tiny_reference, tmp_path, monkeypatch
 ):
-    """`simulate_reads.py --no-oracle` turns the oracle BAM off AFTER the config is read, so the parser
+    """`simulate_reads.py --no-oracle` turns the oracle BAM off after the config is read, so the parser
     cannot see it; `run_simulation` refuses it before writing anything. The config alone is valid: it is
-    the fl-gap panels' `emit_fastq: false`. PERTURBATION: without the run-time check this run exits 0
+    the fl-gap panels' `emit_fastq: false`. Perturbation: without the run-time check this run exits 0
     having simulated the condition and deleted its only reads."""
     genome, gtf, index = tiny_reference
     outdir = tmp_path / "out"
@@ -620,8 +615,8 @@ def test_no_oracle_on_a_config_without_fastqs_is_refused_before_anything_is_simu
 
 def test_the_length_sampler_is_unbiased_and_its_law_is_exact():
     """A drawn length is the nearest integer to a normal draw, so the law the instruments integrate (`fl_pmf`, the
-    rounded normal's mass at each integer, truncated) is the sampler's exactly. The sampler once truncated toward
-    zero, so every simulated length law sat half a base below the one `fl_pmf` claims: invisible to the pmf gate
+    rounded normal's mass at each integer, truncated) is the sampler's exactly. A sampler truncating toward zero
+    would put every simulated length law half a base below the one `fl_pmf` claims: invisible to the pmf gate
     above, which reads the largest per-length difference, and plain in the mean.
 
     Perturbation: `.astype(int)` without rounding moves the mean by about half a base, seven standard errors here."""
@@ -643,7 +638,7 @@ def test_the_length_sampler_is_unbiased_and_its_law_is_exact():
 
 def test_the_length_law_is_the_rounded_normals_mass_at_each_integer():
     """`fl_pmf` is the Normal's mass on ``[k − ½, k + ½)`` at each length of the window, renormalised: the law of a
-    rounded draw. The Normal's density at ``k`` is a different law, only nearly the same at the ladder's spread of
+    rounded draw. The Normal's density at ``k`` is a different law, only nearly the same at a spread of
     98 bases, where the mean gate above cannot tell them apart; at a spread of a base and a half they differ by
     percents. Checked by quadrature there, and against the sampler.
 

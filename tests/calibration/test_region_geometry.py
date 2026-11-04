@@ -1,14 +1,12 @@
 """The chain's geometry: its shape, its per-slot arrays, its structural flags and its numbers.
 
-A reference with ``k`` regions lays out ``2k - 1`` chain slots running REGION, BOUNDARY, …, REGION,
-so a BOUNDARY always has a region on both sides and no slot is a reference terminal. This file
-gates that shape, the ``RegionArrays`` the slots are built from with the two-way mapping between a
-region and the contiguous boundary on its right, the splice graph's structural flags landing on the
-payload's own boundary axis, and ``RegionGeometry`` itself — one set of numbers per slot, with no
-face concept in it. Two strand axes meet here and are asserted apart: ``count`` is keyed by genome
-strand, ``sj_count`` by the transcript strand each junction carries. The brute-force oracles share
-no helper with the implementation and the flag tests match by genomic coordinate rather than by
-index, so neither can be fooled by the arithmetic it is checking.
+A reference with ``k`` regions lays out ``2k - 1`` chain slots running REGION, BOUNDARY, …, REGION, so a BOUNDARY always
+has a region on both sides and no slot is a reference terminal. This module tests that shape; the ``RegionArrays`` the
+slots are built from, with the two-way mapping between a region and the contiguous boundary on its right; the splice
+graph's structural flags on the payload's own boundary axis; and ``RegionGeometry``, one set of numbers per slot. Two
+strand axes meet here and are asserted apart: ``count`` is keyed by genome strand, ``sj_count`` by the transcript strand
+each junction carries. The brute-force oracles share no helper with the implementation, and the flag tests match by
+genomic coordinate rather than index.
 """
 
 from __future__ import annotations
@@ -57,7 +55,7 @@ from _synthetic import make_synthetic_payload
 
 
 # ---------------------------------------------------------------------------
-# brute force — integer start positions, counted in a Python loop. No shared helper.
+# brute force: integer start positions, counted in a Python loop, sharing no helper
 # ---------------------------------------------------------------------------
 
 
@@ -73,10 +71,9 @@ def brute_contained(region_len: int, pmf: np.ndarray) -> float:
 
 
 def brute_crossing(pmf: np.ndarray, reach_lo: float, reach_hi: float) -> float:
-    """``E_f[#{a : 1 <= a <= w-1, a <= R_lo, w-a <= R_hi}]`` by enumeration.
-
-    ``a`` is how many of the molecule's bases lie to the LEFT of the 0-bp boundary. The molecule must have
-    at least one base on each side and must fit in what remains of its own template either way.
+    """``E_f[#{a : 1 <= a <= w-1, a <= R_lo, w-a <= R_hi}]`` by enumeration. ``a`` is how many of the molecule's bases
+    lie left of the 0-bp boundary; the molecule needs at least one base on each side and must fit in its own template
+    either way.
     """
     total = 0.0
     for w, p in enumerate(pmf):
@@ -113,8 +110,8 @@ def parts():
     payload, region_arrays = make_synthetic_payload()
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
-    # the fixture's one sj: regions are [0,100) [100,200) [200,300), so an intron running from the
-    # end of region 0 to the start of region 2 has its DONOR at boundary 0 and its ACCEPTOR at boundary 1.
+    # the fixture's one sj: regions are [0,100) [100,200) [200,300), so an intron from the end of region 0 to the start
+    # of region 2 has its donor at boundary 0 and its acceptor at boundary 1.
     sj = SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
         dst_region=np.array([2], dtype=np.int64),
@@ -132,19 +129,18 @@ def geometry(parts):
 
 
 # ---------------------------------------------------------------------------
-# 1. the dissolution itself
+# 1. one set of numbers per slot
 # ---------------------------------------------------------------------------
 
 
 def test_NO_FIELD_NAMES_A_FACE():
-    """No field may name a face. A surviving ``_left``/``_right`` would mean the boundary's two
-    sides still carry different numbers, which is the model that put a large share of "spliced"
-    mass at positions with no annotated splice site."""
+    """No field may name a face: a ``_left``/``_right`` field would mean the boundary's two sides carry different
+    numbers."""
     fields = set(RegionGeometry.__dataclass_fields__)
     for name in fields:
         assert not name.endswith("_left"), f"{name} is a face"
         assert not name.endswith("_right"), f"{name} is a face"
-    # and the specific names, so a rename cannot smuggle the concept back
+    # and the specific names, so a rename cannot bring the concept back
     for dead in (
         "mass_left",
         "mass_right",
@@ -175,9 +171,8 @@ def test_ONE_SET_OF_NUMBERS_PER_SLOT(geometry, parts):
 
 
 def test_the_chain_is_N_E_N_E_N_and_the_geometry_is_addressed_by_SLOT(parts, geometry):
-    """3 regions and 2 boundaries interleave into 5 slots. A geometry keyed by region id or by
-    boundary id instead would have the wrong length, which is the axis mix-up that drops nearly
-    every fragment while every golden test stays green."""
+    """3 regions and 2 boundaries interleave into 5 slots. A geometry keyed by region id or by boundary id would have
+    the wrong length."""
     _, _, _, chain, _ = parts
     assert chain.n_slots == 5
     np.testing.assert_array_equal(chain.kind, [REGION, BOUNDARY, REGION, BOUNDARY, REGION])
@@ -185,15 +180,15 @@ def test_the_chain_is_N_E_N_E_N_and_the_geometry_is_addressed_by_SLOT(parts, geo
 
 
 # ---------------------------------------------------------------------------
-# 2. the routing — which population lands on which slot kind
+# 2. the routing: which population lands on which slot kind
 # ---------------------------------------------------------------------------
 
 
 def test_a_REGION_slot_carries_region_contained_and_an_BOUNDARY_slot_carries_boundary_unspliced(
     geometry, parts
 ):
-    """The two populations live on axes that are off by one per reference, and the fixture gives every
-    bank a distinct total so a consumer reading the wrong one cannot pass by coincidence."""
+    """The two populations live on axes that are off by one per reference, and the fixture gives every bank a distinct
+    total so reading the wrong one cannot pass by coincidence."""
     payload, _, _, chain, _ = parts
     region_slots = np.flatnonzero(np.asarray(chain.kind) == REGION)
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
@@ -207,9 +202,8 @@ def test_a_REGION_slot_carries_region_contained_and_an_BOUNDARY_slot_carries_bou
 
 
 def test_the_count_columns_are_GENOME_STRAND_unpermuted(geometry, parts):
-    """POS is column 0. Storing some banks by genome strand and others by sense is how a large
-    share of the spliced deposits land in the opposite column from their unspliced neighbours at
-    the same boundary."""
+    """POS is column 0. Storing some banks by genome strand and others by sense would put spliced deposits in the
+    opposite column from their unspliced neighbours at the same boundary."""
     payload, _, _, chain, _ = parts
     first_region = int(np.flatnonzero(np.asarray(chain.kind) == REGION)[0])
     assert geometry.unspliced_count[first_region, 0] == float(payload.region_contained_count[0, 0])
@@ -218,26 +212,23 @@ def test_the_count_columns_are_GENOME_STRAND_unpermuted(geometry, parts):
 
 
 def test_the_count_IS_the_flux_so_mass_and_n_no_longer_diverge(geometry, parts):
-    """A fractional mass (the density numerator) and an integer count (the Poisson power) are two
-    numbers only if one fragment's mass is split across objects. The accumulator deposits ``+1`` on
-    every object the fragment touched, so there is one number and ``Var(log rho) = 1/n`` is honest
-    against it. Assert it is exactly integral."""
+    """The accumulator deposits ``+1`` on every object a fragment touched, so the mass (the density numerator) and the
+    count (the Poisson power) are one integral number, and ``Var(log rho) = 1/n`` holds against it."""
     np.testing.assert_array_equal(geometry.unspliced_count, np.rint(geometry.unspliced_count))
 
 
 def test_a_REGION_carries_NO_MATURE_FLUX_because_contained_is_unspliced_by_construction(
     geometry, parts
 ):
-    """Structural, from the specification: ``region_contained`` is credited only when ``not sj_ids``
-    (`_accumulator_reference.deposit`). So a region's contained population can never contain a spliced
-    fragment, and any mature flux appearing on a REGION slot is a routing bug."""
+    """``region_contained`` is credited only when ``not sj_ids`` (`_accumulator_reference.deposit`), so a region's
+    contained population never holds a spliced fragment, and mature flux on a REGION slot would be a routing bug."""
     _, _, _, chain, _ = parts
     region_slots = np.asarray(chain.kind) == REGION
     assert np.all(geometry.sj_count[region_slots] == 0.0)
 
 
 # ---------------------------------------------------------------------------
-# 3. the divisors — enumerated, not restated
+# 3. the divisors, enumerated rather than restated
 # ---------------------------------------------------------------------------
 
 
@@ -253,12 +244,9 @@ def test_a_REGION_divisor_is_the_CONTAINED_placements_count(geometry, parts):
 def test_a_CONTIGUOUS_BOUNDARY_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULING(
     geometry, parts
 ):
-    """At a contiguous boundary both components pass ``UNBOUNDED_REACH``, so both divisors collapse
-    to ``mu - 1`` exactly. gDNA is unbounded by physics — its template is the chromosome, so
-    ``taper_g = 1`` — and RNA is unbounded by ruling, which defers the RNA taper to a change that
-    can be A/B'd on its own.
-
-    This test pins that ruling: turning the RNA taper on must break it, which is the point.
+    """At a contiguous boundary both components pass ``UNBOUNDED_REACH``, so both divisors are exactly ``mu - 1``. gDNA
+    is unbounded physically (its template is the chromosome, so ``taper_g = 1``), and RNA is unbounded by design; an RNA
+    taper at a contiguous boundary would break this test.
     """
     _, _, _, chain, _ = parts
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
@@ -267,7 +255,7 @@ def test_a_CONTIGUOUS_BOUNDARY_divisor_is_the_UNBOUNDED_crossing_count__the_A7_R
     for slot in boundary_slots:
         assert geometry.eff_gdna[slot] == pytest.approx(mu_g - 1.0)
         assert geometry.eff_rna[slot] == pytest.approx(mu_r - 1.0)
-        # and against the enumerator, so this is not just restating `mu - 1`
+        # and against the enumerator, so this does not just restate `mu - 1`
         assert geometry.eff_gdna[slot] == pytest.approx(brute_crossing(GDNA_PMF, 1e12, 1e12))
 
 
@@ -291,11 +279,12 @@ def _masked_parts(parts):
 
 
 def test_every_divisor_counts_only_placements_that_touch_no_masked_base(parts):
-    """No fragment is observed on a masked base, so a slot's divisor is its placements over the observable genome: a
-    region's contained starts over its observable pieces (region 0 holds two, [0, 20) and [40, 100); region 2 is
-    masked whole and holds none), a boundary's crossing starts within the bases to the nearest masked base either side
-    (boundary 0 reaches 60 left and 90 right; a masked base touches boundary 1, which nothing observable crosses). For
-    both components, against the enumerator; with nothing masked the two unbounded-crossing gates above hold."""
+    """No fragment is observed on a masked base, so a slot's divisor counts its placements over the observable genome: a
+    region's contained starts over its observable pieces (region 0 holds two, [0, 20) and [40, 100); region 2 is masked
+    whole and holds none), and a boundary's crossing starts within the bases to the nearest masked base on either side
+    (boundary 0 reaches 60 left and 90 right; boundary 1 touches a masked base, so nothing observable crosses it).
+    Checked for both components against the enumerator.
+    """
     masked, substrate, chain, sj = _masked_parts(parts)
     g = build_region_geometry(chain, substrate, masked, sj, GDNA_PMF, RNA_PMF)
     region = {
@@ -313,8 +302,8 @@ def test_every_divisor_counts_only_placements_that_touch_no_masked_base(parts):
 
 def test_gdnas_conserved_share_at_a_boundary_counts_only_observable_placements(parts):
     """The share the priors' gDNA length reads at each boundary (`calibrate._gdna_boundary_conserved_len`) is gDNA's
-    over the observable genome, `effective_length.observable_cut_shares`, which `test_effective_length.py` enumerates
-    against the deposit rule; a boundary a masked base touches holds none of it."""
+    over the observable genome, `effective_length.observable_cut_shares`; a boundary touched by a masked base holds none
+    of it."""
     from rigel.calibration.calibrate import _gdna_boundary_conserved_len
     from rigel.calibration.effective_length import observable_cut_shares
 
@@ -325,11 +314,9 @@ def test_gdnas_conserved_share_at_a_boundary_counts_only_observable_placements(p
 
 
 def test_the_SJ_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
-    """The other half of the same ruling: a sj boundary is used only by a molecule that spliced
-    across it, so what remains either side is exonic and the reach is real. Leaving the sj divisor
-    unbounded ships a divisor wrong by up to 4x at a first exon.
-
-    Here the reach binds: 50 bases of exon either side of an 80 bp molecule.
+    """A sj boundary is used only by a molecule that spliced across it, so what remains on either side is exonic and the
+    reach is real; an unbounded sj divisor would be wrong by up to 4x at a first exon. Here the reach binds: 50 bases of
+    exon either side of an 80 bp molecule.
     """
     payload, region_arrays, substrate, chain, _ = parts
     tight = SpliceJunctionGeometry(
@@ -355,8 +342,8 @@ def test_the_SJ_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
 
 
 def test_a_reach_of_ZERO_gives_ZERO_opportunity_and_is_not_a_sentinel(parts):
-    """`splice_graph`: a reach of 0 is meaningful — no strand-s molecule can occupy that side, so the
-    opportunity is genuinely zero. It must NOT be read as 'unset' and replaced by the mean."""
+    """A reach of 0 is meaningful (no strand-s molecule can occupy that side), so the opportunity is zero; it must not
+    be read as "unset" and replaced by the mean."""
     _, region_arrays, substrate, chain, _ = parts
     dead = SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
@@ -373,12 +360,9 @@ def test_a_reach_of_ZERO_gives_ZERO_opportunity_and_is_not_a_sentinel(parts):
 
 
 def test_a_divisor_of_ZERO_is_NOT_FLOORED(parts):
-    """`effective_length`'s own contract: an object with no opportunity must return 0, and the
-    caller must treat 0 as "no evidence". Flooring every divisor to ``_EPS`` instead produces
-    densities of ~1e9 on the substantial minority of fine-partition regions where the contained
-    effective length collapses to exactly 0.
-
-    A 100 bp region cannot contain a 150 bp fragment: the opportunity is exactly zero.
+    """An object with no opportunity returns 0, and the caller treats 0 as "no evidence". Flooring every divisor to
+    ``_EPS`` would produce enormous densities on the many fine-partition regions whose contained effective length is
+    exactly 0. A 100 bp region cannot contain a 150 bp fragment.
     """
     _, region_arrays, substrate, chain, sj = parts
     huge = spike_pmf(150)
@@ -389,17 +373,16 @@ def test_a_divisor_of_ZERO_is_NOT_FLOORED(parts):
 
 
 def test_the_divisors_differ_between_the_two_COMPONENTS(geometry, parts):
-    """gDNA and RNA have different length distributions and therefore different opportunity at the same
-    object. A single shared divisor would make the 2x2 deconvolution singular."""
+    """gDNA and RNA have different length distributions and so different opportunity at the same object; a single shared
+    divisor would make the 2x2 deconvolution singular."""
     _, _, _, chain, _ = parts
     region_slots = np.flatnonzero(np.asarray(chain.kind) == REGION)
     assert not np.allclose(geometry.eff_gdna[region_slots], geometry.eff_rna[region_slots])
 
 
 def test_a_MIXED_pmf_is_not_collapsed_to_its_mean(parts):
-    """The divisor is ``E_f[placements]``, not ``placements(E_f[w])`` — the two differ whenever the
-    opportunity is non-linear in ``w``, which is every contained frame. Enumerated on a two-point pmf.
-    """
+    """The divisor is ``E_f[placements]``, not ``placements(E_f[w])``; the two differ whenever the opportunity is
+    non-linear in ``w``, as in every contained frame. Enumerated on a two-point pmf."""
     _, region_arrays, substrate, chain, sj = parts
     pmf = two_point_pmf(20, 150)  # mean 85; 150 does not fit in a 100 bp region, 20 does
     g = build_region_geometry(chain, substrate, region_arrays, sj, pmf, pmf)
@@ -416,13 +399,10 @@ def test_a_MIXED_pmf_is_not_collapsed_to_its_mean(parts):
 
 
 def test_a_sj_deposits_on_BOTH_the_donor_and_the_acceptor_boundary(geometry, parts):
-    """A sj ``(src, dst)`` has its DONOR at the boundary to the right of ``src`` and its ACCEPTOR at
-    the boundary to the left of ``dst``. Molecules leave the template at the first and arrive at the
-    second, so both boundaries genuinely saw the flux — and the index states both explicitly rather
-    than leaving it to be guessed from the exon bits.
-
-    The fixture's sj runs region 0 -> region 2, so it lands on boundary 0 (donor) and boundary 1 (acceptor)
-    — i.e. on BOTH boundary slots.
+    """A sj ``(src, dst)`` has its donor at the boundary right of ``src`` and its acceptor at the boundary left of
+    ``dst``. Molecules leave the template at the first and arrive at the second, so both boundaries saw the flux, and
+    the index states both explicitly. The fixture's sj runs region 0 -> region 2, so it lands on boundary 0 (donor) and
+    boundary 1 (acceptor).
     """
     payload, _, _, chain, _ = parts
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
@@ -433,11 +413,10 @@ def test_a_sj_deposits_on_BOTH_the_donor_and_the_acceptor_boundary(geometry, par
 
 
 def test_the_mature_flux_is_keyed_by_the_SJ_OWN_STRAND_not_the_align_column(parts):
-    """The 'sense is derived, never stored' rule, made executable. The accumulator's ``sj_count``
-    columns are the genome strand the read aligned to; the sj's strand is a property of the
-    ANNOTATION. A ``-`` sj's flux belongs to the ``-`` transcript column however its reads
-    aligned — and the fixture's sj has 9 POS-aligned and 4 NEG-aligned reads, so a column-wise
-    copy would put 4 fragments in the wrong place.
+    """Sense is derived, never stored. The accumulator's ``sj_count`` columns are the genome strand the read aligned to,
+    while the sj's strand belongs to the annotation, so a ``-`` sj's flux goes to the ``-`` transcript column however
+    its reads aligned. The fixture's sj has 9 POS-aligned and 4 NEG-aligned reads, so a column-wise copy would misplace
+    4 fragments.
     """
     payload, region_arrays, substrate, chain, _ = parts
     neg = SpliceJunctionGeometry(
@@ -475,8 +454,8 @@ def test_several_sj_on_one_boundary_POOL_their_counts_and_SUM_their_route_rates(
     payload2 = dataclasses.replace(
         payload,
         sj_count=np.array([[9, 4], [5, 1]], dtype=np.uint32),
-        # ONE column per sj, not the count's (n_sj, 2): `sj_inv_length_sum` is 1-D in the
-        # executable specification (`tests/native/_accumulator_reference.py`), which wins.
+        # One column per sj, not the count's (n_sj, 2): `sj_inv_length_sum` is 1-D in the executable specification
+        # (`tests/native/_accumulator_reference.py`).
         sj_inv_length_sum=np.zeros(2, dtype=np.uint64),
         sj_mass=np.zeros(2, dtype=np.uint64),
         ref_sj_offsets=np.array([0, 2], dtype=np.int64),
@@ -501,12 +480,9 @@ def test_several_sj_on_one_boundary_POOL_their_counts_and_SUM_their_route_rates(
 def two_reference_parts(payload):
     """chr1 with 3 regions / 2 boundaries, then chr2 with 2 regions / 1 boundary.
 
-    The second reference is the point. Slot ids run ``N E N E N`` per reference, so within the
-    FIRST reference region ``i`` always sits at slot ``2i`` — which means a geometry that assumes that
-    layout instead of reading the chain's own adjacency is indistinguishable from a correct one on any
-    single-reference fixture. chr2's region 3 sits at slot 5, not slot 6. This helper is what makes
-    that assumption observable: the perturbation ``slot_of_region = 2 * arange`` passes every other
-    test in this file.
+    Slot ids run ``N E N E N`` per reference, so within the first reference region ``i`` sits at slot ``2i``, and a
+    geometry that assumed that layout instead of reading the chain's adjacency would pass any single-reference fixture.
+    chr2's region 3 sits at slot 5, not 6, which makes the assumption observable.
     """
     import dataclasses
 
@@ -561,9 +537,7 @@ def _boundary_slot_of(chain, boundary_obj_id: int) -> int:
 
 
 def test_a_sj_never_lands_on_ANOTHER_REFERENCE(parts):
-    """Getting the incidence wrong shifts a sj onto a neighbouring reference's boundaries — invisible
-    in aggregate, and exactly the class of defect the substrate's per-reference offset check exists
-    for."""
+    """A wrong incidence would shift a sj onto a neighbouring reference's boundaries, invisible in aggregate."""
     payload, _, _, _, _ = parts
     p2, ra2, sub2, chain2 = two_reference_parts(payload)
     j = SpliceJunctionGeometry(
@@ -578,18 +552,14 @@ def test_a_sj_never_lands_on_ANOTHER_REFERENCE(parts):
 
 
 def test_a_sj_on_a_LATER_REFERENCE_lands_on_that_references_own_boundary(parts):
-    """The layout-assumption killer. Region ``i`` sits at slot ``2i`` only within the FIRST
-    reference; chr2's region 3 sits at slot 5. A geometry that computes the slot arithmetically instead
-    of reading ``chain.left``/``chain.right`` passes every single-reference test and then puts chr2's
-    mature flux on the wrong slot entirely — here on a REGION, which cannot carry mature at all.
-
-    PERTURBATION: ``slot_of_region = 2 * arange(n_regions)`` passes every other test in this file
-    and fails only here.
+    """Region ``i`` sits at slot ``2i`` only within the first reference; chr2's region 3 sits at slot 5. A geometry that
+    computed the slot arithmetically instead of reading ``chain.left``/``chain.right`` would pass every single-reference
+    test and put chr2's mature flux on the wrong slot, here a REGION, which cannot carry mature flux at all.
     """
     payload, _, _, _, _ = parts
     p2, ra2, sub2, chain2 = two_reference_parts(payload)
     j = SpliceJunctionGeometry(
-        src_region=np.array([3], dtype=np.int64),  # chr2's FIRST region
+        src_region=np.array([3], dtype=np.int64),  # chr2's first region
         dst_region=np.array([4], dtype=np.int64),  # chr2's second region
         strand=np.array([Strand.POS], dtype=np.int8),
         reach_lo=np.array([1000.0]),
@@ -598,7 +568,7 @@ def test_a_sj_on_a_LATER_REFERENCE_lands_on_that_references_own_boundary(parts):
     g = build_region_geometry(chain2, sub2, ra2, j, GDNA_PMF, RNA_PMF)
     flux = float(p2.sj_count[0].sum())
     chr2_boundary = _boundary_slot_of(chain2, 2)
-    # donor (right of region 3) and acceptor (left of region 4) are the SAME boundary, so it takes the flux twice
+    # donor (right of region 3) and acceptor (left of region 4) are the same boundary, so it takes the flux twice
     assert g.sj_count[chr2_boundary, 0] == pytest.approx(2.0 * flux)
     assert np.all(g.sj_count[np.asarray(chain2.kind) == REGION] == 0.0)
     for e in (0, 1):  # chr1's two boundaries saw nothing
@@ -611,9 +581,8 @@ def test_a_sj_on_a_LATER_REFERENCE_lands_on_that_references_own_boundary(parts):
 
 
 def test_region_gdna_geometry_no_longer_SUMS_TWO_FACES(geometry, parts):
-    """Returning ``mass_l + mass_r`` over ``E_l + E_r`` at a boundary needs a ``1/2`` on each side to
-    cancel a missing ``1/2``. With one set of numbers per boundary there is nothing to sum and no
-    halves to cancel, which is what this pins."""
+    """With one set of numbers per boundary, a region's gDNA geometry sums no left and right faces and needs no halves
+    to cancel."""
     _, _, _, chain, _ = parts
     mass, eff = region_gdna_geometry(geometry)
     np.testing.assert_array_equal(mass, geometry.unspliced_count.sum(axis=1))
@@ -621,17 +590,15 @@ def test_region_gdna_geometry_no_longer_SUMS_TWO_FACES(geometry, parts):
 
 
 def test_spliced_count_and_sj_count_are_DIFFERENT_POPULATIONS(geometry, parts):
-    """The naming hazard this schema exists to remove. Both populations are certified RNA and both
-    could be called "mature", so one word would cover both and distinguish neither. They are different
-    molecules:
+    """Both populations are certified RNA, so one word ("mature") would cover both and distinguish neither. They are
+    different molecules:
 
-    * ``spliced_count`` — crossed this boundary CONTIGUOUSLY, having spliced somewhere else;
-    * ``sj_count`` — never crossed it, it JUMPED from here.
+    * ``spliced_count``: crossed this boundary contiguously, having spliced elsewhere;
+    * ``sj_count``: never crossed it; it jumped from here.
 
-    The fixture makes them differ on both axes at once. At boundary 0 the sj's donor sits on the boundary
-    but nothing crossed it contiguously (13 vs 0); at boundary 1 both are live and unequal (13 vs 6). A
-    consumer that read one for the other would be off by the whole gene's mature output at a donor
-    boundary — two orders of magnitude at a real donor.
+    The fixture makes them differ on both axes. At boundary 0 the sj's donor sits on the boundary but nothing crossed it
+    contiguously (13 vs 0); at boundary 1 both are live and unequal (13 vs 6). Reading one for the other would be off by
+    the gene's whole mature output at a real donor.
     """
     payload, _, _, chain, _ = parts
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
@@ -639,15 +606,15 @@ def test_spliced_count_and_sj_count_are_DIFFERENT_POPULATIONS(geometry, parts):
     sj = geometry.sj_count[boundary_slots].sum(axis=1)
     np.testing.assert_array_equal(spliced, payload.boundary_spliced_count.sum(axis=1))
     assert sj[0] == pytest.approx(float(payload.sj_count[0].sum()))
-    # boundary 0: sj flux with NO contiguous spliced crossing — they cannot be the same array
+    # boundary 0: sj flux with no contiguous spliced crossing, so they cannot be the same array
     assert spliced[0] == 0.0 and sj[0] > 0.0
     # boundary 1: both live, and unequal
     assert spliced[1] > 0.0 and sj[1] > 0.0 and spliced[1] != sj[1]
 
 
 def test_the_word_MATURE_names_no_field(geometry):
-    """It fits both spliced populations, so it cannot be the name of either — one word on two
-    concepts names neither. The fields carry the accumulator's own three bank names."""
+    """ "Mature" fits both spliced populations, so it names neither; the fields carry the accumulator's own three bank
+    names."""
     fields = set(RegionGeometry.__dataclass_fields__)
     assert not any("mature" in f for f in fields), fields
     assert {"unspliced_count", "spliced_count", "sj_count"} <= fields
@@ -657,9 +624,8 @@ def test_the_word_MATURE_names_no_field(geometry):
 
 
 def test_route_rates_are_the_sum_of_per_route_rates(geometry, parts):
-    """`route_rate_lo/hi` must equal the independently derived per-route sum Σ flux_J / A_J over
-    each face's junctions — the disjoint-routes law at the observation's source. Re-derived here
-    from the sj axis by a separate implementation (TRAPS: self-checking-validator)."""
+    """`route_rate_lo/hi` must equal the per-route sum Σ flux_J / A_J over each face's junctions, re-derived here from
+    the sj axis by a separate implementation."""
     _payload, _ra, substrate, chain, sj = parts
     from rigel.calibration.effective_length import crossing_eff_length
     from rigel.types import Strand as _S
@@ -739,17 +705,16 @@ def test_from_region_df_requires_signature():
 # The region ↔ contiguous-boundary mapping.
 # ---------------------------------------------------------------------------
 #
-# Topology deliberately MULTI-REFERENCE with three different shapes, because the whole class of
-# defect here is "the first reference happens to work". ref0 = 3 regions / 2 boundaries, ref1 = 2 regions /
-# 1 boundary, ref2 = 1 region / 0 boundaries (a legal reference that owns no boundary at all). E == N − n_refs
-# only counts non-empty refs: 6 regions, 3 refs, 3 boundaries.
+# The topology is multi-reference with three shapes, because this class of defect is "the first reference happens to
+# work". ref0 = 3 regions / 2 boundaries, ref1 = 2 regions / 1 boundary, ref2 = 1 region / 0 boundaries (a legal
+# reference that owns no boundary). E == N − n_refs counts only non-empty refs: 6 regions, 3 refs, 3 boundaries.
 REF_ID = np.array([0, 0, 0, 1, 1, 2], dtype=np.int32)
 REF_REGION_OFFSETS = np.array([0, 3, 5, 6], dtype=np.int64)
 REF_BOUNDARY_OFFSETS = np.array([0, 2, 3, 3], dtype=np.int64)
 
 
 def test_region_right_boundary_is_minus_one_at_every_reference_end():
-    # region 2 is chr0's last, region 4 chr1's last, region 5 chr2's only — none owns a boundary to its right.
+    # region 2 is chr0's last, region 4 chr1's last, region 5 chr2's only: none owns a boundary to its right.
     np.testing.assert_array_equal(region_right_boundary(REF_ID), [0, 1, -1, 2, -1, -1])
 
 
@@ -757,7 +722,7 @@ def test_boundary_region_indices_are_the_adjacent_pair():
     lo, hi = boundary_region_indices(REF_ID)
     np.testing.assert_array_equal(lo, [0, 1, 3])
     np.testing.assert_array_equal(hi, [1, 2, 4])
-    # A boundary NEVER straddles two references — the invariant a k+1 axis cannot state.
+    # A boundary never straddles two references, the invariant a k+1 axis cannot state.
     assert np.all(REF_ID[lo] == REF_ID[hi])
 
 
@@ -780,14 +745,10 @@ def test_the_two_directions_round_trip():
 
 
 def test_boundary_numbering_matches_the_chain_built_from_the_payload_offsets():
-    """The gate that matters: re-derive the SAME numbering by a DIFFERENT algorithm.
-
-    ``boundary_region_indices`` counts adjacent same-reference region pairs; ``build_region_chain`` walks the
-    payload's two CSR offset arrays and lays out ``N E N E … N`` slot by slot. They must agree, or the
-    calibration result's per-boundary arrays are keyed to a different axis than the payload's — the
-    exact class of defect that drops nearly every real fragment while every golden test stays
-    green. A validator that called the builder's own helper would prove nothing here
-    (TRAPS: self-checking-validator).
+    """The same numbering re-derived by a different algorithm. ``boundary_region_indices`` counts adjacent
+    same-reference region pairs; ``build_region_chain`` walks the payload's two CSR offset arrays and lays out ``N E N E
+    … N`` slot by slot. If they disagree, the calibration result's per-boundary arrays are keyed to a different axis
+    than the payload's.
     """
     chain = build_region_chain(REF_REGION_OFFSETS, REF_BOUNDARY_OFFSETS)
     is_boundary = np.asarray(chain.kind) == BOUNDARY
@@ -808,13 +769,13 @@ def test_boundary_numbering_matches_the_chain_built_from_the_payload_offsets():
 
 
 def test_ref_id_must_be_grouped():
-    """A scrambled ``ref_id`` cannot produce a valid boundary axis, and must say so rather than
-    silently manufacturing boundaries that straddle references."""
+    """A scrambled ``ref_id`` cannot produce a valid boundary axis and must be refused rather than manufacture
+    boundaries that straddle references."""
     with pytest.raises(ValueError, match="grouped"):
         region_right_boundary(np.array([0, 1, 0], dtype=np.int32))
 
 
-# ── the chain's shape: a reference alternates REGION/BOUNDARY and owns no terminal slot ────────
+# ── the chain's shape: a reference alternates REGION/BOUNDARY and owns no terminal slot ──────────
 
 
 def _chain(regions_per_ref):
@@ -833,15 +794,14 @@ def test_a_reference_alternates_REGION_BOUNDARY_and_ENDS_ON_A_REGION():
 
 
 def test_the_chain_length_is_2k_minus_1_not_2k_plus_1():
-    """The shape in one assertion: `k` regions plus `k - 1` boundaries is `2k - 1` slots, not the
-    `2k + 1` a `k + 1` boundary axis would give."""
+    """`k` regions plus `k - 1` boundaries is `2k - 1` slots, not the `2k + 1` a `k + 1` boundary axis would give."""
     for k in (1, 2, 5, 50):
         assert _chain([k]).n_slots == 2 * k - 1
 
 
 def test_a_SINGLE_REGION_reference_has_no_boundaries_and_is_still_a_slot():
-    """1 bp and single-region references are legal — human has many thousands of length-1 regions —
-    and a reference with one region has zero interior boundaries, not one."""
+    """1 bp and single-region references are legal (human has many thousands of length-1 regions), and a one-region
+    reference has zero interior boundaries."""
     chain = _chain([1])
     assert chain.n_slots == 1
     assert list(chain.kind) == [REGION]
@@ -855,9 +815,8 @@ def test_a_reference_with_NO_regions_contributes_NOTHING():
 
 
 def test_references_do_not_BLEED_into_each_other():
-    """The last region of one reference must not be adjacent to the first of the next. A chain that
-    wrapped would carry density across a chromosome boundary, which is exactly the class of error that
-    survives every aggregate check."""
+    """The last region of one reference must not be adjacent to the first of the next; a chain that wrapped would carry
+    density across a chromosome boundary, an error that survives every aggregate check."""
     chain = _chain([3, 2])
     last_of_first = 2 * 3 - 2  # the final REGION slot of reference 0
     assert chain.kind[last_of_first] == REGION
@@ -875,15 +834,14 @@ def test_adjacency_is_symmetric_and_alternates_TYPE():
 
 
 def test_an_BOUNDARY_always_has_a_region_on_BOTH_sides():
-    """A boundary sits BETWEEN two regions, so it can never be a terminal. This is the invariant a
-    ``k + 1`` shape cannot state, because its terminal boundaries have exactly one flank."""
+    """A boundary sits between two regions, so it is never a terminal, an invariant a ``k + 1`` shape cannot state."""
     chain = _chain([5, 2, 1])
     for slot in np.flatnonzero(np.asarray(chain.kind) == BOUNDARY):
         assert chain.left[slot] >= 0 and chain.right[slot] >= 0
 
 
 def test_boundary_e_sits_between_region_e_and_region_e_plus_one():
-    """The endpoints are IMPLICIT — that is the design's word — so this arithmetic is the contract."""
+    """The endpoints are implicit, so this arithmetic is the contract."""
     chain = _chain([4])
     for slot in np.flatnonzero(np.asarray(chain.kind) == BOUNDARY):
         e = int(chain.obj_idx[slot])
@@ -901,29 +859,23 @@ def test_obj_idx_is_a_bijection_onto_each_axis():
 
 
 def test_an_INCONSISTENT_boundary_count_is_REFUSED_with_the_arithmetic_named():
-    """Both offset arrays come from ONE payload, so a mismatch is an accumulator inconsistency rather
-    than a stale index — and the error must say so, or the reader rebuilds the index for nothing."""
+    """Both offset arrays come from one payload, so a mismatch is an accumulator inconsistency rather than a stale
+    index, and the error must say so."""
     with pytest.raises(ValueError, match="k regions has exactly k-1"):
         build_region_chain(np.array([0, 4], np.int64), np.array([0, 4], np.int64))
 
 
 def test_the_predecessors_TERMINAL_SLOT_SHAPE_is_GONE():
-    """The gate is on the shape, not on the names: ``REGION`` and ``BOUNDARY`` are live constants,
-    so banning the words would ban the vocabulary rather than the defect.
-
-    A ``B R B R … R B`` layout gives a reference ``k + 1`` boundary slots, the two outermost
-    carrying no data and existing only so every region has an object on each side. The shipped
-    layout is ``R B R … B R``: ``2k − 1`` slots, starting and ending with a REGION, and a BOUNDARY
-    that always has a region on both sides — an invariant the other shape cannot state. That is
-    what must not regress, and it is what this pins.
+    """The test is on the shape, not the names (``REGION`` and ``BOUNDARY`` are live constants). A ``B R B R … R B``
+    layout would give a reference ``k + 1`` boundary slots, the two outermost carrying no data. The layout is ``R B R …
+    B R``: ``2k − 1`` slots starting and ending with a REGION, every BOUNDARY with a region on both sides.
     """
     chain = _chain([4])
     assert chain.n_slots == 2 * 4 - 1, "k regions must give 2k-1 slots, never k + (k+1)"
     assert chain.kind[0] == REGION and chain.kind[-1] == REGION, (
         "the chain starts and ends with a REGION"
     )
-    # the invariant a k+1 axis cannot state: every BOUNDARY has a region on BOTH sides. The SHAPE is
-    # what is pinned here, not the spelling of the constant.
+    # every BOUNDARY has a region on both sides; the shape is checked, not the spelling of the constant.
     for i in range(chain.n_slots):
         if chain.kind[i] == BOUNDARY:
             assert chain.left[i] >= 0 and chain.right[i] >= 0
@@ -932,9 +884,8 @@ def test_the_predecessors_TERMINAL_SLOT_SHAPE_is_GONE():
 # ── the splice graph's structural flags, on the payload's own contiguous-boundary axis ─────────
 
 
-#: t0 splices [400,700); t1 ENDS at 700, where t0's intron ends — so position 700 is an ACCEPTOR
-#: *and* a TES, the case the two independent flag bits exist for. t2 on chr2 keeps the
-#: per-reference offsets honest.
+#: t0 splices [400,700); t1 ends at 700, where t0's intron ends, so position 700 is an acceptor and a TES, the case the
+#: two independent flag bits exist for. t2 on chr2 checks the per-reference offsets.
 GTF = """\
 chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
 chr1\ttest\texon\t701\t900\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
@@ -952,11 +903,9 @@ def index(tmp_path_factory):
 
 
 def _boundary_positions(index) -> np.ndarray:
-    """Genomic position of every contiguous boundary, in boundary order.
-
-    A reference contributing ``c`` bounds owns ``c − 1`` regions and ``c − 2`` interior boundaries,
-    and boundary ``e`` sits at bound ``e + 1`` — so the interior bounds, per reference, are the
-    boundary coordinates.
+    """Genomic position of every contiguous boundary, in boundary order. A reference with ``c`` bounds owns ``c − 1``
+    regions and ``c − 2`` interior boundaries, and boundary ``e`` sits at bound ``e + 1``, so the interior bounds per
+    reference are the boundary coordinates.
     """
     positions, region_bound_offsets, _types = build_region_partition_arrays(index)
     out = []
@@ -968,9 +917,8 @@ def _boundary_positions(index) -> np.ndarray:
 
 
 def test_there_is_EXACTLY_ONE_ENTRY_PER_BOUNDARY_and_no_padding(index):
-    """A reference with ``k`` regions contributes ``k − 1`` entries, never ``k + 1``: two data-free
-    terminals exist only so every region has an object on each side, and a boundary is defined by
-    having a region on both sides."""
+    """A reference with ``k`` regions contributes ``k − 1`` entries, never ``k + 1``: a boundary is defined by having a
+    region on both sides, so there are no data-free terminals."""
     flags = build_boundary_flags_array(index)
     assert flags.dtype == np.uint16
     n_regions = len(index.regions_df)
@@ -980,9 +928,8 @@ def test_there_is_EXACTLY_ONE_ENTRY_PER_BOUNDARY_and_no_padding(index):
 
 
 def test_each_entry_carries_the_flags_of_its_own_GENOMIC_POSITION(index):
-    """THE mapping assertion, checked position by position rather than index by index — matching by
-    COORDINATE cannot be fooled by an off-by-one in the index arithmetic, which is the failure this
-    module exists to catch."""
+    """Each boundary's flags are checked by genomic position rather than index, so an off-by-one in the index arithmetic
+    cannot hide."""
     flags = build_boundary_flags_array(index)
     positions = _boundary_positions(index)
     regions, boundaries = index.regions_df, index.edges_df
@@ -996,8 +943,8 @@ def test_each_entry_carries_the_flags_of_its_own_GENOMIC_POSITION(index):
 
 
 def test_the_terminus_and_splice_site_predicates(index):
-    """Position 700 is BOTH a TES (t1 ends) and an ACCEPTOR (t0's intron ends) — the case the 4-bit
-    signature cannot represent, and the reason the two predicates are independent bits."""
+    """Position 700 is both a TES (t1 ends) and an acceptor (t0's intron ends), which the 4-bit signature cannot
+    represent; hence the two predicates are independent bits."""
     flags = build_boundary_flags_array(index)
     at = {int(p): int(f) for p, f in zip(_boundary_positions(index), flags)}
 
@@ -1016,11 +963,9 @@ def test_the_terminus_and_splice_site_predicates(index):
 
 
 def test_flags_align_with_a_REALLY_SCANNED_payload(tmp_path):
-    """The end-to-end statement: the array indexes the payload the C++ accumulator actually
-    produced, not a re-derivation of the arithmetic that produced it.
-
-    ``RegionStatics`` then places each boundary's bits on the right chain SLOT — asserted through the chain
-    rather than assumed, because that is the second place an off-by-one could hide.
+    """The array indexes the payload the C++ accumulator actually produced. ``RegionStatics`` then places each
+    boundary's bits on the right chain slot, asserted through the chain because that is a second place an off-by-one
+    could hide.
     """
     from rigel.calibration.region_chain import BOUNDARY, build_region_chain
     from rigel.calibration.region_geometry import build_region_statics
@@ -1070,9 +1015,8 @@ def test_flags_align_with_a_REALLY_SCANNED_payload(tmp_path):
 
 
 def test_a_wrong_length_is_refused(index):
-    """A silently mis-sized array would shift every flag by one boundary — invisible in aggregate, and
-    exactly what the solver must not inherit. A ``k + 1`` boundary axis is the specific wrong length
-    most likely to be handed in, so that is the one used here."""
+    """A mis-sized array would shift every flag by one boundary, invisible in aggregate. A ``k + 1`` boundary axis is
+    the wrong length most likely to be handed in, so it is the one used."""
     from rigel.calibration.region_chain import build_region_chain
     from rigel.calibration.region_geometry import build_region_statics
     from rigel.calibration.region_arrays import RegionArrays
@@ -1092,15 +1036,15 @@ def test_a_wrong_length_is_refused(index):
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE LOCUS — `locus_blocks`: the chain cut at its message terminals, merged up to a block size.
+# The locus: `locus_blocks`, the chain cut at its message terminals, merged up to a block size.
 # Pure topology; which slot is a terminal is the caller's predicate.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 def _two_reference_chain():
-    """Two references: 7 regions (13 slots) then 3 regions (5 slots). Terminals at REGION slots 0, 6,
-    12 (the end of reference 0) and 13 (the start of reference 1) — so the fixture has a terminal that
-    is also a reference start, a locus at each end, and one interior locus of 5 slots."""
+    """Two references: 7 regions (13 slots) then 3 regions (5 slots). Terminals at REGION slots 0, 6, 12 (the end of
+    reference 0) and 13 (the start of reference 1), so the fixture has a terminal that is also a reference start, a
+    locus at each end, and one interior locus of 5 slots."""
     from rigel.calibration.region_chain import REGION, build_region_chain
 
     chain = build_region_chain(np.array([0, 7, 10]), np.array([0, 6, 8]))
@@ -1145,7 +1089,7 @@ def test_locus_blocks_merge_loci_up_to_the_block_size_and_never_split_one():
     assert [(b.start, b.stop) for b in locus_blocks(chain, terminal, 5)] == one_per_locus_ranges(
         one_per_locus
     )
-    # 7 slots: [0,6) cannot take [6,12); [6,12) cannot take [12,13)? it can (7 slots): [6,13)
+    # 7 slots: [0,6) cannot take [6,12), but [6,12) can take [12,13): [6,13)
     assert [(b.start, b.stop) for b in locus_blocks(chain, terminal, 7)] == [
         (0, 6),
         (6, 13),
@@ -1153,8 +1097,8 @@ def test_locus_blocks_merge_loci_up_to_the_block_size_and_never_split_one():
     ]
     # one block of the whole chain, reading nothing beyond it
     assert locus_blocks(chain, terminal, None) == [LocusBlock(0, 18, 18)]
-    # the read-ahead: [0,6) reads slot 6 (a terminal linked to slot 5); [6,12) reads 12; [12,13)
-    # reads NOT 13, which is a reference start — no message crosses a reference boundary
+    # the read-ahead: [0,6) reads slot 6 (a terminal linked to slot 5); [6,12) reads 12; [12,13) does not read 13, a
+    # reference start, since no message crosses a reference boundary
     assert [(b.stop, b.end) for b in one_per_locus] == [(6, 7), (12, 13), (13, 13), (18, 18)]
 
 

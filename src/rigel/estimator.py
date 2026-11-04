@@ -1,19 +1,12 @@
-"""rigel.estimator — Bayesian fragment abundance estimator.
+"""The abundance estimator: per-transcript and per-gene counts from the deterministic path and the locus EM.
 
-``AbundanceEstimator`` manages per-transcript and per-gene fragment
-count accumulation combined with Bayesian abundance estimation via
-locus-level EM.
+The EM starts from the warm start ``EMConfig.warm_start`` names and adds a gDNA-vs-RNA prior per locus: ``a_g`` on
+gDNA and ``a_r`` on the RNA pool, shared among the RNA components in proportion to their current EM count unless
+``rna_prior_weight`` names the shares (``apply_grouped_prior_update`` in em_solver.cpp). Production passes no
+weights, so the distribution within the RNA pool is the data's.
 
-The EM starts from the warm start ``EMConfig.warm_start`` names and adds a
-pool-level gDNA-vs-RNA prior per locus (additive ``a_g`` on gDNA; ``a_r`` on
-the RNA pool, shared among the RNA components in proportion to their current
-EM count unless ``rna_prior_weight`` names the shares — em_solver.cpp
-``apply_grouped_prior_update``). Nothing in production fills that lane yet, so
-the transcript distribution within the RNA pool is the data's.
-
-The data containers ``ScoredFragments`` and ``LocusPartition`` live in
-``rigel.scored_fragments`` and ``MultiLocus`` in ``rigel.locus``; the
-per-locus prior is assembled in ``rigel.calibration.priors``.
+``ScoredFragments`` and ``LocusPartition`` live in ``rigel.scored_fragments``, ``MultiLocus`` in ``rigel.locus``,
+and the per-locus prior is assembled in ``rigel.calibration.priors``.
 """
 
 import logging
@@ -62,10 +55,9 @@ def _gene_locus_ids(
     locus_id_per_transcript: np.ndarray,
     t_mrna: np.ndarray,
 ) -> np.ndarray:
-    """For each gene, assign the locus_id of its highest-count transcript.
+    """For each gene, the locus_id of its highest-count transcript.
 
-    The caller passes total (mRNA + nRNA) counts as ``t_mrna``, so the
-    winning transcript is the one with the highest total count.
+    The caller passes each transcript's total count as ``t_mrna``.
     """
     g_locus_id = np.full(n_genes, -1, dtype=np.int32)
     g_best_mrna = np.full(n_genes, -1.0, dtype=np.float64)
@@ -75,7 +67,7 @@ def _gene_locus_ids(
     v_g = t_to_g[valid]
     v_mrna = t_mrna[valid]
     v_lid = locus_id_per_transcript[valid]
-    # Process in descending mRNA order; first write per gene wins.
+    # Descending count order; the first write per gene wins
     order = np.argsort(-v_mrna, kind="stable")
     for i in order:
         g = int(v_g[i])
@@ -159,7 +151,7 @@ class AbundanceEstimator:
 
         Per locus:
         [0, n_t)       - transcript components (annotated transcripts + synthetic nRNA spans)
-        [n_t]          - gDNA: ONE component per locus
+        [n_t]          - gDNA: one component per locus
 
     Parameters
     ----------
@@ -208,7 +200,7 @@ class AbundanceEstimator:
         self.unambig_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
         self.em_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
 
-        # --- gDNA: locus-level, NOT per-gene ---
+        # --- gDNA: per locus, not per gene ---
         # Total gDNA count as assigned by locus EM (sum across all loci)
         self._gdna_em_total = 0.0
         # The intergenic term's mass: the multimappers' gDNA the EM put at a place outside every locus
@@ -283,7 +275,7 @@ class AbundanceEstimator:
         Parameters
         ----------
         partition_tuples : list[tuple]
-            List of 7-tuples, one per locus, containing partition arrays.
+            List of 8-tuples, one per locus, containing partition arrays.
         locus_transcript_indices : list[np.ndarray]
             List of int32 transcript index arrays, one per locus.
         gdna_prior_count : np.ndarray
@@ -292,16 +284,11 @@ class AbundanceEstimator:
             float64 — additive aggregate RNA alpha per locus; the pipeline always
             passes it, and ``None`` means zeros.
         rna_prior_weight : np.ndarray, optional
-            float64[n_transcripts] — how the per-locus RNA prior is SHARED
-            OUT among a locus's RNA components. ``None`` (the default and the
-            shipped behaviour) means "in proportion to the evidence each component
-            already carries".
-
-            ⛔ This rides the PER-TRANSCRIPT lane, like ``t_eff_lens`` — not the
-            per-locus one. It is passed to the C++ FLAT and whole; it is never
-            indexed by ``multi_locus_id``. Mixing the two conventions is the
-            plumbing error this axis invites, so the C++ refuses any length but
-            ``n_transcripts`` or 0.
+            float64[n_transcripts] — how the per-locus RNA prior is shared among
+            a locus's RNA components. ``None`` (the default) shares it in proportion
+            to the evidence each component already carries. It is per transcript,
+            like ``t_eff_lens``: passed to the C++ flat and whole, never indexed by
+            ``multi_locus_id``, and the C++ refuses any length but ``n_transcripts`` or 0.
         gdna_eff_len : np.ndarray, optional
             float64 array of length ``n_loci``: the capture-contracted effective
             length of each locus's gDNA component (``LocusPriors.gdna_eff_len``,
@@ -344,9 +331,7 @@ class AbundanceEstimator:
                     f"rna_prior_count length {rna_prior_count.shape[0]} != n_loci {n_loci}."
                 )
 
-        # The allocation weight rides the PER-TRANSCRIPT lane, flat and whole — never `[ids]`. An
-        # EMPTY array means "share the prior out by current evidence", the shipped rule, which the
-        # C++ reaches through a `nullptr` test on this one lane.
+        # Per transcript, flat and whole, never `[ids]`; an empty array shares the prior by current evidence
         if rna_prior_weight is None:
             t_rna_prior_weight = np.zeros(0, dtype=np.float64)
         else:
@@ -354,8 +339,7 @@ class AbundanceEstimator:
             if t_rna_prior_weight.shape[0] != n_transcripts:
                 raise ValueError(
                     f"rna_prior_weight length {t_rna_prior_weight.shape[0]} != n_transcripts "
-                    f"{n_transcripts} — this array rides the per-TRANSCRIPT lane, not the per-locus "
-                    f"one."
+                    f"{n_transcripts}: the array is indexed per transcript, not per locus."
                 )
             if not np.all(np.isfinite(t_rna_prior_weight)) or np.any(t_rna_prior_weight < 0.0):
                 raise ValueError(
@@ -606,13 +590,9 @@ class AbundanceEstimator:
         # n_transcripts (annotated only, excluding synthetics)
         n_annotated = _aggregate_to_gene(t_to_g, n_genes, annotated_mask).astype(int)
 
-        # TPM — computed from annotated-only counts.  Every synthetic span is
-        # its own gene row (a gene-neutral placeholder), so no aggregate above
-        # puts a synthetic span's count on an annotated gene.  ``annotated_mask``
-        # zeros a synthetic row's count and count_em, but
-        # count_unambig, count_spliced, the effective-length sums and the locus
-        # id are aggregated unmasked, so this filter is what keeps the synthetic
-        # rows' values out of the table.
+        # TPM from annotated counts only. Every synthetic span is its own gene row, so no aggregate puts its count
+        # on an annotated gene; count_unambig, count_spliced, the effective-length sums and the locus id are
+        # aggregated unmasked, so this filter keeps the synthetic rows out of the table.
         annotated_gene_mask = (
             ~index.g_df["is_synthetic"].to_numpy()
             if "is_synthetic" in index.g_df.columns
@@ -704,10 +684,7 @@ class AbundanceEstimator:
 
         t_total = self.t_counts.sum(axis=1)
 
-        # span_t_index is guaranteed by the index
-        # schema (see TranscriptIndex.load dtype contract).  Compute the
-        # span → named-by aggregation once, vectorized, then take the
-        # slice for the synthetic spans' rows.
+        # The span → named-by aggregation once (span_t_index is in the index schema), then the synthetic rows
         span_t_idx = t_df["span_t_index"].values
         n_annotated_per_span, count_annotated_per_span = _span_children_counts(
             span_t_idx,
@@ -731,10 +708,8 @@ class AbundanceEstimator:
         n_annotated = n_annotated[has_children]
         count_annotated = count_annotated[has_children]
 
-        # Total RNA TPM: normalized over annotated + synthetic rpk pool so
-        # values are directly comparable to the transcript table's tpm_total_rna.
-        # (The _tpm helper normalizes within a single array; here the
-        # denominator is an alternate full-pool rpk sum, so compute inline.)
+        # Total RNA TPM, normalized over the annotated + synthetic rpk pool so it is comparable to the transcript
+        # table's tpm_total_rna; inline, because the denominator is the full pool, not this array
         rpk = counts / np.maximum(eff, 1.0)
         total_rpk = float((t_total / np.maximum(self._t_eff_len_output, 1.0)).sum())
         tpm_total_rna = (rpk / total_rpk * 1e6) if total_rpk > 0 else np.zeros_like(rpk)
@@ -810,13 +785,11 @@ class AbundanceEstimator:
         t_unambig = self.unambig_counts.sum(axis=1)
         is_synthetic = index.t_df["is_synthetic"].values
         locus_ids = self.locus_id_per_transcript
-        # Transcripts grouped by locus once, not a mask over every transcript per locus. A stable sort keeps
-        # each locus's members in index order, so every sum below adds the values a mask would select, in
-        # the same order: the table is bit-identical.
+        # Transcripts grouped by locus once, by a stable sort that keeps each locus's members in index order, so
+        # every sum below adds the values a per-locus mask would select, in the same order
         order = np.argsort(locus_ids, kind="stable")
         sorted_ids = locus_ids[order]
-        # Every locus's member range in two searches: one search per locus pays the call's overhead each time
-        # (7.3 s over 22,787 loci of the VCaP mix).
+        # Every locus's member range in two vectorised searches rather than one call per locus
         lids = np.array([r["locus_id"] for r in self.locus_results], dtype=sorted_ids.dtype)
         first = np.searchsorted(sorted_ids, lids, side="left")
         last = np.searchsorted(sorted_ids, lids, side="right")
@@ -825,14 +798,9 @@ class AbundanceEstimator:
         for r, lo, hi in zip(self.locus_results, first, last):
             lid = r["locus_id"]
             members = order[lo:hi]
-            # ``r["rna_total"]`` is the C++ EM accumulator
-            # (em_solver.cpp::assign_posteriors -> ``rna_total``):
-            # the sum of posteriors assigned to every non-gDNA component
-            # in the locus. The solver treats the annotated transcripts and
-            # the synthetic spans identically, so this is their posterior
-            # count together, NOT the annotated transcripts' alone.
-            #
-            # The table's counts do not overlap:
+            # ``r["rna_total"]`` (em_solver.cpp, assign_posteriors) is the posterior count of every non-gDNA
+            # component in the locus, the annotated transcripts and the synthetic spans together. The table's
+            # counts do not overlap:
             #   count_nascent   = the synthetic spans' counts
             #   count_annotated = ``rna_total`` - count_nascent + unambig (annotated only)
             #   count           = count_annotated + count_nascent + count_gdna

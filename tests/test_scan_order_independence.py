@@ -1,14 +1,11 @@
-"""One BAM gives one answer whatever the scan's thread count — for the fragment buffer the EM reads
-and for the accumulator's tally alike. The first block gates the pipeline. The scanner streams
-finalized chunks from its worker threads in completion order, so the row a fragment occupies depends
-on which worker got there first; the EM's ``assignment_mode="sample"`` draws one categorical sample
-per unit from a per-locus RNG, so a permutation of the units permutes which fragment gets which draw,
-and units in different equivalence classes have different posteriors. The remedy is an ordering
-rather than a seed: ``frag_id`` is assigned by the single reader thread in BAM order and is a stable
-identity, so a locus's units are sorted by it once, where ``MultiLocus.unit_indices`` is built, and
-every per-locus array scattered by that index list inherits the canonical order. The second block
-gates the tally. Its uint32 count banks merge exactly whatever order the chunks arrived in, because
-integer addition is associative; its float64 fraction and mass banks agree to within a tolerance
+"""One BAM gives one answer whatever the scan's thread count, for the fragment buffer the EM reads and for the
+accumulator's tally alike.
+
+The scanner streams finalized chunks from its worker threads in completion order, so a fragment's buffer row depends
+on which worker finished first, and a permutation of a locus's units permutes which fragment gets which draw. The
+remedy is an ordering, not a seed: ``frag_id`` is assigned by the single reader thread in BAM order, and a locus's
+units are sorted by it once, where ``MultiLocus.unit_indices`` is built. The tally's uint32 count banks merge exactly
+in any order, since integer addition is associative; its float64 fraction and mass banks agree to within a tolerance
 derived from the deposit count, because the per-worker merge re-associates their sums.
 """
 
@@ -25,14 +22,12 @@ from rigel.scan_payload import AccumulatorPayload
 from rigel.sim import ReadSimConfig, Scenario
 
 
-# ── The FRAGMENT BUFFER — the pipeline's answer at every scan thread count ──────────────────────
+# ── The fragment buffer: the pipeline's answer at every scan thread count ───────────────────────
 #
-# The remedy is an ordering by identity rather than a per-fragment seed, and the reason matters.
-# Deriving the draw from a hash of the fragment's own content would also be
-# order-independent, and would be wrong: identical fragments would hash identically and so all draw
-# identically, turning a 60/40 posterior into 100/0 for every group of duplicates. Ordering by
-# identity and keeping one stream per locus preserves the multinomial spread, which is the whole
-# point of the sampling mode.
+# The remedy is an ordering by identity, not a per-fragment seed: a draw derived from a hash of the
+# fragment's content would also be order-independent, but identical fragments would all draw alike,
+# turning a 60/40 posterior into 100/0 for every group of duplicates. Ordering by identity with one
+# stream per locus keeps the multinomial spread.
 
 
 SEED = 7
@@ -45,10 +40,10 @@ THREAD_COUNTS = (1, 4, 16)
 
 @pytest.fixture(scope="module")
 def oracle(tmp_path_factory):
-    """A locus with two isoforms sharing an exon, so units land in DIFFERENT equivalence classes.
+    """A locus with two isoforms sharing an exon, so units land in different equivalence classes.
 
-    That is what gives the gate teeth. Fragments that are all interchangeable would be permuted with no
-    effect on the answer — the assignment only moves when units with *different* posteriors swap draws.
+    Fragments that are all interchangeable would be permuted with no effect on the answer: the
+    assignment only moves when units with *different* posteriors swap draws.
     ``t1``/``t2`` share their first exon and differ in the second, so a fragment in the shared region is
     ambiguous while one in the unique region is not.
     """
@@ -90,8 +85,8 @@ def _counts(oracle, threads: int, mode: str = "sample") -> np.ndarray:
 
 
 #: Two repeats per thread count, not one. The permutation is random, so a single pair can agree by luck
-#: — two runs at the SAME thread count can disagree while three different counts happen to match. Six
-#: runs against one baseline is what makes the gate reliable rather than occasionally lucky.
+#: (two runs at the same thread count can disagree while three different counts happen to match). Six
+#: runs against one baseline make the gate reliable.
 REPEATS = 2
 
 
@@ -99,14 +94,14 @@ REPEATS = 2
 def test_the_answer_IS_THE_SAME_AT_EVERY_SCAN_THREAD_COUNT(oracle, mode):
     """The contract, for both assignment modes: one BAM and one seed give one answer.
 
-    Byte-identical across thread counts AND across repeats, which is strictly stronger than
-    "reproducible at the default" and the only version that survives someone changing the default.
+    Byte-identical across thread counts and across repeats, which is strictly stronger than
+    "reproducible at the default".
 
     Both modes, because each fails a different way. ``sample`` draws the units in order, so a
-    permutation changes which fragment draws which transcript — and, through the re-weighting toward
+    permutation changes which fragment draws which transcript and, through the re-weighting toward
     the counts, which fragments the counts are met with. ``fractional`` scatters float posteriors into
     shared accumulators, so a permutation reorders the summation and the answer drifts by ULPs. One
-    ordering fixes both; asserting only the first leaves the second to be rediscovered as "flaky".
+    ordering fixes both.
     """
     runs = [_counts(oracle, threads, mode) for threads in THREAD_COUNTS for _ in range(REPEATS)]
     assert runs[0].sum() > 0, "nothing was assigned; this fixture cannot detect a permutation"
@@ -121,9 +116,8 @@ def test_the_answer_IS_THE_SAME_AT_EVERY_SCAN_THREAD_COUNT(oracle, mode):
 def test_the_SHIPPED_DEFAULTS_give_one_answer_run_after_run(oracle):
     """No seed given and the shipped sampled assignment: three runs of one BAM, one answer.
 
-    The gate above pins its own seed, so it could not see the default. That default was ``None``, and the
-    CLI's a timestamp, so every run drew from fresh entropy and two runs of one input differed by whole
-    fragments (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
+    The gate above pins its own seed, so it cannot see the default; an entropy-seeded default would make
+    two runs of one input differ by whole fragments.
     """
     config = PipelineConfig(scan=BamScanConfig(sj_strand_tag="auto"))
     assert config.em.assignment_mode == "sample", "the gate is on the shipped SAMPLED assignment"
@@ -143,8 +137,8 @@ def test_the_SHIPPED_DEFAULTS_give_one_answer_run_after_run(oracle):
 
 
 def test_an_unset_seed_is_refused():
-    """``None`` would seed the draw from the OS's entropy, the old default, so it is refused rather than
-    quietly honoured."""
+    """``None`` would seed the draw from the OS's entropy, so it is refused rather than quietly
+    honoured."""
     with pytest.raises(TypeError, match="seed must be an integer"):
         EMConfig(seed=None)
 
@@ -182,9 +176,9 @@ def many_loci(tmp_path_factory):
 
 @pytest.mark.parametrize("em_threads", [1, 8])
 def test_the_reported_gdna_total_is_the_loci_summed_in_LOCUS_ORDER(many_loci, em_threads):
-    """The summary's gDNA count is one number. It was an atomic sum taken as the EM's workers finished, so
-    it re-associated from run to run (and at one thread ran in the solver's work order); it is the
-    per-locus totals added in locus order once the solve is done, at every thread count."""
+    """The summary's gDNA count is the per-locus totals added in locus order once the solve is done, at
+    every thread count; an atomic sum taken as the EM's workers finish would re-associate from run to
+    run."""
     config = PipelineConfig(
         em=EMConfig(n_threads=em_threads, assignment_mode="fractional"),
         scan=BamScanConfig(sj_strand_tag="auto", total_threads=1),
@@ -247,12 +241,12 @@ def test_a_known_buffer_permutation_preserves_the_pipeline_answer(oracle, monkey
 def test_frag_id_IS_AN_IDENTITY_which_is_what_makes_it_a_legal_sort_key(oracle):
     """The assumption the ordering rests on, pinned where the ordering is gated.
 
-    Ordering by ``frag_id`` canonicalises the units ONLY IF no two units share one. If ids could repeat,
+    Ordering by ``frag_id`` canonicalises the units only if no two units share one. If ids could repeat,
     ``argsort(kind="stable")`` would break the tie by the unit's buffer row, silently reintroducing the
     exact dependence the ordering removes, on exactly the duplicates it matters for.
 
-    Uniqueness, not contiguity. The EM's units are a SUBSET of the scanned fragments, so the ids have
-    gaps — which is fine, because the sort needs a total order rather than a dense one.
+    Uniqueness, not contiguity: the EM's units are a subset of the scanned fragments, so the ids have
+    gaps, which is fine because the sort needs a total order rather than a dense one.
     """
     import numpy as np_
 
@@ -280,20 +274,16 @@ def test_frag_id_IS_AN_IDENTITY_which_is_what_makes_it_a_legal_sort_key(oracle):
     )
 
 
-# ── The SPLIT — how the budget is divided between decompression and workers ─────────────────────
+# ── The split: how the budget is divided between decompression and workers ──────────────────────
 
 
 def test_the_thread_split_is_derived_from_the_budget_and_an_explicit_one_still_wins():
-    """The split is a RATIO, not a count: one decompression thread keeps about eight scan workers fed,
+    """The split is a ratio, not a count: one decompression thread keeps about eight scan workers fed,
     so the budget is divided by that ratio rather than by a fixed reservation.
 
-    Measured on the 18.6M-fragment library, scan seconds by budget and decompression threads — 4: (0)
-    32.0, (1) 41.2; 8: (1) 25.8, (2) 26.2, (0) 28.3, (4) 34.5; 16: (2) 17.6, (1) 19.6, (4) 20.1 — so the
-    derived cell is the best one at every budget measured, and the old fixed 4 was the worst at all
-    three. What this gate holds is the ARITHMETIC: every thread is spent, none is spent twice, at least
-    one worker always runs, and an explicit request still overrides. The answer itself cannot move with
-    the split — that is the tally's own gate below, and the reason is that every bank is a sum of
-    integers.
+    This gate holds the arithmetic: every thread is spent, none is spent twice, at least one worker
+    always runs, and an explicit request still overrides. That the answer cannot move with the split is
+    the tally's own gate below.
     """
     for total, expect in (
         (1, (1, 0)),
@@ -313,18 +303,16 @@ def test_the_thread_split_is_derived_from_the_budget_and_an_explicit_one_still_w
     assert BamScanConfig(total_threads=2, bgzf_threads=9).resolved_scan_threads() == (1, 1)
 
 
-# ── The TALLY — the same BAM gives the same accumulator payload at any worker count ─────────────
+# ── The tally: the same BAM gives the same accumulator payload at any worker count ──────────────
 #
 # The count banks are uint32 integers and integer addition is associative, so they merge bit for
 # bit. The fraction and mass banks are float64 and the per-worker merge re-associates their sums,
-# so they agree only to within the float64 representation. Testing ``Accumulator.merge_from``
-# directly — which the parity module does — is not enough, because this exercises the SCANNER's
-# worker path: each worker builds its own ``AccumulatorSet`` from the scanner's members, and the
-# chunk-to-worker split is data-dependent. A worker whose set was constructed differently, with the
-# sj installed on the template but not on the copies say, is invisible to a merge test on one
-# accumulator and shows up here. The fixture is named for the property it has to have: every bank of
-# the tally must receive something, or a bit-identity gate over an all-zero array passes for the
-# wrong reason.
+# so they agree only to within the float64 representation. This exercises the scanner's worker
+# path, which a direct test of ``Accumulator.merge_from`` cannot: each worker builds its own
+# ``AccumulatorSet`` from the scanner's members, and the chunk-to-worker split is data-dependent, so
+# a worker whose set was constructed differently (the sj installed on the template but not on the
+# copies, say) shows up only here. Every bank of the tally must receive something, or a bit-identity
+# gate over an all-zero array passes for the wrong reason.
 
 
 TALLY_SEED = 20260730
@@ -336,28 +324,24 @@ EPS = float(np.finfo(np.float64).eps)
 
 @pytest.fixture
 def every_bank_oracle(tmp_path):
-    """A scenario built so that EVERY bank of the tally receives something.
+    """A scenario built so that every bank of the tally receives something.
 
-    The obvious scenario does not. Two single-isoform genes deposit into the regions and the sj
-    boundaries and leave both contiguous-boundary banks identically zero: every region boundary is an
-    exon boundary, so a mature fragment either fits inside an exon (contained) or splices across the gap
-    (sj boundary) and never has bases on both sides of a boundary. A bit-identity gate over an all-zero
-    array passes for the wrong reason, and this project has already had one arm with zero rows report
-    itself fully identical. So:
+    Two single-isoform genes alone leave both contiguous-boundary banks identically zero: every region
+    boundary is an exon boundary, so a spliced transcript's fragment either fits inside an exon
+    (contained) or splices across the gap (sj boundary) and never has bases on both sides of a
+    boundary. So:
 
-    * ``t2`` starts at 500, INSIDE ``t1``'s first exon. That makes 500 a region boundary, and a ``t1``
-      fragment spanning it has bases on both sides — a contiguous crossing. If that fragment also uses
-      the sj, it is a crossing in the SPLICED bank, which is a channel of its own.
+    * ``t2`` starts at 500, inside ``t1``'s first exon. That makes 500 a region boundary, and a ``t1``
+      fragment spanning it has bases on both sides, a contiguous crossing. If that fragment also uses
+      the sj, it is a crossing in the spliced bank, which is a channel of its own.
     * ``t4`` ends at 650, which cuts a 50 bp region out of ``[500, 700)``. Nothing else here can be
-      SPANNED: spanning needs one segment covering a region whole, so at 200 bp regions and 220 bp
-      fragments it essentially never happens, and mature RNA can never span the region before a sj at
-      all — it has no base past the exon end, it splices there. A 50 bp region is spanned by gDNA.
+      spanned: spanning needs one segment covering a region whole, so at 200 bp regions and 220 bp
+      fragments it essentially never happens, and spliced RNA can never span the region before a sj (it
+      has no base past the exon end, it splices there). A 50 bp region is spanned by gDNA.
     * ``gdna_fraction`` puts genomic fragments in the intronic and intergenic regions, which is the
       unspliced bank and the two contained gDNA length pools.
 
-    Every one of those three was added because the assertion below found the array empty. That is the
-    fixture doing its job: each is a population the tally has, and a determinism gate that never sees
-    one is not testing it.
+    Each is a population the tally has, and a determinism gate that never sees one is not testing it.
     """
     scenario = Scenario(
         "worker_determinism",
@@ -379,11 +363,11 @@ def every_bank_oracle(tmp_path):
         "-",
         [{"t_id": "t3", "exons": [(3000, 3400), (4000, 4400)], "abundance": 40}],
     )
-    # 300 bp mean at 12,000 fragments, and BOTH numbers are load-bearing. The RESOLVED-gap arm needs a
+    # 300 bp mean at 12,000 fragments, and both numbers are load-bearing. The resolved-gap case needs a
     # fragment whose two 100 bp mates straddle the sj with the intron strictly inside the gap, so it
     # needs length ≥ ~300 on a 1,000 nt transcript — and the simulator models the effective length, so
     # a 600 bp fragment has 401 placements on that transcript against an 80 bp fragment's 921 and the
-    # long tail is genuinely suppressed. A shorter mean or a smaller budget empties that arm entirely,
+    # long tail is genuinely suppressed. A shorter mean or a smaller budget empties that case entirely,
     # and the assertion below then holds over nothing.
     result = scenario.build_oracle(
         n_fragments=12000,
@@ -417,8 +401,7 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(every_bank_oracle):
     baseline = _tally(every_bank_oracle, 1)
 
     # A tally of zeros would satisfy bit-identity trivially, so the baseline has to be shown to contain
-    # something first. A bit-identity gate in this project has lied in exactly this way: an arm with zero
-    # rows scored fully identical, because the comparison looped over the empty arm's rows.
+    # something first.
     for key, why in [
         ("region_start_count", "nothing was deposited at all"),
         ("region_contained_count", "no fragment fitted inside a region"),
@@ -443,10 +426,9 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(every_bank_oracle):
     )
     # The side buffer is the one bank this is not free for, and it is read the same way — off its own
     # fields, so an array added to it joins this gate too. Every other bank is a sum, compared below
-    # exactly (counts) or within the derived tolerance (float64). The deferred queue is a LIST:
+    # exactly (counts) or within the derived tolerance (float64). The deferred queue is a list:
     # concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8 workers with
-    # identical CONTENTS, so the C++ export sorts on the record's own content — and this is what
-    # says it does.
+    # identical contents, so the C++ export sorts on the record's own content, which this checks.
     deferred_keys = [f.name for f in dataclasses.fields(baseline.deferred)]
     assert baseline.deferred.n_fragments > 0, (
         "no fragment was deferred, so the canonical sort is compared only against an empty bank — which "
@@ -463,17 +445,17 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(every_bank_oracle):
             expected = np.asarray(getattr(baseline, key))
             actual = np.asarray(getattr(other, key))
             assert actual.dtype == expected.dtype, f"{n_workers} workers: {key} dtype"
-            # One convention, two standards, and that is the point. A COUNT is an integer and integer
-            # addition IS associative, so a count bank must be bit-identical at any worker count and is
-            # asserted with no tolerance at all. A FRACTION is float64 and float addition is NOT
-            # associative: the per-worker merge re-associates the sum, so those banks agree only to the
-            # representation. The budget is derived from the deposit count, never fitted, and a count
-            # bank that needed it would fail here.
+            # One convention, two standards. A count is an integer and integer addition is
+            # associative, so a count bank must be bit-identical at any worker count and is asserted
+            # with no tolerance. A fraction is float64 and float addition is not associative: the
+            # per-worker merge re-associates the sum, so those banks agree only to the representation.
+            # The budget is derived from the deposit count, never fitted, and a count bank that needed
+            # it would fail here.
             if expected.dtype == np.float64:
                 # The budget is `n_deposits * EPS`: each cell accumulates at most one addition per
                 # deposited fragment, and re-associating `n` round-to-nearest additions moves the sum
-                # by at most `n` ulp. DERIVED from the fragment count — not the array size, which is
-                # unrelated, and not a number anyone chose.
+                # by at most `n` ulp. Derived from the fragment count, not the array size, which is
+                # unrelated.
                 assert np.allclose(actual, expected, rtol=n_deposits * EPS, atol=0.0), (
                     f"{n_workers} workers: {key} differs by MORE than the float64 representation — "
                     f"that is a merge defect, not re-association"
@@ -505,8 +487,8 @@ def test_the_deferred_bank_holds_the_fragments_ITS_COUNTER_CLAIMS(every_bank_ora
 
     Two identities, and they are different statements: the bank holds as many records as the counter
     says, and the umbrella census's three ``gap_deferred_*`` partition exactly that population. The
-    payload refuses both at its door, so this test's real content is that the fixture REACHES the
-    population at all — a conservation identity over an empty term is satisfied by any bookkeeping.
+    payload refuses both at its door, so this test's real content is that the fixture reaches the
+    population at all: a conservation identity over an empty term is satisfied by any bookkeeping.
     """
     payload = _tally(every_bank_oracle, 1)
     assert payload.deferred.n_fragments == payload.qc.deferred_undetermined_gap > 0

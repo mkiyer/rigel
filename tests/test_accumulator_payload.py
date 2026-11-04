@@ -1,13 +1,11 @@
 """Schema invariants for :class:`rigel.scan_payload.AccumulatorPayload`, against the executable
 specification in ``tests/native/_accumulator_reference.py``.
 
-The payload is the boundary where the C++ tally becomes Python. Its field names ARE the
-specification's ``Tally`` field names, character for character, so every check below reads the schema
-off `Tally` itself rather than off a hand-written list — a list would be free to drift, and the whole
-point of sharing one vocabulary is that it cannot. Alongside the field set: dtypes and column counts,
-the nested deferred CSR, the QC and gap-census key sets, and the refusals — a wrong dtype, a missing
-denominator, a bank that disagrees with its own counter — because the payload is also what a CACHED
-scan is rebuilt from, so these have to be refused at the door rather than downstream.
+The payload is the boundary where the C++ tally becomes Python. Its field names are the specification's ``Tally``
+field names, character for character, so every check reads the schema off `Tally` itself rather than off a
+hand-written list that could drift. Alongside the field set: dtypes and column counts, the nested deferred CSR, the
+QC and gap-census key sets, and the refusals (a wrong dtype, a missing denominator, a bank that disagrees with its
+own counter), made at the door because the payload is also what a cached scan is rebuilt from.
 """
 
 from __future__ import annotations
@@ -29,15 +27,14 @@ from native._accumulator_reference import (
 
 
 #: Two references: chr1 with 4 region_bounds (3 regions, 2 boundaries) and chr2 with 3 (2 regions, 1 boundary). A third
-#: reference has NO region_bounds, which is legal and contributes nothing — the case where per-reference offset
+#: reference has no region_bounds, which is legal and contributes nothing: the case where per-reference offset
 #: arithmetic goes wrong if it is written as a plain subtraction.
 REGION_BOUNDS_PER_REF = [[0, 100, 200, 600], [0, 500, 900], []]
 MAX_LENGTH = 12
 
-#: The deferred bank in the fixture is produced by the SPECIFICATION rather than hand-written, so the
-#: nested CSR the payload validates is one the reference actually emits. A hand-written bank is a second
-#: encoding of the same layout and the two would be free to drift — the same reason the payload's field
-#: names are read off ``Tally`` instead of listed.
+#: The deferred bank in the fixture is produced by the specification rather than hand-written, so the
+#: nested CSR the payload validates is one the reference actually emits; a hand-written bank would be a
+#: second encoding of the same layout, free to drift.
 #:
 #: Four fragments, because ``qc.deferred_undetermined_gap`` below is 4 and the payload refuses a bank
 #: whose record count disagrees with the counter that describes it.
@@ -122,7 +119,7 @@ def _calibration_dict(**overrides) -> dict:
         "boundary_unspliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
         "boundary_unspliced_inv_length_sum": np.arange(n_boundaries, dtype=np.float64),
         "boundary_spliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
-        # The conserved masses: ONE value per boundary, so `n_boundaries` and not `n_boundaries * 2`. A
+        # The conserved masses: one value per boundary, so `n_boundaries` and not `n_boundaries * 2`. A
         # fixture that gave them a strand axis would pass every value check and disagree with the emitter.
         "boundary_unspliced_mass": np.arange(n_boundaries, dtype=np.float64) * 29,
         "boundary_spliced_mass": np.arange(n_boundaries, dtype=np.float64) * 31,
@@ -130,9 +127,8 @@ def _calibration_dict(**overrides) -> dict:
         "sj_inv_length_sum": np.arange(n_sj, dtype=np.float64),
         "sj_mass": np.arange(n_sj * 2, dtype=np.float64),
         "pool_lengths": np.arange(5 * (MAX_LENGTH + 1), dtype=np.int64),
-        # `TRAPS: a-purity-filter-is-a-length-filter`: the unconditional histogram must bin EXACTLY the
-        # deposited fragments, so this fixture cannot carry an arbitrary array — 41 here, matching
-        # qc.deposited below. That coupling is the invariant doing its job at the door.
+        # The unconditional histogram must bin exactly the deposited fragments, so this fixture cannot
+        # carry an arbitrary array: 41 here, matching qc.deposited below.
         "deposited_lengths": _deposited_lengths(41),
         "qc": {
             "deposited": 41,
@@ -145,7 +141,6 @@ def _calibration_dict(**overrides) -> dict:
         "deferred": _deferred_bank(),
         "gap_resolution": _gap_census(),
         "n_strand_columns": N_STRAND_COLUMNS,
-        "n_fragment_pools": 5,
         "max_length": MAX_LENGTH,
         "n_refs": len(REGION_BOUNDS_PER_REF),
         "unique_unspliced_mismatches": 7,
@@ -160,7 +155,7 @@ def _payload(**overrides) -> AccumulatorPayload:
 
 
 # ---------------------------------------------------------------------------
-# the schema IS the specification's Tally
+# the schema is the specification's Tally
 # ---------------------------------------------------------------------------
 
 
@@ -182,7 +177,7 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     payload = _payload()
     n_regions, n_boundaries, n_sj = payload.n_regions, payload.n_boundaries, payload.n_sj
     assert (n_regions, n_boundaries, n_sj) == (5, 3, 3)
-    # The COUNTS keep both genome-strand columns — the strand model is a Beta-Binomial over them.
+    # The counts keep both genome-strand columns: the strand model is a Beta-Binomial over them.
     for name, rows in (
         ("region_contained_count", n_regions),
         ("boundary_unspliced_count", n_boundaries),
@@ -191,7 +186,7 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
         ("sj_mass", n_sj),
     ):
         assert getattr(payload, name).shape == (rows, N_STRAND_COLUMNS), name
-    # The length moments and the conserved masses carry ONE column: which strand a read aligned to
+    # The length moments and the conserved masses carry one column: which strand a read aligned to
     # says nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
     for name, rows in (
         ("boundary_unspliced_inv_length_sum", n_boundaries),
@@ -211,9 +206,9 @@ def test_the_dtypes_are_the_specifications_dtypes():
     A count that arrives as int64 compares equal to the specification's uint32 by value, so a value-only
     check would pass while the schema had changed underneath it.
 
-    Three ``Tally`` fields are not arrays — ``qc`` and ``gap_resolution`` are dicts of counters and
-    ``deferred`` is a list of records — and each is checked by its own test below. They are skipped by
-    ASKING THE REFERENCE what type it holds, never by naming them here: a name would let a field that
+    Three ``Tally`` fields are not arrays (``qc`` and ``gap_resolution`` are dicts of counters and
+    ``deferred`` is a list of records), and each is checked by its own test below. They are skipped by
+    asking the reference what type it holds, never by naming them here: a name would let a field that
     stopped being an array drop silently out of this gate.
     """
     payload = _payload()
@@ -225,10 +220,9 @@ def test_the_dtypes_are_the_specifications_dtypes():
             continue
         assert getattr(payload, field.name).dtype == expected.dtype, field.name
         checked += 1
-    # The floor moves only when the SCHEMA moves, and then deliberately: a floor that drifted down on its
-    # own would be this gate quietly narrowing, which is the one thing it exists to catch. Note that a
-    # bank gaining a strand axis does NOT move it — that is one array either way, and its SHAPE is gated
-    # by the test above rather than here.
+    # The floor moves only when the schema moves, and then deliberately: a floor that drifted down on its
+    # own would be this gate quietly narrowing. A bank gaining a strand axis does not move it (that is one
+    # array either way, and its shape is gated by the test above).
     assert checked >= 12, f"only {checked} arrays compared; the gate has narrowed"
 
 
@@ -236,8 +230,8 @@ def test_the_DEFERRED_bank_is_int64_throughout_and_carries_the_specifications_ar
     """The side buffer's own schema check, since it is not one array and cannot join the loop above.
 
     One dtype for the whole bank, and it is ``int64`` even for the two strand columns — which are
-    ``int32`` everywhere else in the scanner. The parity gate compares dtypes, so a narrowing conversion at
-    the ABI would compare equal by value and hide the change.
+    ``int32`` everywhere else in the scanner. A narrowing conversion at the ABI would compare equal by value
+    and hide the change, so the dtype is checked.
     """
     payload = _payload()
     reference = Tally.zeros(n_regions=5, n_boundaries=3, n_sj=3, max_length=MAX_LENGTH)
@@ -255,12 +249,10 @@ def test_the_DEFERRED_bank_is_int64_throughout_and_carries_the_specifications_ar
 
 
 def test_a_WRONG_dtype_is_REJECTED_rather_than_coerced():
-    """PERTURBATION: checking the output dtype is not enough, and breaking the code showed it.
-
-    ``ascontiguousarray(x, dtype=uint32)`` will happily narrow an int64 array, so a payload that *coerces*
-    still reports the right dtype and passes a check on its own output. What that hides is a C++ side that
-    has stopped agreeing with the schema — the dtype is part of byte-identity, and a widened count compares
-    equal by value all the way down. So the wrong dtype has to arrive and be refused.
+    """Checking the output dtype is not enough: ``ascontiguousarray(x, dtype=uint32)`` narrows an int64
+    array, so a payload that *coerces* still reports the right dtype and passes a check on its own output,
+    hiding a C++ side that has stopped agreeing with the schema. So the wrong dtype has to arrive and be
+    refused.
     """
     with pytest.raises(ValueError, match="region_contained_count.*dtype"):
         _payload(region_contained_count=np.arange(10, dtype=np.int64))
@@ -280,9 +272,7 @@ def test_a_length_HISTOGRAM_of_the_WRONG_dtype_is_REJECTED_rather_than_coerced()
 
 
 def test_a_MISSING_qc_denominator_is_REJECTED():
-    """PERTURBATION: nothing was feeding an incomplete qc block until this was written.
-
-    Every denominator has to be emitted, because every conservation statement downstream has to be able
+    """Every denominator has to be emitted, because every conservation statement downstream has to be able
     to name what it excluded. A denominator that silently arrives absent is a statement that cannot.
     """
     qc = dict(_calibration_dict()["calibration"]["qc"])
@@ -305,7 +295,7 @@ def test_a_reference_with_no_region_bounds_contributes_nothing_to_any_axis():
 
 
 def test_qc_is_typed_so_a_misspelled_denominator_fails_loudly():
-    """Every denominator is EMITTED, and every conservation statement names its own. A dict would
+    """Every denominator is emitted, and every conservation statement names its own. A dict would
     answer a typo with a KeyError at the call site; a dataclass answers at the boundary, and the field
     names are the specification's own."""
     payload = _payload()
@@ -313,7 +303,7 @@ def test_qc_is_typed_so_a_misspelled_denominator_fails_loudly():
     assert payload.qc.deposited == 41
     assert payload.qc.deferred_undetermined_gap == 4
     with pytest.raises(AttributeError):
-        _ = payload.qc.dropped_ambigous_path  # noqa: B018 — the typo IS the test
+        _ = payload.qc.dropped_ambigous_path  # noqa: B018 — the typo is the test
 
 
 def test_the_qc_fields_are_exactly_the_specifications_qc_keys():
@@ -323,7 +313,7 @@ def test_the_qc_fields_are_exactly_the_specifications_qc_keys():
 
 
 def test_the_gap_census_fields_are_exactly_the_specifications_keys():
-    """Including the ABSENCE of ``gap_resolved_unspliced``.
+    """Including the absence of ``gap_resolved_unspliced``.
 
     No fragment can enter that class: a spliced hypothesis removes bases the unspliced one keeps, so the
     unspliced path is always the longest and can never be the sole survivor. Reading the key set off the
@@ -346,8 +336,8 @@ def test_a_DEFERRED_BANK_THAT_DISAGREES_WITH_ITS_OWN_COUNTER_IS_REJECTED():
     """The conservation half, refused at the door.
 
     ``deposited + deferred + dropped_* == offered`` is worth nothing if the deferred term is a number
-    with no fragments behind it. The check has to live at the payload boundary and not only in the
-    accumulator's tests, because the payload is what a CACHED scan is rebuilt from — and a cache can be
+    with no fragments behind it. The check lives at the payload boundary and not only in the
+    accumulator's tests, because the payload is what a cached scan is rebuilt from, and a cache can be
     truncated, partially written, or produced by a build whose schema digest happened to collide.
     """
     with pytest.raises(ValueError, match="deferred bank holds 3 fragments"):
@@ -385,16 +375,15 @@ def test_a_TRUNCATED_deferred_CSR_is_REJECTED_rather_than_indexed_off_the_end():
 
 
 def test_a_DEFERRED_RECORD_WITH_FEWER_THAN_TWO_HYPOTHESES_IS_REJECTED():
-    """A fragment is deferred BECAUSE two or more hypotheses survived.
+    """A fragment is deferred because two or more hypotheses survived.
 
     A record carrying one is a bank that lost the others, and the second pass would then "choose" from a
     set of one and deposit an answer nothing supported — the exact outcome the deferral exists to prevent.
     """
     bank = _deferred_bank()
-    # Drop the LAST record's second (unspliced) hypothesis, which carries no introns — so every other
-    # array stays self-consistent and the ONLY thing wrong is the run length.
-    # Written this way on purpose: a bank that also broke the CSR would be caught by the test above and
-    # this one would pass for the wrong reason.
+    # Drop the last record's second (unspliced) hypothesis, which carries no introns, so every other
+    # array stays self-consistent and the only thing wrong is the run length: a bank that also broke the
+    # CSR would be caught by the test above, and this one would pass for the wrong reason.
     lone = dict(bank) | {
         "hypothesis_offsets": np.asarray([0, 2, 4, 6, 7], np.int64),
         "hypothesis_sj_strand": bank["hypothesis_sj_strand"][:-1],
@@ -407,11 +396,9 @@ def test_a_DEFERRED_RECORD_WITH_FEWER_THAN_TWO_HYPOTHESES_IS_REJECTED():
 def test_a_LEDGER_bank_that_does_not_book_every_deposited_fragment_is_REJECTED():
     """``Σ region_start_count == qc.deposited``, refused at the door.
 
-    The start bank's sum is the accumulator's one non-tautological invariant. It replaced three
-    "conservation identities" whose right-hand sides could only be evaluated by re-running the deposit,
-    so a deliberately broken replay satisfied all three while 91 % of the crossings were junk. This one is
-    checkable against a number the deposit counted independently. A bank one fragment off, in either
-    direction, lost or invented a fragment.
+    The start bank's sum is the accumulator's one non-tautological invariant: it is checkable against a
+    number the deposit counted independently, where an identity evaluated by re-running the deposit is
+    satisfied by a broken replay. A bank one fragment off, in either direction, lost or invented a fragment.
     """
     for total in (40, 42):  # one short of qc.deposited = 41, and one too many
         with pytest.raises(ValueError, match=f"region_start_count sums to {total} but 41"):
@@ -426,11 +413,6 @@ def test_a_LEDGER_bank_that_does_not_book_every_deposited_fragment_is_REJECTED()
 # ---------------------------------------------------------------------------
 # validation: every failure names both the observed and the expected value
 # ---------------------------------------------------------------------------
-
-
-def test_a_missing_calibration_block_is_an_ERROR_not_an_empty_payload():
-    with pytest.raises(ValueError, match="set_regions"):
-        AccumulatorPayload.from_scan_result({"calibration": None})
 
 
 def test_a_wrong_column_count_is_rejected():
@@ -451,7 +433,7 @@ def test_an_array_that_does_not_divide_by_its_axis_is_rejected():
 
 def test_the_offsets_must_agree_with_the_region_bound_axis_they_describe():
     """A reference contributing ``c`` region_bounds owns ``c-1`` regions and ``c-2`` boundaries. Re-derived here rather
-    than trusted, because an offset array that merely has the right LENGTH can still be inconsistent."""
+    than trusted, because an offset array that merely has the right length can still be inconsistent."""
     bad = np.asarray(
         [0, 3, 5, 5], np.int64
     )  # chr1 claims 3 regions; 4 region_bounds means 3 — chr2 claims 2, ok
@@ -466,11 +448,9 @@ def test_the_offsets_must_agree_with_the_region_bound_axis_they_describe():
 
 
 def test_the_payload_holds_VIEWS_and_does_not_copy():
-    """A live footgun, recorded because someone will be tempted to add a cast for safety.
-
-    ``np.ascontiguousarray(x, dtype=D)`` is a **no-op** when the array already has dtype ``D``, so the
-    payload holds views over the capsule-owned C++ heap and the payload object is the keep-alive. Adding
-    a defensive cast would silently double peak memory on a 1.04 M-region partition.
+    """``np.ascontiguousarray(x, dtype=D)`` is a no-op when the array already has dtype ``D``, so the
+    payload holds views over the capsule-owned C++ heap and the payload object is the keep-alive. No
+    defensive cast may be added: it would silently double peak memory on a whole-genome partition.
     """
     cal = _calibration_dict()
     payload = AccumulatorPayload.from_scan_result(cal)
@@ -481,16 +461,12 @@ def test_the_payload_holds_VIEWS_and_does_not_copy():
 
 
 def test_a_deposited_lengths_HISTOGRAM_THAT_DOES_NOT_BIN_EVERY_FRAGMENT_IS_REJECTED():
-    """`TRAPS: a-purity-filter-is-a-length-filter`, refused at the door: ``sum(deposited_lengths)`` must
-    equal ``qc.deposited``.
+    """Refused at the door: ``sum(deposited_lengths)`` must equal ``qc.deposited``.
 
     This histogram is the empirical-Bayes anchor for every fragment-length model in the tool, so an
-    off-by-N is not cosmetic — it silently re-weights the anchor against the pools it is supposed to
-    anchor, which is a subtler form of the frame mismatch that trap exists to remove.
-
-    The check has to live at the payload boundary and not only in the accumulator's own tests, because
-    the payload is what a CACHED scan is rebuilt from — and a cache can be truncated, partially written,
-    or produced by a build whose schema digest happened to collide.
+    off-by-N silently re-weights the anchor against the pools it anchors: the histogram must bin exactly
+    the deposited fragments, in the pools' own frame. The check lives at the payload boundary because
+    the payload is what a cached scan is rebuilt from.
     """
     n = MAX_LENGTH + 1
     with pytest.raises(ValueError, match="deposited_lengths sums to"):

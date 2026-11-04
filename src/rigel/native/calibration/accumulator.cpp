@@ -1,10 +1,7 @@
 /**
- * accumulator.cpp — the deposit rule.
- *
- *     SPEC: tests/native/_accumulator_reference.py — byte for byte. Where the two disagree, it wins.
- *
- * ⚠ Every ordering decision in `deposit` is load-bearing and each one below was a real bug first. Read
- * the comments before reordering anything.
+ * accumulator.cpp — the deposit rule. Specification: tests/native/_accumulator_reference.py, byte for byte; where
+ * the two disagree, the Python file is right. Every ordering decision in `deposit` is load-bearing, and the
+ * comments say why: read them before reordering anything.
  */
 #include "accumulator.h"
 
@@ -62,8 +59,7 @@ void DeferredFragments::append_placement(const OfferedFragment& fragment,
 }
 
 void DeferredFragments::merge_from(const DeferredFragments& other) {
-    // ⚠ CSR concatenation: the values append, and the offsets append SHIFTED by this queue's current
-    // extent. Every offset array starts at 0, so `other`'s leading 0 is skipped rather than added.
+    // CSR concatenation: offsets append shifted by this queue's extent, skipping `other`'s leading 0.
     const auto shift_append = [](std::vector<std::int64_t>& into,
                                  const std::vector<std::int64_t>& from) {
         const std::int64_t base = into.back();
@@ -90,12 +86,8 @@ void DeferredFragments::merge_from(const DeferredFragments& other) {
 
 namespace {
 
-/// Python's sequence comparison, exactly: element-wise, and a PREFIX sorts BEFORE the longer sequence it
-/// is a prefix of. Returns -1, 0 or 1.
-///
-/// ⚠ A flat run of (start, end) PAIRS compares identically to Python's tuple-of-pairs, because a pair has
-/// fixed length 2 -- so there is no need to compare pairwise and the same helper serves both the observed
-/// and the implied intron runs.
+/// Python's sequence comparison (a prefix sorts first), returning -1, 0 or 1. A flat run of (start, end) pairs
+/// compares as Python's tuple of pairs, so one helper serves the observed and the implied intron runs.
 inline int lex_compare(const std::int64_t* a, std::size_t na,
                        const std::int64_t* b, std::size_t nb) noexcept
 {
@@ -190,8 +182,7 @@ const OfferedFragment& DeferredFragments::offered_of(std::size_t p, std::size_t 
     }
     const std::size_t g0 = static_cast<std::size_t>(hypothesis_offsets[p]) + h0;
     const std::size_t g1 = static_cast<std::size_t>(hypothesis_offsets[p]) + h1;
-    // ⛔ Reserved up front: the spans below point INTO these vectors, so a reallocation while filling
-    // them would dangle every pointer already handed out.
+    // Reserved up front: the spans below point into these vectors, so they must not reallocate while filling.
     st.implied.reserve(static_cast<std::size_t>(hypothesis_intron_offsets[g1] - hypothesis_intron_offsets[g0]));
     st.spans.reserve(g1 - g0);
     for (std::size_t g = g0; g < g1; ++g) {
@@ -233,9 +224,7 @@ void DeferredFragments::canonicalise() {
     const std::size_t n = n_records();
     if (n < 2) return;
 
-    // ⭐ The specification's key: a record is the sequence of its placements' keys, compared as Python
-    // compares those tuples -- element-wise, and a PREFIX sorts BEFORE the longer sequence it is a prefix
-    // of -- at both levels; `compare_placements` is the placement's key.
+    // The specification's key: the sequence of the placements' `compare_placements` keys, a prefix sorting first.
     const auto record_less = [this](std::size_t a, std::size_t b) {
         const std::size_t a0 = static_cast<std::size_t>(placement_offsets[a]);
         const std::size_t a1 = static_cast<std::size_t>(placement_offsets[a + 1]);
@@ -247,10 +236,8 @@ void DeferredFragments::canonicalise() {
             if (c != 0) return c < 0;
         }
         if (a1 - a0 != b1 - b0) return (a1 - a0) < (b1 - b0);
-        // ⚠ The sequence only once the whole record's content ties: a record's sequence must never move it past a
-        // record its content orders, or the draw's stream would reach every later record in another order. Records
-        // tying here deposit identically and are ordered by their placements' (nm, clip), so the order stays total
-        // and a set's offer, which keeps the first of identical placements, keeps the fewest mismatches.
+        // (nm, clip) breaks only a content tie, so it never reorders records the content orders (the draw's stream
+        // follows that order); it makes the order total, and a set's offer keeps the fewest-mismatch copy.
         for (std::size_t k = 0; k < common; ++k) {
             if (nm[a0 + k] != nm[b0 + k]) return nm[a0 + k] < nm[b0 + k];
             if (clip[a0 + k] != clip[b0 + k]) return clip[a0 + k] < clip[b0 + k];
@@ -260,13 +247,12 @@ void DeferredFragments::canonicalise() {
 
     std::vector<std::size_t> order(n);
     for (std::size_t i = 0; i < n; ++i) order[i] = i;
-    // ⚠ Not a stable sort, and it does not need to be: two records that tie on the whole key are
-    // byte-identical records, so no permutation of them is observable in the exported arrays.
+    // Not stable, and need not be: records that tie on the whole key are byte-identical.
     std::sort(order.begin(), order.end(), record_less);
 
     bool identity = true;
     for (std::size_t i = 0; i < n && identity; ++i) identity = (order[i] == i);
-    if (identity) return;  // keeps a second export free, which is what makes this idempotent in practice
+    if (identity) return;  // already canonical: a repeat export copies nothing
 
     DeferredFragments out;
     out.placement_offsets.reserve(n + 1);
@@ -322,19 +308,15 @@ Accumulator::Accumulator(std::vector<std::int64_t> region_bounds,
         }
     }
 
-    // A reference contributing c region_bounds owns c-1 regions and c-2 interior boundaries; one contributing fewer than
-    // two region_bounds owns neither, which is legal and deposits nothing.
+    // c region_bounds own c-1 regions and c-2 boundaries; fewer than two own neither, which is legal.
     const std::size_t n_regions = region_bounds_.size() >= 2 ? region_bounds_.size() - 1 : 0;
     const std::size_t n_boundaries = region_bounds_.size() >= 2 ? region_bounds_.size() - 2 : 0;
     regions_.assign(n_regions, Region{});
     boundaries_.assign(n_boundaries, Boundary{});
     region_start_count_.assign(n_regions * kNStrandColumns, 0u);
 
-    // ⚠ REQUIRED whenever this reference owns a region, and it throws rather than quietly skipping the
-    // length pools. The shipped accumulator disabled pooling silently on an empty type array, which is a
-    // whole output going missing with nothing to notice it by; and the specification has no such state at
-    // all -- `Partition.from_region_bounds` always materialises a type per region -- so a C++ mode the spec cannot
-    // express could only ever be a way to disagree with it.
+    // Required whenever this reference owns a region: the specification always has one type per region, and an
+    // empty array would silently emit no length pools.
     if (n_regions > 0 && region_types.empty()) {
         throw std::invalid_argument(
             "accumulator: region_types is empty but this reference has " + std::to_string(n_regions) +
@@ -401,24 +383,20 @@ std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
                                      std::int32_t sj_strand) const noexcept
 {
     if (sj_offsets_.empty()) return -1;
-    // ⭐ Every annotated intron has BOTH endpoints as partition region_bounds (measured: 404,168 of 404,168), so
-    // "is this intron annotated?" reduces to the binary search the deposit already performs. If the start
-    // is not a region_bound the table is never consulted -- and 70.4 % of region_bounds are not a donor at all.
+    // Both ends of every annotated intron are region_bounds, so an intron whose ends are not is unannotated
+    // without consulting the table.
     const std::int64_t donor = exact_region_bound(intron_start);
     if (donor < 0) return -1;
     const std::int64_t acceptor = exact_region_bound(intron_end);
     if (acceptor < 0) return -1;
 
-    // ⚠ The strand filter applies only when the observed strand is DEFINITE. NONE means the aligner wrote
-    // no motif tag at all (STAR writes XS, minimap2 ts, some write neither), so on such a BAM every
-    // spliced fragment arrives with NONE -- demanding a strand there would delete 100 % of that aligner's
-    // annotated sj. AMBIGUOUS never arrives from `deposit`, which trusts none of such a fragment's splices;
-    // it does arrive through `sj_edge_ids`, the second pass's batched lookup, and is then treated as NONE:
-    // the first annotated sj with these two ends answers, whatever its strand.
+    // The strand filter applies only to a definite strand. NONE means the aligner wrote no motif tag (STAR writes
+    // XS, minimap2 ts, some neither), so demanding one would drop every annotated sj of such a BAM. AMBIGUOUS comes
+    // only from `sj_edge_ids` and is treated as NONE: the first annotated sj with these ends answers.
     const bool definite = (sj_strand == STRAND_POS || sj_strand == STRAND_NEG);
     const std::int32_t lo = sj_offsets_[static_cast<std::size_t>(donor)];
     const std::int32_t hi = sj_offsets_[static_cast<std::size_t>(donor) + 1];
-    for (std::int32_t k = lo; k < hi; ++k) {  // one to three iterations at human scale
+    for (std::int32_t k = lo; k < hi; ++k) {  // a donor has only a few sj
         if (sj_boundary_right_[static_cast<std::size_t>(k)] != acceptor) continue;
         if (definite && sj_strand_[static_cast<std::size_t>(k)] != sj_strand) continue;
         return k;
@@ -445,24 +423,16 @@ std::int64_t Accumulator::hypothesis_length(const OfferedFragment& fragment,
                                            std::int64_t end,
                                            DepositScratch& scratch) const
 {
-    // ⚠ ONE definition of L, `path_length`, which the resolver also scores each candidate by.
-    //
-    // The observed introns and the implied ones are UNIONED. They are disjoint by construction -- the
-    // enumeration never searches a gap the CIGAR already explained -- so this is a union and not a merge,
-    // and `normalise_introns` sorts and clips it either way.
+    // The one definition of L, `path_length`, which the resolver also scores candidates by. Observed and implied
+    // introns are disjoint (the enumeration never searches a gap the CIGAR explained), so this is their union.
     return path_length(fragment.observed_introns, fragment.n_observed_introns,
                        hypothesis.introns, hypothesis.n_introns,
                        start, end, scratch.introns, scratch.segments);
 }
 
 DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScratch& scratch) {
-    // ⚠ FIRST, before any geometry: the strand is a property of the fragment alone, and one with no
-    // single genome strand has no column in any bank. Booking it anyway would credit it to the WRONG
-    // strand; rejecting it here is what lets the loss be counted instead of vanishing.
-    //
-    // ⚠ And it must win over the deferral, because every fragment counts exactly ONCE and a fragment can
-    // be both. The queue sizes the population the SECOND PASS CAN RECOVER, and a fragment with no genome
-    // strand is not recoverable -- that pass resolves which PATH, not which strand the read aligned to.
+    // The strand check comes first: a fragment with no genome strand has no column, and it wins over the deferral
+    // because every fragment counts once and the second pass resolves which path, not which strand.
     std::int64_t start = 0, end = 0;
     const int column = admit(fragment, &start, &end);
     if (column == -1) {
@@ -474,15 +444,8 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         return DepositOutcome::kEmpty;
     }
 
-    // ⛔⛔ EVERY FRAGMENT HAS AT LEAST ONE HYPOTHESIS -- "cut nothing beyond what was sequenced" -- and
-    // the executable specification makes that its DEFAULT (`UNSPLICED_ONLY`), not an option:
-    // "the degenerate case is the general case, not a branch". A caller offering an EMPTY set is
-    // asking the same question, so answer it the same way rather than crashing.
-    //
-    // ⛔ Without this, an empty set walked straight past the `survivors.size() > 1` deferral and
-    // dereferenced `survivors.front()` on an EMPTY vector, indexing a NULL `hypotheses` -- a hard
-    // segfault, and one nothing could reach from the scanner because the scanner always offers the
-    // genomic path. It cost a session to find precisely because it was unreachable from production.
+    // Every fragment has at least one hypothesis, the unspliced one (the specification's default
+    // `UNSPLICED_ONLY`), so an empty set is answered as that one.
     static const GapHypothesis kUnsplicedOnly{nullptr, 0, STRAND_NONE};
     OfferedFragment offered_or_default = fragment;
     if (fragment.n_hypotheses == 0) {
@@ -510,8 +473,8 @@ int Accumulator::admit(const OfferedFragment& fragment, std::int64_t* start, std
     const int column = strand_column(fragment.align_strand);
     if (column < 0) return -1;
     if (region_bounds_.size() < 2) return -2;
-    // Clip to the reference. L is the CLIPPED length, so the placement count stays consistent -- and the
-    // clip must precede arbitration, because a hypothesis is filtered on its L.
+    // Clip to the reference. L is the clipped length, and the clip precedes arbitration because a hypothesis is
+    // filtered on its L.
     const std::int64_t s = std::max(fragment.start, region_bounds_.front());
     const std::int64_t e = std::min(fragment.end,   region_bounds_.back());
     if (e <= s) return -2;
@@ -522,15 +485,10 @@ int Accumulator::admit(const OfferedFragment& fragment, std::int64_t* start, std
 
 void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t start, std::int64_t end,
                             DepositScratch& scratch, bool all_stand_if_empty, bool* any_spliced) const {
-    // ⭐ Short-read chemistry does not sequence molecules past `max_length_` -- the same statement that
-    // makes kTooLong a rejection -- so a hypothesis implying a longer L is not a molecule this library
-    // contains. Applied to the UNSPLICED hypothesis this is exactly "a fragment whose genomic span
-    // exceeds the limit must be RNA": that hypothesis's L IS the span. There is no second rule.
-    // ⚠ Unless the filter would empty the set, in which case every hypothesis stands -- `deposit`'s
-    // clause. The ordinary kTooLong rejection then counts the fragment: at once when it offered one
-    // hypothesis, and at the drain, which replays the chosen one alone, when it offered several and was
-    // held. The set's offer applies the clause over the union of every placement's pairs instead, and
-    // asks for the raw filter.
+    // A hypothesis implying L > `max_length_` is not a molecule this library contains; for the unspliced one, whose
+    // L is the genomic span, this says a fragment spanning more than the limit must be RNA. With
+    // `all_stand_if_empty`, a filter that would empty the set leaves every hypothesis standing, and kTooLong then
+    // counts the fragment (at once, or at the drain if held). The set's offer applies that clause to the union.
     auto& survivors = scratch.survivors;
     survivors.clear();
     bool any = false;
@@ -559,14 +517,11 @@ void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t star
 DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, const GapHypothesis& chosen,
                                              const int column, const std::int64_t start,
                                              const std::int64_t end, DepositScratch& scratch) {
-    // The single survivor. ⚠ Re-normalised rather than cached per hypothesis: one extra normalise on the
-    // winner is cheaper than carrying a normalised list for every candidate, and it keeps ONE code path
-    // from a hypothesis to its introns.
+    // Re-normalised rather than cached per hypothesis: one code path from a hypothesis to its introns.
     const std::int64_t length = hypothesis_length(fragment, chosen, start, end, scratch);
 
-    // ⭐ An implied strand is used ONLY when no motif was sequenced anywhere on this fragment. An observed
-    // motif is evidence; an implied strand is an inference from the annotation, and mixing an inference
-    // into an observation is how `primary` went wrong.
+    // An implied strand is used only when no motif was sequenced on this fragment: an observed motif is evidence,
+    // an implied strand only an inference from the annotation.
     const std::int32_t sj_strand =
         fragment.sj_strand == STRAND_NONE ? chosen.sj_strand : fragment.sj_strand;
 
@@ -580,17 +535,15 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
     }
 
     // ── which annotated sj does this path use? this also picks the boundary bank ────────────────
-    // ⚠ Resolved BEFORE the crossing loop, because `spliced` chooses which bank the crossings land in.
-    // ⭐ Resolved PER INTRON POSITION into `sj_id_at_gap`, with -1 where the annotation has no such
-    // sj, because the conserved mass needs to know WHICH of a block's two ends is a sj
-    // boundary. A filtered list cannot answer that -- dropping the unannotated entries destroys the
-    // alignment between intron `i` and the gap between blocks `i` and `i+1`.
+    // Resolved before the crossing loop, because `spliced` chooses the bank the crossings land in; and per intron
+    // position into `sj_id_at_gap` (-1 where unannotated), because the conserved mass needs to know which of a
+    // block's ends is a sj, and a filtered list loses the alignment between intron `i` and the gap after block `i`.
     auto& sj_ids      = scratch.sj_ids;
     auto& sj_id_at_gap = scratch.sj_id_at_gap;
     sj_ids.clear();
     sj_id_at_gap.assign(scratch.introns.size(), -1);
-    // The motif tag is read once per RECORD, so AMBIGUOUS means the mates DISAGREED about one molecule:
-    // contradictory evidence, not missing evidence. Trust no splice -- every intron stays -1.
+    // The motif tag is read once per record, so AMBIGUOUS means the mates disagreed about one molecule:
+    // contradictory evidence, so no splice is trusted and every intron stays -1.
     if (sj_strand != STRAND_AMBIGUOUS) {
         for (std::size_t gap = 0; gap < scratch.introns.size(); ++gap) {
             const auto& [intron_start, intron_end] = scratch.introns[gap];
@@ -603,9 +556,8 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
     }
     const bool spliced = !sj_ids.empty();
 
-    // ⚠ The path's own first and last COVERED base, not the fragment's extent. With a leading intron the
-    // molecule does not begin at `start`: introns [(150,480)] over [150,500) has its whole path in
-    // [480,500), a different region, and using the extent would credit a region it never touches.
+    // The path's own first and last covered base, not the fragment's extent: introns [(150,480)] over [150,500)
+    // put the whole path in [480,500), and the extent would credit a region the path never touches.
     const std::int64_t first_base = scratch.segments.front().first;
     const std::int64_t last_base  = scratch.segments.back().second - 1;
 
@@ -613,19 +565,15 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
     const std::int64_t last_region  = region_of_pos(last_base);
     region_start_count_[static_cast<std::size_t>(first_region) * kNStrandColumns +
                         static_cast<std::size_t>(column)] += 1u;
-    // ⭐ The unconditional length histogram is incremented HERE -- beside the start count and the DEPOSITED counter -- so all three
-    // describe one population by construction rather than by agreement. `length` is already clipped to
-    // the reference and gated by the length limit above.
+    // The deposited-length histogram moves with the start count and the deposited counter, so all three describe
+    // one set of fragments by construction. `length` is already clipped and within the limit.
     deposited_lengths_[static_cast<std::size_t>(length)] += 1u;
     ++counters_.deposited;
 
-    // ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────────
+    // ── crossings, per contiguous segment of the path ─────────────────────────────────────────────
     // A boundary is crossed iff it lies strictly inside a segment, so per segment the crossed boundaries are a
-    // contiguous index range and no container is needed.
-    //
-    // ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp boundary, and 1/(L-1) would divide by zero. Its
-    // residue is the schema's only count/density co-support violation -- an L == 1 path on an annotated
-    // sj books a count against density 0, which is correct.
+    // contiguous index range. 0 at L == 1: a length-1 molecule cannot cross a 0-bp boundary, and 1/(L-1) would
+    // divide by zero; an L == 1 path on an annotated sj then books a count against density 0, which is correct.
     const double inv_boundary = length >= 2 ? 1.0 / static_cast<double>(length - 1) : 0.0;
     const std::size_t   col          = static_cast<std::size_t>(column);
 
@@ -639,9 +587,7 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
             std::lower_bound(region_bounds_.begin(), region_bounds_.end(), seg_end) - region_bounds_.begin();
 
         for (std::int64_t boundary_idx = first; boundary_idx < last; ++boundary_idx) {
-            // ⭐ TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is
-            // the design: a spliced crossing is certified RNA, nothing deconvolves it, so its length
-            // moments have no consumer and are not stored.
+            // A spliced crossing books no length moment: it is certified RNA, which nothing deconvolves.
             Boundary& boundary = boundaries_[static_cast<std::size_t>(boundary_idx - 1)];
             if (spliced) {
                 boundary.spliced_count[col] += 1u;
@@ -650,23 +596,12 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
                 boundary.unspliced_inv_length_sum += inv_boundary;
             }
         }
-        // ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ────────────────────────────
-        // The crossed region_bounds split this block into `last - first + 1` slices. Each slice's
-        // `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
-        // slice disposes of exactly its own bases:  Sum over the fragment = Sum slice_len / length = 1.
-        //
-        // ⭐⭐ A SJ BOUNDS A BLOCK EXACTLY AS A CONTIGUOUS BOUNDARY DOES, and that is the whole rule. A
-        // block's interior boundaries are the boundaries it crosses; its two ENDS are boundaries too
-        // whenever the intron there resolved to an annotated sj. So a fragment's 1.0 is shared across
-        // every object it crosses -- boundaries and sj together -- rather than boundaries first and sj
-        // only with whatever is left over.
-        //
-        // ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat, and
-        // only this one is expressible per base -- which is how the two are told apart at all.
-        // ⚠ An UNSPLICED path has no sj boundaries, so its bases go to boundaries alone. A single block
-        // with no boundary and no annotated sj is bounded by nothing and deposits nothing: for a
-        // one-block path that is the CONTAINED case, already whole in `contained_count`; for a
-        // multi-block one it is an unannotated intron's block.
+        // ── the conserved mass, per slice ───────────────────────────────────────────────────────────
+        // The crossed region_bounds split this block into `last - first + 1` slices; each slice's `slice_len / length`
+        // is shared equally among the objects bounding it, so Sum over the fragment = Sum slice_len / length = 1. A
+        // block's ends are bounds wherever its intron resolved to an annotated sj, so one unit is shared across
+        // boundaries and sj together. Coverage-weighted rather than 1/K: both conserve, but only this one says where
+        // the fragment sat. An unbounded block deposits nothing: the contained case, or an unannotated intron's.
         {
             const std::int32_t left_sj =
                 block > 0 ? sj_id_at_gap[block - 1] : -1;
@@ -678,15 +613,14 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
                 const std::int64_t hi = (i == n_slices - 1) ? seg_end : region_bounds_[static_cast<std::size_t>(first + i)];
                 const std::int64_t left_boundary  = (i > 0) ? first + i - 1 : -1;
                 const std::int64_t right_boundary = (i < n_slices - 1) ? first + i : -1;
-                // The block's own ends are sj boundaries; its interior ends are boundaries. A slice
-                // therefore has at most one boundary of each kind on each side, never both.
+                // The block's own ends are sj bounds and its interior ends boundaries, so each side of a slice
+                // has at most one bound.
                 const std::int32_t left_jid  = (left_boundary  < 0) ? left_sj  : -1;
                 const std::int32_t right_jid = (right_boundary < 0) ? right_sj : -1;
                 const std::int64_t n_bounds = (left_boundary >= 0 ? 1 : 0) + (right_boundary >= 0 ? 1 : 0)
                                             + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
                 if (n_bounds == 0) continue;
-                // ⭐ float64, deposited directly: the share is a coverage fraction in (0, 1] and needs
-                // no fixed point.
+                // A coverage fraction in (0, 1], deposited directly as double.
                 const double share = static_cast<double>(hi - lo)
                                    / (static_cast<double>(length) * static_cast<double>(n_bounds));
                 for (const std::int64_t boundary_idx : {left_boundary, right_boundary}) {
@@ -696,8 +630,7 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
                     else         boundary.unspliced_mass += share;
                 }
                 for (const std::int32_t jid : {left_jid, right_jid}) {
-                    // ⭐ `col` — the SAME genome-strand column `count` is deposited at below, so
-                    // `mass[c] / count[c]` is a per-strand mean rather than a ratio across populations.
+                    // `count`'s column (below), so `mass[c] / count[c]` is a per-strand mean.
                     if (jid >= 0) sj_[static_cast<std::size_t>(jid)].mass[col] += share;
                 }
             }
@@ -714,10 +647,10 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
         sj.inv_length_sum += inv_boundary;
     }
 
-    // ── contained: the WHOLE path lies inside ONE region ────────────────────────────────────────────
-    // ⚠ Not merely "crossed no boundary". An unannotated intron can swallow every boundary between two blocks,
-    // leaving a fragment that crosses nothing yet straddles two regions. Such a fragment deposits on NO
-    // object but still increments region_start_count, so the loss is visible rather than silent.
+    // ── contained: the whole path lies inside one region ────────────────────────────────────────────
+    // Not merely "crossed no boundary": an unannotated intron can swallow every boundary between two blocks,
+    // leaving a fragment that crosses nothing yet straddles two regions. It deposits on no object but still
+    // increments region_start_count, so the loss is visible.
     std::int64_t contained_region = -1;
     if (sj_ids.empty() && first_region == last_region) {
         contained_region = first_region;
@@ -735,10 +668,8 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
 void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
                                         const std::vector<ScoredHypothesis>& survivors) noexcept
 {
-    // ⭐ The ONE site, so the subclasses cannot drift out of sync. The caller has already established
-    // that at least one hypothesis was not the unspliced one -- a fragment that never had a question to
-    // answer is not in this population, and counting it would quietly make the umbrella's denominator
-    // the whole library.
+    // The one site, so the subclasses cannot drift apart. The caller has established that at least one hypothesis
+    // is spliced; counting any other fragment would make the umbrella's denominator the whole library.
     std::int64_t n_spliced = 0;
     bool unspliced_survives = false;
     for (const ScoredHypothesis& s : survivors) {
@@ -746,9 +677,7 @@ void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
         else ++n_spliced;
     }
     if (survivors.size() == 1) {
-        // ⛔ The sole survivor is necessarily the SPLICED one, and there is no branch for the other case
-        // because it cannot occur: the unspliced path is always the longest, so it can never be the last
-        // one left. See `GapCensus`.
+        // Necessarily spliced: the unspliced path is the longest, so it is never the last one left.
         ++gap_census_.resolved_spliced;
     } else if (!unspliced_survives) {
         ++gap_census_.deferred_which_introns;   // certified RNA; only the structure is open
@@ -764,11 +693,8 @@ std::int64_t Accumulator::fragment_pool(bool spliced,
                                         std::int64_t sole_boundary) const noexcept
 {
     // Priority: a splice on the one surviving path is certified RNA; a contained fragment is typed by its
-    // region; a single-boundary crossing is a "splash" read typed by its two flanks. Anything else -- an
-    // exonic contained fragment, a multi-boundary crossing -- is a mixture and enters nothing.
-    //
-    // ⭐ DETERMINACY, NOT PROVENANCE: a fragment reaches here only when exactly ONE hypothesis survived,
-    // so its L is not in doubt however it was arrived at.
+    // region; a single-boundary crossing is a "splash" read typed by its two flanks. Anything else (an exonic
+    // contained fragment, a multi-boundary crossing) is a mixture and enters nothing.
     if (spliced) return static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
     if (contained_region >= 0) {
         switch (region_types_[static_cast<std::size_t>(contained_region)]) {
@@ -796,8 +722,7 @@ std::int64_t Accumulator::length_under(const OfferedFragment& fragment,
                                        std::size_t hypothesis_index,
                                        DepositScratch& scratch) const
 {
-    // ⚠ The SAME clip `deposit` applies, and in the same order: L is measured after clipping to the
-    // reference, so a scorer that skipped it would score a length the deposit can never produce.
+    // The clip `deposit` applies, in the same order: L is measured after clipping to the reference.
     if (region_bounds_.size() < 2 || hypothesis_index >= fragment.n_hypotheses) return 0;
     const std::int64_t start = std::max(fragment.start, region_bounds_.front());
     const std::int64_t end   = std::min(fragment.end,   region_bounds_.back());
@@ -809,8 +734,7 @@ void Accumulator::placement_masses(const OfferedFragment& fragment,
                                    DepositScratch& scratch,
                                    std::vector<PlaceMass>& out) const
 {
-    // ⭐ `deposit_survivor`'s crossing and containment rules on the observed path, writing nothing: the SAME
-    // clip, the same one `path_length`, the same sj resolution and the same slices.
+    // `deposit_survivor`'s clip, sj resolution, crossing and containment on the observed path, writing nothing.
     out.clear();
     if (region_bounds_.size() < 2) return;
     const std::int64_t start = std::max(fragment.start, region_bounds_.front());
@@ -887,32 +811,21 @@ const DeferredFragments& Accumulator::deferred_canonical() {
 // ============================================================================
 
 void Accumulator::merge_from(const Accumulator& other) {
-    // ⛔ EVERY precondition is checked before anything is merged, so a refusal leaves `this` exactly as it
-    // was. A check placed after the first bank is summed does not guard the merge: it throws on a
-    // half-merged accumulator.
-    //
-    // Not itself, first: every other precondition holds trivially between an accumulator and itself. With
-    // `other` aliasing `this` every bank would double, and the held-record bank would be appended to
-    // itself, which once it holds a record is a loop that reads the vector it grows and never ends.
-    // Pinned by `test_an_accumulator_merging_ITSELF_is_refused_before_ANY_bank_is_touched`.
+    // Every precondition is checked before anything is merged, so a refusal leaves `this` unchanged. Self-merge
+    // first: every other check passes against itself, and the held-record bank would append to itself forever.
     if (&other == this) {
         throw std::invalid_argument("accumulator: an accumulator cannot merge itself");
     }
-    // Then `max_length`. It is the width of both length histograms, `pool_lengths_` and
-    // `deposited_lengths_`, and the merge walks `this`'s width, so an `other` built with a smaller limit
-    // would be read past the end of its histograms. It throws rather than skipping them, which would lose
-    // one side's pools whole. Pinned by `test_a_merge_across_two_WIDTHS_is_refused_before_ANY_bank_is_touched`.
+    // `max_length` is the width of both length histograms, and the merge walks `this`'s width, so a narrower
+    // `other` would be read past its end.
     if (max_length_ != other.max_length_) {
         throw std::invalid_argument(
             "accumulator: merge_from requires the same max_length (this has " + std::to_string(max_length_) +
             ", other has " + std::to_string(other.max_length_) +
             "); it is the width of the pool and deposited-length histograms");
     }
-    // ⚠ The region_bound arrays must match element-wise. A ref-id mismatch here once silently dropped 476,719 of
-    // 476,732 fragments while every golden test passed, so this compares positions rather than sizes.
-    //
-    // ⭐ And now it can compare the ref id itself, which is what that bug was actually about — two
-    // references with coincidentally identical region_bound axes would have passed the position check.
+    // The reference id and the region_bound positions must both match: two references can share an axis, and a
+    // size check alone would pass two different axes.
     if (ref_id_ != other.ref_id_) {
         throw std::invalid_argument(
             "accumulator: merge_from requires the same reference (this is ref " +
@@ -949,7 +862,7 @@ void Accumulator::merge_from(const Accumulator& other) {
             boundaries_[i].unspliced_count[c]   += other.boundaries_[i].unspliced_count[c];
             boundaries_[i].spliced_count[c]     += other.boundaries_[i].spliced_count[c];
         }
-        // ⚠ Outside the column loop — these have ONE value per boundary, not one per strand.
+        // Outside the column loop: one value per boundary, not per strand.
         boundaries_[i].unspliced_inv_length_sum += other.boundaries_[i].unspliced_inv_length_sum;
         boundaries_[i].unspliced_mass += other.boundaries_[i].unspliced_mass;
         boundaries_[i].spliced_mass   += other.boundaries_[i].spliced_mass;
@@ -957,8 +870,7 @@ void Accumulator::merge_from(const Accumulator& other) {
     for (std::size_t i = 0; i < sj_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             sj_[i].count[c]   += other.sj_[i].count[c];
-            // ⭐ INSIDE the column loop, unlike every other mass in this file: the sj mass is the
-            // one that carries a strand. See `SpliceJunction::mass`.
+            // Inside the column loop: the sj mass is the one mass with a strand (`SpliceJunction::mass`).
             sj_[i].mass[c]    += other.sj_[i].mass[c];
         }
         sj_[i].inv_length_sum += other.sj_[i].inv_length_sum;
@@ -987,8 +899,7 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* region_bounds,
     }
     accs_.reserve(n_refs);
 
-    // A reference contributing c region_bounds owns c-1 regions, so the region offset for reference f is
-    // ref_region_bound_offsets[f] - (number of earlier references that own any region).
+    // Reference f's first region and boundary on the flat axes: the counts the earlier references own.
     std::size_t region_base = 0, boundary_base = 0;
     for (std::size_t f = 0; f < n_refs; ++f) {
         const std::size_t lo = static_cast<std::size_t>(ref_region_bound_offsets[f]);
@@ -1112,8 +1023,7 @@ const DeferredFragments& AccumulatorSet::deferred_canonical() {
 
 DepositOutcome AccumulatorSet::offer(const Placement* placements, std::size_t n, OfferScratch& sc) {
     if (n == 0) throw std::invalid_argument("accumulator set: offer needs at least one placement");
-    // ⭐ ONE placement is the unique mapper's path, bit for bit: `deposit` admits, arbitrates, holds or
-    // deposits, and counts, exactly as it always has.
+    // One placement is the unique mapper's path, bit for bit.
     if (n == 1) return at(placements[0].ref_id).deposit(placements[0].offered, sc.deposit);
 
     static const GapHypothesis kUnsplicedOnly{nullptr, 0, STRAND_NONE};
@@ -1134,11 +1044,11 @@ DepositOutcome AccumulatorSet::offer(const Placement* placements, std::size_t n,
             offered.hypotheses = &kUnsplicedOnly;
             offered.n_hypotheses = 1;
         }
-        sc.admitted.append(offered, pl.ref_id, s, e);  // one record per admitted placement, CLIPPED
+        sc.admitted.append(offered, pl.ref_id, s, e);  // one record per admitted placement, clipped
     }
     if (sc.admitted.n_records() == 0) {
-        // Every placement excluded: the fragment is rejected ONCE, on this set's counters, named for the
-        // strand only when the strand was every exclusion.
+        // Every placement excluded: rejected once on this set's counters, as strand-undefined only when the strand
+        // was every exclusion.
         if (strand_rejected > 0 && empty_rejected == 0) {
             ++counters_.dropped_strand_undefined;
             return DepositOutcome::kStrandUndefined;
@@ -1146,8 +1056,7 @@ DepositOutcome AccumulatorSet::offer(const Placement* placements, std::size_t n,
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
     }
-    // The placements in THEIR canonical order (one record each, so the record sort is the placement sort),
-    // and identical placements collapsed to one -- the same content is the same placement.
+    // Canonical order (one record per placement), identical placements collapsed to one.
     sc.admitted.canonicalise();
     sc.kept.clear();
     for (std::size_t p = 0; p < sc.admitted.n_placements(); ++p) {
@@ -1176,16 +1085,14 @@ DepositOutcome AccumulatorSet::offer(const Placement* placements, std::size_t n,
         for (const ScoredHypothesis& sh : sc.deposit.survivors) sc.union_survivors.emplace_back(k, sh.index);
     }
     if (sc.union_survivors.empty()) {
-        // The filter would empty the union: every pair stands, and the drain's ordinary kTooLong
-        // rejection counts the chosen one.
+        // The filter would empty the union: every pair stands, and the drain's kTooLong counts the chosen one.
         for (std::size_t k = 0; k < sc.kept.size(); ++k) {
             for (std::size_t h = 0; h < n_hyp(sc.kept[k]); ++h) sc.union_survivors.emplace_back(k, h);
         }
     }
     if (sc.union_survivors.size() == 1) {
-        // One pair is a molecule this library contains: deposited at its placement with that hypothesis
-        // alone, and the umbrella census put back -- it answers a question this fragment has no single
-        // answer to.
+        // One pair left: deposited at its placement with that hypothesis alone, and the umbrella census restored,
+        // since its question has no single answer for this fragment.
         const auto [k, h] = sc.union_survivors[0];
         const std::size_t p = sc.kept[k];
         const OfferedFragment& one = sc.admitted.offered_of(p, h, h + 1, sc.storage);
@@ -1195,7 +1102,7 @@ DepositOutcome AccumulatorSet::offer(const Placement* placements, std::size_t n,
         a.restore_gap_census(before);
         return outcome;
     }
-    // Held WHOLE: every kept placement, every hypothesis, in canonical order, as ONE record.
+    // Held whole: every kept placement and hypothesis, in canonical order, as one record.
     for (const std::size_t p : sc.kept) deferred_.copy_placement(sc.admitted, p);
     deferred_.close_record();
     ++counters_.deferred_multiple_placements;

@@ -1,18 +1,17 @@
 #!/usr/bin/env python
 """Where do the time and the memory go? The whole pipeline on one library, as a tree of named stages.
 
-Runs the real `run_pipeline` on one BAM and attributes wall clock and memory to named stages: the index
-load, the scan, the second pass, each index-derived geometry build, the fragment-length models, every
-calibration stage down to each sweep and each directional pass, and every quant stage down to the locus
-EM (or, with `--scan-only`, the scan alone, which is the loop for tuning the scanner's thread and chunk
-knobs on a deep library without waiting for calibration). Stages are production functions wrapped at runtime (`PROBES`), patched in every loaded module that
-holds a reference, so the profile always follows the production flow and never re-implements it; a probe
-whose target has moved is reported as missing, never silently dropped. Each stage reports its calls,
-inclusive and self seconds, the peak current RSS sampled while it ran (a reading that can fall, unlike
-the process high-water mark), and the RSS it left held on exit. `--compare` joins two reports stage by
-stage, which is how a speed-up is judged; whether it changed any number is `rename_identity.py --bam`'s
-question, not this one's. Profile the real libraries (the cfRNA ones as smoke tests, a deep cell-line
-library for the regime that matters), never a panel condition or a toy, which rank hotspots differently.
+Runs the real `run_pipeline` on one BAM and attributes wall clock and memory to named stages: the index load,
+the scan, the second pass, each index-derived geometry build, the fragment-length models, every calibration
+stage down to each sweep and pass, and every quant stage down to the locus EM. `--scan-only` runs the scan
+alone, for tuning the scanner's thread and chunk knobs on a deep library. Stages are production functions
+wrapped at runtime (`PROBES`) in every loaded module that holds a reference, so the profile follows the
+production flow and never re-implements it; a probe whose target has moved is reported as missing. Each stage
+reports its calls, inclusive and self seconds, the peak current RSS sampled while it ran (which, unlike the
+process high-water mark, can fall), and the RSS it left held on exit. `--compare` joins two reports stage by
+stage to judge a speed-up; whether it changed any number is `rename_identity.py --bam`'s question. Profile real
+libraries (a deep one for the regime that matters), never a panel condition or a toy, which rank hotspots
+differently.
 
 Usage::
 

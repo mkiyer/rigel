@@ -1,8 +1,5 @@
-"""Hybrid-capture probe weighting for the simulator.
-
-Re-exports the public API: configuration (:mod:`capture.config`) + runtime sampler
-(:mod:`capture.sampler`). Probe design lives in :mod:`capture.design`.
-"""
+"""Hybrid capture for the simulator: configuration (:mod:`.config`), the runtime sampler (:mod:`.sampler`) and
+probe design (:mod:`.design`)."""
 
 from .config import CaptureConfig, CaptureScenario
 from .sampler import CaptureSampler, ProbeInterval

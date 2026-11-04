@@ -1,14 +1,10 @@
-"""The one loader the instruments use to import a sibling instrument by path.
+"""Helpers shared by the instruments under ``scripts/design/``; a helper module, not an instrument.
 
 An instrument runs as ``python scripts/design/<name>.py``, so ``scripts/design/`` is not a package and a
-sibling cannot be imported by name. ``sibling("_oracle_arms.py")`` loads the file beside this one,
-registers it in ``sys.modules`` under its stem BEFORE executing it (a dataclass defined in the sibling
-resolves its own module through ``sys.modules`` at class-creation time), and returns the cached module on
-every later call, so two instruments loading the same sibling share one copy of it. This is a helper, not
-an instrument: it answers no question and has no row in the instrument table. It also holds
-``set_field``, the one ``SECTION.FIELD=VALUE`` parser behind every instrument's ``--set``, the data root
-and the panel's default paths, the six override fields, the stratum readers and the pool ledger the
-instruments share.
+sibling cannot be imported by name: ``sibling("_oracle_arms.py")`` loads the file beside this one once and
+shares the module. The module also holds the data root and the panels' paths, ``set_field`` (the one
+``SECTION.FIELD=VALUE`` parser behind every ``--set``), the override fields, the stratum readers, the pool
+ledger and the subprocess sharder behind every ``--jobs``.
 
 Usage::
 
@@ -23,6 +19,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 import typing
 from pathlib import Path
@@ -37,9 +34,18 @@ RUNS = Path(os.environ.get("RIGEL_RUNS") or Path.home() / "Downloads" / "rigel_r
 DEFAULT_SUITE = RUNS / "suite" / "ladder"
 DEFAULT_INDEX = RUNS / "suite" / "rigel_index"
 
-#: The mass arrays ``OracleTruth.override_masses`` replaces. Named here so the ``noop`` gate can
-#: re-inject exactly this set from the SHIPPED result and demand byte-identity — an override applied
-#: to a field nothing reads is an override that never ran (TRAPS: an-ablation-that-never-ran).
+#: the substrates, each: (index dir, the panel dir holding `scan_cache/` and `oracle_cache/`)
+PANELS = {
+    "test": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios"),
+    # the same chromosome under the two other probe designs (junction-only and sparse probes)
+    "test_junction": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_junction"),
+    "test_sparse": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_sparse"),
+    "ladder": (DEFAULT_INDEX, DEFAULT_SUITE),
+}
+
+#: The mass arrays ``OracleTruth.override_masses`` replaces. Named here so the ``noop`` gate can re-inject
+#: exactly this set from the shipped result and demand byte-identity: an override of a field nothing reads
+#: would never run.
 OVERRIDE_FIELDS = (
     "count_gdna_region",
     "count_rna_region",
@@ -85,24 +91,55 @@ def strata(conds) -> list[tuple[str, str]]:
 
 
 def is_zero_gdna(cond: str) -> bool:
-    """``g00`` — the owner-required ZERO-gDNA control. Truth is exactly 0, so every gDNA fragment in
-    the prior there is a false positive with nothing to cancel it, and a relative change is unbounded.
-    Read per condition."""
+    """``g00``, the zero-gDNA control. Truth is exactly 0, so every gDNA fragment in the prior there is a
+    false positive with nothing to cancel it, and a relative change is unbounded. Read per condition."""
     return "_g00_" in cond
 
 
 def pool_ledger(condition_dir: Path) -> dict:
-    """The simulator's own starting fragment count per origin pool, the outer reference.
+    """The simulator's starting fragment count per origin pool (``gdna``, ``mrna``, ``nrna``).
 
-    Three pools on the truth side and two on the answer side, structurally: ``calibrate`` deconvolves
-    an object into ``(gDNA, RNA+, RNA−)`` and cannot split mature from nascent, which is the EM's job
-    and is scored in ``quant_accuracy.py``'s pool table. ``nrna`` is reported to keep the accounting
-    complete and calibration's RNA answer is scored against ``mrna + nrna``. Read from
-    ``truth_summary.json``, never from the condition name; a missing pool reads 0, a missing file raises.
+    ``calibrate`` answers in gDNA and RNA only, so its RNA answer is scored against ``mrna + nrna``; the
+    split between annotated and nascent RNA is the EM's, scored in ``quant_accuracy.py``'s pool table. Read
+    from ``truth_summary.json``, never from the condition name; a missing pool reads 0, a missing file raises.
     """
     summary = json.loads((Path(condition_dir) / "truth_summary.json").read_text())
     counts = summary["origin_counts"]
     return {k: float(counts.get(k, 0.0)) for k in ("gdna", "mrna", "nrna")}
+
+
+def run_shards(script: Path, names: list, jobs: int, scratch: Path, shard_args) -> list[Path]:
+    """Run ``script`` on ``names`` split round-robin into ``jobs`` shards, each its own subprocess, and return
+    the shards' output files in shard order; ``shard_args(out, conditions)`` is one shard's command line.
+
+    Shards, not threads: conditions share nothing but a read-only index and cache, so this changes no number.
+    Every shard is waited on before any failure is raised, and one failed shard refuses the whole panel,
+    because a short output would read as a complete one.
+    """
+    shards = [s for s in (names[i::jobs] for i in range(jobs)) if s]
+    scratch.mkdir(parents=True, exist_ok=True)
+    outs = [scratch / f"shard{i}.json" for i in range(len(shards))]
+    procs = [
+        subprocess.Popen([sys.executable, str(script), *shard_args(out, shard)],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for out, shard in zip(outs, shards)
+    ]
+    failed = False
+    for i, proc in enumerate(procs):
+        log, _ = proc.communicate()
+        if proc.returncode != 0:
+            failed = True
+            print(f"  ⛔ shard {i} FAILED (rc={proc.returncode}):\n{log}", flush=True)
+        else:
+            print(f"  shard {i}: {len(shards[i])} conditions ok", flush=True)
+    if failed:
+        raise SystemExit("⛔ a shard failed; refusing to report a partial panel")
+    return outs
+
+
+def set_args(settings) -> list[str]:
+    """``--set`` specs as the command-line arguments a shard is handed."""
+    return [arg for spec in settings for arg in ("--set", spec)]
 
 
 def sibling(name: str):
@@ -117,12 +154,11 @@ def sibling(name: str):
 
 
 def set_field(cfg, spec: str):
-    """``SECTION.FIELD=VALUE`` applied to a frozen ``PipelineConfig`` — the one parser behind every
-    instrument's ``--set``, so an arm is a config value spelled the same way on every instrument. The
-    value is typed from the field's annotation (``bool``, ``int``, ``float``, ``str``; ``none`` where the
-    field admits ``None``), so an ``int | None`` field such as ``sweep_block_slots`` takes an int. An unknown
-    section or field, a malformed spec, or a value the field's type refuses raises ``SystemExit``
-    naming it; the config's own validation (``__post_init__``) still runs on the result."""
+    """``SECTION.FIELD=VALUE`` applied to a frozen ``PipelineConfig``: the one parser behind every
+    instrument's ``--set``, so an arm is spelled the same way everywhere. The value is typed from the field's
+    annotation (a ``Literal`` by membership; ``bool``, ``int``, ``float``, ``str``; ``none`` where the field
+    admits ``None``). An unknown section or field, a malformed spec, or a value the type refuses raises
+    ``SystemExit`` naming it; the config's own ``__post_init__`` validation still runs on the result."""
     dotted, sep, raw = spec.partition("=")
     section_name, dot, field_name = dotted.partition(".")
     if not (sep and dot and section_name and field_name):
@@ -133,9 +169,7 @@ def set_field(cfg, spec: str):
     if field_name not in {f.name for f in dataclasses.fields(section)}:
         raise SystemExit(f"⛔ --set: {section_name} has no field {field_name!r}")
     hint = typing.get_type_hints(type(section))[field_name]
-    # A ``Literal[...]`` field admits exactly its listed values, by membership: its "args" are the values
-    # themselves, not callables, so the kind-based coercion below cannot apply to it (it once raised on
-    # every ``em.mode=map`` and ``em.warm_start=...``, leaving no instrument able to run a MAP arm).
+    # a ``Literal[...]`` field's args are its values, not callables, so it is matched by membership
     literal = typing.get_origin(hint) is typing.Literal
     kinds = [t for t in (typing.get_args(hint) or (hint,)) if t is not type(None)]
     try:

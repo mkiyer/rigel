@@ -1,14 +1,9 @@
-"""Vega-Lite spec builders for the report's charts: the fragment-length distributions and the
-per-reference gDNA-density track.
+"""Vega-Lite specs for the report's charts: the fragment-length distributions and the per-reference gDNA-density
+track.
 
-Charts are emitted as plain Vega-Lite JSON specs (no colours baked in — the
-front-end driver injects the theme palette + axis colours at embed time and
-re-embeds on theme change). Densities are pre-computed here so the same numbers
-back the chart, its tooltip, and the summary table.
-
-The composition, pool and strand components are native HTML/SVG; every chart is built here and
-embedded by the same driver. The width a chart bins at, the references it caps and the rounding of
-its positions are ``CONSTANTS.qc``'s.
+Specs carry no colours: the front end injects the theme palette at embed time and re-embeds on a theme change.
+Densities are computed here, so the chart, its tooltip and the summary table show the same numbers. Bin widths,
+reference caps and rounding are ``CONSTANTS.qc``'s.
 """
 
 from __future__ import annotations
@@ -23,9 +18,8 @@ _SCHEMA = "https://vega.github.io/schema/vega-lite/v5.json"
 # Overlay compares the deconvolved pools; per-category small multiples show all.
 _OVERLAY_CATEGORIES = ["rna", "gdna"]
 
-#: The label the report shows for each fragment-length category ``rigel quant`` writes: the anchor, the two
-#: modelled pools, and the five pools, selected by structure, that they are built from. The one map: the
-#: summary table, the overlay's legend and the per-category facets all read it.
+#: The label shown for each fragment-length category ``rigel quant`` writes: the anchor, the two modelled pools, and
+#: the five structural pools they are built from. The summary table, the overlay legend and the facets all read it.
 FL_CATEGORY_LABELS = {
     "global": "All fragments",
     "gdna": "gDNA",
@@ -178,12 +172,9 @@ def build_fl_specs(fl_df: pd.DataFrame | None) -> dict:
 
 
 def _bin_track(track: pd.DataFrame) -> list[dict]:
-    """Length-weighted per-bin gDNA density, binned within each reference.
-
-    Binning happens here (Python) so a genome with millions of region rows still
-    emits at most ``CONSTANTS.qc.genome_track_bins`` points per reference to the chart. One
-    ``groupby`` over the ref column keeps this O(regions) rather than O(refs × regions).
-    """
+    """Length-weighted gDNA density per bin, binned within each reference, so a genome with millions of regions
+    still sends at most ``CONSTANTS.qc.genome_track_bins`` points per reference to the chart. One ``groupby`` keeps
+    it O(regions)."""
     bins_per_ref = CONSTANTS.qc.genome_track_bins
     rows: list[dict] = []
     length = (track["end"] - track["start"]).clip(lower=1).to_numpy(dtype="float64")
@@ -210,13 +201,11 @@ def _bin_track(track: pd.DataFrame) -> list[dict]:
 
 
 def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
-    """Per-reference gDNA-density track for the top references by gDNA count.
+    """Per-reference gDNA-density track for the top ``CONSTANTS.qc.genome_track_refs`` references by gDNA count.
 
-    References are ranked by their total gDNA count (data-driven, organism-agnostic — no
-    name-based filtering) and only the top ``CONSTANTS.qc.genome_track_refs`` are faceted, so
-    hundreds of small alt/haplotype contigs don't flood the panel (the full list is in the
-    reference table). The y-axis is **log** and **independent per facet**, so a
-    high-density outlier like chrM cannot flatten the other references' scales.
+    Ranking by count, not by name, keeps small alt and haplotype contigs out of the panel on any organism; the
+    reference table lists them all. The y-axis is log and independent per facet, so a high-density reference such
+    as chrM cannot flatten the others.
     """
     if track is None or track.empty:
         return None
@@ -263,7 +252,6 @@ def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
                 ],
             },
         },
-        # Independent scales per facet — no reference (e.g. chrM) blows out another.
         "resolve": {"scale": {"x": "independent", "y": "independent"}},
     }
 

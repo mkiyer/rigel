@@ -1,11 +1,7 @@
 /**
- * resolve_context.h — FragmentResolver, ResolvedFragment, FragmentAccumulator.
- *
- * Shared by resolve.cpp (the Python binding) and bam_scanner.cpp, which
- * calls _resolve_core() directly in C++ and accumulates results into
- * FragmentAccumulator without crossing the Python boundary.
- *
- * Depends on constants.h and cgranges.h.
+ * resolve_context.h — FragmentResolver, ResolvedFragment and FragmentAccumulator, shared by resolve.cpp (the Python
+ * binding) and bam_scanner.cpp, which calls _resolve_core() and fills a FragmentAccumulator without crossing into
+ * Python.
  */
 
 #pragma once
@@ -13,9 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <limits>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -71,10 +65,8 @@ public:
     int32_t nm = 0;
     int32_t clip = 0;  // the hit's soft-clipped read bases, over its records
 
-    // Leftmost ANNOTATED sj (ref, start, end); -1 when the fragment
-    // crosses none.  With `sj_strand` this is the per-sj strand
-    // table's key — see RawResolveResult in constants.h for why it is the
-    // first ANNOTATED sj and why only one sj is credited.
+    // The leftmost annotated junction (ref, start, end), -1 when the fragment crosses none; with `sj_strand`, the
+    // per-junction strand table's key (RawResolveResult in constants.h says why one junction is credited).
     int32_t sj_key_ref = -1;
     int32_t sj_key_start = -1;
     int32_t sj_key_end = -1;
@@ -84,16 +76,10 @@ public:
     std::vector<int32_t> exon_bp;
     std::vector<int32_t> intron_bp;
 
-    // The annotated introns found inside this fragment's UNSEQUENCED gaps, one run per gap hypothesis
-    // (`gap_intron_offsets`; an empty run is the unspliced hypothesis). Carried out of `RawResolveResult`
-    // unchanged.
-    //
-    // ⚠ INSTRUMENTATION, and it is load-bearing for one gate that is otherwise unobservable. The
-    // deposit adapter unions these with the observed CIGAR-N introns and the accumulator normalises
-    // the union, so an intron the detector re-derived from an observed splice would be merged away
-    // and leave `L` untouched — i.e. "it was never emitted" and "it was emitted and absorbed" are
-    // indistinguishable downstream. The rule is precisely about the case where they
-    // are NOT the same thing (a NEAR match shortens `L`), so the emission itself has to be visible.
+    // The annotated introns inside this fragment's unsequenced gaps, one run per gap hypothesis
+    // (`gap_intron_offsets`; an empty run is the unspliced hypothesis), carried out of `RawResolveResult` unchanged.
+    // Exposed so the enumeration's output is observable: the accumulator merges these with the observed CIGAR-N
+    // introns, so an emitted intron that an observed one absorbs leaves `L` unchanged downstream.
     std::vector<IntronBlock> gap_introns;
     std::vector<int32_t>     gap_intron_offsets;
     int32_t                  n_gap_hypotheses = 0;
@@ -132,8 +118,8 @@ public:
         return d;
     }
 
-    // Every hypothesis as a list of ``[(ref_id, start, end, strand), ...]``, in enumeration order.
-    // ⭐ An EMPTY inner list is the unspliced (genomic) hypothesis.
+    // Every hypothesis as a list of ``[(ref_id, start, end, strand), ...]``, in enumeration order; an empty list is
+    // the unspliced (genomic) hypothesis.
     nb::object get_gap_hypotheses() const {
         nb::list out;
         for (int32_t h = 0; h < n_gap_hypotheses; ++h) {
@@ -175,10 +161,8 @@ public:
         r.sj_key_ref = cr.sj_key_ref;
         r.sj_key_start = cr.sj_key_start;
         r.sj_key_end = cr.sj_key_end;
-        // ⛔ COPIED, NOT MOVED, and the difference is a bug. `bam_scanner.cpp` builds the
-        // ResolvedFragment first and calls `collect_placement(frag, cr)` afterwards, so moving
-        // this out of `cr` would hand the deposit adapter an empty intron list and silently stop
-        // cutting every gap intron — the exact defect this field exists to make visible.
+        // Copied, not moved: bam_scanner.cpp calls `collect_placement(frag, cr)` after building the
+        // ResolvedFragment, and the deposit adapter needs `cr`'s gap introns intact.
         r.gap_introns = cr.gap_introns;
         r.gap_intron_offsets = cr.gap_intron_offsets;
         r.n_gap_hypotheses = cr.n_gap_hypotheses();
@@ -224,17 +208,14 @@ public:
         place_offsets_.push_back(0);
     }
 
-    /// One object of the NEXT appended row's place: call before `append`.
+    /// One object of the next appended row's place: call before `append`.
     void add_place_mass(int8_t kind, int64_t index, double mass) {
         place_kind_.push_back(kind);
         place_index_.push_back(index);
         place_mass_.push_back(static_cast<float>(mass));
     }
 
-    /// Pre-allocate internal vectors to avoid repeated reallocation.
-    /// @param n_fragments  Expected number of fragments.
-    /// @param n_candidates Expected total CSR entries (sum of per-fragment
-    ///                     transcript candidate counts).
+    /// Pre-allocate for ``n_fragments`` rows and ``n_candidates`` CSR entries (transcript candidates over all rows).
     void reserve(int64_t n_fragments, int64_t n_candidates) {
         splice_type_.reserve(n_fragments);
         align_strand_.reserve(n_fragments);
@@ -282,9 +263,7 @@ public:
 
     int32_t get_size() const { return size_; }
 
-    /// Finalize: moves internal vectors to heap-allocated storage and
-    /// returns capsule-backed numpy arrays.  The accumulator is consumed
-    /// (left empty) after this call.
+    /// Move the columns into capsule-backed numpy arrays, leaving the accumulator empty.
     nb::dict finalize() {
         int32_t n = size_;
 
@@ -317,9 +296,8 @@ public:
 // ================================================================
 // ResolverScratch — per-thread mutable scratch buffers
 // ================================================================
-// Kept apart from FragmentResolver so that multiple threads can call
-// _resolve_core() concurrently, each with its own scratch. The single-threaded path uses FragmentResolver's
-// internal scratch_ member.
+// Kept apart from FragmentResolver so several threads can call _resolve_core() concurrently, each with its own
+// scratch; the single-threaded path uses the resolver's scratch_ member.
 
 struct GapBlock {
     int32_t ref_id;
@@ -366,15 +344,13 @@ struct ResolverScratch {
     std::vector<int32_t> t_transcript_bp;
     std::vector<uint8_t> t_dirty;
     std::vector<int32_t> dirty_indices;
-    // dirty_indices' initial capacity, in transcripts one fragment touches. A capacity hint only; it grows
-    // past it.
+    // dirty_indices' initial capacity, in transcripts one fragment touches: a hint, it grows past it.
     static constexpr size_t DIRTY_INDICES_RESERVE = 512;
 
     // cgranges query buffer (reusable per-call)
     OverlapQueryBuffer buf;
 
-    // Reusable scratch for SPLICED_IMPLICIT detection
-    // (per-fragment block sort + PE-gap collection)
+    // Reusable scratch for SPLICED_IMPLICIT detection (per-fragment block sort and mate-gap collection)
     std::vector<ExonBlock> implicit_blocks;
     std::vector<GapBlock> implicit_gaps;
     std::vector<IntronBlock> hypothesis_path;  // one candidate's path, while enumerating
@@ -411,8 +387,7 @@ struct ResolverScratch {
         dirty_indices.reserve(DIRTY_INDICES_RESERVE);
     }
 
-    // Non-copyable. ⚠ The moves are the members' own, defaulted, so a member added later cannot be left out
-    // of them, as a hand-written member list once left out `hypothesis_path`.
+    // Non-copyable; the moves are defaulted, so every member moves, including one added later.
     ResolverScratch(const ResolverScratch&) = delete;
     ResolverScratch& operator=(const ResolverScratch&) = delete;
     ResolverScratch(ResolverScratch&&) = default;
@@ -423,15 +398,6 @@ struct ResolverScratch {
             t_dirty[t_idx] = 1;
             dirty_indices.push_back(t_idx);
         }
-    }
-
-    void clean() {
-        for (int32_t t : dirty_indices) {
-            t_exon_bp[t] = 0;
-            t_transcript_bp[t] = 0;
-            t_dirty[t] = 0;
-        }
-        dirty_indices.clear();
     }
 
     void reset_per_fragment() noexcept {
@@ -453,8 +419,8 @@ struct ResolverScratch {
     }
 };
 
-// The defaulted moves take their exception specification from the members, so this holds them to the
-// `noexcept` the hand-written moves promised: a member whose move can throw fails here, at compile time.
+// The defaulted moves take their exception specification from the members: a member whose move can throw fails
+// here, at compile time.
 static_assert(std::is_nothrow_move_constructible_v<ResolverScratch> &&
                   std::is_nothrow_move_assignable_v<ResolverScratch>,
               "ResolverScratch: every member must move without throwing");
@@ -476,10 +442,7 @@ public:
     SJMap sj_map_;
     std::vector<int32_t> sj_map_data_;
 
-    // --- SJ artifact blacklist (from alignable) ---
-    // Strand-agnostic: keyed on (ref_id, start, end).  A CIGAR splice
-    // sj is rejected at BAM-scan time when either its left or
-    // right anchor is <= the stored maximum.
+    // --- SJ artifact blacklist (from alignable), strand-agnostic: keyed on (ref_id, start, end) ---
     using SJBlacklistMap = std::unordered_map<
         SJBlacklistKey, SJBlacklistEntry, SJBlacklistKeyHash>;
     SJBlacklistMap sj_blacklist_;
@@ -492,11 +455,8 @@ public:
     // --- Transcript strand metadata (direct lookup, no gene indirection) ---
     std::vector<int32_t> t_strand_arr_;
 
-    // --- Per-transcript nRNA parent index (-1 if none, else index of
-    //     the parent nRNA entity for derive-on-demand resolution).
-    //     Synthetic nRNAs are not in cgranges; they are surfaced into
-    //     each fragment's candidate set during _resolve_core by
-    //     mapping each real-tx hit to its nrna_parent_ entry.
+    // --- Per-transcript parent synthetic nascent span (-1 if none). The spans are not in cgranges;
+    //     _resolve_core adds each annotated-transcript hit's parent to the fragment's candidate set.
     std::vector<int32_t> nrna_parent_;
 
     // --- Per-transcript exon structure (CSR layout): each candidate's introns, for its path and its length ---
@@ -506,16 +466,14 @@ public:
 
     // --- Intron-overhang tolerance K (bp), the gap-hypothesis enumeration's slack ---
     int32_t intron_overhang_tolerance_ = 0;
-    //: the library's fragment-length limit, which a pair's molecule must not exceed (`validate_pair`)
+    // The library's fragment-length limit, which a pair's molecule must not exceed (`validate_pair`)
     int32_t max_fragment_length_ = 0;
 
     // --- Reference name <-> ID ---
     std::unordered_map<std::string, int32_t> ref_to_id_;
     std::vector<std::string> id_to_ref_;
 
-    // --- Per-call scratch (mutable, NOT thread-safe) ---
-    // Single-threaded callers use this. Multi-threaded callers pass
-    // their own ResolverScratch to the overloaded methods.
+    // --- Per-call scratch for single-threaded callers (not thread-safe); threaded callers pass their own ---
     ResolverScratch scratch_;
 
     // ----------------------------------------------------------------
@@ -542,13 +500,10 @@ public:
         return id;
     }
 
-    // Seed the reference-ID space in a CANONICAL order (index.ref_names) so the
-    // resolver's ref ids match index.ref_name_to_id — the same space used by
-    // t_df, region_df, RegionArrays and the calibration accumulator partition.
-    // Must be called BEFORE build_overlap_index: otherwise ref ids are assigned
-    // by first-seen interval order (gene/transcript order), which scrambles them
-    // relative to ref_names and silently mis-routes the accumulator deposit on
-    // multi-reference genomes (a single-ref synthetic index hides the bug).
+    // Seed the reference-ID space in canonical order (index.ref_names), so the resolver's ref ids match
+    // index.ref_name_to_id, the space t_df, region_df, RegionArrays and the calibration accumulator partition use.
+    // Call it before build_overlap_index: otherwise ids follow first-seen interval order and mis-route the
+    // accumulator deposit on multi-reference genomes.
     void set_ref_names(const std::vector<std::string>& ref_names) {
         ref_to_id_.clear();
         id_to_ref_.clear();
@@ -604,11 +559,8 @@ public:
         }
     }
 
-    /// Build the splice-junction artifact blacklist (from alignable).
-    ///
-    /// Strand-agnostic: a single entry per (ref, start, end).  At BAM
-    /// scan time ``sj_blacklist_lookup`` is used to test a CIGAR-derived
-    /// sj; rejection uses the OR rule (either anchor <= max).
+    /// Build the splice-junction artifact blacklist (from alignable): one strand-agnostic entry per (ref, start, end).
+    /// The scan rejects a CIGAR junction when either anchor is <= its entry's maximum (``sj_blacklist_lookup``).
     void build_sj_blacklist_map(
         const std::vector<std::string>& refs,
         const std::vector<int32_t>& starts,
@@ -648,9 +600,8 @@ public:
         t_strand_arr_ = t_strand;
     }
 
-    /// Set per-transcript nRNA parent index (int32; -1 = no parent).
-    /// Used by _resolve_core to derive synthetic-nRNA candidates from
-    /// real-transcript hits without bloating the cgranges index.
+    /// Set the per-transcript parent synthetic nascent span (int32; -1 = none). _resolve_core derives the span
+    /// candidates from annotated-transcript hits, so the spans stay out of the cgranges index.
     void set_nrna_parent_index(const std::vector<int32_t>& nrna_parent) {
         nrna_parent_ = nrna_parent;
     }
@@ -687,30 +638,21 @@ public:
     // ----------------------------------------------------------------
 
     /// Set the intron-overhang tolerance K (bp): how many bases an aligned read end may lie inside an annotated intron,
-    /// at the edge of an unsequenced gap or at a fragment's outer end. It is the slack in the same two tests wherever
-    /// a path along a transcript is drawn, the pair rule's witness (`validate_pair`) and the gap-hypothesis
-    /// enumeration: an annotated intron in an unaligned gap may overlap up to K aligned bases on either side and is
-    /// still cut whole (`collect_transcript_introns_in_gap`), and a transcript is contradicted only by an intron
-    /// holding more than K aligned bases (`transcript_contradicts_blocks`). Negative K is clamped to 0; the resolver's
-    /// own default, before this is called, is 0.
+    /// at the edge of an unsequenced gap or at a fragment's outer end. An annotated intron in an unaligned gap may
+    /// overlap up to K aligned bases and is still cut whole (`collect_transcript_introns_in_gap`), and only an intron
+    /// holding more than K aligned bases contradicts a transcript (`transcript_contradicts_blocks`). Negative K clamps
+    /// to 0, the default.
     void set_intron_overhang_tolerance(int32_t K) {
         if (K < 0) K = 0;
         intron_overhang_tolerance_ = K;
     }
 
-    /// Does transcript ``t`` contradict the alignment? True when one of its introns overlaps the
-    /// INTERIOR of an aligned block -- the read has bases there, so the molecule cannot have spliced them
-    /// out, and ``t`` is not a candidate explanation for anything. The pair rule's witness and the gap-hypothesis
-    /// enumeration both ask it.
-    ///
-    /// ⛔ THE CANDIDATE SET IS NOT ALREADY THIS. `cr.t_inds` comes from `merge_sets`, which falls back to
-    /// a UNION when the intersection is empty, so a transcript the reads contradict can be in it. Without
-    /// this test the enumeration would emit hypotheses no molecule has.
-    ///
-    /// ⚠ Abutting is fine: an intron may START where a block ends. And the overlap must exceed the
-    /// INTRON-OVERHANG TOLERANCE K before it counts -- the same slack the gap match uses, because it is
-    /// the same physical thing: an aligner routinely runs a read a base or two past a donor. Without
-    /// this the predicate rejects exactly the fragments K exists to accept.
+    /// Does transcript ``t`` contradict the alignment? True when one of its introns overlaps the interior of an
+    /// aligned block by more than K bases: the read has bases there, so the molecule cannot have spliced them out.
+    /// The pair rule's witness and the gap-hypothesis enumeration both ask it. The candidate set needs the test
+    /// because `merge_sets` falls back to a union, which can hold a contradicted transcript. Abutting is fine (an
+    /// intron may start where a block ends), and K is the same slack the gap match uses: an aligner routinely runs a
+    /// read a base or two past a donor.
     inline bool transcript_contradicts_blocks(int32_t t,
                                               const std::vector<std::pair<int32_t, int32_t>>& blocks,
                                               int32_t K) const
@@ -827,22 +769,17 @@ public:
         return holders.empty() ? HIT_UNSUPPORTED : HIT_USABLE;
     }
 
-    /// Whether the forward mate ``f`` and the reverse mate ``r``, on reference ``ref_id``, can be one molecule:
-    /// `HIT_USABLE`, or `HIT_OUTWARD` or `HIT_LENGTH` (the caller has checked the reference and the strands).
+    /// Whether the forward mate ``f`` and the reverse mate ``r`` on ``ref_id`` can be one molecule: `HIT_USABLE`,
+    /// `HIT_OUTWARD` or `HIT_LENGTH` (the caller has checked the reference and the strands).
     ///
-    /// The forward mate's 5' soft clip is walked back along the genome and the reverse mate's forward, giving the
-    /// mates' 5' ends a and b, which must face each other (a < b). The molecule spans both mates, since a read trimmed
-    /// at its 5' end starts inside its molecule and its mate may run past it: [lo, hi), from the lower of a and the
-    /// reverse mate's first aligned base to the higher of b and the forward mate's last. Its length counts the bases
-    /// of [lo, hi) with every observed skip of either mate removed, and must lie in [1, max_fragment_length].
-    /// Failing that, one annotated transcript that overlaps both mates and holds every junction the hit observes
-    /// (``junctions``; `pair_holders`) may witness a shorter path: its other introns in the stretches neither mate
-    /// aligned are cut whole by the K rule of `collect_transcript_introns_in_gap`, and it offers no path when one of
-    /// its introns holds more than K aligned bases (`transcript_contradicts_blocks`). One transcript supplies both the
-    /// observed junctions and the implied introns, so a junction one transcript holds and an intron only another holds
-    /// never make a path together (the targeted review's hybrid); and a transcript that misses a mate never shortens
-    /// the path between them. Measured against per-base truth on the STAR panel, this rejects no correct pair, of
-    /// 47.9 M templates as STAR paired them and of 76.3 M mate pairs with HI ignored.
+    /// Walking the forward mate's 5' soft clip back and the reverse mate's forward gives the 5' ends a and b, which
+    /// must face each other (a < b). The molecule is [lo, hi), from the lower of a and the reverse mate's first aligned
+    /// base to the higher of b and the forward mate's last (a 5'-trimmed read starts inside its molecule, and its mate
+    /// may run past it). Its length, [lo, hi) less every observed skip of either mate, must lie in
+    /// [1, max_fragment_length]. Failing that, one annotated transcript that overlaps both mates and holds every
+    /// observed junction (`pair_holders`) may witness a shorter path: its other introns in the stretches neither mate
+    /// aligned are cut by the K rule, and it offers none when it contradicts the blocks. One transcript supplies both
+    /// the observed junctions and the implied introns, so introns from two transcripts never combine into one path.
     int32_t validate_pair(int32_t ref_id, const PairMate& f, const PairMate& r,
                           const std::vector<IntronBlock>& junctions, ResolverScratch& scratch) const
     {
@@ -928,31 +865,22 @@ public:
         return HIT_LENGTH;
     }
 
-    /// ⭐ EVERY explanation of this fragment's UNSEQUENCED gaps, grouped so that identical paths are ONE
-    /// hypothesis. The accumulator arbitrates between them; this only enumerates.
+    /// Every explanation of this fragment's unsequenced gaps, identical paths grouped into one hypothesis; the
+    /// accumulator arbitrates between them, this only enumerates. A hypothesis is a path through the annotation: a
+    /// gap may hold several introns and whole exons no read touched. Each compatible transcript implies one path, its
+    /// own introns inside the gaps, and paths are compared whole across every gap, so no hypothesis mixes one
+    /// transcript's intron in one gap with another's in the next.
     ///
-    /// A hypothesis is a PATH THROUGH THE ANNOTATION, not "an intron": a gap may hold several introns and
-    /// several whole exons that no read ever touched. Each compatible transcript determines exactly one
-    /// path -- its own introns lying inside the gaps -- so the set is finite and small.
+    /// Only unsequenced gaps are searched. The walk over consecutive blocks also yields each observed CIGAR-N intron
+    /// (`50M200N50M` is two blocks), and searching it again would let a nearby intron within ±K answer for it and
+    /// shorten L. Those gaps are dropped by exact (start, end) equality, never by overlap, which would also drop a
+    /// genuine gap intron abutting an observed one.
     ///
-    /// ⛔ THE GAPS ARE ONLY THE UNSEQUENCED ONES. The walk over consecutive blocks emits every hole, and a
-    /// read `50M200N50M` has two blocks, so a sequenced intron arrives indistinguishable from a mate gap.
-    /// Searching it again is not merely redundant: the ±K intron-overhang tolerance lets a DIFFERENT
-    /// nearby intron answer for it, the two normalise into one wider interval, and L comes out too SHORT.
-    /// Gaps matching an observed intron by EXACT (start, end) equality are dropped -- never by overlap,
-    /// which would also drop a genuine gap intron abutting an observed one.
-    ///
-    /// ⚠ The path is compared WHOLE, across every gap, never per gap. A per-gap union can take gap A's
-    /// intron from T1 and gap B's from T2 and emit a path no single molecule has; grouping by the whole
-    /// path makes that unrepresentable rather than merely avoided.
-    ///
-    /// ⭐ AND EACH CANDIDATE'S LENGTH, from the same path: ``cr.frag_lengths[i]``, aligned to ``candidate_t``, is
-    /// `path_length` of the fragment's extent less the observed junctions and candidate i's introns in the gaps,
-    /// the length the accumulator deposits for that path (-1 when the path has no base). An intron the reads
-    /// cover lies in no gap, so it is never cut, and one molecule has one length on a candidate however its mates
-    /// were read. A candidate the reads contradict (`transcript_contradicts_blocks`) joins no hypothesis, but it
-    /// keeps a length: the molecule it would have made with the covered intron retained, which the EM scores
-    /// beside the covered bases' overhang penalty.
+    /// Each candidate's length comes from the same path: ``cr.frag_lengths[i]``, aligned to ``candidate_t``, is
+    /// `path_length` of the fragment's extent less the observed junctions and candidate i's gap introns (-1 when the
+    /// path has no base), the length the accumulator deposits. A candidate the reads contradict
+    /// (`transcript_contradicts_blocks`) joins no hypothesis but keeps a length: its molecule with the covered intron
+    /// retained, which the EM scores beside the covered bases' overhang penalty.
     void enumerate_gap_hypotheses(const std::vector<ExonBlock>& exons,
                                   const std::vector<IntronBlock>& observed_introns,
                                   const std::vector<int32_t>& candidate_t,
@@ -1021,9 +949,8 @@ public:
                        gaps.end());
         }
 
-        // ⭐ No unsequenced gap ⇒ one hypothesis, the unspliced one, and nothing to arbitrate; and one length
-        // on every candidate, the extent less the observed junctions. The degenerate case is the general case:
-        // `deposit` still receives a set, of size one.
+        // No unsequenced gap: one hypothesis, the unspliced one, and one length on every candidate, the extent less
+        // the observed junctions.
         const int32_t K = intron_overhang_tolerance_;
         auto& path = scratch.hypothesis_path;
         path.clear();
@@ -1056,18 +983,16 @@ public:
             add_hypothesis(cr, path, strand);
         }
 
-        // ⭐ The UNSPLICED hypothesis. Present when some compatible transcript implies nothing in the
-        // gaps (a retained-intron isoform), and ALWAYS when no annotated sj was sequenced -- then
-        // the molecule may be gDNA or RNA that has not spliced there, and the gap is real template.
+        // The unspliced hypothesis: present when some compatible transcript implies nothing in the gaps (a
+        // retained-intron isoform), when no other hypothesis survives, and always when no annotated junction was
+        // sequenced, since then the molecule may be gDNA or RNA that has not spliced there.
         if (any_candidate_implies_nothing || !certified_rna || cr.n_gap_hypotheses() == 0)
             emit_unspliced_hypothesis(cr);
     }
 
 private:
-    /// Append every intron of ``t`` lying inside ``gap`` (±K), in genomic order.
-    ///
-    /// ⛔ EVERY one, not the first. Stopping at the first would cut only one of two annotated introns a mate
-    /// gap spans, and two transcripts differing only in their SECOND intron would read as agreeing.
+    /// Append every intron of ``t`` lying inside ``gap`` (±K), in genomic order: a mate gap can span two annotated
+    /// introns, and two transcripts differing only in the second must stay apart.
     inline void collect_transcript_introns_in_gap(int32_t t,
                                                   const GapBlock& gap,
                                                   int32_t K,
@@ -1110,17 +1035,11 @@ private:
                        cr.gap_introns[lo + i].end == path[i].end;
             }
             if (!same) continue;
-            // ⛔ ONE PATH, BUT ITS SUPPORTERS MAY DISAGREE ABOUT THE STRAND. Grouping on coordinates is
-            // right -- two transcripts implying the same introns imply the same molecule -- but the
-            // hypothesis carries ONE `sj_strand`, and keeping the first supporter's would make the answer
-            // depend on the order the transcripts happen to sit in the GTF. AMBIGUOUS is what this state
-            // is called everywhere else (the fragment-level `sj_strand` uses it for exactly this:
-            // contradictory evidence, not missing evidence), and `deposit` already refuses to credit a
-            // sj on it. ⚠ Idempotent: once AMBIGUOUS, any further disagreement keeps it there.
-            //
-            // ⚠ An sj annotated on both strands is biologically impossible, and the index warns about
-            // one. Handled because the alternative is a silent answer that flips when two GTF
-            // lines are swapped.
+            // One path, but its supporters may disagree about the strand. The hypothesis carries one `sj_strand`,
+            // and keeping the first supporter's would depend on GTF order, so disagreement makes it
+            // STRAND_AMBIGUOUS (contradictory evidence, as for the fragment-level `sj_strand`), which `deposit`
+            // does not credit; once ambiguous it stays so. A junction annotated on both strands is biologically
+            // impossible and the index warns about it.
             if (cr.gap_sj_strand[h] != strand) cr.gap_sj_strand[h] = STRAND_AMBIGUOUS;
             return;
         }
@@ -1129,7 +1048,7 @@ private:
         cr.gap_sj_strand.push_back(strand);
     }
 
-    /// The empty path: cut nothing. ⚠ Idempotent, because two routes can both call for it.
+    /// The empty path: cut nothing. Idempotent, because two routes can both call for it.
     static void emit_unspliced_hypothesis(RawResolveResult& cr) {
         for (int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
             if (cr.gap_intron_offsets[h] == cr.gap_intron_offsets[h + 1]) return;
@@ -1268,14 +1187,10 @@ public:
             sort_unique(block_transcript_t);
         }
 
-        // --- Derive nRNA candidates from real-tx hits ---------------
-        // Synthetic nRNAs are intentionally absent from the cgranges
-        // index (see _gen_transcript_intervals).  Each real-tx hit
-        // carries a one-to-one link to its parent nRNA entity via
-        // nrna_parent_; collect the unique parents the fragment
-        // overlaps, accumulate fragment-bp inside each parent's span,
-        // and inject them into every per-block exon_t_set so that
-        // merge_sets() naturally picks them up.
+        // --- Synthetic nascent-span candidates from annotated-transcript hits ---
+        // The spans are absent from the cgranges index (see _gen_transcript_intervals); each annotated transcript
+        // links to its parent span through nrna_parent_. Collect the unique parents the fragment overlaps, add the
+        // fragment's bases inside each span, and insert each into every block's exon set so merge_sets() picks it up.
         if (!nrna_parent_.empty()) {
             auto add_nrna = [&](int32_t ti) {
                 if (ti < 0 ||
@@ -1290,10 +1205,8 @@ public:
 
             sort_unique(scratch.nrna_t);
             for (int32_t n : scratch.nrna_t) {
-                // Synthetic nRNAs have exactly one exon by construction;
-                // annotated nascent-equivs are handled via cgranges and
-                // never appear here (nrna_parent_ holds only synthetic
-                // parents; a non-synthetic one is installed as -1).
+                // A synthetic span has one exon by construction; nrna_parent_ holds only synthetic parents (-1
+                // otherwise), and annotated transcripts come from cgranges.
                 int32_t ns = exon_starts_[exon_offsets_[n]];
                 int32_t ne = exon_ends_  [exon_offsets_[n]];
                 int32_t bp_total = 0;
@@ -1306,10 +1219,8 @@ public:
                 scratch.mark_dirty(n);
                 scratch.t_exon_bp[n] += bp_total;
                 scratch.t_transcript_bp[n] += bp_total;
-                // Insert into every block's exon_t_set so merge_sets'
-                // intersection logic surfaces the nRNA across blocks.
-                // Sets are sorted; use lower_bound to keep them sorted
-                // and unique.
+                // Into every block's exon set, kept sorted and unique, so merge_sets' intersection surfaces the
+                // span across blocks.
                 for (auto& bset : exon_t_sets) {
                     auto it = std::lower_bound(bset.begin(), bset.end(), n);
                     if (it == bset.end() || *it != n)
@@ -1325,9 +1236,7 @@ public:
         auto& holders = scratch.sj_holders;
         holders.clear();
         cr.sj_strand = STRAND_NONE;
-        // Reset alongside sj_strand: `cr` is an out-param taken by reference, so a
-        // caller that reuses one across fragments would otherwise carry the previous
-        // fragment's sj key forward. Every call site builds a fresh `cr` today.
+        // Reset with sj_strand, so a `cr` reused across fragments carries no previous fragment's key.
         cr.sj_key_ref = cr.sj_key_start = cr.sj_key_end = -1;
         if (n_introns > 0) {
             if (junction_holders(introns, scratch, holders) != HIT_USABLE)
@@ -1391,24 +1300,18 @@ public:
             cr.splice_type = SPLICE_UNSPLICED;
 
         } else {
-            // No exon and no transcript overlap -> truly intergenic.
-            // do NOT early-exit; let the fragment flow through
-            // the buffer with empty t_inds so calibration can categorize
-            // it as INTERGENIC.
+            // No exon or transcript overlap: intergenic. The fragment still flows through the buffer with empty
+            // t_inds, so calibration can count it as intergenic.
             cr.splice_type = SPLICE_UNSPLICED;
         }
 
-        // SPLICE_ARTIFACT promotion.  When the alignment had
-        // CIGAR splice junctions that were rejected by the artifact
-        // blacklist (set by caller in cr.n_sj_blacklisted before this
-        // call), promote any non-spliced classification so the
-        // fragment is held out of calibration.
+        // SPLICE_ARTIFACT promotion: a fragment not otherwise spliced whose CIGAR junctions the artifact blacklist
+        // rejected (cr.n_sj_blacklisted, set by the caller) is held out of calibration.
         if (cr.n_sj_blacklisted > 0 && cr.splice_type != SPLICE_SPLICED_ANNOT) {
             cr.splice_type = SPLICE_ARTIFACT;
         }
 
         // --- Overlap profiles (parallel to t_inds) ---
-        // Skip when t_inds is empty (intergenic / unresolved).
         auto& all_overlap_t = scratch.all_overlap_t;
         all_overlap_t.clear();
         for (const auto& s : exon_t_sets)
@@ -1453,20 +1356,15 @@ public:
         }
         cr.ambig_strand = mixed ? 1 : 0;
 
-        // --- gap-hypothesis enumeration, and each candidate's length on its path ---
-        //
-        // ⭐ EVERY fragment, whatever its splice type: a SPLICED fragment can also carry an intron in its
-        // mate gap.
-        //
-        // ⛔ THE ACCUMULATOR ARBITRATES. This only enumerates; whether the fragment deposits or is held
-        // for the second pass is decided where the outcome is reported.
+        // --- Gap-hypothesis enumeration and each candidate's length on its path ---
+        // Every fragment, whatever its splice type: a spliced fragment can also carry an intron in its mate gap.
+        // This only enumerates; whether the fragment deposits or waits for the second pass is decided where the
+        // outcome is reported.
         enumerate_gap_hypotheses(exons, introns, cr.t_inds, cr.splice_type == SPLICE_SPLICED_ANNOT, scratch, cr);
 
-        // ⛔ THE SPLICE_IMPLICIT PROMOTION IS UNSPLICED-ONLY.
-        // `splice_type` is the scanner's census of what it SAW; it feeds scoring, the buffer, the strand
-        // training and `rigel report`. Re-labelling an observed SPLICED_ANNOT fragment would silently move
-        // mass between reported categories. ⚠ The fragment may still be DEFERRED -- the two axes are
-        // independent, which is why the umbrella census is its own axis and not a splice type.
+        // SPLICE_IMPLICIT promotes unspliced fragments only. `splice_type` is the scanner's census of what it saw
+        // and feeds scoring, the buffer, strand training and `rigel report`, so relabelling an observed
+        // SPLICED_ANNOT fragment would move mass between reported categories. Deferral is a separate axis.
         if (cr.splice_type == SPLICE_UNSPLICED && cr.n_gap_hypotheses() > 1) {
             cr.splice_type = SPLICE_IMPLICIT;
         }
@@ -1475,8 +1373,6 @@ public:
         cr.genomic_start = exons[0].start;
         for (const auto& e : exons)
             cr.genomic_start = std::min(cr.genomic_start, e.start);
-
-        scratch.clean();
     }
 
     /// The single-threaded path, on the resolver's own scratch.

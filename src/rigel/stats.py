@@ -1,30 +1,19 @@
-"""
-rigel.stats — Structured pipeline statistics tracking.
-
-Replaces ad-hoc tally variables with a structured dataclass,
-reducing boilerplate and enabling consistent serialization.
-"""
+"""rigel.stats — the pipeline's counters (:class:`PipelineStats`) and the library's mismatch rate."""
 
 from dataclasses import dataclass, asdict
 
 
 def library_mismatch_rate(mismatches: int, bases: int) -> float | None:
     """The library's mismatch rate: NM per aligned read base over its unique unspliced hits, the maximum-likelihood
-    rate of the binomial each aligned base is; ``None`` when there is no such base to read it on. One definition,
-    read by the EM's prices (:class:`PipelineStats`) and the second pass's draw (the payload)."""
+    rate of each base's binomial; ``None`` with no such base. The EM's prices (:class:`PipelineStats`) and the second
+    pass's draw (the payload) both read it."""
     return mismatches / bases if bases else None
 
 
 @dataclass
 class PipelineStats:
-    """Structured counters for the rigel pipeline.
-
-    The scan counters are copied from the native scanner's stats by
-    ``pipeline._apply_scan_stats``; the routing and gating counters are
-    added by ``FragmentRouter.route``.
-
-    Use ``to_dict()`` for JSON serialization.
-    """
+    """The pipeline's counters. ``pipeline._apply_scan_stats`` copies the scan counters from the native scanner;
+    ``FragmentRouter.route`` adds the routing and gating counters. ``to_dict()`` serializes them."""
 
     # --- Records: each flag counter counts every record carrying the flag ---
     total: int = 0
@@ -67,7 +56,7 @@ class PipelineStats:
     n_strand_skipped_ambig_strand: int = 0
     n_strand_skipped_ambiguous: int = 0
 
-    # --- Routing counters (authoritative) ---
+    # --- Routing ---
     deterministic_unambig_units: int = 0
     em_routed_unambig_units: int = 0
     em_routed_ambig_same_strand_units: int = 0
@@ -134,33 +123,13 @@ class PipelineStats:
     n_nh_above_reported: int = 0  # NH above a mate's reported records (a truncated output)
 
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
-    #
-    # ONE observation per placement the scanner hands the accumulator's deposit adapter — every
-    # resolved hit, intergenic ones included: once for a unique mapper, once per placement for a
-    # multimapping fragment. That population is stated; reading these off a fragment-length category
-    # model instead would silently count only the fragments that also yielded a length observation.
-    #
-    # The field names are derived, not chosen — ``rigel.splice.census_field`` builds each one from
-    # its :class:`~rigel.splice.SpliceType` member name, and the C++ builds the same key from
-    # ``splice_type_label``. ``pipeline._apply_scan_stats`` refuses a scan key with no field, so renaming
-    # one of these by hand fails the scan rather than dropping the count.
+    # One observation per placement the scanner hands the accumulator's deposit adapter, intergenic hits included. The
+    # names come from ``rigel.splice.census_field`` and the C++ builds the same keys from ``splice_type_label``;
+    # ``pipeline._apply_scan_stats`` refuses a scan key with no field, so a renamed field fails the scan.
     n_census_unspliced: int = 0
     n_census_spliced_annot: int = 0
     n_census_spliced_implicit: int = 0
     n_census_splice_artifact: int = 0
-
-    #: Censused but never offered to the accumulator's ``deposit()``: no accumulator was installed.
-    #: It exists so that
-    #:
-    #:   Σ census − n_census_splice_artifact
-    #:       == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap
-    #:          + qc.deferred_multiple_placements + n_deposit_not_offered
-    #:
-    #: closes exactly when no fragment offers more than one placement. The census counts placements
-    #: and the ``qc`` counters count fragments, so a multimapping fragment that offers several
-    #: placements is censused once per placement and counted once. Those returns were a silent loss
-    #: before this counter.
-    n_deposit_not_offered: int = 0
 
     @property
     def mismatch_rate(self) -> float | None:

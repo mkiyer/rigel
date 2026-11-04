@@ -1,8 +1,5 @@
-"""Hybrid-capture configuration dataclasses (data only).
-
-``CaptureConfig`` parameterizes the capture-aware weighting model; ``CaptureScenario`` labels one
-setting in a condition grid. The runtime sampler lives in :mod:`capture.sampler`.
-"""
+"""Hybrid-capture configuration: ``CaptureConfig`` parameterises the weight model of :mod:`.sampler`, and
+``CaptureScenario`` labels one setting in a condition grid."""
 
 from __future__ import annotations
 
@@ -16,26 +13,20 @@ class CaptureConfig:
     Parameters
     ----------
     probes : str or None
-        Probe file path.  Transcript-coordinate TSV and BED12 are supported.
-        When unset, capture weighting is disabled and simulation remains
+        Probe file path, a transcript-coordinate TSV or BED12. Unset disables capture: starts are
         uniform within each template.
     probe_format : {"auto", "transcript", "bed12"}
-        Probe file format.  ``"auto"`` detects a BED12-looking row or a
-        transcript-coordinate TSV/header.
+        ``"auto"`` detects a BED12 row or a transcript-coordinate TSV.
     off_target_weight : float
-        Baseline weight for every legal fragment start.  A positive value
-        keeps off-target fragments possible.
+        Baseline weight of every legal fragment start; positive keeps off-target fragments possible.
     binding_per_base : float
-        Additional weight per base of the fragment's best overlap with one
-        contiguous probe part.  For example, with ``off_target_weight=1`` and
-        ``binding_per_base=10``, a full 120 bp probe overlap has weight 1201
-        relative to weight 1 off target.  Overlapping probes do not stack, and
-        neither do the parts of a probe split across a splice junction: a
-        transcript holding the junction sees the probe whole, while gDNA, a
-        nascent span and an isoform without the junction see its parts and bind
-        the better one.  That geometry is the only price gDNA pays.
+        Added weight per base of the fragment's best overlap with one contiguous probe part: with
+        ``off_target_weight=1`` and ``binding_per_base=10``, a full 120 bp overlap weighs 1201.
+        Overlapping probes do not stack, and neither do the parts of a probe split across a splice
+        junction: a transcript holding the junction sees the probe whole, while gDNA, a nascent span
+        and an isoform without the junction bind the better part.
     min_overlap : int
-        Minimum overlap, in bases, required before a probe contributes weight.
+        Minimum overlap, in bases, before a probe contributes weight.
     """
 
     probes: str | None = None

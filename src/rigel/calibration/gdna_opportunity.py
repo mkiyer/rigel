@@ -1,12 +1,7 @@
-"""De-tilting the four gDNA fragment-length pools.
+"""The opportunities of the four gDNA fragment-length pools (layer 2, opportunity).
 
-The gDNA fragment-length model is fitted from pools that are pure gDNA by construction, and every
-one of them is a length-dependent selection. Two are "contained in one region", which longer
-fragments achieve less often; two are "crosses exactly one boundary", which longer fragments achieve
-more often. The four raw histograms therefore tilt in opposite directions, and each has to be
-divided by its own opportunity before any of them can be combined.
-
-The four pools, and why all four are needed:
+The gDNA length law is read from four pools of unspliced fragments (none of them pure gDNA; ``fl`` handles the
+contamination), each a length-dependent selection that must be divided by its own opportunity before any are combined:
 
 | pool | selection rule | dominant when |
 |---|---|---|
@@ -15,13 +10,9 @@ The four pools, and why all four are needed:
 | ``DNA_INTRON_EXON`` | crosses exactly one boundary, flanks {intron, exon} | capture ON |
 | ``DNA_INTERGENIC_EXON`` | crosses exactly one boundary, flanks {intergenic, exon} | capture ON |
 
-Off capture the library is spread over the genome and nearly all gDNA lies wholly inside a large
-intergenic or intronic region. Under hybrid capture the surviving gDNA sits beside a probe, and a
-fragment beside a probe reaches the exon boundary, so it stops being contained and becomes crossing.
-Fitting from the contained pair alone therefore measures only the short half of one population and
-reads short under capture; the crossing pair holds the long half.
-
-The two opportunity functions, both exact:
+Off capture nearly all gDNA lies inside a large intergenic or intronic region; under capture the surviving gDNA sits
+beside a probe, reaches the exon boundary and becomes crossing, so the contained pair alone would hold only the short
+half of the law. The two opportunity functions are exact.
 
 *Contained* in one of a set of regions with lengths ``ell_n``::
 
@@ -31,44 +22,19 @@ The two opportunity functions, both exact:
 
     A(w) = (w - 1)+  -  (w - 1 - a)+  -  (w - 1 - b)+  +  (w - 1 - a - b)+
 
-A fragment ``[s, s+w)`` crosses the boundary for ``w - 1`` starts; of those it also crosses the
-previous boundary for ``(w-1-a)+`` and the next for ``(w-1-b)+``, and both for ``(w-1-a-b)+``. The
-two nearest boundaries are the only ones that need excluding: a fragment is an interval containing
-the boundary, so if it reaches any boundary beyond the nearest one it must also cross the nearest
-one. The inclusion-exclusion over the two neighbours is therefore exact rather than a truncation.
-The reference ends need no special case either, because the partition places a bound at ``0`` and at
-``L_ref``, so the outermost region's length IS the distance to the wall and the same subtraction
-removes the impossible starts.
+A fragment ``[s, s+w)`` crosses the boundary for ``w - 1`` starts; of those it also crosses the previous boundary for
+``(w-1-a)+``, the next for ``(w-1-b)+`` and both for ``(w-1-a-b)+``. Excluding the two nearest boundaries is exact,
+since a fragment that reaches any farther boundary also crosses the nearest one. The reference ends need no special
+case: the partition puts a bound at ``0`` and at ``L_ref``.
 
-Divide by the PROBABILITY, never by ``A`` alone. ``count(w)/A(w)`` recovers the distribution lengths
-were DRAWN from; every consumer needs the one the library REALIZES, which is the drawn one weighted
-by how many placements each length has. So the divisor is ``pi(w) = A(w)/T(w)`` with::
+The divisor is the probability ``pi(w) = A(w)/T(w)``, with ``T(w) = SUM_refs (L_ref - w + 1)+`` the total admissible
+gDNA starts, as for the sj pool (:mod:`rigel.calibration.sj_opportunity`): ``count/A`` recovers the law lengths were
+drawn from, while consumers need the law the library realizes. The raw histograms must never share one divisor: the
+contained opportunity falls with length and the crossing one rises, so a shared divisor reads the gDNA mean far too
+long. Both functions assume gDNA is placed uniformly along the genome, which hybrid capture breaks, so the divisor
+alone does not de-bias a capture-ON fit.
 
-    T(w) = SUM_refs (L_ref - w + 1)+
-
-the total admissible gDNA starts in the reference. On whole chromosomes ``T`` is nearly flat and the
-two forms coincide numerically; on a short reference they do not, and the probability form is the
-correct one either way. This is the same rule the sj pool obeys
-(:mod:`rigel.calibration.sj_opportunity`).
-
-The combination is derived, not chosen. Sum the counts, sum the opportunities::
-
-    f(w)  ~  [SUM_p count_p(w)] * T(w) / [SUM_p A_p(w)]
-
-That is algebraically the opportunity-weighted average of the four de-tilted pools,
-``SUM_p A_p f_p / SUM_p A_p``, and under Poisson counts ``Var(count_p)`` is proportional to ``A_p``,
-so weights proportional to ``A_p`` are exactly inverse-variance. There is no tunable weight in it.
-
-What this is NOT is pooling the four histograms raw. Summing four differently-tilted counts and
-applying one divisor reads the gDNA mean far too long, because the crossing pools' long tail is
-divided by a containment opportunity. Summing counts AND the matching per-pool opportunities is a
-different operation with a different answer, and ``tests/calibration/test_gdna_opportunity.py``
-separates the two.
-
-The residual this does not fix, stated so nobody expects it to: both opportunity functions assume
-gDNA is placed uniformly along the genome. Under hybrid capture it is not — placement is
-proportional to the capture landscape, which the tool cannot see — so a capture-ON fit stays biased
-long, and closing that needs a capture-aware placement model rather than a better divisor.
+Gate: ``tests/calibration/test_gdna_opportunity.py``.
 """
 
 from __future__ import annotations
@@ -119,12 +85,10 @@ def _ramp(values: np.ndarray, max_width: int) -> np.ndarray:
 
 
 def contained_opportunity(region_lengths: np.ndarray, max_width: int) -> np.ndarray:
-    """``SUM_n (ell_n - w + 1)+`` — the starts at which a length-``w`` fragment fits inside one region.
+    """``SUM_n (ell_n - w + 1)+``: the starts at which a length-``w`` fragment fits inside one region.
 
-    O(max_width + n), not O(max_width x n): regions longer than ``max_width`` always contribute, so
-    they reduce to ``sum(ell) - (w - 1) * count``, and the rest come from a length histogram's
-    reverse cumulative sums. At human scale ``n`` is a million regions and the naive form is a
-    billion terms.
+    O(max_width + n): regions longer than ``max_width`` always contribute, so they reduce to
+    ``sum(ell) - (w - 1) * count``, and the rest come from a length histogram's reverse cumulative sums.
     """
     lengths = np.asarray(region_lengths, dtype=np.int64)
     width = np.arange(max_width + 1, dtype=np.float64)
@@ -145,10 +109,10 @@ def contained_opportunity(region_lengths: np.ndarray, max_width: int) -> np.ndar
 
 
 def crossing_opportunity(left: np.ndarray, right: np.ndarray, max_width: int) -> np.ndarray:
-    """``SUM_boundaries`` starts at which a length-``w`` fragment crosses THAT boundary and no other.
+    """The starts at which a length-``w`` fragment crosses one boundary and no other, summed over boundaries.
 
-    ``left`` and ``right`` are the flanking region lengths, one entry per boundary. See the module
-    docstring for the inclusion-exclusion and why two neighbours suffice.
+    ``left`` and ``right`` are the flanking region lengths, one entry per boundary; the inclusion-exclusion over the
+    two neighbours is the module docstring's.
     """
     left = np.asarray(left, dtype=np.int64)
     right = np.asarray(right, dtype=np.int64)
@@ -159,10 +123,10 @@ def crossing_opportunity(left: np.ndarray, right: np.ndarray, max_width: int) ->
 
 
 def total_opportunity(reference_lengths: np.ndarray, max_width: int) -> np.ndarray:
-    """``T(w) = SUM_refs (L_ref - w + 1)+`` — every admissible gDNA start in the reference.
+    """``T(w) = SUM_refs (L_ref - w + 1)+``: every admissible gDNA start in the reference.
 
-    Every reference counts, including RNA-only spike-ins: the tool does not know which references
-    carry genomic DNA and must not pretend to. Their contribution is negligible by length anyway.
+    Every reference counts, RNA-only spike-ins included: the tool does not know which references carry genomic DNA,
+    and their contribution is negligible by length.
     """
     return contained_opportunity(reference_lengths, max_width)
 
@@ -191,10 +155,11 @@ class GdnaOpportunity:
         )
 
     def combined_probability(self) -> np.ndarray:
-        """``pi(w) = [SUM_p A_p(w)] / T(w)`` — the divisor for the four pools' summed counts.
+        """``pi(w) = [SUM_p A_p(w)] / T(w)``: the divisor for the four pools' summed counts.
 
-        This is the whole model in one expression, and the weighting inside it is inverse-variance
-        rather than chosen; see the module docstring.
+        Summing counts and opportunities gives ``f(w) ~ [SUM_p count_p(w)] · T(w) / [SUM_p A_p(w)]``, the
+        opportunity-weighted average of the four de-tilted pools. Under Poisson counts ``Var(count_p) ∝ A_p``, so the
+        weights are exactly inverse-variance, with nothing tuned.
         """
         summed = np.sum(self.pools, axis=0)
         return np.divide(summed, self.total, out=np.zeros_like(summed), where=self.total > 0.0)
@@ -204,11 +169,11 @@ def observable_gdna_opportunity(region_arrays: "RegionArrays", max_width: int) -
     """The four pools' opportunities and the total over the observable genome (`rigel.observable`): a start counts only
     where its fragment touches no masked base.
 
-    The contained pools sum each region's observable pieces by the region's type; a crossing pool's flanks are the
-    boundary's two regions up to the nearest masked base, since a fragment reaching that base is not observed, exactly
-    as one reaching the next boundary is not in the pool, and the inclusion-exclusion of :func:`crossing_opportunity`
-    removes both; the total sums every reference's observable stretches. With nothing masked every pool is its regions'
-    whole-length opportunity, to the bit (`tests/calibration/test_observable_geometry.py`).
+    The contained pools sum each region's observable pieces by the region's type. A crossing pool's flanks are the
+    boundary's two regions up to the nearest masked base: a fragment reaching that base is not observed, just as one
+    reaching the next boundary is not in the pool, and the inclusion-exclusion of :func:`crossing_opportunity` removes
+    both. The total sums every reference's observable stretches. With nothing masked every pool is its regions'
+    whole-length opportunity, to the bit.
     """
     types = coarse_type_array(region_arrays.signature)
     piece_region, piece_len = observable_pieces(region_arrays)

@@ -1,20 +1,15 @@
-"""
-rigel.splice — Splice classification enums for the quantification pipeline.
+"""rigel.splice — the splice classification enums.
 
-Internal count arrays use 8 columns: 4 splice types × 2 strands
-(sense/antisense).  The output sums the two strand columns; strand is
-not exposed in user-facing output.
+A fragment's splice type depends on its junctions alone:
 
-Fragment splice types are based on splice junction status only:
-- UNSPLICED: no splice junctions detected
-- SPLICED_ANNOT: splice junctions, every one held by one annotated transcript. There is no other
-  spliced type: the scan withholds a hit whose junctions no one annotated transcript holds (the
-  annotated-path rule), and the resolver refuses one
-- SPLICED_IMPLICIT: the mate gap spans an annotated intron of a candidate
-- SPLICE_ARTIFACT: a CIGAR junction the splice blacklist rejected
+- UNSPLICED: no splice junction;
+- SPLICED_ANNOT: junctions, every one held by one annotated transcript. It is the only spliced type, because the scan
+  withholds a hit whose junctions no one annotated transcript holds (the annotated-path rule);
+- SPLICED_IMPLICIT: the mate gap spans an annotated intron of a candidate;
+- SPLICE_ARTIFACT: a CIGAR junction the splice blacklist rejected.
 
-Intronic vs exonic overlap is recorded separately, per candidate (the
-resolver's ``exon_bp`` / ``intron_bp``), not in the splice type.
+Exonic and intronic overlap are recorded per candidate (the resolver's ``exon_bp`` / ``intron_bp``), not here. Count
+arrays have 8 columns, 4 splice types × 2 strands (sense, antisense); the output sums the two strands.
 """
 
 from enum import IntEnum
@@ -33,39 +28,16 @@ class SpliceType(IntEnum):
 def census_field(stype: SpliceType) -> str:
     """The :class:`~rigel.stats.PipelineStats` field holding the scanner's count of ``stype``.
 
-    The scanner classifies, so the scanner counts. The per-fragment splice breakdown is scanner QC —
-    it has no algorithmic consumer, only the report — so it lives where it is generated and is passed
-    through nothing to get there. Reading it off a fragment-length category model instead would count
-    only the fragments that contributed a LENGTH observation, a population nobody states.
-
-    There is no name table, deliberately. The C++ keys these counters off
-    ``splice_type_label`` (``bam_scanner.cpp``), whose strings are exactly these member names
-    lower-cased. Writing the correspondence as a mapping would create a second place for it to be
-    wrong; deriving it means a category added to :class:`SpliceType` and forgotten in either
-    language is caught by ``test_every_splice_type_is_censused`` rather than silently reading zero
-    through ``dict.get(key, 0)``.
+    The scanner classifies, so the scanner counts; the breakdown is QC for the report. The name is derived, not
+    tabled, so there is no second correspondence to keep in step: the C++ keys these counters off
+    ``splice_type_label`` (``bam_scanner.cpp``), whose strings are these member names lower-cased.
     """
     return f"n_census_{stype.name.lower()}"
 
 
-#: ``SpliceType.SPLICED_ANNOT`` as a plain int.
-SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)  # 1
-
-
 class SpliceStrandCol(IntEnum):
-    """Internal column index for count arrays.
-
-    Layout: 4 splice categories × 2 strands (sense/antisense) = 8 columns.
-
-    Column formula::
-
-        col = splice_type * 2 + int(is_antisense)
-
-    where ``splice_type`` is a :class:`SpliceType` value (0..3).
-
-    Even indices (0, 2, 4, 6) are sense; odd indices (1, 3, 5, 7) are
-    antisense.
-    """
+    """A count array's column: ``col = splice_type * 2 + int(is_antisense)``, so even columns are sense and odd
+    ones antisense."""
 
     UNSPLICED_SENSE = 0
     UNSPLICED_ANTISENSE = 1
@@ -83,5 +55,5 @@ class SpliceStrandCol(IntEnum):
 
 NUM_SPLICE_STRAND_COLS = len(SpliceStrandCol)
 
-# Pre-computed column subset (a tuple for immutability and indexing).
+# the spliced-annotated columns
 SPLICED_COLS = tuple(c.value for c in SpliceStrandCol if c.category == SpliceType.SPLICED_ANNOT)

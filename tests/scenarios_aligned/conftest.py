@@ -116,8 +116,8 @@ def assert_alignment(bench, min_rate=0.70):
 def assert_accountability(bench, tolerance=5):
     sd = bench.stats_dict
     n_gated_out = sd.get("n_gated_out", 0)
-    # n_synthetic_observed already includes nRNA counts (synthetic transcripts),
-    # so we don't add n_nrna_pipeline separately.
+    # n_synthetic_observed already includes the synthetic spans' counts,
+    # so n_nrna_pipeline is not added separately.
     total = bench.total_observed + bench.n_synthetic_observed + bench.n_gdna_pipeline + n_gated_out
     gap = abs(total - bench.n_fragments)
     assert gap <= tolerance, (

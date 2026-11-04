@@ -1,18 +1,11 @@
-"""Fragment-origin aggregation and the simulator's truth tables, all written here.
+"""Origin counts read off simulator read names (:mod:`read_name`), and the simulator's truth tables.
 
-The read-name format and its parser (``Origin`` / ``parse_origin``) live in :mod:`read_name`; this
-module consumes the parser to count origins and writes the truth. There are two transcript tables,
-each quantity in one column:
+There are two transcript tables, both written by :func:`_write_transcript_table` from :func:`_transcript_metadata`:
 
-- the molar table, one per nascent setting (:func:`write_molar_truth`): the molecules each transcript
-  was simulated at, under the simulator's own input names (``mrna_abundance``, ``nrna_abundance``), so
-  the file is also a valid abundance input;
-- one per condition (:func:`write_post_capture_truth`): the same molecules (``pre_capture_*``) beside
-  the fragments the condition realised, read off its read names (``observed_*_fragments``), written with
-  the condition's fragment-length table and summary JSON.
-
-Both transcript tables are written by :func:`_write_transcript_table` from the identity and structure
-columns :func:`_transcript_metadata` derives, so a fix to either reaches both tables.
+- the molar table, one per nascent setting (:func:`write_molar_truth`): the molecules each transcript was simulated
+  at, under the simulator's input names, so the file is also a valid abundance input;
+- one per condition (:func:`write_post_capture_truth`): the same molecules (``pre_capture_*``) beside the fragments
+  the condition realised (``observed_*_fragments``), with a fragment-length table and a summary JSON.
 """
 
 from __future__ import annotations
@@ -180,8 +173,8 @@ def _length_stats(length_counts: Counter[int]) -> dict[str, float | int | None]:
 
 
 def _transcript_metadata(transcript) -> dict[str, object]:
-    """A transcript's identity and structure columns, and the molecules it was simulated at (mature,
-    nascent, and their sum), as both truth tables write them."""
+    """A transcript's identity and structure columns and the molecules it was simulated at (mature, nascent and
+    their sum), as both truth tables write them."""
     length = transcript.length or transcript.compute_length()
     genomic_span = (
         transcript.end - transcript.start
@@ -204,8 +197,7 @@ def _transcript_metadata(transcript) -> dict[str, object]:
 
 
 def _write_transcript_table(path: Path, columns: tuple[str, ...], rows: Iterable[dict]) -> None:
-    """The one writer of both transcript tables: a header of ``columns``, then one tab-separated line
-    per row, each value as ``str`` gives it."""
+    """Write a header of ``columns``, then one tab-separated line per row, each value as ``str`` gives it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as handle:
         handle.write("\t".join(columns) + "\n")
@@ -224,10 +216,9 @@ def _molar_row(transcript) -> dict[str, object]:
 
 
 def write_molar_truth(transcripts, path: Path) -> None:
-    """Write the molar truth table: the molecules each transcript was simulated at, mature and nascent,
-    before capture and before sampling, to four decimals. The molecules depend on a condition's nascent
-    setting alone, so the grid writes one table per setting. The columns are the simulator's own
-    abundance-input names (``whole_genome``'s ``sim`` format), so the table can be given back as
+    """Write the molar truth table: the molecules each transcript was simulated at, mature and nascent, before
+    capture and sampling, to four decimals. They depend only on the nascent setting, so the grid writes one table
+    per setting. The columns are ``whole_genome``'s ``sim`` abundance format, so the table can be given back as
     ``abundance.file``. Gates: ``tests/test_sim_truth.py``."""
     _write_transcript_table(path, _MOLAR_COLUMNS, (_molar_row(t) for t in transcripts))
     logger.info("Wrote truth abundances to %s", path)
@@ -239,12 +230,10 @@ def summarize_post_capture_truth(
     bam_path: Path | None = None,
     fastq_path: Path | None = None,
 ) -> dict[str, object]:
-    """Summarize empirical post-capture truth from simulated read origins.
+    """Count the fragments each transcript realised, by origin, from the read names of a BAM or FASTQ.
 
-    The simulator encodes the selected template and interval in every read name.
-    For hybrid-capture benchmarking, these observed fragment origins are the
-    relevant abundance truth: capture changes which transcripts and starts are
-    sampled, so molecular pre-capture abundances are retained only as provenance.
+    Under capture these realised counts are the abundance truth, since capture changes which templates and starts
+    are drawn; the pre-capture molecules are kept beside them as provenance.
     """
     mrna_by_tx: Counter[str] = Counter()
     nrna_by_tx: Counter[str] = Counter()
@@ -323,14 +312,12 @@ def write_post_capture_truth(
     pre_capture_abundances: str | None = None,
     gdna_strand_overdispersion: float | None = None,
 ) -> dict[str, object]:
-    """Write one condition's truth after simulation, from the origins its read names carry.
+    """Write one condition's truth from the origins its read names carry.
 
-    ``abundance_path`` gets one row per transcript: the molecules it was simulated at
-    (``pre_capture_*``, the molar table's values) and the fragments the condition realised
-    (``observed_*_fragments``), the truth a fragment count is scored against. ``fl_path`` gets the
-    realised fragment lengths per origin, and ``summary_path`` the origin counts, the length statistics
-    and the paths of the three tables, each under one key: ``pre_capture_abundances`` (the molar table,
-    as given), ``post_capture_abundances`` and ``post_capture_fragment_lengths``.
+    ``abundance_path`` gets one row per transcript, the molecules it was simulated at (``pre_capture_*``) beside the
+    fragments realised (``observed_*_fragments``); ``fl_path`` the realised fragment lengths per origin; and
+    ``summary_path`` the origin counts, the length statistics and the three tables' paths
+    (``pre_capture_abundances``, ``post_capture_abundances``, ``post_capture_fragment_lengths``).
     """
     summary = summarize_post_capture_truth(
         transcripts,

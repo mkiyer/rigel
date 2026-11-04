@@ -1,16 +1,13 @@
 """Scan once, calibrate many times: cache what calibration reads from a BAM scan, one cache per condition.
 
-Calibration is the phase under development and re-running it must cost seconds, not a re-scan, so this
-script runs the single-pass scan on each condition's oracle BAM (or on one BAM) and writes the payload
-and strand model to a `rigel.scan_cache` directory. Each cache is independently keyed against the index
-it was built from — `graph_hash`, a reach digest (which neither `partition_hash` nor `graph_hash`
-covers), the scan config and the splice blacklist — and records its BAM's identity, and is refused at
-load if either has moved, so a partial suite is usable and one condition can be rebuilt without touching
-the others. An existing cache is skipped only when it still describes this index and this BAM and was scanned
-under the settings below; a stale one is re-scanned. Every cache is read straight back
-after it is written so a cache that cannot be loaded fails here rather than in a later session. The
-cache key hashes the accumulator's deposit rule and not the fragment construction, so a change to which
-fragments are offered needs `--force`. Nothing is calibrated or scored.
+Re-running calibration should cost seconds, not a re-scan, so this script runs the single-pass scan on each
+condition's oracle BAM (or on one BAM) and writes the payload and strand model to a `rigel.scan_cache`
+directory. Each cache is keyed against its index (`graph_hash`, a reach digest that no other hash covers, the
+scan config and the splice blacklist) and its BAM's identity, and is refused at load if either has moved, so
+one condition can be rebuilt without touching the others. An existing cache is skipped only when it still
+matches; a stale one is re-scanned. Every cache is read straight back after it is written, so an unloadable
+cache fails here. The key hashes the accumulator's deposit rule, not the fragment construction, so a change to
+which fragments are offered needs `--force`. Nothing is calibrated or scored.
 
 Usage::
 

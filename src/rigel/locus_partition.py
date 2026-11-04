@@ -1,12 +1,7 @@
-"""rigel.locus_partition — Per-locus CSR scatter for the per-locus EM solver.
+"""rigel.locus_partition — scatter the global ``ScoredFragments`` CSR into one ``LocusPartition`` per locus.
 
-Scatters the monolithic ``ScoredFragments`` global CSR into per-locus
-``LocusPartition`` objects, freeing each global array immediately after
-scatter to bound peak memory.
-
-Unrelated to region/annotation partitioning. The name reflects what the
-module actually does: it builds the input arrays the per-locus EM
-requires (one ``LocusPartition`` per connected-component locus).
+The per-locus EM's inputs (unrelated to the region partition). Each global array is freed as soon as it is scattered,
+to bound peak memory.
 """
 
 import numpy as np
@@ -27,8 +22,7 @@ def partition_and_free(
     em_data: ScoredFragments,
     multi_loci: list,
 ) -> dict[int, LocusPartition]:
-    """Scatter global CSR into per-locus partitions, freeing each global
-    array immediately after scatter.
+    """Scatter the global CSR into per-locus partitions, freeing each global array once scattered.
 
     Parameters
     ----------
@@ -82,9 +76,7 @@ def partition_and_free(
     unit_results = {}
     for attr, scatter_fn in UNIT_ARRAYS:
         global_arr = getattr(em_data, attr)
-        if global_arr.dtype == np.bool_:
-            global_arr = global_arr.view(np.uint8)
-        elif global_arr.dtype == np.int8:
+        if global_arr.dtype in (np.bool_, np.int8):
             global_arr = global_arr.view(np.uint8)
         unit_results[attr] = scatter_fn(global_arr, locus_units, n_loci)
         setattr(em_data, attr, None)

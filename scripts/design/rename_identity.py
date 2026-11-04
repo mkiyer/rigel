@@ -1,19 +1,16 @@
 #!/usr/bin/env python
 """Is this rename stage numerically a no-op? Every stage proven bit-identical to a frozen reference.
 
-A rename, or any refactor or speed-up, must change no number, and this makes that claim falsifiable. `--freeze` runs the whole
-pipeline once on one condition and reduces it to digests; `--check` runs it again after a stage and
-compares. It compares content, never names, because the names are the thing changing: the content
-multiset (the sorted `dtype|shape|sha256` of every payload and calibration array, field names discarded,
-so any pure rename is invisible and any moved value is not) and the tool's own output (the transcript
-table, canonicalised by transcript id at full precision, which carries no region/boundary vocabulary at
-all). The pair is needed: the multiset cannot see two arrays swapping names, and the transcript digest
-can. No name map is used. Bit-identity is only provable with every source of run-to-run variation
-pinned, so the scan runs on one thread with one BGZF thread, `OMP_NUM_THREADS=1` and a fixed EM seed;
-a `--check` is therefore a statement about the code, not about the shipped thread configuration. The
-reference is frozen, not rolling: every stage compares to the same capture, never to the stage before it,
-because renames compound and a rolling baseline would let one stage's defect become the next stage's
-truth, so `--freeze` refuses to overwrite an existing reference.
+A rename, refactor or speed-up must change no number, and this makes that claim falsifiable. `--freeze` runs
+the whole pipeline once on one condition and reduces it to digests; `--check` runs it again after a stage and
+compares. It compares content, never names, because the names are what changes: the content multiset (the
+sorted `dtype|shape|sha256` of every payload and calibration array, field names discarded, so a pure rename is
+invisible and a moved value is not) and the tool's output (the transcript table, sorted by transcript id at
+full precision). The pair is needed: the multiset cannot see two arrays swapping names, and the transcript
+digest can. Every source of run-to-run variation is pinned (one scan thread, one BGZF thread,
+`OMP_NUM_THREADS=1`, a fixed EM seed), so a `--check` is a statement about the code, not about the shipped
+thread configuration. The reference is frozen, never rolling: every stage compares to the same capture, so one
+stage's defect cannot become the next stage's truth, and `--freeze` refuses to overwrite it.
 
 Usage::
 
@@ -59,7 +56,7 @@ def _sha(a: np.ndarray) -> str:
 
 
 def quant_digest(quant) -> str:
-    """The transcript table as one digest: sorted by transcript id and rendered at full precision WITHOUT the header,
+    """The transcript table as one digest: sorted by transcript id and rendered at full precision without the header,
     so it states the numbers and their column order, not the row order, the float formatting or a column's name. A
     renamed column is invisible; a moved value or a reordered column is not."""
     key = "transcript_id" if "transcript_id" in quant.columns else quant.columns[0]
@@ -94,9 +91,8 @@ def capture(suite: Path, index_dir: Path, condition: str, bam: Path | None = Non
         scan=dataclasses.replace(base.scan, **DETERMINISM),
         em=dataclasses.replace(base.em, seed=EM_SEED),
     )
-    # the payload is not on `PipelineResult` and holds the very banks being renamed, so it is captured
-    # at the `calibrate` boundary rather than by scanning a second time; `calibrate` is imported
-    # function-locally by the pipeline, so patching the module attribute is picked up at call time
+    # the payload is not on `PipelineResult`, so it is captured at the `calibrate` boundary; the pipeline
+    # imports `calibrate` function-locally, so patching the module attribute is picked up at call time
     import rigel.calibration as CAL
 
     original = CAL.calibrate
@@ -200,9 +196,8 @@ def self_test() -> int:
     # an empty capture is the sharpest version of the same lie
     checks.append(("an EMPTY capture => caught", compare(ref, dict(ref, payload_multiset=[])) != []))
 
-    # the known hole, pinned so nobody mistakes it for coverage: the multiset cannot see two arrays
-    # swapping names, because a multiset has no names; the quant digest is what covers that, and this
-    # asserts the hole is exactly where it is documented to be
+    # the known hole, pinned: the multiset cannot see two arrays swapping names (it has no names); the
+    # quant digest covers that
     checks.append(("a NAME SWAP is invisible to the multiset (documented hole)",
                    content_multiset(A(u, v)) == content_multiset(A(v, u))))
 

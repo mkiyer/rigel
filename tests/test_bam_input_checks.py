@@ -1,8 +1,9 @@
 """A BAM the scan would read wrong is refused before its records are trusted.
 
-Each case once produced a full output set and exit 0: a coordinate-sorted BAM, whose mates are not adjacent, so every
-mate was its own fragment; references the index does not hold, so every fragment was intergenic; a reference the index
-holds at another length, another assembly; and a truncated BAM, whose read error ended the scan like the end of file.
+Each case would otherwise produce a full output set and exit 0: a coordinate-sorted BAM, whose mates are not adjacent,
+so every mate would be its own fragment; references the index does not hold, so every fragment would be intergenic; a
+reference the index holds at another length, another assembly; and a truncated BAM, whose read error would end the scan
+like the end of file.
 """
 
 import logging

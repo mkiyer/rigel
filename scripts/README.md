@@ -1,21 +1,21 @@
 # `scripts/` — developer tooling
 
-Developer-facing tooling that is not part of the shipped `rigel` package. Membership is gated:
-`tests/test_scripts_index.py` holds `design/` against `CLAUDE.md`'s instrument table and `profiling/`
-against this file, in both directions, and checks that every script imports and has a docstring.
+Developer tooling that is not part of the shipped `rigel` package. `tests/test_scripts_index.py` holds `design/`
+against `CLAUDE.md`'s instrument table and `profiling/` against this file, in both directions, and checks that
+every script imports and has a docstring.
 
 ## The four directories
 
 | dir | what it is |
 |---|---|
-| `design/` | The instrument shelf: the debug loop, the panel harnesses, the truth-scoring instruments. Indexed by question in `CLAUDE.md`'s table; `docs/SUCCESS.md` has the run order |
-| `sim/` | Thin CLI wrappers over the simulator engine in `src/rigel/sim/`, plus the panel YAML configs in `sim/configs/`. `panel.py` drives a panel through build, simulate, cache, score and report; the reference it builds on is carved by hand (`build_suite_reference.py`), and the test chromosome is rendered by `build_test_reference.py` |
-| `profiling/` | Where the time and the memory go, and this row is its index. `profiling/profiler.py` runs the whole pipeline on one library as a tree of named stages (the index load, the scan, the second pass, each index-derived geometry build, every calibration stage down to each sweep's builders and passes, every quant stage down to the locus EM), with calls, inclusive and self seconds, peak and held RSS per stage; `--set SECTION.FIELD=VALUE` overrides any `PipelineConfig` field, `--scan-only` runs the scan alone for tuning its knobs, `--compare A.json B.json` joins two reports stage by stage, and `--self-test` falsifies the probe machinery with no BAM. `profiling/sweep_replay.py` captures every calibration sweep's inputs from one real run and replays one sweep in isolation, timing it and comparing its result bit for bit (`--block-slots` replays it at another locus-block size, which must move nothing); `--tolerance` adds the second verdict a change that may move numbers needs — per output array the slots moved, the largest absolute and relative move, and the derived budget beside them; `self-test` falsifies the comparator, which is the loop for optimising the sweep. Whether a change moved any number on the whole pipeline is `design/rename_identity.py --bam`'s question. Profile the real libraries, never a panel condition (`docs/TESTING.md` §6) |
-| `publishing/` | Release scripts (`release.sh`, `post_release.sh`, `conda_publish.sh`); `docs/PUBLISHING.md` is the procedure |
+| `design/` | The instruments: the debug loop, the panel harnesses, the truth-scoring instruments. Indexed by question in `CLAUDE.md`'s table; each module docstring is its manual |
+| `sim/` | Thin CLI wrappers over the simulator engine in `src/rigel/sim/`, plus the panel configs in `sim/configs/`. `panel.py` drives a panel through build, simulate, cache, score and report; the reference it builds on is carved by `build_suite_reference.py`, and the test chromosome is rendered from `sim/test_reference/test_chr.yaml` by `build_test_reference.py` (recipe: `docs/TESTING.md` §0a) |
+| `profiling/` | Where the time and the memory go; this row is its index. `profiling/profiler.py` runs the whole pipeline on one library as a tree of named stages (the index load, the scan, the second pass, each index-derived geometry build, every calibration stage down to each sweep's builders and passes, every quant stage down to the locus EM), with calls, inclusive and self seconds, and peak and held RSS per stage. `--set SECTION.FIELD=VALUE` overrides any `PipelineConfig` field, `--scan-only` runs the scan alone for tuning its knobs, `--compare A.json B.json` joins two reports stage by stage, and `--self-test` falsifies the probe machinery with no BAM. Whether a change moved any number is `design/rename_identity.py --bam`'s question. Profile real libraries, never a panel condition |
+| `publishing/` | The release scripts: `release.sh` cuts the release, `post_release.sh` finishes it once PyPI has the sdist, `conda_publish.sh` uploads a conda package |
 
-## The simulation + benchmarking workflow
+## The simulation and benchmarking workflow
 
-One command per stage, each resumable, each gated. `docs/TESTING.md` §2 is the long form.
+One command per stage, each resumable; `panel.py status` names the next one.
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
@@ -29,9 +29,9 @@ python scripts/sim/panel.py report   --config scripts/sim/configs/gdna_ladder.ya
 ```
 
 `score` needs both caches and `cache` builds both: the scan cache makes calibration re-runnable without
-rescanning, and the oracle cache is the origin-split truth (`gdna` / `mrna` / `nrna` partitions, checked
-sum-to-full against the scan cache, and the RNA split again by transcript strand, `rna_pos` / `rna_neg`) that every
-truth-scoring instrument reads.
+rescanning, and the oracle cache is the origin-split truth that every truth-scoring instrument reads (`gdna` /
+`mrna` / `nrna` partitions, checked sum-to-full against the scan cache, with the RNA split again by transcript
+strand into `rna_pos` / `rna_neg`).
 
 ## Lint
 
@@ -39,5 +39,5 @@ truth-scoring instrument reads.
 ruff check src/ tests/ scripts/
 ```
 
-Everything under `scripts/` must pass. Never `ruff format scripts/`: the instruments' aligned tables and
-banner comments are load-bearing and the formatter destroys them.
+Everything under `scripts/` must pass. Never `ruff format scripts/`: the formatter destroys the instruments'
+aligned tables and banner comments.

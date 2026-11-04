@@ -1,14 +1,12 @@
-"""Falsification gates for ``scripts/design/prior_vs_oracle.py`` — the instrument that scores
-calibration's endpoint (``LocusPriors``) against the origin-split oracle.
+"""Tests for ``scripts/design/prior_vs_oracle.py``, the instrument that scores calibration's endpoint (``LocusPriors``)
+against the origin-split oracle.
 
-Everything the instrument prints is a difference between two per-locus arrays of fragment counts,
-so every way of getting it wrong is a way of getting a plausible number: a lever that never fired,
-a reference that quietly became the arm, a weight that rewards the solver for declining to answer,
-a projection that loses mass off the end of a locus. These gates are those ways, and each carries
-its own perturbation in the same test (TRAPS: perturb-every-gate). The scenario is a
-single-reference toy, which is enough for the scoring and plumbing they cover — arithmetic over two
-per-locus arrays plus the override lever — and deliberately not enough to judge the deposit path,
-which has its own gates in ``tests/native/`` and its truth-scored instruments on the panel.
+Everything the instrument prints is a difference between two per-locus arrays of fragment counts, so every way of
+getting it wrong yields a plausible number: a lever that never fired, a reference that became the arm, a weight that
+rewards the solver for declining to answer, a projection that loses mass off the end of a locus. Each test covers one of
+those and perturbs its own input to show it can fail. The scenario is a single-reference toy, enough for the scoring and
+plumbing (arithmetic over two per-locus arrays plus the override lever) but not for the deposit path, which
+``tests/native/`` covers.
 """
 
 from __future__ import annotations
@@ -31,11 +29,8 @@ _MODULES: dict = {}
 
 
 def _load_sibling(name: str):
-    """Import a ``scripts/design/`` instrument by path.
-
-    ``scripts/`` is not a package and must not become one. The module is registered in
-    ``sys.modules`` BEFORE execution: ``@dataclass`` resolves its own class's ``__module__`` through
-    that table and fails at class-definition time otherwise.
+    """Import a ``scripts/design/`` instrument by path. ``scripts/`` is not a package. The module is registered in
+    ``sys.modules`` before execution, because ``@dataclass`` resolves its class's ``__module__`` through that table.
     """
     import sys
 
@@ -87,7 +82,7 @@ def measured_zero(toy_zero_gdna, tmp_path_factory):
     return _measure(toy_zero_gdna, tmp_path_factory.mktemp("pv0_run"), "toy_zero")
 
 
-# ── GATE 1: the noop arm is byte-identical, AND it notices when it is not ────────────────────────
+# ── Gate 1: the noop arm is byte-identical, and it notices when it is not ────────────────────────
 
 
 def _nudged_prior(measured, field, index, delta):
@@ -105,20 +100,15 @@ def _moved(a, b) -> bool:
 
 
 def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(measured):
-    """TRAPS: byte-identity-gate. The whole instrument rests on ``dataclasses.replace`` being an inert way to swap
-    the six mass arrays. If the replace dropped a field, O would differ from P for a reason that is
-    not deconvolution error, and that bug would BE the headline number.
+    """The instrument rests on ``dataclasses.replace`` being an inert way to swap the six mass arrays; a dropped field
+    would make O differ from P for a reason that is not deconvolution error.
 
-    The perturbation site has to be chosen by perturbation, and that is the gate's real content.
-    Nudging ``argmax(count_gdna_region)`` reads "no effect", because on any genome the largest gDNA
-    region is intergenic and ``_project_regions_to_loci`` drops every region overlapping no locus —
-    correct behaviour, and it would retire the gate as broken (TRAPS: could-the-arm-have-fired). So
-    this asserts both directions: in-locus moves, intergenic does not.
-
-    The resolution: 1e-12 fragments at an in-locus region moves the prior by 1.0e-12, and one ULP
-    (~3e-14 on a mass of a few hundred) does not, because the projection is a plain summation and a
-    perturbation below the summand's own rounding is absorbed. 1e-12 fragments is twelve orders of
-    magnitude below the unit the prior is denominated in, so the lever is not the limiting factor.
+    The perturbation site matters. On any genome the largest gDNA region is intergenic, and ``_project_regions_to_loci``
+    drops every region overlapping no locus, so nudging ``argmax(count_gdna_region)`` would show no effect. So both
+    directions are asserted: an in-locus nudge moves the prior, an intergenic one does not. 1e-12 fragments at an
+    in-locus region moves the prior by 1e-12, while one ULP of a mass of a few hundred does not (the projection is a
+    plain sum and absorbs a perturbation below the summand's rounding), so the lever resolves far below the prior's
+    unit.
     """
     assert all(measured.noop_identical.values()), measured.noop_identical
 
@@ -136,11 +126,9 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     assert _moved(_nudged_prior(measured, "count_gdna_region", inside, 1e-12), base), (
         "1e-12 fragments at an in-locus region changed no prior — the lever cannot resolve an override"
     )
-    # The intergenic direction is asserted on the COUNT field only: the locus projection dropping
-    #   intergenic regions from the count is what this gate protects. ``gdna_eff_len`` is the
-    #   contraction's business — it reads the result's reference density and the locus's own objects —
-    #   and has its own gates in ``test_priors.py``; asserting all of ``PRIOR_FIELDS`` here conflated
-    #   the two.
+    # The intergenic direction is asserted on the count field only: dropping intergenic regions from the count is what
+    # this test protects. ``gdna_eff_len`` reads the result's reference density and the locus's own objects, and
+    # ``test_priors.py`` covers it.
     nudged_out = _nudged_prior(measured, "count_gdna_region", outside, 1.0)
     count_moved = not np.array_equal(nudged_out.gdna_count, base.gdna_count)
     assert not count_moved, (
@@ -152,16 +140,11 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
 def test_the_prior_reads_exactly_the_two_gDNA_mass_fields_and_provably_NONE_of_the_RNA_ones(
     measured,
 ):
-    """TRAPS: an-ablation-that-never-ran, applied to the override itself. The two gDNA arrays
-    ``override_masses`` writes must reach the prior — an override landing on a field nothing reads is an
-    override that never ran, and it would read as "calibration is already correct on that channel".
-
-    And the four RNA arrays must provably NOT reach it. Calibration's RNA count does not enter the EM:
-    ``pipeline.em_pseudocounts`` reads the gDNA count against the EM's own count of the locus's
-    fragments, so the two stages never have to agree on which fragments are spliced. An RNA field that
-    moved the prior would be that count leaking back in. The rule otherwise lives only in a docstring;
-    this is what keeps it true. Each field is nudged at its largest IN-LOCUS site, so a field that does
-    not move the prior is not read, never merely nudged where the projection drops it.
+    """The two gDNA arrays ``override_masses`` writes must reach the prior; an override landing on a field nothing reads
+    would read as "calibration is already correct on that channel". The four RNA arrays must not reach it: calibration's
+    RNA count does not enter the EM (``pipeline.em_pseudocounts`` reads the gDNA count against the EM's own count of the
+    locus's fragments), so an RNA field moving the prior would be that count leaking in. Each field is nudged at its
+    largest in-locus site, so a field that does not move the prior is genuinely unread.
     """
     base = measured.priors["P"]
     reads = {}
@@ -176,9 +159,8 @@ def test_the_prior_reads_exactly_the_two_gDNA_mass_fields_and_provably_NONE_of_t
 
 
 def test_an_override_that_stops_writing_a_field_ABORTS_rather_than_scoring(measured, monkeypatch):
-    """TRAPS: an-ablation-that-never-ran. If ``override_masses`` were changed to stop writing one of the six
-    arrays, O would silently keep the SHIPPED value there and would be a hybrid of truth and estimate
-    — which reads as "calibration is better than we thought" and is the most flattering possible bug.
+    """If ``override_masses`` stopped writing one of the six arrays, O would keep the shipped value there and be a
+    hybrid of truth and estimate, which would flatter calibration.
     """
     cal = _rebuild_calibration(measured)
     full = measured.oracle.override_masses(measured.region_arrays)
@@ -191,17 +173,13 @@ def test_an_override_that_stops_writing_a_field_ABORTS_rather_than_scoring(measu
             PV.oracle_priors(measured.oracle, cal, measured.region_arrays, measured.multi_loci)
 
 
-# ── GATE 2: the lever COULD have fired ───────────────────────────────────────────────────────────
+# ── Gate 2: the lever could have fired ───────────────────────────────────────────────────────────
 
 
 def test_the_oracle_lever_actually_MOVES_the_prior(measured):
-    """TRAPS: could-the-arm-have-fired. "P equals O" would be the headline result of the whole campaign, so the
-    one thing that must not produce it is a lever that did nothing. On a toy with real gDNA the two
-    priors must differ at a substantial number of loci and by a substantial total.
-
-    Stated as a floor on the COUNT of differing loci as well as on the total, because a single
-    enormous locus difference and a broad small one are different findings and only one of them
-    proves the lever reaches the whole array.
+    """ "P equals O" must not come from a lever that did nothing. On a toy with real gDNA the two priors must differ at
+    many loci and by a substantial total; both the count of differing loci and the total are bounded, since one huge
+    locus difference does not show the lever reaches the whole array.
     """
     p, o = measured.priors["P"], measured.priors["O"]
     differ = ~np.isclose(p.gdna_count, o.gdna_count, rtol=1e-9, atol=1e-9)
@@ -209,14 +187,13 @@ def test_the_oracle_lever_actually_MOVES_the_prior(measured):
     assert o.gdna_count.sum() > 0.0, "the oracle prior claims no gDNA on a contaminated toy"
 
 
-# ── GATE 3: the two arms cannot be scored against a different locus partition ────────────────────
+# ── Gate 3: the two arms cannot be scored against a different locus partition ────────────────────
 
 
 def test_scoring_against_a_DIFFERENT_locus_partition_raises(measured):
-    """The locus partition is a function of the SCORING stage, not of the index — ``build_multi_loci``
-    unions transcripts linked by scored fragments — so two runs of the pipeline can produce different
-    numbers of loci. Index-aligning two such arrays would silently compare locus 7 of one run with
-    locus 7 of another, which is not a small error.
+    """The locus partition is a function of the scoring stage, not the index (``build_multi_loci`` unions transcripts
+    linked by scored fragments), so two pipeline runs can produce different numbers of loci, and index-aligning them
+    would compare locus 7 of one run with locus 7 of another.
     """
     p = measured.priors["P"].gdna_count
     o = measured.priors["O"].gdna_count
@@ -225,17 +202,15 @@ def test_scoring_against_a_DIFFERENT_locus_partition_raises(measured):
         PV.score_arm(p, o[:-1])
 
 
-# ── GATE 4: every sharded run writes its shards to a directory of its own ───────────────────────
+# ── Gate 4: every sharded run writes its shards to a directory of its own ───────────────────────
 
 
 def test_two_sharded_runs_never_share_a_shard_directory_and_every_shard_gets_the_set(
     tmp_path, monkeypatch
 ):
-    """Two A/B runs sharing a work dir once wrote their shards to one fixed ``_shards``, so each could
-    merge the other's rows. The shards are faked (each writes an empty row list), so this checks the
-    plumbing only: two runs, two directories, and every shard command carries the run's ``--set``.
-
-    Perturbation: a fixed shard directory makes the two runs' directories equal.
+    """Two A/B runs sharing a work dir must not write shards to one fixed ``_shards``, or each could merge the other's
+    rows. The shards are faked (each writes an empty row list), so this checks the plumbing only: two runs, two
+    directories, and every shard command carries the run's ``--set``.
     """
     import subprocess
     import sys
@@ -277,20 +252,16 @@ def test_two_sharded_runs_never_share_a_shard_directory_and_every_shard_gets_the
     assert len(dirs[0]) == len(dirs[1]) == 1 and dirs[0] != dirs[1]
 
 
-# ── GATE 5: the ZERO-gDNA control ────────────────────────────────────────────────────────────────
+# ── Gate 5: the zero-gDNA control ────────────────────────────────────────────────────────────────
 
 
 def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_is_scored_against_it(
     measured_zero,
 ):
-    """THE OWNER-REQUIRED ZERO CONTROL. With no gDNA in the library the oracle's gDNA mass is
-    exactly 0 at every object, so ``O.gdna_count`` must be exactly 0 at every locus — not small,
-    not floored, zero. Anything the SHIPPED prior puts there is a false positive with nothing to
-    cancel it, which is the only reading of that arm that is unambiguous.
-
-    The perturbation is the other direction and it is what makes the assertion non-vacuous: hand
-    the same assembler a single fabricated gDNA fragment and the prior must come off zero. A gate that
-    only ever sees zeros cannot tell "correct" from "the array is not wired".
+    """With no gDNA in the library the oracle's gDNA mass is exactly 0 at every object, so ``O.gdna_count`` must be
+    exactly 0 at every locus, and anything the shipped prior puts there is an unambiguous false positive. Handing the
+    same assembler one fabricated gDNA fragment must take the prior off zero, so the test can tell "correct" from "not
+    wired".
     """
     o = measured_zero.priors["O"]
     assert measured_zero.n_loci > 0, (
@@ -317,30 +288,25 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
     )
 
 
-# ── GATE 6: a capture that never happened is an error, not a zero ────────────────────────────────
+# ── Gate 6: a capture that never happened is an error, not a zero ────────────────────────────────
 
 
 def test_a_run_that_never_reaches_assemble_priors_RAISES(measured, monkeypatch):
-    """TRAPS: an-ablation-that-never-ran. ``quant_from_buffer`` returns early when there are no EM units, and a
-    silently-absent capture would read as "a condition with no loci and therefore no error" — the most
-    flattering possible failure of the harness.
+    """``quant_from_buffer`` returns early when there are no EM units, and a silently absent capture would read as "a
+    condition with no loci and therefore no error".
     """
     monkeypatch.setattr(PV, "quant_from_buffer", lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="never called"):
         PV.capture_priors(None, None, None, None, None, None, None, PipelineConfig())
 
 
-# ── GATE 7: the aggregate re-derives its rates, never averages them ──────────────────────────────
+# ── Gate 7: the aggregate re-derives its rates, never averages them ──────────────────────────────
 
 
 def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
-    """TRAPS: never-pool-the-strata's third way. A panel condition at 10 M fragments and one at 10 k are not two
-    equally-informative opinions about a rate, and averaging their ``rel`` values gives the shallow
-    one equal say. The aggregate must recompute from the summed totals.
-
-    The two constructed rows differ by 1,000x in depth and have opposite-signed errors, so the mean
-    of ratios and the ratio of sums are far apart and a gate that confused them could not pass by
-    coincidence.
+    """A condition at 10 M fragments and one at 10 k are not equally informative about a rate, and averaging their
+    ``rel`` values would give the shallow one equal say, so the aggregate recomputes from summed totals. The two rows
+    differ 1,000x in depth with opposite-signed errors, so the mean of ratios and the ratio of sums are far apart.
     """
     deep = PV.ArmScore(
         n_loci=1,
@@ -369,13 +335,13 @@ def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
     assert agg.over_call == pytest.approx(100_000.0) and agg.under_call == pytest.approx(900.0)
 
 
-# ── GATE 8: the directional split is reported and reconciles ─────────────────────────────────────
+# ── Gate 8: the directional split is reported and reconciles ─────────────────────────────────────
 
 
 def test_over_and_under_call_are_reported_separately_and_reconcile(measured):
-    """The library-level figure is ``|Σ(a − a*)|`` and the per-locus answer is ``Σ|a − a*|``; when a
-    large under-call sits next to a large over-call the first flatters the second by whatever
-    ``cancellation`` reports. Both halves must therefore exist and must reconcile exactly::
+    """The library-level figure is ``|Σ(a − a*)|`` and the per-locus answer is ``Σ|a − a*|``; a large under-call beside
+    a large over-call makes the first flatter the second by ``cancellation``. Both halves must exist and reconcile
+    exactly::
 
         over − under == net        over + under == abs
     """
@@ -389,18 +355,16 @@ def test_over_and_under_call_are_reported_separately_and_reconcile(measured):
 
 
 def _in_locus_regions(measured) -> np.ndarray:
-    """``bool[N]`` — regions the locus projection keeps. An intergenic region carries no exon/intron bit
-    and is DROPPED, so a perturbation there is inert by design (see the noop gate)."""
+    """``bool[N]``: regions the locus projection keeps. An intergenic region carries no exon/intron bit and is dropped,
+    so a perturbation there is inert by design."""
     sig = np.asarray(measured.region_arrays.signature).astype(np.int64)
     return (sig & _RNA_SIGNATURE_BITS) != 0
 
 
 def _biggest_in_locus_site(measured, field):
-    """The largest element of ``field`` that the locus projection actually reaches.
-
-    Boundary-indexed arrays are selected through the SHIPPED ``_boundary_locus_shares`` rather than a local
-    rule: a locus's boundaries are the boundaries that TOUCH its regions, which is exactly the decision that
-    function exists to make. Restating it here would drift from the code under test.
+    """The largest element of ``field`` the locus projection reaches. Boundary-indexed arrays are selected through the
+    shipped ``_boundary_locus_shares``, since a locus's boundaries are those touching its regions and that function
+    makes the decision.
     """
     from rigel.calibration.priors import _boundary_locus_shares
 
@@ -421,7 +385,6 @@ def _biggest_in_locus_site(measured, field):
 
 
 def _rebuild_calibration(m):
-    """The condition's own ``CalibrationResult``, reconstructed from the shipped masses the
-    measurement kept rather than re-running ``calibrate``: the perturbations below only need an object
-    whose six mass arrays are P's, and re-solving would take seconds per gate and could drift."""
+    """The condition's own ``CalibrationResult``, rebuilt from the shipped masses the measurement kept rather than by
+    re-running ``calibrate``: the perturbations need only an object whose six mass arrays are P's."""
     return m.calibration

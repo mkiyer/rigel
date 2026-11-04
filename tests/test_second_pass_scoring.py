@@ -1,16 +1,12 @@
-"""``rigel.second_pass.score_held_fragments`` DISCRIMINATES, on hand-built loci where the truth is known.
+"""``rigel.second_pass.score_held_fragments`` discriminates, on hand-built loci where the truth is known.
 
-The hard part is the fixture rather than the assertion: a locus with no depth scores every hypothesis
-uniformly, and the gate then passes over a scorer that decided nothing, so every locus here carries real
-depth and non-vacuity is asserted directly. No threshold is tuned anywhere — the loci come in mirror
-pairs, the same geometry with the deep sj swapped, with the crossed end of the mate gap swapped, or with
-the library's sense fraction flipped, so a moved winner isolates one term of the score exactly where a
-"wins by more than X" assertion would have been a constant chosen after the fact. The strand model is
-deliberately prior-only (``p_r1_sense = 0.5``): no read carries an ``XS`` tag, so 0.5 is the correct
-answer rather than a degenerate one, and it holds the strand term constant across each locus's two
-spliced hypotheses, which is what lets the other arms test the density and the length term alone. The
-fixture goes through the SCAN, because driving ``FragmentResolver`` directly leaves ``t_strand_arr_``
-empty and every hypothesis's implied strand silently reads ``NONE``.
+A locus with no depth scores every hypothesis uniformly, so every locus carries real depth and non-vacuity is
+asserted directly. No threshold is tuned: the loci come in mirror pairs (the deep sj swapped, the crossed end of the
+mate gap swapped, or the library's sense fraction flipped), so a moved winner isolates one term of the score. The
+strand model is prior-only (``p_r1_sense = 0.5``; no read carries ``XS``), which holds the strand term constant across
+each locus's spliced hypotheses so the other arms test the density and length terms alone. The fixture goes through
+the scan, because driving ``FragmentResolver`` directly leaves ``t_strand_arr_`` empty and every implied strand reads
+``NONE``.
 """
 
 from __future__ import annotations
@@ -25,28 +21,24 @@ from rigel.pipeline import scan_and_buffer
 GENOME = 30_000
 M, N = 0, 3
 
-#: The seven loci, containing two mirror pairs: 1/2 swap which sj is deep, and 4/6 swap which END of the
-#: mate gap is crossed. Every non-firing perturbation this module found was closed by adding a mirror.
+#: The seven loci, containing two mirror pairs: 1/2 swap which sj is deep, and 4/6 swap which end of the
+#: mate gap is crossed.
 L1, L2, L3, L4, L5, L6, L7 = 1000, 4000, 7000, 10_000, 13_000, 16_000, 19_000
 
-#: Depths. Fixture quantities, not algorithm constants: all that matters is that DEEP and SHALLOW are far
-#: enough apart to separate and that both are NON-ZERO, so the gates test discrimination rather than
-#: elimination-by-zero, which is a different property and is measured separately.
+#: Depths. Fixture quantities, not algorithm constants: DEEP and SHALLOW are far enough apart to separate
+#: and both are non-zero, so the gates test discrimination rather than elimination by zero.
 DEEP, SHALLOW, CONTIGUOUS = 40, 4, 8
 
-#: Ballast sets the LENGTH pmf and touches no locus. `build_fl_models` does not smooth the global anchor
+#: Ballast sets the length pmf and touches no locus. `build_fl_models` does not smooth the global anchor
 #: (`_normalized`, not `_smooth_eb`), so ``global_pmf[L]`` is exactly 0 unless some deposited fragment had
-#: that very length — and every ∅ hypothesis here is 600 bp. Separating the pmf's source from the loci is
-#: what stops a length coincidence from doing the density term's work.
+#: that length, and every ∅ hypothesis here is 600 bp. Keeping the pmf's source apart from the loci stops a
+#: length coincidence from doing the density term's work.
 #:
-#: ``(half, count)``, so ``L = 2 * half``. Adding mass at one length rescales every ``global_pmf`` entry
-#: by a common factor, which cancels in a score normalised within a record — so the ballast sets length
-#: RATIOS and disturbs nothing else.
-#:
-#: Arm 5's two lengths (300 and 500) are reachable by NO locus, because every depth fragment's length
-#: comes from ``_SHAPES`` and those are 200/400/600. Arm 5's 3:1 ratio is therefore a property of this
-#: table alone and cannot drift when a locus is added — which is how it once broke, when a new locus's
-#: depth fragments quietly added mass at 200.
+#: ``(half, count)``, so ``L = 2 * half``. Mass at one length rescales every ``global_pmf`` entry by a
+#: common factor, which cancels in a score normalised within a record, so the ballast sets length ratios
+#: and disturbs nothing else. Arm 5's two lengths (300 and 500) are reachable by no locus (``_SHAPES``
+#: gives 200/400/600), so its 3:1 ratio is a property of this table alone and cannot drift when a locus
+#: is added.
 BALLAST = ((100, 60), (150, 60), (200, 60), (250, 180), (300, 60))
 
 #: The implied lengths. Arms 1–4 put a 400 bp gap in a 600 bp span; arm 5's introns are 300 and 100 bp.
@@ -63,15 +55,15 @@ def _gtf() -> str:
             f'chr1\tt\texon\t{base + 1}\t{base + 700}\t.\t+\t.\tgene_id "g{narrow}"; transcript_id "t{narrow}";\n',
             f'chr1\tt\texon\t{base + 901}\t{base + 1200}\t.\t+\t.\tgene_id "g{narrow}"; transcript_id "t{narrow}";\n',
         ]
-    # Loci 3 and 4 have ONE isoform on purpose, so the intron's endpoints are ADJACENT region_bounds and
-    # the intron spans exactly one region — the case where the boundaries strictly between them are an
-    # empty set, which is what once handed ∅ a structural zero.
+    # Loci 3, 4 and 6 have one isoform on purpose, so the intron's endpoints are adjacent region_bounds and
+    # the intron spans exactly one region: the set of boundaries strictly between them is empty, and the
+    # scorer must still give ∅ its evidence.
     for base, gene in ((L3, "C"), (L4, "D"), (L6, "G")):
         rows += [
             f'chr1\tt\texon\t{base + 1}\t{base + 600}\t.\t+\t.\tgene_id "g{gene}"; transcript_id "t{gene}";\n',
             f'chr1\tt\texon\t{base + 1001}\t{base + 1200}\t.\t+\t.\tgene_id "g{gene}"; transcript_id "t{gene}";\n',
         ]
-    # Locus 5: two isoforms whose introns differ in WIDTH (300 vs 100), so their implied lengths are 300
+    # Locus 5: two isoforms whose introns differ in width (300 vs 100), so their implied lengths are 300
     # and 500 — bins only the ballast fills. Both sj get the same depth, so only ``f`` can decide.
     rows += [
         f'chr1\tt\texon\t{L5 + 1}\t{L5 + 650}\t.\t+\t.\tgene_id "gE"; transcript_id "tE";\n',
@@ -79,8 +71,8 @@ def _gtf() -> str:
         f'chr1\tt\texon\t{L5 + 1}\t{L5 + 700}\t.\t+\t.\tgene_id "gF"; transcript_id "tF";\n',
         f'chr1\tt\texon\t{L5 + 801}\t{L5 + 1200}\t.\t+\t.\tgene_id "gF"; transcript_id "tF";\n',
     ]
-    # Locus 7: opposite-strand isoforms whose introns have the SAME width (200 bp), so the two
-    # hypotheses tie on implied length AND — given equal depth — on rho. Only the strand can separate
+    # Locus 7: opposite-strand isoforms whose introns have the same width (200 bp), so the two
+    # hypotheses tie on implied length and, given equal depth, on rho. Only the strand can separate
     # them. Their coordinates differ, so the two introns are not strand-coincident and the index is quiet.
     rows += [
         f'chr1\tt\texon\t{L7 + 1}\t{L7 + 600}\t.\t+\t.\tgene_id "gH"; transcript_id "tH";\n',
@@ -116,7 +108,7 @@ _SHAPES = ((100, 50, 50), (200, 100, 100), (300, 150, 150))
 
 
 def _spliced(qname, donor, acceptor, k):
-    """A fully-sequenced fragment OBSERVING ``(donor, acceptor)``. No mate gap, so it deposits."""
+    """A fully-sequenced fragment observing ``(donor, acceptor)``. No mate gap, so it deposits."""
     a, b, c = _SHAPES[k % len(_SHAPES)]
     return [
         _read(qname, donor - a, [(M, a), (N, acceptor - donor), (M, b)], acceptor + b, True),
@@ -125,7 +117,7 @@ def _spliced(qname, donor, acceptor, k):
 
 
 def _contiguous(qname, start, half):
-    """A fully-sequenced UNSPLICED fragment: it crosses every boundary strictly inside its span."""
+    """A fully-sequenced unspliced fragment: it crosses every boundary strictly inside its span."""
     return [
         _read(qname, start, [(M, half)], start + half, True),
         _read(qname, start + half, [(M, half)], start, False),
@@ -188,7 +180,7 @@ def scored(tmp_path_factory):
         reads += _spliced(f"spliced_{L3}_{k}", L3 + 600, L3 + 1000, k)
     reads += _ambiguous(f"ambig_{L3}", L3)
 
-    # arm 4: the DONOR end of the gap is deeply crossed and the ACCEPTOR end never is. These fragments
+    # arm 4: the donor end of the gap is deeply crossed and the acceptor end never is. These fragments
     # span [L4+400, L4+800) — over the boundary at L4+600, and stopping well short of the one at L4+1000.
     for k in range(DEEP):
         reads += _contiguous(f"contig_{L4}_{k}", L4 + 400, 200)
@@ -196,7 +188,7 @@ def scored(tmp_path_factory):
         reads += _spliced(f"spliced_{L4}_{k}", L4 + 600, L4 + 1000, k)
     reads += _ambiguous(f"ambig_{L4}", L4)
 
-    # arm 6: the MIRROR of arm 4 — the ACCEPTOR end is deeply crossed and the DONOR end never is.
+    # arm 6: the mirror of arm 4, the acceptor end deeply crossed and the donor end never.
     # These span [L6+800, L6+1200), over the boundary at L6+1000 and starting well past the one at L6+600.
     for k in range(DEEP):
         reads += _contiguous(f"contig_{L6}_{k}", L6 + 800, 200)
@@ -204,7 +196,7 @@ def scored(tmp_path_factory):
         reads += _spliced(f"spliced_{L6}_{k}", L6 + 600, L6 + 1000, k)
     reads += _ambiguous(f"ambig_{L6}", L6)
 
-    # arm 5: both sj at EQUAL depth — the same k range, so the deposited length multiset and
+    # arm 5: both sj at equal depth, the same k range, so the deposited length multiset and
     # therefore the deposited density are identical. Only the implied length differs.
     for k in range(DEEP):
         reads += _spliced(f"wide_{L5}_{k}", L5 + 650, L5 + 950, k)
@@ -232,7 +224,7 @@ def scored(tmp_path_factory):
     fl_models = build_fl_models(payload)
 
     def rescore(rna_sense_frac: float):
-        """Re-score the SAME payload at a different library sense fraction. Isolates the strand term
+        """Re-score the same payload at a different library sense fraction. Isolates the strand term
         exactly: nothing else in the score can move, because nothing else is a function of it."""
         return score_held_fragments(
             payload,
@@ -272,24 +264,21 @@ def _terms(payload, result, base: int) -> dict[tuple, tuple]:
     }
 
 
-# ── arms 1 and 2: the deep sj wins, and the answer FLIPS when the depth moves ────────────────
+# ── arms 1 and 2: the deep sj wins, and the answer flips when the depth moves ────────────────
 
 
 def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
-    """The scorer asks the kernel for sj ids, and the kernel answers in ITS OWN reference-local slots.
-    The payload's axis is the concatenation of those, so every reference but the first needs its base
-    added — and a fixture with one reference cannot tell a correct base from a missing one.
+    """The scorer asks the kernel for sj ids, and the kernel answers in its own reference-local slots.
+    The payload's axis is their concatenation, so every reference but the first needs its base added, and
+    a fixture with one reference cannot tell a correct base from a missing one.
 
-    So this builds TWO references whose sj blocks are both non-empty, and asserts the flat ids. It also
-    pins the MOTIF the lookup filters on, which is the observed one when the aligner wrote it and the
-    hypothesis's own implied strand otherwise: the third fragment below observes ``+`` while its
-    hypothesis implies ``−`` at a junction annotated ``−``, so the rule decides between a match and a
-    miss.
+    So this builds two references whose sj blocks are both non-empty, and asserts the flat ids. It also
+    pins the motif the lookup filters on: the observed one when the aligner wrote it, else the
+    hypothesis's implied strand. The third fragment observes ``+`` while its hypothesis implies ``−`` at
+    a junction annotated ``−``, so the rule decides between a match and a miss.
 
-    PERTURBATIONS, both watched: dropping the base returns the second reference's junction as the
-    first's slot, which would silently score one chromosome's traffic onto another's; taking the implied
-    strand over an observed one turns that third fragment's miss into a hit. With one reference and no
-    observed motif, neither mistake fires anything in this file.
+    Perturbations: dropping the base returns the second reference's junction as the first's slot;
+    taking the implied strand over an observed one turns the third fragment's miss into a hit.
     """
     from types import SimpleNamespace
 
@@ -318,7 +307,7 @@ def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
     }
     deferred = SimpleNamespace(
         ref=np.array([0, 1, 1], np.int64),
-        # the third fragment OBSERVED a + motif; its hypothesis implies − at a − junction
+        # the third fragment observed a + motif; its hypothesis implies − at a − junction
         sj_strand=np.array([int(Strand.NONE), int(Strand.NONE), int(Strand.POS)], np.int64),
         hypothesis_offsets=np.array([0, 1, 2, 3], np.int64),
         hypothesis_sj_strand=np.array(
@@ -342,10 +331,10 @@ def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
         "reference 1's junction is payload slot 1, not its ref-local 0, and the third fragment's "
         "observed + motif must not match a − junction"
     )
-    # the distinguishing range comes back LOCAL to each reference, as the loop consumes it
+    # the distinguishing range comes back local to each reference, as the loop consumes it
     assert first_of.tolist() == [0, 0, 2] and last_of.tolist() == [2, 2, 4]
     # not vacuous: the second reference's base is what makes the first two ids differ at all, and the
-    # third fragment's junction IS annotated — it is the motif that rejects it
+    # third fragment's junction is annotated: it is the motif that rejects it
     assert int(payload.ref_sj_offsets[1]) > 0
     heard_none = dict(deferred.__dict__)
     heard_none["sj_strand"] = np.array([int(Strand.NONE)] * 3, np.int64)
@@ -357,19 +346,17 @@ def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
 
 
 def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
-    """Arm 7. PERTURBATION: dropping the strand term entirely passes arms 1–6, because every locus there
-    offers hypotheses of one strand and the term cancels. This locus offers two.
+    """Arm 7. Dropping the strand term entirely passes arms 1–6, because every locus there offers
+    hypotheses of one strand and the term cancels. This locus offers two.
 
     ``tH`` (+) and ``tI`` (−) imply introns of the same width at different coordinates, observed by the
-    same number of fragments, so implied length and the density both tie and only the strand is left.
-    Scored twice on ONE payload, at an R1-sense and an R1-antisense library: nothing but the strand term
-    is a function of ``rna_sense_frac``, so a flipped winner isolates it exactly, which is the mirror
-    argument arms 1 and 2 use for the density, with no second fixture.
+    same number of fragments, so implied length and density both tie and only the strand is left. Scored
+    twice on one payload, at an R1-sense and an R1-antisense library: nothing but the strand term is a
+    function of ``rna_sense_frac``, so a flipped winner isolates it exactly.
 
-    The direction is the point. ``rna_sense_frac`` is ``P(align_strand agrees | RNA)``, and on a dUTP
-    cfRNA library it is ≈ 0.01, so the hypothesis that DISAGREES with ``align_strand`` is the likely
-    one. A scorer written as "agreement ⇒ multiply by ``rna_sense_frac``" is backwards on every real
-    library, and this gate is what says so.
+    The direction matters. ``rna_sense_frac`` is ``P(align_strand agrees | RNA)``, ≈ 0.01 on a dUTP
+    library, so the hypothesis that disagrees with ``align_strand`` is the likely one; a scorer written as
+    "agreement ⇒ multiply by ``rna_sense_frac``" is backwards.
     """
     payload, _default, rescore = scored
     plus, minus = ((L7 + 600, L7 + 800),), ((L7 + 700, L7 + 900),)
@@ -385,8 +372,8 @@ def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
         f"strand term is not being used, and a winner that moved the other way means it is inverted."
     )
 
-    # And ∅'s own term must be SYMMETRIC here. This locus offers candidates on both strands, so there is
-    # no locus orientation for an unspliced molecule to be sense or antisense TO, and a rule that picked
+    # And ∅'s own term must be symmetric here. This locus offers candidates on both strands, so there is
+    # no locus orientation for an unspliced molecule to be sense or antisense to, and a rule that picked
     # one anyway would make the answer depend on which annotation row was read first.
     d = payload.deferred
     i = next(j for j in range(d.n_fragments) if int(d.start[j]) == L7 + 500)
@@ -403,8 +390,8 @@ def test_the_DEEP_sj_takes_the_larger_share(scored):
     """Arm 1. Locus 1's wide intron carries ``DEEP`` observed sj fragments and its narrow rival
     ``SHALLOW``; the held fragment is compatible with both. The wide hypothesis must win.
 
-    Both rivals have NON-ZERO flux by construction, so this tests discrimination rather than
-    elimination-by-zero — which is the whole reason ``SHALLOW`` is 4 rather than 0.
+    Both rivals have non-zero flux by construction, so this tests discrimination rather than
+    elimination by zero, which is why ``SHALLOW`` is 4 rather than 0.
     """
     shares = _shares(scored[0], scored[1], L1)
     wide, narrow = ((1600, 2000),), ((1700, 1900),)
@@ -417,12 +404,11 @@ def test_the_DEEP_sj_takes_the_larger_share(scored):
 
 
 def test_MOVING_the_depth_FLIPS_the_answer(scored):
-    """Arm 2, the mirror — and the reason no threshold is needed anywhere in this module.
+    """Arm 2, the mirror, and the reason no threshold is needed in this module.
 
-    Locus 2 is locus 1's geometry with the deep sj moved to the *narrow* intron. Every implied
-    length is unchanged, so ``f`` and the strand term are unchanged
-    (:func:`test_the_two_arms_differ_ONLY_in_rho` proves it). A flipped winner therefore isolates ``rho``
-    **exactly**, where a "wins by more than X" assertion would have been a constant chosen after the fact.
+    Locus 2 is locus 1's geometry with the deep sj moved to the narrow intron. Every implied length is
+    unchanged, so ``f`` and the strand term are unchanged (the next test checks this), and a flipped winner
+    isolates ``rho`` exactly.
     """
     first = _shares(scored[0], scored[1], L1)
     second = _shares(scored[0], scored[1], L2)
@@ -435,12 +421,8 @@ def test_MOVING_the_depth_FLIPS_the_answer(scored):
 
 
 def test_the_two_arms_differ_ONLY_in_rho(scored):
-    """The mirror argument is a claim about the fixture, so it is CHECKED rather than left to prose.
-
-    If ``f`` or the strand term differed between the two loci, a flipped winner would no longer isolate
-    ``rho`` and :func:`test_MOVING_the_depth_FLIPS_the_answer` would be green for a reason it does not
-    state.
-    """
+    """The mirror argument is a claim about the fixture, so it is checked: if ``f`` or the strand term
+    differed between the two loci, a flipped winner would no longer isolate ``rho``."""
     first, second = _terms(scored[0], scored[1], L1), _terms(scored[0], scored[1], L2)
     pairs = ((((1600, 2000),), ((4600, 5000),)), (((1700, 1900),), ((4700, 4900),)), ((), ()))
     for a, b in pairs:
@@ -454,17 +436,14 @@ def test_the_two_arms_differ_ONLY_in_rho(scored):
 
 
 def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
-    """Arm 3, which failed when it was written.
+    """Arm 3. Locus 3's gap is crossed contiguously by ``DEEP`` fully-sequenced fragments and spliced by only
+    ``SHALLOW``, so the evidence says the molecule is genomic. Its intron spans exactly one region (one
+    isoform, so the intron's endpoints are adjacent region_bounds), where an evidence set of the boundaries
+    strictly inside the intron would be empty and hand ∅ a structural ``rho = 0``.
 
-    Locus 3's gap is crossed contiguously by ``DEEP`` fully-sequenced fragments and spliced by only
-    ``SHALLOW``, so the evidence says the molecule is genomic. Its intron spans EXACTLY ONE region — the
-    locus has one isoform, so the intron's endpoints are adjacent region_bounds — which is precisely the
-    configuration where ``_boundaries_inside`` returned an empty evidence set and handed ∅ a structural
-    ``rho = 0``.
-
-    The deposit rule settles the right set, not taste: a boundary is crossed iff it is strictly inside a
-    SEGMENT, so the boundaries distinguishing ∅ from a path splicing ``[a, b)`` are those at region_bounds
-    ``a <= c <= b`` — endpoints included, and both endpoints are always region_bounds.
+    The deposit rule settles the right set: a boundary is crossed iff it is strictly inside a segment, so
+    the boundaries distinguishing ∅ from a path splicing ``[a, b)`` are those at region_bounds
+    ``a <= c <= b``, endpoints included, and both endpoints are always region_bounds.
     """
     shares = _shares(scored[0], scored[1], L3)
     genomic, spliced = (), ((7600, 8000),)
@@ -477,20 +456,17 @@ def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
 
 @pytest.mark.parametrize("base,crossed_end", [(L4, "donor"), (L6, "acceptor")])
 def test_the_GENOMIC_hypothesis_needs_evidence_at_BOTH_ENDS_of_the_gap(scored, base, crossed_end):
-    """Arm 4 — the half of the empty-evidence-set defect that arms 1–3 cannot see.
+    """Arms 4 and 6: the genomic hypothesis needs evidence at both ends of the gap.
 
-    PERTURBATION: keeping only the DONOR boundary of the distinguishing set passes every other gate in
-    this module, because at locus 3 both ends carry the same deep coverage and either one alone answers.
-    Loci 4 and 6 separate them as a mirror pair: locus 4 crosses only the donor boundary and locus 6 only
-    the acceptor, so a rule that consults either end alone fails one of the two.
+    Keeping only the donor boundary of the distinguishing set passes every other gate in this module,
+    because at locus 3 both ends carry the same deep coverage. Loci 4 and 6 are a mirror pair: locus 4
+    crosses only the donor boundary and locus 6 only the acceptor, so a rule that consults either end alone
+    fails one of the two.
 
-    A molecule that crosses the gap contiguously is present at BOTH of its ends, so the scarcest object
-    on the path bounds it, which is what ``min`` aggregation means. With no fragment ever seen crossing
-    the acceptor boundary there is no evidence for a contiguous crossing however deep the donor side is,
-    and ∅ must lose to the sj that does have flux.
-
-    ∅'s zero here is a CORRECT zero, and the score keeping no fallback is what makes it stand: a
-    hypothesis with no evidence is unselectable rather than floored.
+    A molecule that crosses the gap contiguously is present at both of its ends, so the scarcest object on
+    the path bounds it (``min`` aggregation). With no fragment crossing one end there is no evidence for a
+    contiguous crossing however deep the other side is, and ∅ must lose to the sj that has flux. That zero
+    is correct: a hypothesis with no evidence is unselectable rather than floored.
     """
     shares = _shares(scored[0], scored[1], base)
     genomic, spliced = (), ((base + 600, base + 1000),)
@@ -504,11 +480,11 @@ def test_the_GENOMIC_hypothesis_needs_evidence_at_BOTH_ENDS_of_the_gap(scored, b
 
 
 def test_when_rho_TIES_the_LENGTH_term_decides(scored):
-    """Arm 5. PERTURBATION: dropping the length term from the score entirely passes arms 1–4, because
-    the density is deliberately decisive there. This locus removes the density from the contest.
+    """Arm 5. Dropping the length term from the score entirely passes arms 1–4, because the density is
+    decisive there. This locus removes the density from the contest.
 
     Both sj are observed by the same number of fragments over the same block layouts, so their deposited
-    densities are IDENTICAL — checked below, not assumed. What differs is the implied length: 300 bp for
+    densities are identical, which is checked below. What differs is the implied length: 300 bp for
     the wide intron and 500 bp for the narrow one, and the ballast puts three times the mass at 500.
     Neither bin is reachable by any locus's depth fragments, so that 3:1 is structural rather than a
     count that happens to come out right. The narrow hypothesis must win, through the length term.
@@ -545,10 +521,9 @@ def test_the_fixture_actually_DECIDES_something(scored):
         f"the seven ambiguous fragments, and only those, must be held; got "
         f"{payload.deferred.n_fragments}"
     )
-    # Arm 7's locus is EXPECTED to tie here, and that is its whole premise: its two candidates differ only
-    # in strand, and this fixture carries no strand information, so `p_r1_sense` is the neutral 0.5 and the
-    # strand term is 0.5 either way. `test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie` is what
-    # breaks that tie, by rescoring the same payload at 0.99 and at 0.01.
+    # Arm 7's locus is expected to tie here: its two candidates differ only in strand, and this fixture
+    # carries no strand information, so `p_r1_sense` is the neutral 0.5 and the strand term is 0.5 either
+    # way. The arm 7 test breaks that tie by rescoring the same payload at 0.99 and at 0.01.
     assert result.n_undecided == 1, (
         f"{result.n_undecided} records had two or more candidates tied for the lead. Exactly one is "
         f"expected — arm 7's, which ties by construction at a neutral strand fraction. More than that "

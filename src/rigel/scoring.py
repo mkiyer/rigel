@@ -22,9 +22,8 @@ def sequence_log_penalties(mismatch_rate: float | None) -> tuple[float, float]:
 
     At the library's mismatch rate ε an aligned base reads its reference base with probability 1 − ε and each of the
     three others with ε/3, while a soft-clipped base is placed nowhere and reads at the composition of the four bases,
-    ¼. So a mismatch costs log[ε / (3(1 − ε))] and a clipped base log[1 / (4(1 − ε))]
-    (``tests/test_hit_sequence.py`` enumerates the emissions). A library with no mismatch makes one impossible (−inf);
-    with no unique unspliced base to read ε on, a hit's sequence is not priced.
+    ¼. So a mismatch costs log[ε / (3(1 − ε))] and a clipped base log[1 / (4(1 − ε))]. A library with no mismatch
+    makes one impossible (−inf); with no unique unspliced base to read ε on, a hit's sequence is not priced.
     """
     if mismatch_rate is None:
         return 0.0, 0.0

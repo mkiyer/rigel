@@ -25,7 +25,10 @@ import pytest
 from _index_builder import StandInStore, rebuild_with_splice_blacklist, stand_in_store
 from rigel.config import IndexConfig
 from rigel.index import MANIFEST_JSON, SJ_BLACKLIST_FEATHER, SJ_BLACKLIST_TSV, TranscriptIndex
-from rigel.splice_blacklist import BLACKLIST_COLUMNS, aggregate_splice_blacklist
+from rigel.splice_blacklist import aggregate_splice_blacklist
+
+#: The blacklist's columns, in the order the index stores them.
+BLACKLIST_COLUMNS = ("ref", "start", "end", "max_anchor_left", "max_anchor_right", "count")
 
 
 def _row(chrom: str, s: int, e: int, rl: int, count: int, al: int, ar: int) -> dict:
@@ -96,7 +99,7 @@ class TestAggregation:
         assert df.iloc[0]["max_anchor_right"] == 18
 
     def test_aggregation_after_count_filter(self) -> None:
-        """Read-length rows below min_count must NOT contribute to max."""
+        """Read-length rows below min_count do not contribute to max."""
         df = load_splice_blacklist_from_records(
             [
                 _row("chr1", 100, 500, 50, 1, 99, 99),  # dropped
@@ -208,9 +211,9 @@ class TestIndexRoundTrip:
     def test_the_index_DIGESTS_the_blacklist_it_applies(
         self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
-        """The scan cache keys on the blacklist the resolver was given (`tests/test_scan_cache.py`). So the digest
-        is "none" exactly when none is applied, moves when any value the resolver receives moves, and ignores the
-        count, which the resolver never receives."""
+        """The scan cache keys on the blacklist the resolver was given, so the digest is "none" exactly when none
+        is applied, moves when any value the resolver receives moves, and ignores the count, which the resolver
+        never receives."""
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta, gtf, out_dir)
@@ -354,8 +357,8 @@ def mini_index_inputs(tmp_path: Path):
 def test_a_store_that_cannot_be_read_refuses_the_build_and_keeps_the_index(
     mini_index_inputs, tmp_path
 ):
-    """The store is read before the first write. A mistyped path used to fail at the end of the build, after the old
-    manifest was deleted, so rebuilding over a working index left one that cannot be loaded."""
+    """The store is read before the first write, so a mistyped path refuses the build and leaves the working index
+    in place, rather than failing after its manifest is deleted and leaving one that cannot be loaded."""
     fasta, gtf = mini_index_inputs
     out = tmp_path / "idx"
     TranscriptIndex.build(fasta, gtf, out)
@@ -387,7 +390,7 @@ def test_a_blacklist_whose_references_miss_the_fasta_refuses_the_build(
     mini_index_inputs, tmp_path, monkeypatch
 ):
     """A blacklist names junctions by reference. One built for references the FASTA does not hold (``1`` against
-    ``chr1``) matches nothing, while the index reported splice-artifact detection on."""
+    ``chr1``) would match nothing while the index reports splice-artifact detection on, so the build refuses it."""
     fasta, gtf = mini_index_inputs
     out = tmp_path / "idx"
     TranscriptIndex.build(fasta, gtf, out)

@@ -1,9 +1,6 @@
-"""
-rigel.transcript — Transcript dataclass and GTF-to-Transcript parsing.
+"""rigel.transcript — the Transcript dataclass, read from a GTF.
 
-The Transcript is the atomic unit of transcription. Each transcript belongs
-to a gene (identified by g_id / g_index) and contains an ordered list of
-Exon intervals in 0-based half-open coordinates.
+A transcript belongs to one gene (``g_id`` / ``g_index``) and holds its exons in order, 0-based half-open.
 """
 
 import logging
@@ -65,46 +62,30 @@ class Transcript:
     is_mane: bool = False
     is_ccds: bool = False
     is_single_exon: bool = False
-    """The transcript has one exon. The GTF reader sets it on every single-exon transcript, and every
-    synthetic span is single-exon too."""
+    """The transcript has one exon, as every synthetic span does."""
     is_synthetic: bool = False
     span_t_index: int = -1
-    """t_index of the transcript's span entity (-1 = none).
-
-    For multi-exon transcripts: the entity over this transcript's merged TSS/TES span — a synthetic
-    span, or the annotated single-exon transcript that covers the span.
-    For single-exon transcripts: itself if it covers a merged span, else -1.
-    For synthetics: -1.
-    """
+    """t_index of the transcript's span entity, -1 for none. A multi-exon transcript's is the entity over its merged
+    TSS/TES span (a synthetic span, or the annotated single-exon transcript covering it); a single-exon transcript's
+    is itself if it covers a merged span; a synthetic's is -1."""
     span_n_contributors: int = 0
-    """Number of annotated multi-exon transcripts whose merged spans this entity stands for.
-
-    Only meaningful for synthetic spans and the annotated single-exon transcripts that cover a span.
-    Zero for regular annotated transcripts.
-    """
+    """The number of annotated multi-exon transcripts whose merged spans this entity stands for; zero except on
+    synthetic spans and the single-exon transcripts that cover a span."""
     abundance: float | None = None
     nrna_abundance: float = 0.0
-    """A simulator input, read only by ``rigel.sim``; the quantifier never reads it.
-
-    The molecular abundance of RNA that has not spliced, which the simulator
-    samples contiguously over the genomic span (pooled first onto the
-    single-exon entity covering the span,
-    ``sim.whole_genome.assign_nrna_to_entities``). Independent of
-    ``abundance``, the molecules the simulator samples on the spliced template.
-    Read fractions are proportional to::
+    """A simulator input, read only by ``rigel.sim``: the abundance of RNA that has not spliced, sampled contiguously
+    over the genomic span (pooled onto the span's single-exon entity, ``sim.whole_genome.assign_nrna_to_entities``).
+    Independent of ``abundance``; read fractions are proportional to::
 
         spliced template : abundance      × spliced_effective_length
         genomic span     : nrna_abundance × genomic_span_effective_length
-
-    Setting ``nrna_abundance = k × abundance`` puts *k* molecules on the
-    genomic span for every one on the spliced template.
     """
     aliases: tuple[str, ...] = ()
     """The IDs of the identical transcripts ``--collapse-duplicate-transcripts`` folded into this one."""
 
     @classmethod
     def from_gtf(cls, feature) -> "Transcript":
-        """Create a Transcript object from a GTF feature"""
+        """A Transcript from a GTF feature's reference, strand, IDs and tags."""
         t = cls()
         if not hasattr(feature, "seqname"):
             raise AttributeError("GTF feature missing seqname")
@@ -118,7 +99,7 @@ class Transcript:
         t.g_name = _first_attr(attrs.get("gene_name"))
         # GENCODE writes gene_type, Ensembl gene_biotype
         t.g_type = _first_attr(attrs.get("gene_type")) or _first_attr(attrs.get("gene_biotype"))
-        # gencode specific tags
+        # GENCODE tags
         tags = getattr(feature, "tags", set()) or set()
         t.is_basic = "basic" in tags
         t.is_mane = ("MANE_Select" in tags) or ("MANE_Plus_Clinical" in tags)
@@ -173,7 +154,7 @@ class Transcript:
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
     ) -> list["Transcript"]:
-        """Read GTF and construct list of Transcript objects."""
+        """Read a GTF's exon records into transcripts, sorted by ``(ref, start, end, strand)``."""
         transcripts: dict[str, Transcript] = {}
         logging.debug("[Transcript] Reading GTF file: %s", gtf_file)
         n_exon_features = 0

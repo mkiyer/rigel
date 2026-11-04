@@ -1,10 +1,7 @@
 """rigel.routing — score every buffered fragment and route it.
 
-Converts a ``FragmentBuffer`` into ``ScoredFragments`` for the EM solver.
-The ``FragmentRouter`` class drives the native scorer over the buffer, routes
-unambiguous fragments to deterministic assignment, and accumulates
-ambiguous fragments into CSR-formatted equivalence-class data for
-the locus-level EM.
+:class:`FragmentRouter` turns a ``FragmentBuffer`` into ``ScoredFragments``: it drives the native scorer over the
+buffer, assigns unambiguous fragments deterministically, and packs the rest into the CSR the locus-level EM reads.
 """
 
 import logging
@@ -23,13 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class FragmentRouter:
-    """Builds the global CSR (ScoredFragments) from a FragmentBuffer.
-
-    Drives the native StreamingScorer over buffer chunks: it scores each
-    fragment against its compatible transcripts in C++, routes
-    deterministic-unique fragments to direct assignment, and packs the
-    remaining ambiguous fragments into the global CSR ``ScoredFragments``
-    for the locus-level EM.
+    """Builds the global CSR (``ScoredFragments``) from a ``FragmentBuffer`` with the native ``StreamingScorer``.
 
     Parameters
     ----------
@@ -70,14 +61,10 @@ class FragmentRouter:
     # ------------------------------------------------------------------
 
     def route(self, buffer: FragmentBuffer, log_every: int) -> ScoredFragments:
-        """Score and route every buffered fragment in one pass.  Returns packed ScoredFragments.
+        """Score and route every buffered fragment in one pass, consuming the buffer's chunks in order.
 
-        Deterministic-unique (SPLICED_ANNOT + FRAG_UNAMBIG) fragments
-        are assigned directly via the C++ scoring path.  All other
-        exonic fragments build EM units.
-
-        Chunks are consumed from the buffer in order and scored by the
-        native ``StreamingScorer``.
+        A deterministic-unique fragment (spliced-annotated and ``FRAG_UNAMBIG``) is assigned directly in C++; every
+        other genic fragment becomes an EM unit.
         """
         native_scorer = self.scorer
         estimator = self.estimator
@@ -88,14 +75,7 @@ class FragmentRouter:
 
         from .native import StreamingScorer
 
-        t_strand_arr = np.ascontiguousarray(index.t_to_strand_arr, dtype=np.int8)
-
-        # ---- Streaming scoring: one chunk at a time ----
-        scorer = StreamingScorer(
-            native_scorer,
-            t_strand_arr,
-            estimator.unambig_counts,
-        )
+        scorer = StreamingScorer(native_scorer, estimator.unambig_counts)
 
         n_processed = 0
         n_total = buffer.total_fragments
@@ -152,11 +132,10 @@ class FragmentRouter:
         stats.em_routed_ambig_opp_strand_units += int(n_em_ao)
         stats.n_gated_out += int(n_gated)
         stats.em_routed_multimapper_units += int(n_mm)
-        # A multimapper whose only places the gates left are intergenic is intergenic, as one none of whose hits
-        # resolves
+        # A multimapper whose only places left after the gates are intergenic counts as intergenic
         stats.n_intergenic += len(intergenic_fids)
 
-        # Det-unambig annotations
+        # deterministic-unambiguous annotations
         if annotations is not None and len(det_tids) > 0:
             is_synth_arr = index.t_df["is_synthetic"].values.astype(bool)
             for j in range(len(det_tids)):

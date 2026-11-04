@@ -1,13 +1,12 @@
 """A hand-checkable substrate for the gDNA length law's two-pool contrast: five regions on one reference.
 
 Intergenic 10 kb | exon 200 | intron 8 kb | exon 200 | intergenic 10 kb, every off-target region holding exactly its
-uniform expectation at ``RHO`` per contained start, and the five pools at the laws that implies: the contained pools
-and the spliced RNA pool at one law, the two crossing pools tilted by their crossing opportunity.
+uniform expectation at ``RHO`` per contained start, and the five pools at the laws that implies: the contained pools and
+the spliced RNA pool at one law, the two crossing pools tilted by their crossing opportunity.
 
-Deliberately NOT a real ``AccumulatorPayload``: the length laws consume four payload fields, and building the full
-scanner object here would couple this fixture to the scan schema for no gain. The dataclass below carries exactly the
-consumed surface, and a schema change that widens that surface will fail these tests loudly at the attribute, which is
-the right failure.
+Not a real ``AccumulatorPayload``: the length laws consume four payload fields, and the dataclass below carries exactly
+that surface, so the fixture is not coupled to the scan schema and a change that widens the surface fails at the
+attribute.
 """
 
 from __future__ import annotations

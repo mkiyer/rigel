@@ -19,20 +19,18 @@ from rigel.scan_payload import (
     ScanQC,
 )
 
-#: ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64. The accumulator deposits
-#: ``1/placements`` directly — there is no scale and nothing to decode, so this fixture builds the same
-#: number the accumulator would.
+#: A count is an integer, a fraction is float64. The accumulator deposits ``1/placements`` directly, so this fixture
+#: builds the same number the accumulator would.
 
 
 def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
-    """A 1-reference, 3-region payload + aligned :class:`RegionArrays`, with every bank distinct.
+    """A 1-reference, 3-region payload with aligned :class:`RegionArrays`, every bank distinct.
 
-    chr1 is cut at 0/100/200/300, so it owns 3 regions and 2 contiguous boundaries — the axes are off
-    by one per reference, and a fixture that used the same length for both would hide an axis mix-up.
-    One sj boundary exists so the third axis is non-trivial.
+    chr1 is cut at 0/100/200/300, so it owns 3 regions and 2 contiguous boundaries; the axes are off by one per
+    reference, and one length for both would hide an axis mix-up. One sj boundary makes the third axis non-trivial.
 
-    Regions: n0 +exon, n1 −exon, n2 intergenic. Every population gets its own values, and no two banks
-    share a value, so a consumer reading the wrong one cannot pass by coincidence::
+    Regions: n0 +exon, n1 −exon, n2 intergenic. No two banks share a value, so a consumer reading the wrong one cannot
+    pass by coincidence::
 
         region_contained_count   n0 [10, 2]   n1 [1, 20]   n2 [7, 8]
         boundary_unspliced_count   e0 [4, 1]    e1 [2, 3]
@@ -50,19 +48,16 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     sj = bank(n_sj, [[9, 4]], np.uint32)
 
     def inv(counts, placements):
-        """The float64 reciprocal sum that ``counts`` fragments at one placement count deposit.
-
-        ONE column — the two strands are SUMMED, because the length moments carry no strand axis.
+        """The float64 reciprocal sum that ``counts`` fragments at one placement count deposit. One column: the two
+        strands are summed, because the length moments carry no strand axis.
         """
         return np.asarray(counts, np.float64).sum(axis=1) / placements
 
     def mass(counts, per_crossing=2):
-        """The conserved mass a bank of ``counts`` crossings would deposit, at ``1/per_crossing`` each.
-
-        ONE value per boundary — the two strand columns are SUMMED, because the mass has no strand
-        axis. And it is a plausible state rather than an arbitrary array: a crossing's share is at most
-        one fragment, so ``mass <= count`` must hold. ``per_crossing = 2`` is the value for a fragment
-        that crosses two boundaries, which is what this fixture's multi-boundary geometry produces.
+        """The conserved mass a bank of ``counts`` crossings would deposit, at ``1/per_crossing`` each. One value per
+        boundary (the strand columns summed, since the mass has no strand axis), and ``mass <= count`` holds because a
+        crossing's share is at most one fragment. ``per_crossing = 2`` is the value for a fragment crossing two
+        boundaries, as this fixture's geometry produces.
         """
         return np.asarray(counts, np.float64).sum(axis=1) / per_crossing
 
@@ -73,9 +68,8 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ref_boundary_offsets=np.array([0, n_boundaries], dtype=np.int64),
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),
         region_contained_count=contained,
-        # per genome strand; every value distinct from every other bank's so a consumer reading the
-        # wrong one cannot pass by coincidence. Ledger: ΣS == deposited in a real scan; this fixture's
-        # qc uses its own totals.
+        # per genome strand; every value differs from every other bank's so a consumer reading the wrong one cannot pass
+        # by coincidence. In a real scan ΣS == deposited; this fixture's qc uses its own totals.
         region_start_count=np.array([[6, 5], [7, 5], [9, 4]], dtype=np.uint32),
         boundary_unspliced_count=unspliced,
         boundary_unspliced_inv_length_sum=inv(unspliced, 25),
@@ -84,14 +78,13 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         boundary_spliced_mass=mass(spliced),
         sj_count=sj,
         sj_inv_length_sum=inv(sj, 10),
-        # TWO COLUMNS, and they SUM to what the one-column bank held (1.3), so every expectation
-        # downstream of the substrate's fold is unchanged by the strand split.
+        # Two columns summing to 1.3, the one-column total, so every expectation downstream of the substrate's fold is
+        # the same.
         sj_mass=np.asarray(sj, np.float64) / 10.0,
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
         deposited_lengths=np.zeros(201, dtype=np.uint32),
-        # Nothing was deferred here, and that is a real state, not a stub: this fixture has no
-        # annotated intron in any mate gap. The two empty spellings live on the classes so a
-        # hand-built payload cannot get the `[0]`-not-`[]` offset boundary wrong.
+        # Nothing was deferred here, a real state: this fixture has no annotated intron in any mate gap. The empty
+        # spellings live on the classes so a hand-built payload cannot get the `[0]`-not-`[]` offset wrong.
         deferred=DeferredFragments.empty(),
         gap_resolution=GapCensus.zeros(),
         qc=ScanQC(
@@ -121,16 +114,11 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
 
 
 def make_synthetic_sj():
-    """The :class:`SpliceJunctionGeometry` matching :func:`make_synthetic_payload`'s one sj boundary.
-
-    It must exist, and match. The payload declares ``n_sj = 1``; ``calibrate`` refuses a sj
-    axis of a different length, because an axis addressing a different graph would place every splice
-    on the wrong boundary and nothing downstream would fault on it.
-
-    The sj runs ``region 0 → region 2``, i.e. it splices OVER region 1 — the only shape a 3-region
-    reference admits, and the one that makes the donor and acceptor two DIFFERENT boundaries (boundary 0 and
-    boundary 1). A ``0 → 1`` sj would put both endpoints on the same boundary and hide an
-    endpoint mix-up.
+    """The :class:`SpliceJunctionGeometry` matching :func:`make_synthetic_payload`'s one sj boundary. ``calibrate``
+    refuses a sj axis whose length differs from the payload's ``n_sj``, because an axis addressing another graph would
+    place every splice on the wrong boundary. The sj runs ``region 0 → region 2``, splicing over region 1, so its donor
+    and acceptor are different boundaries (0 and 1); a ``0 → 1`` sj would put both on one boundary and hide an endpoint
+    mix-up.
     """
     from rigel.calibration.splice_graph import SpliceJunctionGeometry
     from rigel.types import Strand
@@ -152,12 +140,9 @@ def make_gdna_fl_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
 
 
 def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):
-    """A real :class:`StrandModels` with a chosen κ and observation count.
-
-    The calibrator reads BOTH halves of the RNA strand Beta-Binomial from the per-sj strand
-    table — κ as its marginal, the overdispersion as its spread — so a unit fixture must
-    supply a real table rather than duck-type two scalars. Observations are spread evenly over
-    ``n_sj`` motif-POS sj, sense/antisense split to give exactly ``p_r1_sense``.
+    """A real :class:`StrandModels` with a chosen κ and observation count. The calibrator reads κ from the per-sj strand
+    table as its marginal, so a unit fixture supplies a real table. Observations are spread evenly over ``n_sj``
+    motif-POS sj, split sense/antisense to give exactly ``p_r1_sense``.
     """
     from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
     from rigel.types import Strand
@@ -168,7 +153,7 @@ def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):
     if n_sj:
         depth[0] += rem
     n_sense = np.rint(depth * float(p_r1_sense)).astype(np.int64)
-    # Repair rounding so the marginal is EXACTLY the requested rate where it can be.
+    # Repair rounding so the marginal is exactly the requested rate where it can be.
     want = int(round(n_observations * float(p_r1_sense)))
     if n_sj and n_sense.sum() != want:
         n_sense[0] = np.clip(n_sense[0] + (want - n_sense.sum()), 0, depth[0])
@@ -184,12 +169,12 @@ def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):
 
 
 # ---------------------------------------------------------------------------
-# The chain fixture — hand-built numbers on the region / boundary / sj axes.
+# The chain fixture: hand-built numbers on the region / boundary / sj axes.
 # ---------------------------------------------------------------------------
 
 
 def delta_pmf(length: int, size: int | None = None) -> np.ndarray:
-    """A fragment-length pmf concentrated at one length — the simplest oracle for a divisor."""
+    """A fragment-length pmf concentrated at one length, the simplest oracle for a divisor."""
     p = np.zeros((size or length) + 1, dtype=np.float64)
     p[length] = 1.0
     return p
@@ -210,14 +195,12 @@ def make_chain_parts(
     ref_names=None,
     boundary_flags=None,
 ):
-    """A chain + substrate + geometry + statics over ``signatures``, on the region / boundary / sj axes.
+    """A chain + substrate + geometry + statics over ``signatures``, on the region / boundary / sj axes. A reference
+    with ``k`` regions owns ``k`` region rows and ``k − 1`` contiguous-boundary rows, with no terminal slots. Every
+    per-object argument is broadcast, so a test states only the numbers it cares about.
 
-    The axes are off by one per reference and that is the point of the helper: a reference with ``k``
-    regions owns ``k`` region rows and ``k − 1`` contiguous-boundary rows, with no terminal slots.
-    Every per-object argument is broadcast, so a test states only the numbers it cares about.
-
-    ``sj`` is a list of ``(src_region, dst_region, strand, reach_lo, reach_hi, count)``; each becomes a
-    row on the sj axis and is placed on the boundaries it leaves and enters.
+    ``sj`` is a list of ``(src_region, dst_region, strand, reach_lo, reach_hi, count)``; each becomes a row on the sj
+    axis and is placed on the boundaries it leaves and enters.
 
     Returns ``SimpleNamespace(chain, substrate, region_arrays, geometry, statics)``.
     """

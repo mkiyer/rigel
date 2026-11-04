@@ -84,10 +84,10 @@ def test_local_sources_survive_when_the_exon_reduction_is_zero(empty_single):
 
 @pytest.mark.parametrize("strand", ["pos", "neg"])
 @pytest.mark.parametrize("side", ["lo", "hi"])
-@pytest.mark.parametrize("kappa", [0.99, 0.5, None])
+@pytest.mark.parametrize("kappa", [0.99, 0.5])
 def test_flux_survives_when_every_unspliced_object_is_empty(strand, side, kappa):
     ctx, policy = _flux_only(strand, side=side), TransferPolicy(kappa)
-    ctx = replace(ctx, strand_live=kappa is not None and kappa != 0.5)
+    ctx = replace(ctx, strand_live=kappa != 0.5)
     facts = policy.library(ctx)
     assert facts.rho_rna > 0.0
     prepared = _prepared(policy, ctx, facts)

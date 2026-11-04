@@ -1,13 +1,7 @@
-"""rigel.scored_fragments — Data containers for the EM solver.
+"""rigel.scored_fragments — the EM's input containers, pure dataclasses.
 
-Pure dataclasses with no logic.
-
-- ``ScoredFragments`` — global CSR arrays linking fragment units to
-  candidate transcripts with log-likelihoods, built by ``routing.py``.
-- ``LocusPartition`` — per-locus CSR subset for the partitioned native
-  EM path, scattered from it by ``locus_partition.partition_and_free``.
-
-The locus containers live in :mod:`rigel.locus`.
+``ScoredFragments`` is the global CSR linking fragment units to candidate transcripts, built by ``rigel.routing``;
+``LocusPartition`` is one locus's slice of it, scattered by ``locus_partition.partition_and_free``.
 """
 
 from dataclasses import dataclass
@@ -15,23 +9,11 @@ from dataclasses import dataclass
 import numpy as np
 
 
-# ======================================================================
-# ScoredFragments — pre-computed CSR arrays for vectorized EM
-# ======================================================================
-
-
 @dataclass(slots=True)
 class ScoredFragments:
-    """Fragment-level candidate data for the EM, scored from the fragment buffer.
-
-    Contains pre-computed CSR (compressed sparse row) arrays linking
-    each ambiguous fragment unit to its candidate transcripts and
-    their log-likelihoods.  Produced by ``FragmentRouter`` in routing.py
-    and consumed during locus EM construction.
-
-    The global ScoredFragments contains transcript candidates only
-    (NO gDNA).  gDNA candidates are added per-locus during locus EM
-    construction.
+    """The EM's candidate data, scored from the fragment buffer by ``FragmentRouter``: CSR arrays linking each
+    ambiguous fragment unit to its candidate transcripts and their log-likelihoods. Transcript candidates only; the
+    gDNA candidate is added per locus.
 
     Attributes
     ----------
@@ -40,8 +22,9 @@ class ScoredFragments:
     t_indices : np.ndarray
         int32[n_candidates] — candidate transcript indices.
     log_liks : np.ndarray
-        float32[n_candidates] — per candidate, ``log P_strand + log P_insert`` plus the overhang
-        penalty (log-penalty × overhang bases) and the mismatch penalty (log-penalty × NM).
+        float32[n_candidates] — per candidate, ``log P_strand + log P_insert`` plus the overhang penalty
+        (log-penalty × overhang bases); a multimapper's candidate also carries its hit's sequence price (NM and
+        soft-clipped bases) and its place weight (``native/scoring.cpp``).
     count_cols : np.ndarray
         uint8[n_candidates] — ``SpliceStrandCol`` index per candidate (0–7).
     coverage_weights : np.ndarray
@@ -53,8 +36,8 @@ class ScoredFragments:
         candidate (``gdna_competes``) and it has no intergenic place. An unspliced, artifact or implicit unit
         is True only in the second case.
     gdna_log_liks : np.ndarray
-        float32[n_units] — pre-computed gDNA log-likelihood per unit at its places in the locus, the sum over
-        them. -inf where the locus's gDNA is no candidate.
+        float32[n_units] — the unit's gDNA log-likelihood, summed over its places in the locus; -inf where the
+        locus's gDNA is no candidate.
     intergenic_log_liks : np.ndarray
         float32[n_units] — the sum of the gDNA terms at a multimapper's places with no transcript candidate,
         which no locus carries: the EM reads it at the intergenic rate, and it is never pruned. -inf where no
@@ -86,24 +69,11 @@ class ScoredFragments:
     intergenic_log_liks: np.ndarray | None = None
 
 
-# ======================================================================
-# LocusPartition — per-locus CSR subset for partitioned EM
-# ======================================================================
-
-
 @dataclass(slots=True)
 class LocusPartition:
-    """Per-locus CSR subset with contiguous, 0-indexed arrays.
-
-    Produced by ``partition_and_free()`` which scatters the global
-    ``ScoredFragments`` CSR into per-locus partitions.  Each partition
-    is self-contained: its ``offsets`` array defines a local CSR over
-    ``n_units`` rows and ``n_candidates`` total candidate entries.
-
-    Transcript indices (``t_indices``) remain in **global** transcript
-    space; the C++ ``extract_locus_sub_problem_from_partition`` remaps them
-    to local indices.
-    """
+    """One locus's slice of the global CSR, contiguous and 0-indexed: ``offsets`` is a local CSR over ``n_units`` rows
+    and ``n_candidates`` entries. ``t_indices`` stay global; the C++ ``extract_locus_sub_problem_from_partition``
+    remaps them."""
 
     locus_id: int
     n_units: int
@@ -113,7 +83,7 @@ class LocusPartition:
     offsets: np.ndarray  # int64[n_units + 1]
 
     # Per-candidate arrays (indexed by offsets)
-    t_indices: np.ndarray  # int32 — GLOBAL transcript indices
+    t_indices: np.ndarray  # int32 — global transcript indices
     log_liks: np.ndarray  # float32
     count_cols: np.ndarray  # uint8
     coverage_weights: np.ndarray  # float32

@@ -1,11 +1,10 @@
-"""Falsification gates for the FIXED-TOTAL depth mode (``simulation.n_total_fragments``).
+"""The simulator's fixed-total depth mode (``simulation.n_total_fragments``).
 
 ``resolve_depths`` has two modes. With ``n_total_fragments`` unset (the default) the RNA depth is
 fixed and gDNA is added on top at ``n_gdna = rate x n_rna``, which cannot reach the high-gDNA end of
 the spectrum: a 98 % gDNA library is ``rate = 49``, so 490 M fragments at a 10 M RNA depth. With it
-set, the TOTAL is held and ``rate`` decides only the SPLIT, which is what a sequencing run with a fixed
-budget does; the RNA-side accuracy loss at high gDNA is accepted. Each gate below carries its own
-perturbation, because a gate that has never been watched to fire has not been written yet.
+set, the total is held and ``rate`` decides only the split, as a sequencing run with a fixed budget
+does. Each gate carries a perturbation that shows it can fire.
 """
 
 from __future__ import annotations
@@ -25,12 +24,11 @@ def _params(**kw) -> SimulationParams:
 
 
 def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
-    """``n_rna + n_gdna`` must equal the requested total on every rung, exactly — not to within
-    rounding drift. A ladder whose rungs have different depths cannot be compared across rungs, which
-    is the entire purpose of fixing the total.
+    """``n_rna + n_gdna`` equals the requested total on every rung exactly, not to within rounding
+    drift: rungs of different depths cannot be compared, which is the purpose of fixing the total.
 
-    PERTURBATION: the additive path (``n_total_fragments=None``) must NOT conserve it — otherwise this
-    gate passes on a property the additive mode already has and proves nothing about the fixed total.
+    Perturbation: the additive path (``n_total_fragments=None``) must not conserve it, or this gate
+    passes on a property the additive mode already has.
     """
     sim = _params(n_total_fragments=TOTAL)
     for rate in LADDER:
@@ -43,11 +41,11 @@ def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
 
 
 def test_the_realised_gDNA_FRACTION_tracks_the_rung():
-    """The point of the ladder is to sweep ``f_gdna``, so the realised fraction must be the requested
-    one. Checked against ``rate/(1+rate)``, which is what the rate MEANS — not against the label.
+    """The realised gDNA fraction is the requested one, checked against ``rate/(1+rate)``, which is
+    what the rate means, not against the label.
 
-    PERTURBATION: a ladder that produced a constant fraction would still conserve the total, so the
-    gate above cannot catch it. This one requires the fractions to span the range they claim.
+    Perturbation: a ladder that produced a constant fraction would still conserve the total, so the
+    gate above cannot catch it; this one requires the fractions to span the range they claim.
     """
     sim = _params(n_total_fragments=TOTAL)
     fracs = []
@@ -63,13 +61,12 @@ def test_the_realised_gDNA_FRACTION_tracks_the_rung():
 
 
 def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
-    """With nascent enabled the total must still hold: nRNA comes out of the RNA share, it is not
-    added on top. That is STRUCTURAL — the nascent entities are rows of the one RNA multinomial — so
-    the gate is on the ENGINE: every fragment the RNA draw assigns, mature or nascent, is one of the
-    ``n_rna`` the budget gave it.
+    """With nascent enabled the total still holds: nascent RNA comes out of the RNA share, not on
+    top of it. The nascent entities are rows of the one RNA multinomial, so the gate is on the engine:
+    every fragment the RNA draw assigns, mature or nascent, is one of the ``n_rna`` the budget gave it.
 
-    PERTURBATION: the same draw with the entity's nascent abundance zeroed must put strictly more
-    fragments on the mature row — if nascent were ignored, this gate is vacuous.
+    Perturbation: the same draw with the entity's nascent abundance zeroed must put strictly more
+    fragments on the mature row, or the gate is vacuous.
     """
     from rigel.sim.annotation import GeneBuilder
     from rigel.sim.genome import MutableGenome
@@ -132,11 +129,10 @@ def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
 
 
 def test_omitting_the_total_leaves_the_LEGACY_path_byte_identical():
-    """The mode must be opt-in. A config that omits ``n_total_fragments`` gets the additive depths
-    exactly — ``n_rna`` is the configured RNA depth and ``n_gdna = round(rate x n_rna)`` — so a depth
-    change never reaches a config that did not ask for one.
+    """The mode is opt-in: a config that omits ``n_total_fragments`` gets the additive depths
+    exactly (``n_rna`` is the configured RNA depth and ``n_gdna = round(rate x n_rna)``).
 
-    PERTURBATION: switching the mode on must move the numbers, or the identity is vacuous.
+    Perturbation: switching the mode on must move the numbers, or the identity is vacuous.
     """
     legacy = _params(n_total_fragments=None)
     for rate in LADDER:
@@ -150,11 +146,10 @@ def test_omitting_the_total_leaves_the_LEGACY_path_byte_identical():
 
 
 def test_a_total_too_small_for_the_rung_RAISES_rather_than_rounding_to_zero():
-    """At rate 49 a 100-fragment total leaves 2 RNA fragments; at some point the RNA side rounds to
-    zero and the condition silently stops being an RNA-seq library at all. That must fail loudly —
-    a mis-stated depth must raise, never quietly produce nothing.
+    """At rate 49 a 100-fragment total leaves 2 RNA fragments; a smaller one rounds the RNA side to
+    zero, and the condition would silently stop being an RNA-seq library, so it raises.
 
-    PERTURBATION: a total that IS large enough must not raise.
+    Perturbation: a total that is large enough must not raise.
     """
     with pytest.raises(ValueError, match="RNA"):
         resolve_depths(_params(n_total_fragments=10), gdna_rate=49.0)

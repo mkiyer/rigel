@@ -64,8 +64,8 @@ def test_transcript_read_gtf_respects_parse_mode(tmp_path: Path):
     ids=["quoted", "unquoted"],
 )
 def test_the_last_attribute_needs_no_trailing_semicolon(attrs):
-    """GTF asks for a `;` after every attribute and many files omit the last one; the pattern that required it dropped
-    the final attribute — here the transcript id — without a word."""
+    """GTF asks for a `;` after every attribute and many files omit the last one, so the final attribute (here the
+    transcript id) is read without it rather than dropped in silence."""
     r = GTFRecord.from_str(f"chr1\ttest\texon\t100\t200\t.\t+\t.\t{attrs}")
     assert r.attrs["gene_id"] == "G1"
     assert r.attrs["transcript_id"] == "T1"
@@ -78,8 +78,8 @@ def _write(tmp_path: Path, lines: list[str]) -> str:
 
 
 def test_an_exon_without_a_transcript_id_follows_the_parse_mode(tmp_path: Path):
-    """An exon with no `transcript_id` raised a bare KeyError from `read_gtf`, outside the parse mode, so even
-    warn-and-skip stopped on it. Strict names it; warn-and-skip drops that exon and keeps the rest."""
+    """An exon with no `transcript_id` is judged by the parse mode, not raised as a bare KeyError that stops even
+    warn-and-skip. Strict names it; warn-and-skip drops that exon and keeps the rest."""
     path = _write(
         tmp_path,
         [
@@ -104,8 +104,8 @@ def test_an_exon_without_a_transcript_id_follows_the_parse_mode(tmp_path: Path):
 def test_an_exon_off_its_transcripts_reference_or_strand_follows_the_parse_mode(
     tmp_path: Path, stray
 ):
-    """A transcript's exons share its reference and strand; a stray exon was merged in silently, building a transcript
-    that spans two chromosomes or two strands. Strict names it; warn-and-skip drops that exon and keeps the rest."""
+    """A transcript's exons share its reference and strand; a stray exon merged in would build a transcript that spans
+    two chromosomes or two strands. Strict names it; warn-and-skip drops that exon and keeps the rest."""
     path = _write(
         tmp_path,
         ['chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n', stray],
@@ -121,7 +121,8 @@ def _exon(start, end, gene="g1", transcript="t1", ref="chr1", strand="+", extra=
 
 
 def test_an_exon_ending_before_it_starts_follows_the_parse_mode(tmp_path: Path):
-    """An exon with its end before its start parsed, the index built, and `rigel quant` failed far from the cause."""
+    """An exon with its end before its start is judged by the parse mode, rather than building an index on which
+    `rigel quant` fails far from the cause."""
     path = _write(tmp_path, [_exon(100, 200), _exon(500, 400)])
     with pytest.raises(ValueError, match="line 2"):
         Transcript.read_gtf(path, parse_mode="strict")
@@ -135,8 +136,8 @@ def test_an_exon_ending_before_it_starts_follows_the_parse_mode(tmp_path: Path):
     ids=["overlapping", "duplicated"],
 )
 def test_overlapping_or_duplicated_exons_follow_the_parse_mode(tmp_path: Path, second):
-    """Exons of one transcript are disjoint. Overlapping or duplicated ones lengthened the transcript (600 to 900 bp in
-    the release review's case) and wrote negative or empty introns into the splice graph."""
+    """Exons of one transcript are disjoint. Overlapping or duplicated ones would lengthen the transcript and write
+    negative or empty introns into the splice graph."""
     path = _write(tmp_path, [_exon(100, 200), _exon(*second), _exon(500, 600)])
     with pytest.raises(ValueError, match="overlaps"):
         Transcript.read_gtf(path, parse_mode="strict")
@@ -147,7 +148,7 @@ def test_overlapping_or_duplicated_exons_follow_the_parse_mode(tmp_path: Path, s
 
 def test_abutting_exons_are_one_exon(tmp_path: Path):
     """Exons with no base between them (RefSeq writes them at genome indels) are one block of the transcript. Kept apart,
-    they made a 0-bp intron: the transcript turned multi-exon and its synthetic span took half its reads."""
+    they would make a 0-bp intron: the transcript would turn multi-exon and its synthetic span take half its reads."""
     path = _write(tmp_path, [_exon(100, 300), _exon(301, 500)])
     for mode in ("strict", "warn-skip"):
         (t,) = Transcript.read_gtf(path, parse_mode=mode)
@@ -159,8 +160,8 @@ def test_abutting_exons_are_one_exon(tmp_path: Path):
 
 
 def test_a_transcript_id_shared_by_two_genes_follows_the_parse_mode(tmp_path: Path):
-    """Two genes' transcripts sharing an ID on one reference and strand were merged into one transcript behind a fake
-    intron, and the second gene vanished from the tables."""
+    """Two genes' transcripts sharing an ID on one reference and strand would merge into one transcript behind a fake
+    intron, and the second gene would vanish from the tables."""
     path = _write(tmp_path, [_exon(100, 200, gene="g1"), _exon(5000, 5200, gene="g2")])
     with pytest.raises(ValueError, match="g2"):
         Transcript.read_gtf(path, parse_mode="strict")
@@ -192,8 +193,8 @@ def _fasta(tmp_path: Path, length: int) -> Path:
     ids=["contig-missing-from-the-fasta", "past-the-contig-end"],
 )
 def test_a_transcript_off_the_fasta_follows_the_parse_mode(tmp_path: Path, stray):
-    """A transcript on a contig the FASTA lacks, or past a contig's end, raised a bare error from the build even under
-    warn-and-skip. Strict refuses it by name; warn-and-skip drops it and builds the rest."""
+    """A transcript on a contig the FASTA lacks, or past a contig's end, follows the parse mode rather than failing the
+    build with a bare error. Strict refuses it by name; warn-and-skip drops it and builds the rest."""
     from rigel.index import TranscriptIndex
 
     fasta = _fasta(tmp_path, 1000)

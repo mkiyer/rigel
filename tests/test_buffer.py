@@ -194,7 +194,7 @@ class TestFragmentAccumulator:
 
     def test_num_hits_past_16_bits_is_stored_whole(self, mini_index):
         """A template's valid hits are its R1 places times its R2 places, so a read pair in a repeat can have more than
-        65,535. In 16 bits 65,536 hits read as 0 and 65,537 as 1, a unique mapper."""
+        65,535. In 16 bits 65,536 hits would read as 0 and 65,537 as 1, a unique mapper."""
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         result.num_hits = 65_537
         acc = FragmentAccumulator()
@@ -221,7 +221,6 @@ class TestFragmentBufferBasic:
     def test_empty_buffer(self, mini_index):
         buf = FragmentBuffer()
         assert buf.total_fragments == 0
-        assert buf.n_chunks == 0
         assert _consume(buf) == []
 
     def test_single_fragment(self, mini_index):
@@ -231,7 +230,6 @@ class TestFragmentBufferBasic:
         _inject(buf, [result])
 
         assert buf.total_fragments == 1
-        assert buf.n_chunks == 1
         chunk = _only_chunk(buf)
         assert chunk.size == 1
         # t1 and t2 both have exon (99,200), so this should hit both
@@ -271,12 +269,11 @@ class TestFragmentBufferBasic:
         _inject(buf, [r] * 25, chunk_size=10)
 
         assert buf.total_fragments == 25
-        assert buf.n_chunks == 3  # 10, 10, 5
 
         chunks = _consume(buf)
         assert [chunk.size for chunk in chunks] == [10, 10, 5]
         assert np.concatenate([chunk.frag_id for chunk in chunks]).tolist() == list(range(25))
-        assert buf.n_chunks == 0
+        assert _consume(buf) == []
         assert buf.memory_bytes == 0
 
     def test_num_hits_preserved(self, mini_index):
@@ -374,12 +371,12 @@ class TestFragId:
 
 class TestFragmentClasses:
     def test_unique_gene_single_transcript(self, mini_index):
-        """g2 exon region -> t3 + synthetic nRNA -> FRAG_AMBIG_SAME_STRAND."""
+        """g2 exon region -> t3 + synthetic span -> FRAG_AMBIG_SAME_STRAND."""
         r = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
         assert r is not None
         assert r.ambig_strand == 0
         t_inds = list(r.t_inds)
-        assert len(t_inds) == 2  # t3 + synthetic nRNA
+        assert len(t_inds) == 2  # t3 + synthetic span
 
         buf = FragmentBuffer()
         _inject(buf, [r])
@@ -391,7 +388,7 @@ class TestFragmentClasses:
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         assert r is not None
         assert r.ambig_strand == 0
-        assert len(list(r.t_inds)) == 3  # t1, t2 + synthetic nRNA
+        assert len(list(r.t_inds)) == 3  # t1, t2 + synthetic span
 
         buf = FragmentBuffer()
         _inject(buf, [r])
@@ -419,14 +416,14 @@ class TestFragmentClasses:
         _inject(buf, [r_unambig, r_iso, r_mm])
 
         fc = _only_chunk(buf).fragment_classes
-        assert fc[0] == FRAG_AMBIG_SAME_STRAND  # t3 + synthetic nRNA
+        assert fc[0] == FRAG_AMBIG_SAME_STRAND  # t3 + synthetic span
         assert fc[1] == FRAG_AMBIG_SAME_STRAND
         assert fc[2] == FRAG_MULTIMAPPER
 
     def test_the_class_codes_are_the_native_scorers(self):
         """The codes have one definition, in the native scorer that routes on them: ``rigel.buffer`` reads
         them from ``_scoring_impl`` rather than restating them. Their values are pinned as the splice types'
-        are (``tests/test_splice.py``): they cross the ABI in uint8 and int8 arrays, where -1 is no class."""
+        are: they cross the ABI in uint8 and int8 arrays, where -1 is no class."""
         import rigel._scoring_impl as native_scoring
 
         names = (
@@ -517,7 +514,7 @@ class TestDiskSpill:
         self, mini_index, tmp_path, monkeypatch
     ):
         """A chunk is up to a million fragments against a 2 GiB budget, so a written chunk the writer still held
-        while blocked on its queue was one chunk over the budget. A chunk takes no weak reference; its arrays
+        while blocked on its queue would be one chunk over the budget. A chunk takes no weak reference; its arrays
         do, and die with it."""
         written = []
         original = buffer_mod._spill_chunk
@@ -671,7 +668,7 @@ class TestDiskSpill:
         _inject(buf, [r] * 25, chunk_size=10)
 
         assert buf.n_spilled == 0
-        assert buf.n_chunks == 3
+        assert len(_consume(buf)) == 3
 
     def test_no_spill_under_threshold(self, mini_index):
         """Small buffer should not spill."""

@@ -1,13 +1,11 @@
-"""The implicit splice — a fragment whose annotated intron lies inside the unsequenced mate gap, so
-the splice motif was never read. The first block gates the per-intron ``SPLICED_IMPLICIT``
-discriminant, exercising the C++ ``FragmentResolver`` through the test driver
-``_resolution_reference.resolve_fragment`` and its ``make_fragment`` helper over an acceptance matrix of
-transcript geometries; one comprehensive GTF fixture built once per session supplies every geometry
-the matrix needs, and each test sets the resolver's ``intron_overhang_tolerance`` explicitly so the
-cases do not depend on execution order. It also gates that gap introns are searched whatever the
-splice type. The second block gates what the scanner does with such a fragment on a real scan: a
-determined path deposits, and an undetermined one is held in the deferred bank with every hypothesis
-on it.
+"""The implicit splice: a fragment whose annotated intron lies inside the unsequenced mate gap, so the splice motif
+was never read.
+
+The first block gates the per-intron ``SPLICED_IMPLICIT`` discriminant of the C++ ``FragmentResolver``, through the
+test driver ``_resolution_reference.resolve_fragment``, over an acceptance matrix of transcript geometries from one
+session-scoped GTF fixture; each test sets ``intron_overhang_tolerance`` explicitly, so no case depends on execution
+order. It also gates that gap introns are searched whatever the splice type. The second block gates the scanner on a
+real scan: a determined path deposits, and an undetermined one is held in the deferred bank with every hypothesis.
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ from _resolution_reference import make_fragment, resolve_fragment
 #   g5 (+):
 #     t_one_exon: exons (59999,60500)                 single-exon, spans whole locus
 #     t_split   : exons (59999,60100),(60399,60500)   intron (60100,60399)
-#   g6 (+): the MIXED fragment — an observed splice AND a gap intron
+#   g6 (+): the mixed fragment, an observed splice and a gap intron
 #     t_mixed   : exons (62000,62200),(62400,62600),(62800,63000)
 #                 introns (62200,62400) and (62600,62800)
 
@@ -171,7 +169,7 @@ class TestImplicitSpliceDiscriminant:
         index, set_k = with_tolerance
         set_k(3)
         # blocks (750,810),(820,850); gap = (810,820). Microintron (800,804) lies
-        # entirely in block 1, NOT in the gap.
+        # entirely in block 1, not in the gap.
         result = _resolve(index, exons=(_exon(750, 810), _exon(820, 850)))
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
@@ -182,9 +180,8 @@ class TestImplicitSpliceDiscriminant:
 
         Block 1 sits wholly inside exon 2, so intron 1 falls outside the fragment entirely and only
         intron 2 is in play, which is what "any intron satisfies" means. Running block 1 contiguously
-        across intron 1 instead would make this a different case — a transcript the read CONTRADICTS,
-        which is no longer a candidate for anything — and that case has its own test,
-        ``test_h2_a_CONTRADICTED_transcript_is_not_a_candidate``.
+        across intron 1 instead would make this case (h2): a transcript the read contradicts, which is a
+        candidate for nothing.
         """
         index, set_k = with_tolerance
         set_k(3)
@@ -194,29 +191,22 @@ class TestImplicitSpliceDiscriminant:
         assert result is not None
         assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
 
-    # (h2) a transcript the READ CONTRADICTS is not a candidate → UNSPLICED
+    # (h2) a transcript the read contradicts is not a candidate → UNSPLICED
     def test_h2_a_CONTRADICTED_transcript_is_not_a_candidate(self, with_tolerance):
-        """`TRAPS: a-purity-filter-is-a-length-filter`, at the resolver level.
-
-        A candidate is any transcript with a compatible combination of introns and exons, and
-        ``cr.t_inds`` is NOT that set: it comes from ``merge_sets``, which falls back to a UNION when the
+        """A candidate is any transcript with a compatible combination of introns and exons, and
+        ``cr.t_inds`` is not that set: it comes from ``merge_sets``, which falls back to a union when the
         intersection is empty, so a transcript the reads contradict can be in it.
 
-        Block 1 runs contiguously from 149 to 400, straight across ``t_three``'s intron (200,299) — the
+        Block 1 runs contiguously from 149 to 400, straight across ``t_three``'s intron (200,299): the
         read has 99 sequenced bases where ``t_three`` has no exon, so the molecule cannot be
-        ``t_three``. Without the compatibility predicate the enumeration would take ``t_three``'s OTHER
+        ``t_three``. Without the compatibility predicate the enumeration would take ``t_three``'s other
         intron (400,499) as a gap hypothesis, taking 99 bp out of ``L`` on the authority of a transcript
         the read disproves, and report the fragment as an implicit splice.
 
-        What is left is the honest answer: no annotated transcript explains this fragment as spliced, so
-        the only hypothesis is the unspliced one — the molecule is gDNA, or nascent RNA that retains
-        intron 1, and the gap is real template. ``t_three`` is still in ``t_inds``; the predicate is what
-        stops it being believed.
-
-        A partially spliced UNANNOTATED path — intron 2 removed, intron 1 retained — is physically real
-        and is deliberately not a hypothesis, because unannotated sj are out of scope. That is a scope
-        decision rather than an oversight, and it is why the answer here is UNSPLICED rather than a third
-        possibility.
+        No annotated transcript explains this fragment as spliced, so the only hypothesis is the
+        unspliced one: the molecule is gDNA, or RNA that retains intron 1, and the gap is real template.
+        A partially spliced unannotated path (intron 2 removed, intron 1 retained) is not a hypothesis,
+        because unannotated junctions are out of scope, so the answer is unspliced.
         """
         index, set_k = with_tolerance
         set_k(3)
@@ -257,8 +247,8 @@ class TestImplicitSpliceDiscriminant:
     # (k) CIGAR-spliced, its junction held by no transcript → refused
     def test_k_a_spliced_fragment_no_transcript_holds_is_refused(self, with_tolerance):
         """A junction inside exon 1 that no transcript has. The scan withholds such a hit before it reaches the
-        resolver (the annotated-path rule, `tests/test_hit_verdict.py`), so the resolver takes every junction it is
-        handed to be held by one transcript, and refuses a fragment whose junctions are not."""
+        resolver (the annotated-path rule), so the resolver takes every junction it is handed to be held by one
+        transcript, and refuses a fragment whose junctions are not."""
         index, set_k = with_tolerance
         set_k(3)
         with pytest.raises(ValueError, match="annotated transcript"):
@@ -293,15 +283,12 @@ class TestImplicitSpliceDiscriminant:
 
 
 class TestGapIntronsAreSearchedWhateverTheSpliceType:
-    """Gap-intron detection runs on EVERY fragment, not only unspliced ones.
+    """Gap-intron detection runs on every fragment, not only unspliced ones.
 
     Looking for an annotated intron in the unsequenced mate gap only once the resolver has called the
-    fragment ``SPLICE_UNSPLICED`` leaves that intron inside ``L`` for every fragment that also carries an
-    observed CIGAR-N splice, which inflates the length tally's upper tail.
-
-    The condition is on the SPLICE TYPE, never on the block count: an unspliced paired-end fragment
-    already has two blocks and a mate gap, so the population at risk is SPLICED fragments that also have
-    a gap intron, which are long by construction because they span two or more introns.
+    fragment ``SPLICE_UNSPLICED`` would leave that intron inside ``L`` for every fragment that also
+    carries an observed CIGAR-N splice, inflating the length tally's upper tail. Those spliced fragments
+    with a gap intron are long by construction, since they span two or more introns.
 
     Geometry (g6/t_mixed, 0-based half-open):
 
@@ -312,7 +299,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
                            CIGAR-N            holds [62600,62800)
     """
 
-    OBSERVED = (62200, 62400)  #: sequenced as CIGAR-N; the detector must NOT re-derive it
+    OBSERVED = (62200, 62400)  #: sequenced as CIGAR-N; the detector must not re-derive it
     IMPLIED = (
         62600,
         62800,
@@ -334,7 +321,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
             introns=(GenomicInterval("chr1", observed[0], observed[1], Strand.POS),),
         )
 
-    # U1 — the headline: a SPLICED fragment's gap intron is found.
+    # U1: a spliced fragment's gap intron is found.
     def test_U1_a_spliced_fragment_has_the_intron_in_its_mate_gap_found(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
@@ -342,11 +329,11 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
         assert result is not None
         assert self._emitted(result) == [[self.IMPLIED]], (
             "the annotated intron inside the unsequenced mate gap was not found on a fragment that "
-            "also carries an observed CIGAR-N splice — "
+            "also carries an observed CIGAR-N splice"
         )
         assert result.n_gap_hypotheses == 1
 
-    # U2 — the observed CIGAR-N gap is NOT re-derived.
+    # U2: the observed CIGAR-N gap is not re-derived.
     def test_U2_the_observed_cigar_n_intron_is_not_re_derived(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
@@ -357,7 +344,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
             "It must be dropped by EXACT (start, end) equality against the observed introns"
         )
 
-    # U4 — the classification does not move. This work is about L, not about labelling.
+    # U4: the classification does not move; a gap intron changes L, not the label.
     def test_U4_splice_type_does_not_move_when_a_gap_intron_is_found(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
@@ -373,18 +360,16 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
 # ── The scanner: an implicit splice deposits when its path is determined, defers when it is not ─
 #
 # A ``SPLICE_IMPLICIT`` fragment has an annotated intron inside its unsequenced mate gap. The splice
-# motif was never read, so ``sj_strand`` comes from the transcript that implied it — which is only
-# legitimate when the candidates agree about WHICH intron is there. If they do not, ``L`` is
-# undetermined and nothing about the fragment can be tallied. Both arms are pinned here on scenarios
-# small enough to reason about, because on real cfRNA libraries the rule defers nearly every implicit
-# fragment: that is either a true property of real candidate sets or a mistake in the unanimity test,
-# and only the small scenarios let the real-data number be read as evidence rather than guessed at.
+# motif was never read, so ``sj_strand`` comes from the transcript that implied it, which is only
+# legitimate when the candidates agree about which intron is there. If they do not, ``L`` is
+# undetermined and nothing about the fragment can be tallied. Both cases are pinned here on scenarios
+# small enough to reason about.
 
 
 SEED = 4242
 
-#: Exons far enough apart, and reads short enough, that a fragment spanning the sj puts BOTH mates
-#: wholly inside an exon and the intron wholly inside the gap — which is what SPLICE_IMPLICIT means.
+#: Exons far enough apart, and reads short enough, that a fragment spanning the sj puts both mates
+#: wholly inside an exon and the intron wholly inside the gap, which is what SPLICE_IMPLICIT means.
 SIM = ReadSimConfig(
     frag_mean=260,
     frag_std=20,
@@ -415,16 +400,16 @@ def scenario(tmp_path):
 def test_ONE_candidate_transcript_DEPOSITS_with_the_strand_inferred_from_it(scenario):
     """The unanimous case. One isoform, so the implied intron is not in doubt and the fragment tallies.
 
-    If this ever goes to zero deposits, the unanimity test has become unsatisfiable and the whole
-    implicit population is silently deferred, which on real data looks like a census rather than a bug.
+    Zero deposits here would mean the unanimity test is unsatisfiable and every implicit fragment is
+    silently deferred.
     """
     payload = _scan(
         scenario, [{"t_id": "t1", "exons": [(1000, 1200), (3000, 3200)], "abundance": 100}]
     )
-    # Non-vacuity, and it is read off the UMBRELLA CENSUS rather than off a splice label. The census
-    # counts every fragment whose gap needed resolving, which is exactly this scenario's population,
-    # while `splice_type` is the scanner's record of what it SAW and is a different axis. If this ever
-    # goes to zero the scenario stopped producing gap introns and everything below passes vacuously.
+    # Non-vacuity, read off the umbrella census rather than off a splice label: the census counts every
+    # fragment whose gap needed resolving, which is exactly this scenario's population, while
+    # `splice_type` is the scanner's record of what it saw, a different axis. At zero the scenario
+    # produces no gap introns and everything below passes vacuously.
     assert payload.gap_resolution.gap_resolved_spliced > 0, (
         "no fragment had an intron in its unsequenced gap at all — the scenario stopped producing them, "
         "so this test would pass vacuously"
@@ -454,21 +439,19 @@ def test_TWO_candidates_implying_DIFFERENT_introns_are_DEFERRED(scenario):
         "two isoforms imply introns [1200,3000) and [1100,3000) in the same gap — a 100 bp difference in L "
         "— so those fragments have no determined path and must not deposit"
     )
-    # And they are HELD, not dropped: the bank carries as many fragments as the counter claims, with
+    # And they are held, not dropped: the bank carries as many fragments as the counter claims, with
     # both paths on each, which is what makes them recoverable in the second pass.
     assert payload.deferred.n_fragments == payload.qc.deferred_undetermined_gap
     assert int(np.diff(payload.deferred.hypothesis_offsets).min()) >= 2
 
 
 def test_A_RETAINED_INTRON_ISOFORM_ALONE_IS_ENOUGH_TO_DEFER(scenario):
-    """The case that makes the rule strict on real data.
-
-    ``t2`` covers the whole locus as one exon, so for it the mate gap holds no intron at all: the
+    """``t2`` covers the whole locus as one exon, so for it the mate gap holds no intron at all: the
     fragment is unspliced with an ``L`` that includes the gap. That is a different hypothesis from
     ``t1``'s spliced ``L``, so "implies nothing here" has to count as a distinct answer — and GENCODE is
     full of retained-intron isoforms.
 
-    The locus is TIGHT on purpose — a 300 bp intron, so the unspliced hypothesis's ``L`` is about
+    The locus is tight on purpose, a 300 bp intron, so the unspliced hypothesis's ``L`` is about
     560 bp and stays under ``max_fragment_length``. Spread the exons 1800 bp apart instead and the
     unspliced hypothesis is ruled out **by length** and the fragment deposits; that is the next test, and
     keeping the two apart is what stops either passing for the other's reason.
@@ -486,11 +469,11 @@ def test_A_RETAINED_INTRON_ISOFORM_ALONE_IS_ENOUGH_TO_DEFER(scenario):
     )
     # The subclass names the question, and here it is the composition one: the unspliced path against
     # one spliced path is "RNA or gDNA", one bit. `t2` covering the locus as a single exon is what puts the
-    # unspliced path in the set, and GENCODE is full of such retained-intron isoforms.
+    # unspliced path in the set.
     assert payload.gap_resolution.gap_deferred_rna_or_gdna > 0
     assert payload.deferred.n_fragments == payload.qc.deferred_undetermined_gap
-    # Every held record carries BOTH paths, one of them empty — the unspliced hypothesis needs no flag,
-    # because cutting nothing IS the statement that the gap is real template.
+    # Every held record carries both paths, one of them empty: the unspliced hypothesis needs no flag,
+    # because cutting nothing is the statement that the gap is real template.
     empty = [
         h
         for h in range(payload.deferred.n_hypotheses)
@@ -502,16 +485,14 @@ def test_A_RETAINED_INTRON_ISOFORM_ALONE_IS_ENOUGH_TO_DEFER(scenario):
 
 
 def test_A_SPAN_OVER_THE_LIMIT_RULES_OUT_the_retained_intron_hypothesis(scenario):
-    """The other side of the same rule, on a real scan — and it is not a separate rule.
+    """The other side of the same rule, on a real scan.
 
     "If the genomic span exceeds ``max_fragment_length``, assume it is RNA" is the ordinary hypothesis
-    filter applied to the unspliced path, whose ``L`` IS that span. Spread ``t1``'s exons 1800 bp apart
+    filter applied to the unspliced path, whose ``L`` is that span. Spread ``t1``'s exons 1800 bp apart
     and a sj-spanning fragment's unspliced ``L`` is ~2100 bp against a limit of 1000, so the
-    retained-intron explanation is deleted and the spliced path stands alone and deposits.
-
-    The filter is therefore not purely a cost gate: it changes CLASSIFICATION, so the same annotation
-    defers in the test above and resolves here, depending only on how far apart the exons sit. Measuring
-    that from both sides is the difference between a documented consequence and an assumption.
+    retained-intron explanation is ruled out and the spliced path stands alone and deposits. The filter
+    changes the classification: the same annotation defers in the test above and resolves here,
+    depending only on how far apart the exons sit.
     """
     payload = _scan(
         scenario,

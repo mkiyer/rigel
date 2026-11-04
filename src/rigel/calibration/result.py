@@ -1,26 +1,16 @@
-"""CalibrationResult — the calibrator's output schema.
+"""CalibrationResult: the calibrator's output schema (layer 7).
 
-    Gate: ``tests/calibration/test_result_schema.py``
+The splice graph has three kinds of object, so the result has three axes::
 
-THREE AXES, ONE PER ACCUMULATOR OBJECT KIND. The calibrator deconvolves a library on the splice
-graph, and the graph has three kinds of object, so the result has three axes::
+    regions                N             deconvolved contained count and its geometric support
+    contiguous boundaries  E = N − refs  deconvolved crossing count and its geometric support
+    sj boundaries          J             the jumping flux: certified RNA, never deconvolved
 
-    regions            N            deconvolved contained count + its geometric support
-    contiguous boundaries E = N − refs deconvolved crossing count + its geometric support
-    sj boundaries   J            the jumping flux -- certified RNA, never deconvolved
+A contiguous boundary is a 0-bp object with one set of numbers, never a left/right pair, so no consumer pools faces
+and halves them. ``__post_init__`` enforces the intrinsic invariants (per-axis shape, dtype, finiteness, sign); mass
+conservation against the raw counts needs the substrate, which the result does not carry.
 
-A contiguous boundary is a 0-bp boundary with ONE set of numbers, so there is no ``left``/``right``
-pair and no ½ anywhere: the count arrays are ``count_{gdna,rna}_boundary`` and the per-boundary divisor
-is ``crossing_eff_length``, carried here as ``gdna_boundary_eff_len``. ⛔ Do not reintroduce a
-per-face split that a consumer then pools back — that sum-then-halve pattern is exactly what hides a
-factor of 2.
-
-``count_rna_spliced_boundary`` has no region twin, structurally: ``region_contained`` is credited only
-when the fragment used no sj, so a region's contained population cannot hold a spliced molecule.
-
-``__post_init__`` enforces the intrinsic invariants (per-axis shape, dtype, finiteness, sign); mass
-conservation against the raw fragment counts is checked by the calibrator / tests, since it needs the
-substrate the result does not carry.
+Gate: ``tests/calibration/test_result_schema.py``.
 """
 
 from __future__ import annotations
@@ -33,17 +23,11 @@ from ..config import CONSTANTS
 
 
 def _check_axis_array(arr: np.ndarray, name: str, n: int) -> None:
-    """Validate one per-object array: shape against ITS OWN axis, dtype, finite, non-negative.
+    """Validate one per-object array: shape against its own axis, dtype (float64 or an integer count), finite and
+    non-negative.
 
-    The dtype gate admits exact integers as well as float64. The accumulator's primary per-object
-    observable is an integer **count** (no floats anywhere in the data model), so an integer array is a
-    *better* input here than a float one — ``count_rna_sj`` is the flux verbatim and arrives
-    integral. Everything else the gate checks is unchanged, and ``np.isfinite`` is well defined on
-    integers.
-
-    The shape check is the load-bearing one. ``E = N − n_refs`` differs from ``N`` by only a few
-    hundred genome-wide, so an array keyed to the wrong axis is a *plausible* length and nothing
-    downstream would fault on it — it would just silently read the wrong object's number.
+    The shape check matters most: ``E = N − n_refs`` differs from ``N`` by only a few hundred genome-wide, so an array
+    keyed to the wrong axis has a plausible length and would silently read the wrong object's number.
     """
     if not isinstance(arr, np.ndarray):
         raise ValueError(f"CalibrationResult.{name} must be a numpy array.")
@@ -62,7 +46,7 @@ def _check_axis_array(arr: np.ndarray, name: str, n: int) -> None:
 def _check_unit_interval(value: float, name: str, *, open_upper: bool = False) -> None:
     v = float(value)
     upper_ok = v < 1.0 if open_upper else v <= 1.0
-    if not (0.0 <= v and upper_ok):
+    if not (v >= 0.0 and upper_ok):
         bound = "[0, 1)" if open_upper else "[0, 1]"
         raise ValueError(f"CalibrationResult.{name} must be in {bound}; got {v}.")
 
@@ -72,104 +56,69 @@ class CalibrationResult:
     """Deconvolved gDNA / RNA mass on the region and contiguous-boundary axes, the sj flux, the two
     gDNA geometric supports, and the library scalars."""
 
-    # --- the deconvolved MIXTURE, per region (float64[n_regions]) ---
+    # --- the deconvolved mixture, per region (float64[n_regions]) ---
     #: ``chain_region_deconv``: the region's contained unspliced count split by the converged belief.
     count_gdna_region: np.ndarray
     count_rna_region: np.ndarray
 
-    # --- the deconvolved MIXTURE, per contiguous boundary (float64[n_boundaries]) ---
+    # --- the deconvolved mixture, per contiguous boundary (float64[n_boundaries]) ---
     #: ``chain_boundary_deconv``: the boundary's unspliced crossing count split by the converged belief.
-    #: ``count_rna_boundary`` is spliced-INCLUSIVE — a boundary's certified-RNA crossings are RNA whatever the
-    #: unspliced mixture resolves to, since gDNA cannot be spliced — so per-boundary conservation
-    #: ``count_gdna_boundary + count_rna_boundary == unspliced + spliced`` holds.
+    #: ``count_rna_boundary`` includes the boundary's certified-RNA crossings (gDNA cannot splice), so
+    #: ``count_gdna_boundary + count_rna_boundary == unspliced + spliced`` per boundary.
     count_gdna_boundary: np.ndarray
     count_rna_boundary: np.ndarray
 
-    #: float64[n_boundaries] — the ``boundary_spliced`` part of ``count_rna_boundary``: molecules that crossed this
-    #: boundary CONTIGUOUSLY having spliced somewhere else, carried apart so a consumer can separate the
-    #: certified part of ``count_rna_boundary`` from its deconvolved part. ``count_rna_boundary`` itself stays
-    #: spliced-inclusive so conservation is preserved. The EM's prior reads no RNA count at all
-    #: (``assemble_priors`` reads the gDNA mass; the EM forms the RNA side from its own fragment count).
+    #: float64[n_boundaries]: the ``boundary_spliced`` part of ``count_rna_boundary``, molecules that crossed this
+    #: boundary contiguously having spliced elsewhere, carried apart so a consumer can separate certified from
+    #: deconvolved RNA. A region has no twin: its contained population cannot hold a spliced molecule.
     count_rna_spliced_boundary: np.ndarray
 
-    #: float64[n_boundaries] — THE INCIDENCE→FRAGMENT CONVERSION, per boundary. ``mass / count`` off the
-    #: accumulator's conserved-mass bank: the mean fragment-mass ONE crossing at this boundary carries.
-    #:
-    #: ⛔ It is GEOMETRY, not a deconvolved mass, and the distinction is load-bearing. Every array
-    #: above is a gDNA/RNA split that a perfect deconvolution would change; this one is a property of
-    #: the partition and the fragment-length distribution and would be identical under any split. That
-    #: is why it is NOT in ``prior_vs_oracle.OVERRIDE_FIELDS``: an oracle that overrode it would be
-    #: answering a different question.
-    #:
-    #: ``assemble_priors`` multiplies the gDNA per-boundary mass by it, because the accumulator
-    #: deposits ``+1`` on EVERY boundary a fragment crosses — ``max(K, 1)`` of them — so a sum over boundaries is
-    #: an object-incidence count and the EM reads a FRAGMENT count. It is 1.0 where both flanking regions
-    #: exceed every fragment length, and falls toward the region spacing where they do not.
+    #: float64[n_boundaries]: the incidence-to-fragment conversion, ``mass / count`` off the accumulator's
+    #: conserved-mass bank, i.e. the mean fragment mass one crossing at this boundary carries. It is geometry, not a
+    #: deconvolved mass: a property of the partition and the fragment-length law, identical under any gDNA/RNA split,
+    #: so an oracle arm never overrides it. ``assemble_priors`` multiplies the gDNA boundary mass by it, because a
+    #: fragment deposits +1 on each of the ``max(K, 1)`` boundaries it crosses and the EM reads a fragment count. It
+    #: is 1.0 where both flanking regions exceed every fragment length and falls toward the region spacing otherwise.
     boundary_mass_per_crossing: np.ndarray
 
-    # --- the JUMPING population, per sj boundary (float64[n_sj]) ---
-    #: ⛔ AN INCIDENCE COUNT DESPITE THE NAME — it is not a mass, and the gap is large. This is
-    #: ``sj_count`` summed over the genome-strand columns and nothing else, and a fragment deposits
-    #: ``+1`` on EVERY sj it uses, so it runs about 2× the conserved mass and the over-count grows with
-    #: how many sj a fragment spans. A consumer that wants the mass wants :attr:`sj_conserved_mass`,
-    #: which is this array converted; reading this one instead is wrong in proportion to how SPLICED
-    #: the object is, and for a per-transcript weight that is exactly the axis the answer varies over.
-    #:
-    #: Never deconvolved: a sj boundary is pure RNA by construction, so there is nothing to split. It
-    #: is the third population at a boundary, and it is routinely orders of magnitude larger than
-    #: ``count_rna_spliced_boundary`` at the same place: at a donor boundary the sj flux is the gene's
-    #: whole spliced output while the spliced crossing is the handful of molecules that read through
-    #: without splicing.
-    #: ``assemble_priors`` does NOT consume it: the EM's prior reads calibration's gDNA count only, and
-    #: counts the locus's spliced fragments itself. It is exported for QC and reporting — the calibration's output should not be silent about the
-    #: population that dominates a donor boundary.
+    # --- the jumping population, per sj boundary (float64[n_sj]) ---
+    #: An incidence count, not a mass: ``sj_count`` summed over the genome-strand columns. A fragment deposits +1 on
+    #: every sj it uses, so this over-counts the conserved mass in proportion to how many sj a fragment spans;
+    #: :attr:`sj_conserved_mass` is the mass. Never deconvolved, since an sj boundary is pure RNA. ``assemble_priors``
+    #: does not read it; it is exported for QC and reporting, because this population dominates a donor boundary.
     count_rna_sj: np.ndarray
 
-    #: float64[n_boundaries] — the ``boundary_spliced`` twin of ``boundary_mass_per_crossing``, and
-    #: float64[n_sj] — the sj one, ``sj_mass / sj_count``. Same kind of quantity as
-    #: ``boundary_mass_per_crossing`` in every respect: GEOMETRY, identical under any split, and therefore
-    #: not in ``prior_vs_oracle.OVERRIDE_FIELDS``.
-    #:
-    #: ⛔ The sj one is what makes a conserved LIBRARY fragment count computable at all: a spliced
-    #: fragment whose every block lies inside one region crosses no boundary and is not contained, so
-    #: without the sj bank it deposits nowhere conserved — a large minority of RNA fragments, and no
-    #: gDNA ones, since gDNA cannot splice.
+    #: float64[n_boundaries] and float64[n_sj]: the ``boundary_spliced`` and sj twins of
+    #: ``boundary_mass_per_crossing`` (the sj one is ``sj_mass / sj_count``), geometry in the same sense. The sj one
+    #: makes a conserved library fragment count computable: a spliced fragment whose blocks all lie inside one region
+    #: crosses no boundary and is not contained, so only the sj bank holds it.
     boundary_spliced_mass_per_crossing: np.ndarray
     sj_mass_per_crossing: np.ndarray
 
-    # --- the gDNA geometric supports: expected admissible START POSITIONS, per object ---
-    #: float64[n_regions] — ``effective_length.contained_eff_length`` on the gDNA pmf,
-    #: ``E_f[(region_len − w + 1)+]``. Under uniform genomic gDNA at density ρ the expected contained
-    #: mass is EXACTLY ``ρ · gdna_region_eff_len`` (a fragment must FIT to be contained), so dividing by
-    #: it recovers ρ — the bedrock "factor 1 under uniform gDNA" invariant. This, NOT the genomic region
-    #: length, is the density-correct divisor: the raw length ignores the fit-inside constraint and so
-    #: understates a short region's density, manufacturing a spurious contraction in an unenriched library.
+    # --- the gDNA geometric supports: expected admissible start positions, per object ---
+    #: float64[n_regions]: gDNA's contained placements over the region's observable pieces
+    #: (`effective_length.observable_contained_eff_length`), ``E_f[(region_len − w + 1)+]`` with nothing masked. Under
+    #: uniform gDNA at density ρ the expected contained mass is exactly ``ρ · gdna_region_eff_len`` (a fragment must
+    #: fit to be contained), so this, not the region length, is the density-correct divisor.
     gdna_region_eff_len: np.ndarray
-    #: float64[n_boundaries] — ``effective_length.crossing_eff_length`` on the gDNA pmf. Uniform across
-    #: boundaries, and that is physics rather than a placeholder: gDNA's template is the chromosome,
-    #: so it takes ``UNBOUNDED_REACH`` on both sides at every boundary and the divisor collapses to
-    #: ``mu_g − 1``. It stays a per-boundary array because that is the axis its consumers index it on.
+    #: float64[n_boundaries]: gDNA's crossing placements over the observable genome
+    #: (`effective_length.observable_crossing_eff_length`). gDNA's template is the chromosome, so each side's reach
+    #: runs to the nearest masked base and the divisor is ``mu_g − 1`` where nothing is masked.
     gdna_boundary_eff_len: np.ndarray
-    #: float64[n_boundaries] — gDNA's CONSERVED SHARE at each boundary: of the starts whose fragments
-    #: cross it, the part of each placement's unit the deposit rule gives this boundary
-    #: (`effective_length.conserved_cut_shares` on the gDNA pmf at ``UNBOUNDED_REACH``). With
-    #: ``gdna_region_eff_len`` it partitions gDNA's starts over the objects exactly — a start counts once,
-    #: however many boundaries its fragment crosses — so a locus's gDNA component length is its regions'
-    #: and boundaries' shares at their efficiencies (`priors`). Geometry: identical under any split.
+    #: float64[n_boundaries]: gDNA's conserved share at each boundary: of the starts whose fragments cross it, the
+    #: part of each placement's unit the deposit rule gives this boundary (`effective_length.observable_cut_shares` on
+    #: the gDNA pmf). With ``gdna_region_eff_len`` it partitions gDNA's starts over the objects exactly, a start
+    #: counted once however many boundaries its fragment crosses, so a locus's gDNA length is its objects' shares at
+    #: their efficiencies (`priors`). Geometry: identical under any split.
     gdna_boundary_conserved_len: np.ndarray
 
-    # --- THE THREE-WAY COMPOSITION — the simplex ψ actually solves, per object ---
-    #: float64[n_regions] / float64[n_boundaries] — the solved ``(f_g, f_pos, f_neg)`` at each object: the
-    #: gDNA share and the two RNA STRAND shares of that object's unspliced population.
-    #:
-    #: This is AXIOM 0's ``T(slot)``, published. The solve is over
-    #: ``{gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}`` at every slot, so the answer is three
-    #: numbers; ``count_gdna_*`` and ``count_rna_*`` are that answer with the two RNA strands summed.
-    #:
-    #: The three close by construction: ψ solves ``(f_g, w_pos)`` and ψ's ``compose``
-    #: (`native/psi_kernel.h`) maps them onto the simplex, while a slot the solve does not reach keeps
-    #: its signature-binary belief.
-    #: They are published as solved, never renormalised.
+    # --- the three-way composition ψ solves, per object ---
+    #: float64[n_regions] / float64[n_boundaries]: the solved ``(f_g, f_pos, f_neg)`` at each object, the gDNA share
+    #: and the two RNA strand shares of its unspliced population, over
+    #: ``{gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}``. ``count_gdna_*`` and ``count_rna_*`` are this answer with
+    #: the two RNA strands summed. The three close by construction (ψ's ``compose``, ``native/psi_kernel.h``), a slot
+    #: the solve does not reach keeps its signature-binary belief, and they are published as solved, never
+    #: renormalised.
     gdna_frac_region: np.ndarray
     rna_pos_frac_region: np.ndarray
     rna_neg_frac_region: np.ndarray
@@ -179,30 +128,24 @@ class CalibrationResult:
 
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
-    #: The unit the capture efficiencies are read in: the peak density of the last refit's gDNA landscape's
-    #: largest basin, the bulk, in gDNA fragments per bp (`capture_efficiency`). ``None`` when no landscape was
-    #: fitted, and then every efficiency is exactly 1. A positive finite density when present.
+    #: The unit the capture efficiencies are read in: the peak density of the last landscape's largest basin, the
+    #: bulk, in gDNA fragments per bp (`capture_efficiency`). ``None`` when no landscape was fitted, and then every
+    #: efficiency is exactly 1; otherwise positive and finite.
     gdna_bulk_density: float | None
-    #: The landscape's saturated level against the bulk: the most massive enriched basin's peak over the bulk
-    #: peak, ``> 1``; exactly 1 when nothing lies above the bulk or no landscape was fitted. The ruler's junction
-    #: price saturates at it (`capture_eff_length`).
+    #: The landscape's saturated level against the bulk: the most massive enriched basin's peak over the bulk peak,
+    #: ``> 1``, or exactly 1 when nothing lies above the bulk or no landscape was fitted. The ruler's junction price
+    #: saturates at it (`capture_eff_length`).
     gdna_capture_saturation: float
-    #: float64[n_regions] — each region's capture efficiency: ``exp(E[min(x, s(x))] − x_b)``, its own gDNA
-    #: density against the bulk under the landscape as a two-group prior, from its own contained count on its
-    #: contained support (`capture_efficiency.capture_efficiencies`). A relative yield, so 1 at the bulk and above
-    #: 1 under capture; exactly 1 everywhere when there is no bulk density. The ruler and the locus prior price
-    #: every contained share at it and re-derive nothing (`capture_eff_length`, `priors`).
+    #: float64[n_regions]: each region's capture efficiency ``exp(E[min(x, s(x))] − x_b)``, its own gDNA density
+    #: against the bulk with the landscape as a two-group prior and its contained count as the likelihood
+    #: (`capture_efficiency.capture_efficiencies`). A relative yield: 1 at the bulk, above 1 under capture, and exactly
+    #: 1 everywhere with no bulk density. The ruler and the locus prior price every contained share at it.
     gdna_capture_efficiency_region: np.ndarray
-    #: float64[n_boundaries] — each boundary's own capture efficiency, from its crossing count on its
-    #: crossing support, in the same unit; exactly 1 everywhere when there is no bulk density. The ruler and the
-    #: locus prior price every conserved share at a boundary at it, and the ruler prices a junction from the
-    #: efficiencies beside it (`capture_eff_length`).
+    #: float64[n_boundaries]: each boundary's capture efficiency, from its crossing count on its crossing support, in
+    #: the same unit. The ruler and the locus prior price every conserved boundary share at it, and the ruler prices a
+    #: junction from the efficiencies beside it (`capture_eff_length`).
     gdna_capture_efficiency_boundary: np.ndarray
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
-    #: The gDNA and RNA strand Beta-Binomial dispersions, in [0, 1). Nothing fits them: ``calibrate``
-    #: always writes 0.0, and beyond the range check in ``__post_init__`` only tests read them.
-    gdna_strand_overdispersion: float
-    rna_strand_overdispersion: float
 
     # --- provenance: the three axis lengths, independent of each other ---
     n_regions: int
@@ -242,8 +185,7 @@ class CalibrationResult:
         ):
             _check_axis_array(getattr(self, name), name, self.n_boundaries)
 
-        # Each component is a FRACTION, so it is bounded by 1. Closure holds by construction
-        # (ψ's ``compose``, `native/psi_kernel.h`) and is not re-asserted here.
+        # each component is a fraction, bounded by 1; closure holds by construction (ψ's ``compose``)
         for name in (
             "gdna_frac_region",
             "rna_pos_frac_region",
@@ -298,46 +240,30 @@ class CalibrationResult:
                 f"got {self.gdna_density_global}."
             )
         _check_unit_interval(self.rna_sense_frac, "rna_sense_frac")
-        _check_unit_interval(
-            self.gdna_strand_overdispersion, "gdna_strand_overdispersion", open_upper=True
-        )
-        _check_unit_interval(
-            self.rna_strand_overdispersion, "rna_strand_overdispersion", open_upper=True
-        )
 
-    # ── THE CONSERVED SJ MASS — the third axis in FRAGMENT units, in ONE place ──
+    # ── the conserved sj mass: the third axis in fragment units ──
 
     @property
     def sj_conserved_mass(self) -> np.ndarray:
-        """float64[n_sj] — the CONSERVED fragment mass at each sj.
+        """float64[n_sj]: the conserved fragment mass at each sj, ``count_rna_sj · sj_mass_per_crossing``.
 
-        This is the accumulator's ``sj_mass`` bank recovered exactly: ``sj_mass_per_crossing`` is
-        ``sj_mass / sj_count`` and ``count_rna_sj`` is ``sj_count``, so the product is ``sj_mass``
-        identically, up to float division-then-multiplication.
-
-        ⛔ At a sj nothing crossed the answer is 0, and the multiplication is what produces it — do
-        not branch. ``mass_per_crossing`` deliberately keeps the ``1.0`` identity where the count is
-        zero (there is no mass at an unobserved boundary to rescale), so a ``where(count > 0, …)``
-        fallback to the factor would publish phantom mass on the large zero-count share of this axis,
-        the one axis that is certified RNA by construction.
-
-        A PROPERTY, never a stored field, and that is forced rather than preferred: ``count_rna_sj``
-        is in ``prior_vs_oracle.OVERRIDE_FIELDS``, an oracle arm swaps it with
-        ``dataclasses.replace``, and a cached array would survive that swap and silently describe the
-        array it replaced — the same reason :attr:`library_rna_fragments` is derived.
+        This recovers the accumulator's ``sj_mass`` bank up to float rounding. It must stay a plain product:
+        ``mass_per_crossing`` is 1.0 where the count is zero, so a branch that fell back to the factor would publish
+        phantom mass at every sj nothing crossed. It is a property rather than a stored field because an oracle arm
+        swaps ``count_rna_sj`` with ``dataclasses.replace``, and a cached array would survive the swap.
         """
         return np.asarray(self.count_rna_sj, dtype=np.float64) * np.asarray(
             self.sj_mass_per_crossing, dtype=np.float64
         )
 
-    # ── THE LIBRARY FRAGMENT COUNT — the deliverable, in FRAGMENT units, derived in ONE place ──
+    # ── the library fragment counts, in fragment units ──
 
     @property
     def library_gdna_fragments(self) -> float:
-        """gDNA fragments in the library — a CONSERVED count, not an object-incidence sum.
+        """gDNA fragments in the library: a conserved count, not an object-incidence sum.
 
-        gDNA appears on TWO axes only, because it cannot splice, and containment is exclusive — so a
-        region term is already a fragment count and only the crossing term needs converting.
+        gDNA cannot splice, so it sits on two axes; containment is exclusive, so only the crossing term needs
+        converting.
         """
         return float(
             np.asarray(self.count_gdna_region, dtype=np.float64).sum()
@@ -349,20 +275,13 @@ class CalibrationResult:
 
     @property
     def library_rna_fragments(self) -> float:
-        """RNA fragments in the library — all THREE axes, each converted by its OWN population's ``q``.
+        """RNA fragments in the library over all three axes, each converted by its own population's mass per crossing.
 
-        ⛔ Never sum the raw incidences instead. One fragment books ``max(K,1)`` boundary crossings AND
-        one incidence per sj it uses, so an incidence sum over-counts, and the gDNA:RNA ratio it
-        implies is biased wherever the two components' inflations differ — which they do, because gDNA
-        cannot splice. These conserved counts reproduce the true origin split exactly.
-
-        Adding the spliced crossings and the sj flux is conservation, not double counting: the deposit
-        rule splits a spliced fragment's bases between ``boundary_spliced_mass`` and ``sj_mass``.
-
-        A PROPERTY, never a stored field. ``prior_vs_oracle`` swaps the deconvolved arrays for truth with
-        ``dataclasses.replace``; a cached scalar would survive that swap and silently describe the old
-        arrays. Deriving it means the
-        oracle arm's count is the oracle's by construction.
+        The raw incidences must never be summed instead: a fragment books ``max(K, 1)`` boundary crossings and one
+        incidence per sj it uses, so the sum over-counts, and differently for the two components because gDNA cannot
+        splice. Adding the spliced crossings and the sj flux is not double counting: the deposit rule splits a spliced
+        fragment's bases between ``boundary_spliced_mass`` and ``sj_mass``. A property for the same reason as
+        :attr:`sj_conserved_mass`.
         """
         unspliced_boundary = np.maximum(
             np.asarray(self.count_rna_boundary, dtype=np.float64)
@@ -378,8 +297,7 @@ class CalibrationResult:
                 np.asarray(self.count_rna_spliced_boundary, dtype=np.float64)
                 * np.asarray(self.boundary_spliced_mass_per_crossing, dtype=np.float64)
             ).sum()
-            # ONE home for the sj conversion: spelling the product out here as well lets a caller
-            # reading the property and a caller reading this sum disagree.
+            # the sj conversion has one home, `sj_conserved_mass`
             + self.sj_conserved_mass.sum()
         )
 

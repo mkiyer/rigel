@@ -116,13 +116,11 @@ def test_strand_reversal_preserves_the_claim():
     )
 
 
-@pytest.mark.parametrize("missing", ["protocol", "single_strand", "own_evidence"])
+@pytest.mark.parametrize("missing", ["single_strand", "own_evidence"])
 def test_missing_strand_information_does_not_create_a_claim(missing):
     context = _context()
     kappa = 0.99
-    if missing == "protocol":
-        kappa = None
-    elif missing == "single_strand":
+    if missing == "single_strand":
         context = replace(context, free_neg=np.ones(3, dtype=bool))
     else:
         context = replace(context, has_own_composition=np.zeros(3, dtype=bool))

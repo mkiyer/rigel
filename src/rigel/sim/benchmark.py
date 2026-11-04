@@ -1,10 +1,4 @@
-"""
-rigel.sim.benchmark — Accuracy benchmarking for simulation scenarios.
-
-Compares observed counts from ``run_pipeline`` against ground-truth
-fragment assignments from the read simulator.  Produces per-transcript
-accuracy metrics suitable for both deterministic correctness testing
-and statistical accuracy benchmarking.
+"""Score ``run_pipeline`` counts against a scenario's read-name truth, per transcript and per pool.
 
 Usage
 -----
@@ -118,12 +112,7 @@ class BenchmarkResult:
 
     @property
     def total_rna_observed(self) -> float:
-        """Sum of mRNA + nRNA counts (total RNA attribution).
-
-        total_observed covers annotated transcripts; n_synthetic_observed
-        covers the synthetic nRNA transcripts (regular transcripts in the
-        EM) — the same rows n_nrna_pipeline sums (``estimator.synthetic_count``).
-        """
+        """Annotated plus synthetic-span counts: every RNA fragment the pipeline assigned."""
         return self.total_observed + self.n_synthetic_observed
 
     @property
@@ -212,33 +201,24 @@ def run_benchmark(
     -------
     BenchmarkResult
     """
-    # Ground truth: actual simulated fragments per transcript
     simulated_counts = scenario_result.ground_truth_auto()
-
-    # Ground truth: gDNA fragment count
     n_gdna_expected = scenario_result.ground_truth_gdna_auto()
-
-    # Ground truth: nascent RNA fragment count
     n_nrna_expected = scenario_result.ground_truth_nrna_auto()
 
-    # Observed: per-transcript total counts from the pipeline
     t_counts = pipeline_result.estimator.t_counts
-    observed_per_t = t_counts.sum(axis=1)  # total per transcript
-
-    # Stats
+    observed_per_t = t_counts.sum(axis=1)
     stats = pipeline_result.stats
 
-    # Pipeline gDNA count: intergenic (deterministic) + EM-assigned genic gDNA.
+    # gDNA: the intergenic fragments plus the EM's genic and intergenic gDNA.
     n_gdna_pipeline = float(
         stats.n_intergenic
         + pipeline_result.estimator.gdna_em_count
         + pipeline_result.estimator.gdna_intergenic_em_count
     )
 
-    # Pipeline nRNA count: the synthetic spans' unambiguous and EM counts.
+    # Nascent RNA: the synthetic spans' counts.
     n_nrna_pipeline = float(pipeline_result.estimator.synthetic_count)
 
-    # Per-transcript accuracy
     transcript_results: list[TranscriptAccuracy] = []
     annotated_t_indices: set[int] = set()
     for t in scenario_result.transcripts:
@@ -261,11 +241,8 @@ def run_benchmark(
             )
         )
 
-    # The counts (unambiguous + EM) on every index row outside the scenario's
-    # transcripts: the synthetic nRNA transcripts, in the index but not in the
-    # per-transcript ground truth, and the same rows ``estimator.synthetic_count``
-    # sums. These must be included in the accountability equation so that all
-    # fragment mass is accounted for.
+    # The counts on every index row outside the scenario's transcripts, the synthetic spans, so every fragment is
+    # accounted for.
     n_synthetic_observed = sum(
         float(observed_per_t[i]) for i in range(len(observed_per_t)) if i not in annotated_t_indices
     )

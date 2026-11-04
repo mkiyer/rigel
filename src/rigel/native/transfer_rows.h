@@ -1,8 +1,8 @@
-// transfer_rows.h — the ROW CONSTRUCTORS of the composition transfer, shared by the transfer's builders, pass
-// and solve (`transfer_kernel.h`) and ψ's kernel (`psi_kernel.h`), and bound for the gates as `native.transfer_rows`.
-// Every function here is a pure function of one face's or one node's numbers over the solve grid `lam`
-// (`f_g = sigma(lam)`, K points), writing a max-normalised log-row. The gates are the transfer gates
-// (`tests/calibration/test_transfer_*.py`), which recompute with these very functions.
+// transfer_rows.h — the row constructors of the composition transfer, shared by the transfer's builders, pass and
+// solve (`transfer_kernel.h`) and ψ's kernel (`psi_kernel.h`), and bound to Python as `native.transfer_rows`.
+// Each function is a pure function of one face's or one node's numbers over the solve grid `lam`
+// (`f_g = sigma(lam)`, K points) and writes a max-normalised log-row.
+// Gate: tests/calibration/test_transfer_*.py, which recompute with these functions.
 #pragma once
 
 #include <algorithm>
@@ -15,7 +15,7 @@ namespace transfer_rows {
 
 constexpr double EPS = 1.0e-9;
 constexpr double TINY = 1.0e-300;
-//: the five kinds of composition rule a directed face can carry
+// NONE, or one of the five composition rules a directed face can carry
 constexpr int NONE = 0, FORWARD = 1, TRANSPORT = 2, SPLICE_OUT = 3, EDGE = 4, LEVEL = 5;
 
 // ---- scalar pieces ---------------------------------------------------------------------------------
@@ -57,18 +57,13 @@ inline double sigmoid(double x) { return 1.0 / (1.0 + std::exp(-x)); }  // scipy
 // scipy.special.log_expit: log sigma(x), exact in the depleted tail (never forms 1 - sigma)
 inline double log_expit(double x) { return x < 0.0 ? x - std::log1p(std::exp(x)) : -std::log1p(std::exp(-x)); }
 
-// THE FROZEN STRAND VARIANCE (simplex_logodds: the count-zero-information freeze): the mixture's variance at
-// the REFERENCE composition (f_ref, ref_pos, ref_neg) — the count sets precision, never composition.
-inline double strand_variance(double n, double f_ref, double ref_pos, double ref_neg, double kappa, double od_g,
-                              double od_r) {
-    const double rscale = kappa * (1.0 - kappa);
+// The strand variance, frozen at the reference composition (f_ref, ref_pos, ref_neg): the count sets the
+// precision, never the composition.
+inline double strand_variance(double n, double f_ref, double ref_pos, double ref_neg, double kappa) {
     const double p_ref = 0.5 * f_ref + kappa * ref_pos + (1.0 - kappa) * ref_neg;
-    const double nf = n * f_ref, np = n * ref_pos, nn = n * ref_neg;
-    const double var = n * p_ref * (1.0 - p_ref) + (nf * nf) * 0.25 * od_g + (np * np) * rscale * od_r +
-                       (nn * nn) * rscale * od_r;
-    return std::max(var, EPS);
+    return std::max(n * p_ref * (1.0 - p_ref), EPS);
 }
-// THE STRAND TERM at one cell: the Gaussian log-likelihood of the + column count u_pos at the mean n·p,
+// The strand term at one cell: the Gaussian log-likelihood of the + column count u_pos at the mean n·p,
 // p = ½ f_g + κ f_+ + (1 − κ) f_−, at the frozen variance.
 inline double strand_term(double u_pos, double n, double p, double var, double half_log_var) {
     const double d = u_pos - n * p;
@@ -234,13 +229,11 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
     const double m = vmax(row_e, K);
     for (int j = 0; j < K; ++j) S.a[j] = row_e[j] - m;
     const double sd = std::sqrt(trigamma(n_s + 0.5) + trigamma(n_u + 0.5));
-    // The map is the forward face map read in reverse, with EACH component's own opportunity and
-    // the route-summed certified rate. Only that rate varies across the existing marginal nodes.
-    // The map at every node is face_map_lambda(lam, n_u, a_g_b, a_r_b, a_g_e, a_r_e, s), with
-    // its node-independent half hoisted: the gDNA arm's log and the RNA arm's unspliced density are the
-    // same at every node (only the node's spliced density s joins the RNA arm), so they are computed once
-    // per face — the same operations in the same order per cell, so the same bits, at half the node loop's
-    // transcendentals
+    // The forward face map read in reverse, with each component's own opportunity and the route-summed
+    // certified rate; only that rate varies across the marginal nodes. The map at each node is
+    // face_map_lambda(lam, n_u, a_g_b, a_r_b, a_g_e, a_r_e, s) with its node-independent half (the gDNA arm's
+    // log, the RNA arm's unspliced density) computed once per face, in the same operation order, so the bits
+    // match.
     double* g_log = S.g.data();
     double* r_unspl = S.h.data();
     for (int j = 0; j < K; ++j) {
@@ -355,7 +348,7 @@ inline void rna_level_of_profile(const double* row, const double* lam, const dou
     norm_inplace(out, K);
 }
 
-// profile_of_level(profile, u, lam, n, a, rho_ref): a held gDNA level read as THIS node's composition row
+// profile_of_level(profile, u, lam, n, a, rho_ref): a held gDNA level read as this node's composition row
 // through its own total — a pure coordinate change, u(lam) = log(sigma(lam) n / (a rho_ref)).
 inline void profile_of_level(const double* p, const double* u, const double* lam, int K, double n, double a,
                              double rho_ref, Scratch& S, double* out) {

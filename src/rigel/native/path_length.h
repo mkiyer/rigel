@@ -1,9 +1,7 @@
-// path_length.h — L, the length of a fragment's path, defined once for the resolver, which scores each candidate
-// transcript by it in the EM, and the accumulator, which deposits by it in calibration (`calibration/accumulator.cpp`).
-// A path is the fragment's genomic extent [start, end) with introns cut out: the junctions the reads observed and the
-// introns a hypothesis implies in the unsequenced gaps. L is the total length of its segments. The specification is
-// `tests/native/_accumulator_reference.py`; `tests/test_transcript_space_fl.py` holds the resolver's length to the
-// accumulator's for every candidate.
+// path_length.h — L, the length of a fragment's path, defined once for the resolver (which scores each candidate
+// transcript by it in the EM) and the calibration accumulator (which deposits by it). A path is the fragment's genomic
+// extent [start, end) with introns cut out: the junctions the reads observed and the introns a hypothesis implies in
+// the unsequenced gaps. L is the total length of its segments. Specification: `tests/native/_accumulator_reference.py`.
 #pragma once
 
 #include <algorithm>
@@ -16,13 +14,10 @@
 
 namespace rigel {
 
-/// The introns as a sorted, DISJOINT set clipped to [start, end).
-///
-/// ⚠ Overlapping AND ABUTTING introns both merge. Overlapping ones are contradictory observations of one
-/// molecule -- a real BAM produces them when the mates disagree about an acceptor. Abutting ones imply a
-/// zero-length exon, which is physically impossible, so no single molecule can legitimately use both.
-///
-/// ⚠ Sort the RAW pairs and clip inside the loop, in that order, to match the spec exactly.
+/// The introns as a sorted, disjoint set clipped to [start, end). Overlapping and abutting introns both merge:
+/// overlapping ones are contradictory observations of one molecule (mates that disagree about an acceptor), and
+/// abutting ones imply a zero-length exon, which no molecule has. The raw pairs are sorted first and clipped inside the
+/// loop, the order the specification uses.
 inline void normalise_introns(const IntronBlock* observed,
                               std::size_t n_observed,
                               const IntronBlock* implied,
@@ -31,8 +26,7 @@ inline void normalise_introns(const IntronBlock* observed,
                               std::int64_t end,
                               std::vector<std::pair<std::int64_t, std::int64_t>>& out)
 {
-    // ⚠ Both ranges are emplaced BEFORE the sort, so the union needs no second scratch vector and the
-    // caller never has to think about which list came first.
+    // Both lists go in before the sort, so the union needs no second scratch vector and their order does not matter.
     out.clear();
     out.reserve(n_observed + n_implied);
     for (std::size_t i = 0; i < n_observed; ++i) {
@@ -78,9 +72,8 @@ inline void build_segments(std::int64_t start,
 /// and ``segments`` are the caller's scratch and hold the normalised introns and the segments on return, which the
 /// deposit walks.
 ///
-/// ⚠ ONE definition of L. Deriving it any other way invites two formulas for one quantity, and the obvious second
-/// formula -- (end - start) - sum(intron) -- disagrees by up to 1.5x on overlapping introns, goes NEGATIVE on a wide
-/// overlap, and miscounts an intron that runs past the fragment's end.
+/// This is the one definition of L. The shortcut (end - start) - sum(intron) is wrong on overlapping introns and on an
+/// intron that runs past the fragment's end.
 inline std::int64_t path_length(const IntronBlock* observed,
                                 std::size_t n_observed,
                                 const IntronBlock* implied,

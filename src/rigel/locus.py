@@ -60,15 +60,11 @@ class MultiLocus:
     transcript_indices : np.ndarray
         int32 — global transcript indices in this multi-locus.
     unit_indices : np.ndarray
-        int32 — EM unit indices (rows in global CSR) belonging to
-        this multi-locus.
+        int32 — EM unit indices (rows in the global CSR) in this multi-locus, in BAM order.
     span_bp : int
-        Total merged genomic footprint (bp): ``sum(l.span for l in loci)``.
-        Reported as the loci table's ``locus_span_bp``.
+        Total merged genomic footprint (bp), ``sum(l.span for l in loci)``: the loci table's ``locus_span_bp``.
     loci : tuple[Locus, ...]
-        The contiguous intervals composing this multi-locus, sorted
-        ascending by the ``ref`` column's categorical code (not ``ref_id``),
-        then by ``start``.
+        The contiguous intervals, sorted by the ``ref`` column's categorical code (not ``ref_id``), then ``start``.
     """
 
     multi_locus_id: int
@@ -84,12 +80,7 @@ class MultiLocus:
 
 
 def _in_bam_order(units: np.ndarray, frag_ids: np.ndarray) -> np.ndarray:
-    """``units`` reordered by their fragments' ``frag_id`` — BAM order. Always a fresh array.
-
-    Sorts on the id itself rather than on a densified rank. Building a global
-    ``rank[unit] -> position in BAM order`` first is exactly equivalent, because rank is a monotone
-    function of ``frag_id``, and several times as expensive.
-    """
+    """``units`` reordered by their fragments' ``frag_id``, which is BAM order; always a fresh array."""
     return units[np.argsort(frag_ids[units], kind="stable")]
 
 
@@ -97,11 +88,7 @@ def build_multi_loci(
     em_data: ScoredFragments,
     index: TranscriptIndex,
 ) -> list[MultiLocus]:
-    """Build multi-loci as connected components of transcripts linked
-    by fragments.
-
-    Uses C++ union-find (disjoint-set with path compression and union
-    by rank) for fast component detection.
+    """Build the multi-loci, the connected components of transcripts linked by fragments, by C++ union-find.
 
     Parameters
     ----------
@@ -122,52 +109,24 @@ def build_multi_loci(
     if n_units == 0 or len(t_indices) == 0:
         return []
 
-    # C++ union-find returns per-component transcript and unit lists
-    # in CSR form (offsets + flat index arrays), already sorted ascending.
+    # Per-component transcript and unit lists in CSR form, each sorted ascending.
     n_comp, comp_t_offsets, comp_t_indices, comp_u_offsets, comp_u_indices = _cc_native(
         offsets,
         t_indices,
         np.int32(n_transcripts),
     )
 
-    # The canonical unit order is BAM ORDER, and `_in_bam_order` below is where it is imposed.
-    #
-    # ``comp_u_indices`` is ascending by unit index, i.e. by the ROW a fragment happens to occupy in the
-    # scan buffer — and that row is not a property of the fragment. The scanner streams finalized chunks
-    # from worker threads in COMPLETION order, so the same BAM fills the buffer differently run to
-    # run, while the ``frag_id -> fragment`` mapping is stable.
-    # Ordering by ``frag_id`` — the reader's own BAM-order id —
-    # makes ``unit_indices``, and therefore every per-locus array ``locus_partition`` scatters by it, a
-    # function of the fragment SET alone.
-    #
-    # It is not cosmetic. The EM's ``assignment_mode="sample"`` draws one categorical sample per unit
-    # from a per-locus RNG, so permuting the units permutes which fragment gets which draw and the
-    # answer moves by whole counts; ``fractional`` scatters float posteriors into shared accumulators,
-    # so a permutation reorders the summation and it drifts by ULPs. ``EMConfig.seed`` does not help:
-    # the seed reaches the solver bit-identically, the order it is consumed in does not.
-    #
-    # ⛔ Order by IDENTITY, never by CONTENT. Seeding each draw from a hash of the fragment itself
-    # would also be order-independent and would be WRONG: identical fragments would hash alike and so
-    # draw alike, collapsing a 60/40 posterior to 100/0 for every group of duplicates. A content key
-    # cannot even deliver determinism, because it TIES exactly on the duplicates, which leaves both
-    # ``sample`` and ``fractional`` thread-count dependent. ``frag_id`` is an identity, so it never
-    # ties. The second pass orders its own queue the same way.
+    # Units are put in BAM order (`_in_bam_order`), not unit-index order: a unit's row in the scan buffer depends on
+    # the order worker threads finished their chunks, while `frag_id` is the fragment's own identity. The EM's sampled
+    # draws and float sums consume units in this order, so it must not vary from run to run. The order must come from
+    # identity, never content: a content key ties on duplicate fragments, which would then all draw alike.
 
-    # Pre-extract transcript coordinates as numpy arrays.
     t_starts_all = index.t_df["start"].values
     t_ends_all = index.t_df["end"].values
 
-    # Integer ref codes for fast sort/compare within merge loops.
-    # The "ref" column is already categorical; use its codes directly
-    # instead of an O(N log N) np.unique sort on the transcripts' string ids.
-    #
-    # NOTE: pandas categorical codes are NOT the canonical resolver/BAM
-    # ref-id space (which is defined by ``index.ref_lengths`` insertion
-    # order via ``index.ref_name_to_id``).  We store both: ``_ref_codes``
-    # is used only for fast intra-loop sorting/comparison; ``Locus.ref_id``
-    # must carry the canonical id so downstream consumers
-    # (``calibration.priors._region_locus_shares``, which bins locus
-    # blocks by ref_id against RegionArrays) match the correct contig.
+    # The "ref" column's categorical codes drive the merge loop's sort and compare. They are not the canonical ref-id
+    # space (`index.ref_name_to_id`), which `Locus.ref_id` must carry: `calibration.priors` bins locus blocks by
+    # ref_id against RegionArrays.
     ref_cat = index.t_df["ref"].cat
     _ref_names = ref_cat.categories.values
     _ref_codes = ref_cat.codes.values
@@ -182,8 +141,7 @@ def build_multi_loci(
         t_hi = comp_t_offsets[lid + 1]
         t_idx = comp_t_indices[t_lo:t_hi].copy()
 
-        # Sort transcript intervals by (ref_code, start), then merge
-        # overlapping spans to compute the genomic footprint.
+        # Sort the transcript intervals by (ref_code, start) and merge overlaps into the genomic footprint.
         rc = _ref_codes[t_idx]
         ss = t_starts_all[t_idx]
         ee = t_ends_all[t_idx]

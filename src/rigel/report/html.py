@@ -1,9 +1,7 @@
 """Assemble the self-contained report HTML.
 
-Inlines the design-system CSS, the front-end render layer, the view-model
-payload, and — when ``vl-convert-python`` is installed — the Vega/Vega-Lite/
-Vega-Embed runtime, so the resulting single ``.html`` renders offline with no
-CDN, no server, and no Node.js runtime.
+Inlines the CSS, the front-end script, the view-model payload and, when ``vl-convert-python`` is installed, the
+Vega / Vega-Lite / Vega-Embed runtime, so the one ``.html`` renders offline with no CDN, server or Node.js.
 """
 
 from __future__ import annotations
@@ -15,8 +13,8 @@ from importlib.resources import files
 
 _ASSETS = files("rigel.report") / "assets"
 
-# ES6 snippet handed to vl_convert.javascript_bundle: pulls the three libraries
-# into the bundle and exposes them as globals for report.js to call.
+# ES6 snippet for vl_convert.javascript_bundle: bundles the three libraries and exposes them as globals for
+# report.js.
 _VEGA_EXPOSE = "window.vegaEmbed = vegaEmbed; window.vega = vega; window.vegaLite = vegaLite;"
 
 
@@ -28,9 +26,7 @@ def _asset(name: str) -> str:
 def vega_bundle() -> str | None:
     """Return the inlinable Vega runtime, or ``None`` if vl-convert is absent.
 
-    The bundle is identical for every report, so it is built once per process and
-    cached — this dominates a single build (~0.8 s) and would otherwise repeat for
-    every sample in a batch.
+    The bundle is the same for every report and is the slowest step of a build, so it is built once per process.
     """
     try:
         import vl_convert as vlc

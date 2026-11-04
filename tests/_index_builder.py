@@ -1,10 +1,10 @@
 """The synthetic index builder every structural test starts from.
 
-`build_test_index` turns a GTF string into a loaded `TranscriptIndex`, writing a FASTA of known sequence for
-the requested references beside it (`write_fasta`, which every test that builds an index writes its genome with);
-`rebuild_with_splice_blacklist` gives an existing index a splice blacklist the way a real build does. It lives in its own module rather than in `conftest.py` because it is a
-plain builder, not a fixture: a test that needs a bespoke index imports and calls it, and importing a
-conftest by module name is ambiguous as soon as a sub-directory has one of its own.
+`build_test_index` turns a GTF string into a loaded `TranscriptIndex`, writing a FASTA of known sequence for the
+requested references beside it (`write_fasta`, which every test that builds an index writes its genome with);
+`rebuild_with_splice_blacklist` gives an existing index a splice blacklist the way a real build does. It lives in its
+own module rather than in `conftest.py` because it is a plain builder, not a fixture: a test that needs a bespoke
+index imports and calls it, and importing a conftest by module name is ambiguous once a sub-directory has its own.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def write_fasta(
     refs: Mapping[str, int],
     unknown: Mapping[str, list[tuple[int, int]]] | None = None,
 ) -> Path:
-    """Write an indexed FASTA of KNOWN sequence: each reference is ``ACGT`` repeated to its length.
+    """Write an indexed FASTA of known sequence: each reference is ``ACGT`` repeated to its length.
 
     A structural test's genome holds no unknown base, so an index built from it observes every base and its
     unobservable set is empty, as a real genome's is outside its gaps. An all-``N`` genome is unobservable end to end.
@@ -88,10 +88,9 @@ def build_test_index(
     name : str
         Sub-directory name for this index (keeps separate indexes apart).
     refs : dict[str, int] | None
-        Optional ``{reference_name: length}`` for a MULTI-reference index. ``None`` (the default) builds
-        the single ``chr1`` of ``genome_size`` bp that every existing caller expects, so this parameter
-        is purely additive. The splice-graph matrix needs it: region and boundary ids must stay
-        contiguous per reference, and no boundary may cross references.
+        Optional ``{reference_name: length}`` for a multi-reference index. ``None`` (the default) builds
+        the single ``chr1`` of ``genome_size`` bp. The splice-graph matrix needs several references:
+        region and boundary ids must stay contiguous per reference, and no boundary may cross references.
     unknown : dict[str, list[tuple[int, int]]] | None
         ``N`` written over these ``[start, end)`` runs (:func:`write_fasta`), which the index then masks as
         unobservable. ``None`` writes known sequence everywhere.
@@ -109,7 +108,7 @@ def build_test_index(
 
     idx_dir = base / "index"
     TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-    return TranscriptIndex.load(idx_dir, retain_test_structures=True)
+    return TranscriptIndex.load(idx_dir, retain_lookup_maps=True)
 
 
 class StandInStore:

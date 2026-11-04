@@ -1,11 +1,10 @@
 """The pass-0 per-slot initialization, and the signature classification its chain slots carry.
 
-One test per information source — MEASURED (the structural lock), INTRON FACTORY, STRAND DECONVOLUTION,
-UNSOLVED default (100 % gDNA, ZERO evidence) — on the three things the self-solve publishes: the
-composition mode ``f_*`` and the own evidence ``tau_lam``. These pin the self-solve that seeds the
-sweep. The last block gates the ``free_*`` (RNA-crossing) masks ``build_region_statics`` carries onto
-the chain; that classification is signature-only, so the counts are irrelevant to it, and it is asserted
-across every region type and all four boundary types.
+One test per information source (measured: the structural lock; the intron factory; strand deconvolution; and the
+unsolved default, 100 % gDNA at zero evidence) on what the self-solve that seeds the sweep publishes: the composition
+mode ``f_*`` and the own evidence ``tau_lam``. The last block tests the ``free_*`` (RNA-crossing) masks
+``build_region_statics`` carries onto the chain; that classification is signature-only, so counts are irrelevant to it,
+and it is asserted across every region type and all four boundary types.
 """
 
 from __future__ import annotations
@@ -21,10 +20,7 @@ from rigel.calibration.blocks import SweepCapture
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 from rigel.calibration.region_geometry import build_region_statics, g1_locked, init_beliefs
-from rigel.calibration.region_init import (
-    has_own_composition_evidence,
-    strand_discriminability,
-)
+from rigel.calibration.region_init import strand_discriminability
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
     BIT_EXON_POS,
@@ -44,14 +40,12 @@ from _synthetic import make_chain_parts
 # ── helpers ────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_r, n_rna_obs):
+def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, n_rna_obs):
     """The kernel's I_strand (`native.transfer_rows.strand_evidence`): the reference-free strand composition
-    evidence at ``fg_loc``, the count overdispersed, the protocol's discriminability its library-level factor."""
+    evidence at ``fg_loc``, the protocol's discriminability its library-level factor."""
     disc = strand_discriminability(kappa, n_rna_obs)
     f64 = lambda a: np.ascontiguousarray(a, np.float64)  # noqa: E731
-    return R.strand_evidence(
-        f64(u_pos), f64(u_neg), f64(fg_loc), float(kappa), float(od_r), float(disc)
-    )
+    return R.strand_evidence(f64(u_pos), f64(u_neg), f64(fg_loc), float(kappa), float(disc))
 
 
 def _delta_pmf(length):
@@ -61,11 +55,8 @@ def _delta_pmf(length):
 
 
 def _scenario(kappa=0.9):
-    """One ref, 3 regions: intergenic (pure gDNA) | exon+ (single-strand) | AMBIG.
-
-    The chain is ``N E N E N`` — 5 slots, the regions at 0/2/4 — and the two boundaries carry no
-    counts, so this exercises the region axis alone. There are no data-free terminal slots: a
-    reference with k regions owns k − 1 boundaries.
+    """One ref, 3 regions: intergenic (pure gDNA) | exon+ (single-strand) | AMBIG. The chain is ``N E N E N`` (5 slots,
+    regions at 0/2/4), and the two boundaries carry no counts, so this exercises the region axis alone.
     """
     parts = make_chain_parts(
         [TS_NONE, BIT_EXON_POS, BIT_EXON_POS | BIT_EXON_NEG],
@@ -80,8 +71,6 @@ def _scenario(kappa=0.9):
         parts.geometry,
         parts.statics,
         rna_sense_frac=kappa,
-        gdna_strand_overdispersion=0.2,
-        rna_strand_overdispersion=0.1,
         n_grid=60,
         logodds_window=10.0,
     )
@@ -89,9 +78,9 @@ def _scenario(kappa=0.9):
 
 
 def _init(kappa=0.9):
-    """The message-free self-solve of the scenario, read off the sweep under the SILENT policy: no message is
-    sent, so a slot's final solve IS its self-solve (the same inputs to ψ), and the capture carries the own
-    evidence ``tau_lam`` and the self-solve's ``fg_loc`` (`blocks.SweepCapture`)."""
+    """The message-free self-solve of the scenario, read off the sweep under the silent policy: no message is sent, so a
+    slot's final solve is its self-solve (the same inputs to ψ), and the capture carries the own evidence ``tau_lam``
+    and the self-solve's ``fg_loc`` (`blocks.SweepCapture`)."""
     chain, statics, geometry, belief, ra = _scenario(kappa)
     cap = SweepCapture()
     out = solve_chain(
@@ -101,8 +90,6 @@ def _init(kappa=0.9):
         belief,
         ra,
         rna_sense_frac=kappa,
-        gdna_strand_overdispersion=0.2,
-        rna_strand_overdispersion=0.1,
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,
@@ -116,7 +103,7 @@ def _init(kappa=0.9):
         tau_lam=np.asarray(cap.tau_lam),
         fg_loc=np.asarray(cap.fg_loc),
     )
-    # ONE count per slot: it is both the density numerator and the Poisson n.
+    # One count per slot: it is both the density numerator and the Poisson n.
     return ni, np.asarray(geometry.unspliced_count, float).sum(axis=1)
 
 
@@ -127,34 +114,31 @@ def test_strand_evidence_is_zero_unstranded_and_positive_stranded():
     """I_strand is identically 0 on unstranded data (κ = ½) and positive on stranded data."""
     u = np.array([100.0, 100.0])
     fg = np.array([0.5, 0.5])
-    assert np.all(strand_evidence(u, u, fg, kappa=0.5, od_r=0.03, n_rna_obs=1e4) == 0.0)
-    assert np.all(strand_evidence(u, u, fg, kappa=0.99, od_r=0.03, n_rna_obs=1e4) > 0.0)
+    assert np.all(strand_evidence(u, u, fg, kappa=0.5, n_rna_obs=1e4) == 0.0)
+    assert np.all(strand_evidence(u, u, fg, kappa=0.99, n_rna_obs=1e4) > 0.0)
 
 
 def test_a_gdna_free_stranded_library_keeps_its_strand_channel():
-    """gDNA's strand mean is ½ by symmetry and needs no observation, so the channel's liveness is a
-    function of the RNA strand fit alone: neither `strand_discriminability` nor `strand_evidence` takes a
-    gDNA count or the gDNA overdispersion (the invariant, asserted structurally: a ``1/N_gdna`` term had
-    switched every gDNA-free library's channel off, the modal real case), and a stranded library is live
-    at any gDNA content, zero included."""
+    """gDNA's strand mean is ½ by symmetry and needs no observation, so the channel's liveness depends on the RNA strand
+    fit alone: neither `strand_discriminability` nor `strand_evidence` takes a gDNA quantity (asserted structurally),
+    and a stranded library is live at any gDNA content, zero included.
+    """
     names = set(inspect.signature(strand_discriminability).parameters)
-    assert not names & {"n_gdna_obs", "od_g"}, (
-        f"strand_discriminability reads a gDNA quantity: {names}"
-    )
+    assert "n_gdna_obs" not in names, f"strand_discriminability reads a gDNA quantity: {names}"
     doc = R.strand_evidence.__doc__  # the kernel's binding, its arguments in its signature line
-    assert "od_r" in doc and "od_g" not in doc and "gdna" not in doc.lower().split("disc")[0], doc
+    assert "kappa" in doc and "gdna" not in doc.lower().split("disc")[0], doc
     assert strand_discriminability(0.99, 1e4) > 0.0
     u = np.array([100.0, 100.0])
     fg = np.array([0.5, 0.5])
-    assert np.all(strand_evidence(u, u, fg, kappa=0.99, od_r=0.03, n_rna_obs=1e4) > 0.0)
+    assert np.all(strand_evidence(u, u, fg, kappa=0.99, n_rna_obs=1e4) > 0.0)
 
 
 def test_the_strand_channel_is_a_protocol_decision_not_a_sampling_band():
-    """The ladder's unstranded zero control fits κ̂ = 0.500298 from 3,090,137 spliced fragments, 1.05σ
-    from ½. An unbiased estimate of (κ−½)² floored at zero — the form this replaced — reads that LIVE (a
-    coin toss lost on 32 % of unstranded libraries; 21,484 false gDNA fragments on this one), while the
-    Bayes factor of a free κ against κ = ½ exactly reads it dead by 6.7 nats and the stranded rows live
-    by 10⁶ nats. At κ = ½ exactly the channel is dead at every N."""
+    """The strand channel is live by the Bayes factor of a free κ against κ = ½ exactly, not by a sampling band: an
+    unbiased estimate of (κ−½)² floored at zero would read a balanced unstranded library live about a third of the time.
+    A deep unstranded library fitting κ̂ ≈ 1σ from ½ reads dead, the stranded case live by a wide margin, and at κ = ½
+    exactly the channel is dead at every N.
+    """
     kappa, n = 0.500298, 3_090_137.0
     assert strand_discriminability(kappa, n) == 0.0
     assert 4.0 * ((kappa - 0.5) ** 2 - 0.25 / n) > 0.0, (
@@ -168,9 +152,9 @@ def test_the_strand_channel_is_a_protocol_decision_not_a_sampling_band():
 
 
 def test_the_occam_penalty_grows_with_the_spliced_sample():
-    """ln BF₁₀ ≈ ½·[z² − ln(2N/π)]: the excursion a sampling fluctuation must clear to read as a protocol
-    grows with the sample — 3σ is live at N = 100 and dead at N = 10⁶, 4σ live at 10⁶ and dead at 10⁸ —
-    so no multiple of σ is the gate; the free parameter's Occam penalty is."""
+    """ln BF₁₀ ≈ ½·[z² − ln(2N/π)]: the excursion a sampling fluctuation must clear to read as a protocol grows with the
+    sample (3σ is live at N = 100 and dead at N = 10⁶, 4σ live at 10⁶ and dead at 10⁸), so no multiple of σ is the
+    threshold; the free parameter's Occam penalty is."""
 
     def at(z, n):
         return strand_discriminability(0.5 + z * np.sqrt(0.25 / n), n)
@@ -187,11 +171,10 @@ def test_no_spliced_observations_is_no_protocol_decision():
 
 
 def test_the_pipeline_warns_exactly_when_calibration_reads_the_library_unstranded(caplog):
-    """The pipeline's warning is calibration's own strand decision — `strand_discriminability` on
-    `fit_strand_balance`'s fit and its spliced count — and not a second test: at N = 10⁵ a balanced
-    spliced 2×2 warns, a sense fraction of 0.99 or 0.52 is silent, and a 3σ excursion, which a 99 %
-    normal-approximation band reads as stranded, warns because the Bayes factor reads it unstranded.
-    No spliced observation is silent (`calibrate` raises there)."""
+    """The pipeline's warning is calibration's own strand decision (`strand_discriminability` on `fit_strand_balance`'s
+    fit and its spliced count), not a second test: at N = 10⁵ a balanced spliced 2×2 warns, a sense fraction of 0.99 or
+    0.52 is silent, and a 3σ excursion, which a 99 % normal-approximation band would read as stranded, warns because the
+    Bayes factor reads it unstranded. No spliced observation is silent (`calibrate` raises there)."""
 
     def warns(n_same, n_opp):
         models = StrandModels(exonic_spliced=StrandModel(pos_pos=n_same, pos_neg=n_opp))
@@ -215,9 +198,10 @@ def test_the_pipeline_warns_exactly_when_calibration_reads_the_library_unstrande
 
 
 def test_a_single_strand_slot_solves_and_is_precise():
-    """A single-strand exon self-solves f_g from the tilt: it carries a live gDNA + sense-RNA own
-    belief with own evidence, and no antisense, because the − axis is structurally dead. The strand
-    λ-term applies to a single-strand region: the tilt is locked, so the strand pins f_g."""
+    """A single-strand exon self-solves f_g from the tilt: it carries a live gDNA + sense-RNA own belief with own
+    evidence, and no antisense, because the − axis is structurally dead. The tilt is locked, so the strand λ-term pins
+    f_g.
+    """
     ni, _ = _init(kappa=0.95)
     ex = 2  # exon+ region slot
     assert ni.tau_lam[ex] > 0.0  # stranded evidence fires (single-strand ⇒ strand pins f_g)
@@ -226,11 +210,11 @@ def test_a_single_strand_slot_solves_and_is_precise():
 
 
 def test_ambig_stranded_strand_gives_zero_fg_precision():
-    """The strand Beta-Binomial is rank-1 — it informs only p — so at an AMBIG region, where the
-    tilt is a free nuisance, the strand cancels out of f_g in the Schur-marginal λ-precision and
-    contributes zero. The un-gated `strand_evidence` still computes a positive single-strand λ-term
-    there, which is the phantom source, but the kernel gates it to single-strand regions,
-    so the AMBIG region's τ_λ from the strand is 0. Only a density prior can pin its f_g."""
+    """The strand Beta-Binomial is rank-1 (it informs only p), so at an AMBIG region, where the tilt is a free nuisance,
+    the strand cancels out of f_g in the Schur-marginal λ-precision. The ungated `strand_evidence` still computes a
+    positive single-strand λ-term there, but the kernel gates it to single-strand regions, so the AMBIG region's strand
+    τ_λ is 0. Only a density prior can pin its f_g.
+    """
     chain, statics, geometry, belief, ra = _scenario(kappa=0.9)
     am = 4  # AMBIG region slot (both strands live); no intron prior in _init ⇒ no density evidence
     i_strand = strand_evidence(
@@ -238,25 +222,22 @@ def test_ambig_stranded_strand_gives_zero_fg_precision():
         np.asarray(geometry.unspliced_count, float)[:, 1],
         np.full(chain.n_slots, 0.5),
         kappa=0.9,
-        od_r=0.1,
         n_rna_obs=85.0,
     )
-    assert (
-        i_strand[am] > 0.0
-    )  # the un-gated single-strand strand term is positive (the phantom the fix removes)
+    assert i_strand[am] > 0.0  # the ungated single-strand strand term is positive
     ni, _ = _init(kappa=0.9)
     assert (
         ni.tau_lam[am] == 0.0
-    )  # ...but the assembled τ_λ gates the strand term to 0 for the AMBIG region
+    )  # but the assembled τ_λ gates the strand term to 0 for the AMBIG region
 
 
-# ── source 1: MEASURED (structural pure gDNA) → composition CERTAIN ──────────────────────────────────────────
+# ── source 1: measured (structural pure gDNA) → composition certain ──────────────────────────────────────────
 
 
 def test_measured_intergenic_is_structurally_certain():
-    """An intergenic region is structurally pure gDNA: neither strand admissible (`g1_locked`, the one
-    predicate) and the self-solve keeps its signature-binary ``f_g = 1`` — the anchor the whole
-    prior-free pass leans on, certain without any strand or factory evidence."""
+    """An intergenic region is structurally pure gDNA: neither strand admissible (`g1_locked`) and the self-solve keeps
+    its signature-binary ``f_g = 1``, the anchor the prior-free pass leans on, certain without strand or factory
+    evidence."""
     chain, statics, _geometry, _belief, _ra = _scenario(kappa=0.9)
     ni, _ = _init(kappa=0.9)
     ig = 0  # intergenic region slot
@@ -264,13 +245,12 @@ def test_measured_intergenic_is_structurally_certain():
     assert ni.f_g[ig] == 1.0 and ni.f_pos[ig] == 0.0 and ni.f_neg[ig] == 0.0
 
 
-# ── source 4: UNSOLVED → 100% gDNA at ZERO evidence ──────────────────────────────────────────────────────────
+# ── source 4: unsolved → 100% gDNA at zero evidence ──────────────────────────────────────────────────────────
 
 
 def test_unsolved_ambig_unstranded_has_zero_own_evidence():
-    """An AMBIG region on unstranded data has no intrinsic gDNA/RNA signal (I_strand=0 by the
-    protocol decision) and no structural lock, so its own evidence is 0 — the honest "no information"
-    default — with no nan anywhere."""
+    """An AMBIG region on unstranded data has no intrinsic gDNA/RNA signal (I_strand=0 by the protocol decision) and no
+    structural lock, so its own evidence is 0, the "no information" default, with no nan anywhere."""
     ni, _ = _init(kappa=0.5)  # unstranded
     am = 4  # AMBIG region slot
     assert ni.tau_lam[am] == 0.0
@@ -287,26 +267,6 @@ def test_the_self_solve_is_all_finite():
             assert np.all(np.isfinite(arr)) and np.all(arr >= 0.0) and np.all(arr <= 1.0)
 
 
-# ── the own-evidence predicate ───────────────────────────────────────────────────────────────────────
-
-
-def test_the_evidence_predicate_agrees_with_the_kernel_liveness_test():
-    """TRAPS: a-test-that-redefines: the one definition of "has own composition evidence" is
-    ``region_init.has_own_composition_evidence`` (``tau_lam`` above the kernel's ``OWN_EVIDENCE_EPS``).
-    On the kind of value the solver publishes — exactly zero where the slot has no channel, a Fisher
-    information otherwise — it agrees with the kernel's other liveness test, ``tau_lam > 0``."""
-    tau = np.array([0.0, 1e-4, 1.0, 850.0])
-    assert np.array_equal(has_own_composition_evidence(tau), tau > 0.0)
-
-
-def test_perturbation_a_DIFFERENT_predicate_stops_matching_the_home():
-    """The falsification: a consumer that picks its own floor disagrees with the production predicate
-    on a τ that spans the guard, so the agreement above is not vacuous."""
-    tau = np.array([0.0, 1e-12, 1e-9, 2e-9, 1e-4, 1.0])
-    theirs = tau > 1e-6  # a plausible, wrong, home-made floor
-    assert not np.array_equal(theirs, has_own_composition_evidence(tau))
-
-
 # ── source 2: density-deconvolution factor precision (I_density) ──────────────────────────────────────────────────────────
 
 
@@ -314,13 +274,9 @@ def test_perturbation_a_DIFFERENT_predicate_stops_matching_the_home():
 
 
 def _build_statics(region_sigs):
-    """Build a single-reference chain over ``region_sigs`` (genomic order) and return
-    ``(chain, statics)``.
-
-    ``k`` regions own ``k − 1`` interior boundaries and there are no terminal slots, so there is no
-    "boundary 0 is the reference-start sink" case to classify. A boundary always has a region on
-    both sides, which is what lets `build_region_statics` read its flanks straight off the chain's
-    adjacency instead of a ``left_region``/``right_region`` array with ``-1`` holes.
+    """Build a single-reference chain over ``region_sigs`` (genomic order) and return ``(chain, statics)``. ``k``
+    regions own ``k − 1`` interior boundaries and there are no terminal slots, so a boundary always has a region on both
+    sides and `build_region_statics` reads its flanks straight off the chain's adjacency.
     """
     sig = np.asarray(region_sigs, dtype=np.int64)
     n_reg = sig.shape[0]
@@ -336,7 +292,7 @@ def _build_statics(region_sigs):
 
 def test_classifier_covers_region_and_boundary_types():
     # N0 exon+ | N1 exon+ | N2 intron+ | N3 intergenic | N4 ambig-exon | N5 ambig-exon
-    # boundaries (5): E0(N0|N1) E1(N1|N2) E2(N2|N3) E3(N3|N4) E4(N4|N5) — no terminals
+    # boundaries (5): E0(N0|N1) E1(N1|N2) E2(N2|N3) E3(N3|N4) E4(N4|N5), no terminals
     sigs = [
         BIT_EXON_POS,
         BIT_EXON_POS,
@@ -366,10 +322,9 @@ def test_classifier_covers_region_and_boundary_types():
     assert state(reg[3]) == (False, False)  # intergenic: gDNA sink
     assert state(reg[4]) == (True, True)  # ambig-exon: both strands
 
-    # --- boundaries: the four types. There is no reference-start terminal slot, so E0 is the first
-    # real boundary, N0|N1.
+    # --- boundaries: the four types. E0, N0|N1, is the first boundary.
     assert state(bnd[0]) == (True, False)  # exon↔exon+
     assert state(bnd[1]) == (True, False)  # exon↔intron+
-    assert state(bnd[2]) == (False, False)  # intron↔intergenic: SINK (no + crossing)
-    assert state(bnd[3]) == (False, False)  # intergenic↔ambig-exon : SINK
-    assert state(bnd[4]) == (True, True)  # ambig↔ambig  : AMBIG
+    assert state(bnd[2]) == (False, False)  # intron↔intergenic: sink (no + crossing)
+    assert state(bnd[3]) == (False, False)  # intergenic↔ambig-exon: sink
+    assert state(bnd[4]) == (True, True)  # ambig↔ambig: AMBIG

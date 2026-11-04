@@ -1,10 +1,9 @@
 """The EM gives one answer whatever its thread count.
 
-A locus whose E-step work reaches a thread's fair share runs its E-step on every thread. Its column sums were added
-per thread and the threads' sums reduced in thread order, a grouping that changed with the thread count, and SQUAREM
-turned those ulps into whole isoforms: on one ladder condition 16 threads moved 42 transcripts by 3,293 fragments
-against 1 to 8. Each equivalence class's column sums now go to a slot of their own and are added in class order on
-every path, so the thread count changes only which thread runs a class.
+A locus whose E-step work reaches a thread's fair share runs its E-step on every thread. Each equivalence class's
+column sums go to a slot of their own and are added in class order on every path, so the thread count changes only
+which thread runs a class. Sums reduced in thread order would group differently at each thread count, and SQUAREM
+turns those ulps into whole isoforms.
 """
 
 from __future__ import annotations
@@ -18,15 +17,15 @@ from rigel.sim import ReadSimConfig, Scenario
 
 SEED = 19
 
-#: Each of these disagreed with one thread while the E-step split its classes into row ranges per thread.
+#: Thread counts at which a split of each class into row ranges per thread lands at a different row.
 THREAD_COUNTS = (2, 3, 4, 16)
 
 
 @pytest.fixture(scope="module")
 def one_locus(tmp_path_factory):
     """One gene of three isoforms that share exons, under gDNA: one locus, so at any thread count above one it is
-    the whole of the work and its E-step runs threaded, with classes deep enough that the old split into row ranges
-    landed at a different row for every thread count."""
+    the whole of the work and its E-step runs threaded, with classes deep enough that a split into row ranges per
+    thread would land at a different row for every thread count."""
     work = tmp_path_factory.mktemp("em_threads")
     scenario = Scenario("em_threads", genome_length=9000, seed=SEED, work_dir=work / "sim")
     scenario.add_gene(

@@ -13,8 +13,6 @@
 #pragma once
 
 #include <cstddef>
-#include <stdexcept>
-#include <string>
 #include <vector>
 
 #include <nanobind/nanobind.h>

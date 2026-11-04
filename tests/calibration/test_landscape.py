@@ -1,12 +1,10 @@
 """The population gDNA-density hyperprior (`calibration.landscape`), one property per test.
 
-What the fit has to survive is a library whose truth is a uniform depleted level plus a
-capture-enriched minority: the minority must stay a mode rather than being smoothed into the bulk,
-the grid must span exactly what ψ can represent and nothing else, a zero-count region must decay
-downward instead of inventing a location at 1/E, an imprecise region must be damped rather than
-dropped, and the kernel widths must come from the local neighbour spacing so they widen on their own
-as regions thin out. The census that splits the fit into the bulk and the enriched basins closes the file.
-Each gate holds one property, so a regression names itself.
+The fit must survive a library whose truth is a uniform depleted level plus a capture-enriched minority: the minority
+stays a mode rather than being smoothed into the bulk, the grid spans exactly what ψ can represent, a zero-count region
+decays downward instead of inventing a location at 1/E, an imprecise region is damped rather than dropped, and the
+kernel widths come from the local neighbour spacing so they widen as regions thin out. The census that splits the fit
+into the bulk and the enriched basins closes the module.
 """
 
 import numpy as np
@@ -51,10 +49,9 @@ def test_fit_is_deterministic():
 
 def test_the_row_tiles_move_no_bit(monkeypatch):
     """The kernels are built and summed a row tile at a time, and the tile's height is a resource setting
-    (`simplex_logodds._block_rows`), so it must order no addition: a population spanning several tiles, fitted
-    and refitted (the refit's E-step runs tile by tile), gives the same bits at a one-row tile, an odd tile, the
-    shipped tile and one tile for the whole population. PERTURBATION: adding each tile's partial sum into the
-    per-group totals, as the fit once did, fails here at every height."""
+    (`simplex_logodds._block_rows`), so it must not change the order of any addition: a population spanning several
+    tiles, fitted and refitted (the refit's E-step runs tile by tile), gives the same bits at a one-row tile, an odd
+    tile, the shipped tile and one tile for the whole population."""
     rng = np.random.default_rng(5)
     n = 1600
     eff = rng.uniform(100.0, 3000.0, n)
@@ -84,8 +81,8 @@ def test_the_row_tiles_move_no_bit(monkeypatch):
 
 
 def test_recovers_both_modes():
-    """The estimator exists to keep a capture-enriched MINORITY — 15 % of regions here — so a fit that
-    smooths them into the depleted bulk is the failure mode, not a nuance."""
+    """The estimator exists to keep a capture-enriched minority (15 % of regions here); smoothing them into the depleted
+    bulk is the failure mode."""
     count, mass, eff, var = _two_mode()
     ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     x, d = ls.log_rho / LN10, _density(ls)
@@ -95,8 +92,8 @@ def test_recovers_both_modes():
 
 
 def test_grid_is_the_domain_logprior_is_asked_about():
-    """ψ evaluates at ρ_g = f_g·M/E with f_g ≤ 1, so the grid top is max(M/E) and the bottom is the deepest
-    one-count resolution wall. Nothing outside is representable, so nothing outside is represented."""
+    """ψ evaluates at ρ_g = f_g·M/E with f_g ≤ 1, so the grid top is max(M/E) and the bottom is the deepest one-count
+    resolution wall; nothing outside is representable, so nothing outside is represented."""
     count, mass, eff, var = _two_mode()
     ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     x = ls.log_rho / LN10
@@ -105,8 +102,8 @@ def test_grid_is_the_domain_logprior_is_asked_about():
 
 
 def test_zero_count_anchor_is_native_and_low():
-    """A region with no gDNA must say "ρ is anything below the wall" — a downward decay, NOT an
-    invented location at 1/E. It is also the depleted anchor, so dropping it moves the whole fit."""
+    """A region with no gDNA says "ρ is anything below the wall": a downward decay, not an invented location at 1/E. It
+    is also the depleted anchor, so dropping it would move the whole fit."""
     eff = np.full(200, 500.0)
     ls = fit_landscape(
         np.zeros(200), np.full(200, 1000.0), eff, np.full(200, np.inf), anchor=np.ones(200, bool)
@@ -119,10 +116,9 @@ def test_zero_count_anchor_is_native_and_low():
 
 
 def test_reliability_weight_damps_but_never_deletes():
-    """Precision belongs in a continuous weight; expressing it as an admission threshold is measurably
-    worse than ignoring precision altogether. So an imprecise region must be DAMPED — strictly smaller
-    contribution — and never DELETED, because the one region reporting a genuine enriched mode may be exactly
-    the imprecise one."""
+    """Precision belongs in a continuous weight; an admission threshold would be worse than ignoring precision. An
+    imprecise region must be damped (a strictly smaller contribution), never deleted, since the one region reporting a
+    real enriched mode may be the imprecise one."""
     count, mass, eff, var = _two_mode()
     # move a single region far from every other, so its contribution is separable on the axis
     count, var = count.copy(), var.copy()
@@ -142,8 +138,8 @@ def test_reliability_weight_damps_but_never_deletes():
 
 
 def test_anchor_is_trusted_outright():
-    """The zero-count structural anchor carries w = 1: its density is 0 for EVERY f_g, so its composition
-    ambiguity is irrelevant and must not down-weight it."""
+    """The zero-count structural anchor carries w = 1: its density is 0 for every f_g, so its composition ambiguity is
+    irrelevant and must not down-weight it."""
     count, mass, eff, var = _two_mode()
     var = var.copy()
     var[:20] = np.inf  # unidentified composition, but zero mass ⇒ still an exact density statement
@@ -157,8 +153,8 @@ def test_anchor_is_trusted_outright():
 
 
 def test_knn_width_never_below_the_grid_step():
-    """Forced by the axis: a kernel narrower than one cell is a delta at the wrong height, and the
-    enriched half of the landscape becomes a comb of them rather than a bump."""
+    """A kernel narrower than one cell is a delta at the wrong height, and the enriched half of the landscape would
+    become a comb of them rather than a bump."""
     a = np.linspace(-3.0, 2.0, 500)
     step = 0.02
     assert (knn_widths(a, step) >= step).all()
@@ -166,10 +162,9 @@ def test_knn_width_never_below_the_grid_step():
 
 
 def test_knn_width_is_the_exact_kth_nearest_neighbour_distance():
-    """Not "the far boundary of a 2k window" — that hands the WIDEST kernel in the fit to the most
-    ISOLATED region, which is backwards, and on a zero-gDNA library it is the channel that
-    manufactures a false enriched mode. Checked against brute force on samples deliberately built as
-    a bulk plus outliers."""
+    """The exact k-th nearest-neighbour distance, not the far boundary of a 2k window, which would hand the widest
+    kernel to the most isolated region and on a zero-gDNA library manufacture a false enriched mode. Checked against
+    brute force on samples built as a bulk plus outliers."""
     rng = np.random.default_rng(0)
     for _ in range(20):
         n = int(rng.integers(8, 300))
@@ -183,7 +178,7 @@ def test_knn_width_is_the_exact_kth_nearest_neighbour_distance():
 
 
 def test_knn_width_widens_as_the_sample_thins():
-    """The self-correcting property: fewer regions ⇒ farther neighbours ⇒ wider kernels, with no tuning."""
+    """Fewer regions mean farther neighbours and wider kernels, with no tuning."""
     full = knn_widths(np.linspace(-3, 2, 1000), 1e-6)
     thin = knn_widths(np.linspace(-3, 2, 100), 1e-6)
     assert np.median(thin) > np.median(full)
@@ -215,10 +210,9 @@ def test_the_arm_tracks_the_region_mass():
 
 
 def test_the_kernels_arm_is_numpys_interpolation_of_the_curve_to_the_bit():
-    """The arm ψ reads per cell (`native/psi_kernel.h`, ``Arm``) is the former ``(n, K)`` projection to the
-    bit: ``np.interp`` of the curve at ``log σ(λ) + log M − log E`` with the ends held, the fraction, mass and
-    opportunity clipped at the landscape's guard. Scored against numpy, a different implementation (TRAPS:
-    a-test-that-redefines). PERTURBATION: an arm that extrapolated past the grid, or skipped a clip, fails here."""
+    """The arm ψ reads per cell (`native/psi_kernel.h`, ``Arm``) is ``np.interp`` of the curve at ``log σ(λ) + log M −
+    log E`` to the bit, with the ends held and the fraction, mass and opportunity clipped at the landscape's guard;
+    numpy is a different implementation. An arm that extrapolated past the grid, or skipped a clip, would fail here."""
     from scipy.special import expit
 
     from _psi_reference import gdna_arm
@@ -281,9 +275,9 @@ def test_the_landscape_keeps_its_own_density_beside_the_padded_one():
 
 
 def test_split_basins_names_the_largest_basin_depleted_and_returns_only_the_basins_above_it():
-    """Depleted is the largest-mass basin; the basins returned beside it are those strictly above it, so a
-    smaller basin BELOW the depleted one is never an enriched candidate, and a density whose largest basin
-    is the top one has nothing above it."""
+    """Depleted is the largest-mass basin; the basins returned beside it are those strictly above it, so a smaller basin
+    below the depleted one is never an enriched candidate, and a density whose largest basin is the top one has nothing
+    above it."""
     below = LandscapeMode(log_rho=-7.0, basin_mass=0.10, lo=-9.0, hi=-6.0)
     base = LandscapeMode(log_rho=-4.0, basin_mass=0.60, lo=-6.0, hi=-2.0)
     mid = LandscapeMode(log_rho=0.0, basin_mass=0.30, lo=-2.0, hi=1.5)
@@ -319,10 +313,10 @@ def test_the_basins_partition_the_grid():
 
 
 def test_a_density_highest_at_the_grid_edge_peaks_there():
-    """The review's case: a floor of mass 0.70 at the grid's low edge and a small bump at x = 5. The edge is a
-    maximum, so it is the bulk, and the bump is the enriched basin above it. PERTURBATION: reading interior
-    maxima only makes the bump the one basin, holding everything, and the floor-versus-enriched contrast is
-    gone."""
+    """A floor of mass 0.70 at the grid's low edge and a small bump at x = 5: the edge is a maximum, so it is the bulk,
+    and the bump is the enriched basin above it. Reading interior maxima only would make the bump the one basin, holding
+    everything, and lose the floor-versus-enriched contrast.
+    """
     modes = census(_drawn([0.70, 0.10, 0.05, 0.02, 0.03, 0.08, 0.02]))
     assert [m.log_rho for m in modes] == [0.0, 5.0]
     bulk, above = split_basins(modes)
@@ -344,10 +338,10 @@ def test_a_plateau_peaks_at_its_left_end():
 
 
 def _walls_around_a_tail(seed=0, n_long=20_000, n_dep=200, n_short=600, n_tail=12):
-    """A sparse human-like library, refitted through the loop's own E-step: the depleted bulk is 20,000
-    long anchors (walls at 10^-5) with 200 located intron pieces at the depleted level; 600 SHORT anchors —
-    20–60 bp intergenic slivers that sequenced nothing — whose resolution walls 1/E sit between 10^-1.8
-    and 10^-1.3; and twelve located exon kernels near 10^-1.3, a tail and not a population."""
+    """A sparse human-like library, refitted through the loop's own E-step: the depleted bulk is 20,000 long anchors
+    (walls at 10^-5) with 200 located intron pieces at the depleted level; 600 short anchors (20–60 bp intergenic
+    slivers that sequenced nothing) whose resolution walls 1/E sit between 10^-1.8 and 10^-1.3; and twelve located exon
+    kernels near 10^-1.3, a tail rather than a population."""
     rng = np.random.default_rng(seed)
     eff = np.concatenate(
         [
@@ -377,11 +371,11 @@ def _walls_around_a_tail(seed=0, n_long=20_000, n_dep=200, n_short=600, n_tail=1
 
 
 def test_walls_around_a_handful_of_exons_lift_nothing_and_the_exons_read_their_own_level():
-    """cfRNA-A's shape, through the estimator itself: the walls' mass goes to the bulk in the E-step, and the
-    twelve exons are a basin of a few parts in ten thousand. Read by the capture reader, nothing without evidence
-    is lifted — a 40 bp sliver with no fragment reads the bulk to a part in a thousand, a 100 kb intron with none
-    reads it exactly — and an exon at the tail's level, fifteen fragments on 300 bp, reads its own level: the
-    small panel the located-mode gate would not read at all."""
+    """A sparse real library's shape, through the estimator: the walls' mass goes to the bulk in the E-step, and the
+    twelve exons are a basin of a few parts in ten thousand. Read by the capture reader, nothing without evidence is
+    lifted (a 40 bp sliver with no fragment reads the bulk to a part in a thousand, a 100 kb intron with none reads it
+    exactly), and an exon at the tail's level, fifteen fragments on 300 bp, reads its own level.
+    """
     ls = _walls_around_a_tail()
     assert ls is not None
     _bulk, above = split_basins(census(ls))

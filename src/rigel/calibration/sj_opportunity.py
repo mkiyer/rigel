@@ -1,44 +1,27 @@
-"""De-tilting the annotated-sj length pool.
+"""The annotated-sj opportunity: the length tilt of the spliced pool (layer 2, opportunity).
 
-The RNA fragment-length model is fitted from ``RNA_SPLICED``, the pool of deposited fragments whose
-path used an annotated sj. That is a length-dependent selection: a longer fragment covers more of
-its transcript, so it crosses a sj more often, and the raw pool therefore reads long against the
-library's real RNA lengths while the unconditional anchor does not.
-
-The tilt is exactly computable from the annotation. For a transcript with exon lengths
-``e_1 .. e_K`` in transcript space and total ``L = SUM e_i``, the number of start positions at which a
-length-``w`` window crosses **at least one** sj is::
+The spliced pool (fragments whose path used an annotated sj) is a length-dependent selection: a longer fragment
+crosses an sj more often, so the pool reads long against the library's RNA lengths. The tilt is computable from the
+annotation. For a transcript with exon lengths ``e_1 .. e_K`` in transcript space and ``L = SUM e_i``, the starts at
+which a length-``w`` window crosses at least one sj number::
 
     A_j(w)  =  (L - w + 1)+  -  SUM_i (e_i - w + 1)+
 
-Work with the COMPLEMENT and it decomposes with no inclusion-exclusion: a window crosses no sj iff
-it lies wholly inside a single exon, and the exons are disjoint, so those placements partition by
-which exon contains the window. The union of "crosses sj ``j``" events gets worse with every exon;
-the complement is exact in one subtraction.
-
-The library-level quantities are abundance-weighted sums of that, over transcripts::
+by the complement: a window crosses no sj iff it lies inside one exon, and the exons partition those placements, so
+no inclusion-exclusion is needed. Over transcripts, weighted by molar abundance ``theta``::
 
     T(w) = SUM_t theta_t (L_t - w + 1)+          every placement
     A(w) = SUM_t theta_t A_j(w, t)               the placements that cross something
     pi(w) = A(w) / T(w)                          the probability a placement lands in the pool
 
-and the corrected pool is ``pool(w) / pi(w)``.
+and the corrected pool is ``pool(w) / pi(w)``. The divisor is ``pi``, not ``A``: ``A`` alone recovers the law lengths
+were drawn from, while consumers need the law the library realizes, the drawn one weighted by its placements ``T``;
+and because ``A`` and ``T`` sum over the same transcripts, the ratio tolerates a wrong ``theta``. ``theta`` must be
+molar (copies), never a fragment count, which would apply the length weighting twice.
+:func:`crossing_probability_from_index` weights every non-synthetic transcript equally, which needs no expression
+estimate because the ratio cancels most of the dependence on ``theta``.
 
-Divide by ``pi``, never by ``A`` alone, and the difference is not cosmetic. ``A`` alone recovers the
-distribution lengths were DRAWN from; what every consumer needs is the distribution the library
-REALIZES, which is the drawn one weighted by how many placements each length has — and that weight
-is ``T``. The ratio also makes the correction safe under a wrong ``theta``, because ``A`` and ``T``
-are sums over the same transcripts, so a reweighting moves both: on a deliberately pathological theta
-the ratio form still beats not correcting while the ``A``-only form overshoots past it.
-``tests/calibration/test_sj_opportunity.py`` pins both halves of that.
-
-``theta`` is a molar abundance — copies — and never an observed fragment count. ``A_j`` already
-counts start positions, so a count would apply the length weighting twice.
-
-Production uses a UNIFORM theta over the non-synthetic transcripts, which needs no expression
-estimate at all. That is not a shortcut taken for cheapness: the ratio cancels most of the
-dependence on theta, so a uniform weighting lands the corrected pool close to where the true molar
-abundances do.
+Gate: ``tests/calibration/test_sj_opportunity.py``.
 """
 
 from __future__ import annotations
@@ -62,14 +45,10 @@ def _ramp_sum(lengths: np.ndarray, weights: np.ndarray, max_length: int) -> np.n
     """``SUM_j weights_j * (lengths_j - w + 1)+`` for every ``w`` in ``[0, max_length]``.
 
     ``(len - w + 1)+`` is the count of integers in ``[w, len]``, so the whole sum is
-    ``SUM_{v >= w} SUM_{j: len_j >= v} weights_j`` — the reverse cumulative sum, applied twice, of the
-    weighted length histogram. Exact integer geometry with no loop over ``w`` and no float rounding
-    beyond the weights themselves.
-
-    The histogram must span the longest object present AND ``max_length``, not whichever is
-    smaller: too short a span truncates the inner tail sum and every value comes back too small, and
-    a spectrum that stops before ``max_length`` returns a short array that silently misaligns
-    against the other curve.
+    ``SUM_{v >= w} SUM_{j: len_j >= v} weights_j``: the reverse cumulative sum, applied twice, of the weighted
+    length histogram, with no loop over ``w``. The histogram must span both the longest object and ``max_length``: a
+    shorter span truncates the inner tail sum, and one that stops before ``max_length`` returns a short, misaligned
+    array.
     """
     lengths = np.asarray(lengths, dtype=np.int64)
     span = max(int(lengths.max(initial=0)) + 2, max_length + 1)
@@ -99,8 +78,8 @@ def sj_opportunity(
     max_length
         the largest fragment length to return, inclusive.
 
-    Both curves are built from the same two length spectra — one over transcripts, one over exons —
-    so they cannot disagree about what a length is.
+    Both curves come from the same two length spectra, one over transcripts and one over exons, so they agree on
+    what a length is.
     """
     exon_lengths = np.asarray(exon_lengths, dtype=np.int64)
     transcript_offsets = np.asarray(transcript_offsets, dtype=np.int64)
@@ -111,8 +90,8 @@ def sj_opportunity(
         )
 
     n_exons = np.diff(transcript_offsets)
-    # A prefix-sum difference rather than `add.reduceat`, which has no answer for an EMPTY slice —
-    # and a transcript with no cached exons is an ordinary state, not an error.
+    # a prefix-sum difference, because `add.reduceat` mishandles an empty slice and a transcript with no cached
+    # exons is an ordinary state
     prefix = np.concatenate([[0], np.cumsum(exon_lengths)])
     transcript_lengths = prefix[transcript_offsets[1:]] - prefix[transcript_offsets[:-1]]
 
@@ -120,10 +99,9 @@ def sj_opportunity(
     inside_one_exon = _ramp_sum(exon_lengths, np.repeat(theta, n_exons), max_length)
     crossing = total - inside_one_exon
 
-    # Bin 0 is not a fragment length, and the complement identity is NEGATIVE there: a zero-length
-    # window sits exactly ON an exon boundary, so `SUM_i (e_i + 1)` counts every internal boundary
-    # twice and `A_j(0) = 1 - K`. Both curves are defined on `w >= 1`; leaving a negative divisor in
-    # bin 0 would be a landmine for any consumer that does not happen to guard on it.
+    # Bin 0 is not a fragment length, and the complement identity is negative there: a zero-length window sits on an
+    # exon boundary, so `SUM_i (e_i + 1)` counts every internal boundary twice and `A_j(0) = 1 - K`. Both curves are
+    # defined on `w >= 1`, so bin 0 is zeroed rather than left a negative divisor.
     total[0] = 0.0
     crossing[0] = 0.0
     return total, crossing
@@ -135,22 +113,19 @@ def crossing_probability(
     theta: np.ndarray,
     max_length: int,
 ) -> np.ndarray:
-    """``pi(w) = A(w) / T(w)`` — the chance a uniformly placed length-``w`` fragment crosses a sj.
+    """``pi(w) = A(w) / T(w)``: the chance a uniformly placed length-``w`` fragment crosses an sj.
 
-    Zero where there are no placements at all (``w`` beyond every expressed transcript), which is the
-    honest answer: the pool cannot contain such a fragment, so there is nothing to de-tilt.
+    Zero where there are no placements (``w`` beyond every expressed transcript): the pool cannot hold such a fragment.
     """
     total, crossing = sj_opportunity(exon_lengths, transcript_offsets, theta, max_length)
     return np.divide(crossing, total, out=np.zeros_like(total), where=total > 0.0)
 
 
 def crossing_probability_from_index(index: "TranscriptIndex", max_length: int) -> np.ndarray:
-    """``pi(w)`` for an index, weighting every **real** transcript equally.
+    """``pi(w)`` for an index, weighting every non-synthetic transcript equally.
 
-    The transcript filter is ``~is_synthetic``, alone. The manufactured unspliced spans are not
-    molecules anybody sequenced, and giving them opportunity puts weight on exon structures the
-    library does not contain. It is NOT ``~is_synthetic & ~is_single_exon``: a real single-exon transcript
-    is a real transcript, and using that flag as a realness filter silently deletes real transcripts.
+    The filter is ``~is_synthetic`` alone. Synthetic spans are not sequenced molecules, while a single-exon
+    transcript is a real one and must stay in: it adds placements to ``T`` and none to ``A``.
     """
     offsets, exon_starts, exon_ends, _ = index.build_exon_csr()
     theta = (~index.t_df["is_synthetic"].to_numpy()).astype(np.float64)
@@ -163,20 +138,13 @@ def crossing_probability_from_index(index: "TranscriptIndex", max_length: int) -
 
 
 def detilt_pool(counts: np.ndarray, crossing_probability: np.ndarray) -> np.ndarray:
-    """Divide a sj-pool histogram by its own opportunity, keeping its evidence weight.
+    """Divide a pool histogram by its selection probability, keeping its total.
 
-    The total is preserved on purpose. ``build_fl_models`` shrinks gDNA's pool toward the anchor with
-    a Dirichlet pseudo-count whose strength is the pool total, and that total means "how many
-    fragments stand behind this shape". De-tilting changes the shape, not how much evidence there
-    is; letting the total move would weaken the shrinkage as an accidental side effect.
-
-    A bin where the opportunity is zero cannot legitimately hold mass, since a fragment is only in
-    this pool because it crossed an annotated sj, which is a placement the opportunity counts. Such
-    a bin contributes nothing and the surviving mass is renormalised over it, so no evidence is
-    lost.
-
-    Returns ``counts`` unchanged when the annotation offers no opportunity anywhere (every transcript
-    single-exon, or an empty annotation): a correction with no information must be inert.
+    De-tilting changes the pool's shape, not how many fragments stand behind it, so the total is preserved for any
+    consumer that reads it as an evidence weight. A bin whose probability is zero cannot legitimately hold mass (a
+    fragment is in the pool only through a placement the probability counts); it contributes nothing and the surviving
+    mass is renormalised over it. With no opportunity anywhere (every transcript single-exon, or an empty annotation)
+    ``counts`` comes back unchanged: a correction with no information is inert.
     """
     counts = np.asarray(counts, dtype=np.float64)
     pi = np.asarray(crossing_probability, dtype=np.float64)

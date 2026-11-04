@@ -1,13 +1,11 @@
 """The simulator draws no fragment over sequence the reference does not know.
 
-A reference's `N` runs are assembly gaps: no molecule reads as `N`, and an aligner places no read there. The
-simulator once drew gDNA over them anyway — about a fifth of the ladder's gDNA off capture — which no aligner could
-place and the oracle BAM placed by truth, so the oracle ladder agreed with calibration's region lengths, which count
-those bases too, and hid that defect. The capture sampler now masks every unknown base per template: a fragment of
-gDNA or RNA that would overlap one is never drawn and adds no opportunity, in the allocation across templates and in
-the placement within one, with capture and without. These gates hold the masks to the templates, the masked totals to
-brute-force enumeration over every start, the masked draws to the masked weights, and the simulated reads to known
-sequence.
+A reference's `N` runs are assembly gaps: no molecule reads as `N`, and an aligner places no read there, while the
+oracle BAM would place one by truth and so agree with any calibration that counts those bases too. The capture
+sampler masks every unknown base per template: a fragment of gDNA or RNA that would overlap one is never drawn and
+adds no opportunity, in the allocation across templates and in the placement within one, with capture and without.
+These gates hold the masks to the templates, the masked totals to brute-force enumeration over every start, the
+masked draws to the masked weights, and the simulated reads to known sequence.
 """
 
 from __future__ import annotations
@@ -73,7 +71,7 @@ def test_every_template_is_masked_at_its_own_unknown_bases(tmp_path):
     """The mask sits in each template's own coordinates: a gDNA reference's, a spliced transcript's (an N run in
     an intron is no base of it, one in an exon is), and the reverse strand's, read 5′ to 3′ as the engine builds it.
 
-    Perturbation: masking in genomic coordinates, or ignoring the strand, misplaces every mRNA run."""
+    Perturbation: masking in genomic coordinates, or ignoring the strand, misplaces every transcript's run."""
     genome = MutableGenome(3000, seed=1, name="chr1")
     genome.edit(150, "N" * 20)  # intergenic
     genome.edit(620, "N" * 7)  # in t_pos's first exon
@@ -189,7 +187,7 @@ def test_the_draws_avoid_unknown_bases_and_follow_the_masked_weights(enabled, ma
 
 def test_a_mask_is_kept_sorted_and_merged_whatever_order_it_arrives_in():
     """The blocked starts are read off the runs in order, so a mask given out of order, or overlapping, is put in
-    order on install: given unsorted, one run once hid the other entirely. An empty or negative run is refused.
+    order on install: given unsorted, one run could hide the other entirely. An empty or negative run is refused.
 
     Perturbation: storing the runs as given."""
     sampler = _sampler([])

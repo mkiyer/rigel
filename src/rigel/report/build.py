@@ -1,14 +1,8 @@
-"""The report pipeline in one function: :func:`build_report`.
+"""The report pipeline in one function, :func:`build_report`: load the substrate (:mod:`.substrate`), build the
+view model (:mod:`.model`) and the chart specs (:mod:`.specs`), and write one HTML file (:mod:`.html`).
 
-Loads the substrate a ``rigel quant`` run left in its output directory
-(:mod:`rigel.report.substrate`), builds the render-ready view model (:mod:`rigel.report.model`)
-and the chart specs (:mod:`rigel.report.specs`), and writes one self-contained HTML file
-(:mod:`rigel.report.html`). It computes nothing itself; each stage owns its own step.
-
-Only ``summary.json`` is required — substrate warnings are logged rather than raised, and a
-missing optional table degrades the corresponding section instead of failing the report. When
-``vl-convert-python`` is absent every chart is omitted, with a warning naming the extra to
-install.
+Only ``summary.json`` is required. Substrate warnings are logged, not raised, and a missing optional table empties
+its section. Without ``vl-convert-python`` every chart is omitted, with a warning naming the extra to install.
 """
 
 from __future__ import annotations

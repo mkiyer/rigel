@@ -70,7 +70,7 @@ class TestFragmentLengthModelStatistics:
         counts[100] = 10.0  # overflow bin (>= max_size=100), a censored long tail
         m = FragmentLengthModel(max_size=100, counts=counts)  # raw QC view (unfinalized)
 
-        # mean/mode/std describe the in-range bulk (all at 50), NOT dragged to 100.
+        # mean/mode/std describe the in-range bulk (all at 50), not dragged to 100.
         assert m.mode == 50
         assert m.mean == pytest.approx(50.0)
         assert m.std == pytest.approx(0.0)
@@ -152,13 +152,12 @@ class TestFragmentLengthModelSerialization:
         assert d["histogram"]["values"] == []
 
 
-# The report's fragment-length categories come from `FLModels` rather than from a per-splice-category
-# histogram of the scanner's, and are gated in tests/test_summary_report.py.
+# The report's fragment-length categories come from `FLModels` and are gated in tests/test_summary_report.py.
 
 
 def test_a_RAW_COUNT_model_refuses_a_pmf():
-    """A model built from raw counts is a statistics view. The smoothing that once gave it a pmf was
-    deleted with the path nothing called, so asking for one must refuse rather than return None."""
+    """A model built from raw counts is a statistics view with no pmf, so asking for one refuses rather
+    than returning None."""
     model = FragmentLengthModel(max_size=100, counts=np.ones(101))
     with pytest.raises(ValueError, match="from_pmf"):
         model.pmf()

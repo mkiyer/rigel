@@ -1,17 +1,15 @@
-"""rigel.config — every setting and every fixed number Rigel's code reads, in one place.
+"""Every setting and every fixed number Rigel's code reads, in one place.
 
-Two trees, both frozen dataclasses, validated on construction:
+Two trees of frozen dataclasses, validated on construction:
 
-* :class:`PipelineConfig` — what a run may set (the CLI, a YAML file, an instrument's ``--set``): ``em``,
-  ``scan``, ``scoring`` and ``calibration``. :class:`IndexConfig` is the same for ``rigel index``.
-* :data:`CONSTANTS` — what the code fixes: the numerical methods, the quality-control thresholds and the resource
-  budgets, by component. Not user-configurable; each value is documented with why it has that value, and the code
-  reads it by name and never restates it.
+* :class:`PipelineConfig` — what a run may set (the CLI, a YAML file, an instrument's ``--set``): ``em``, ``scan``,
+  ``scoring`` and ``calibration``. :class:`IndexConfig` is the same for ``rigel index``.
+* :data:`CONSTANTS` — what the code fixes: numerical methods, quality-control thresholds and resource budgets, by
+  component. Each value is documented with why it has that value; the code reads it by name and never restates it.
 
-What is deliberately NOT here: identifiers and formats (enum codes, bit flags, schema versions, file names), which
-live with the format they define; mathematical definitions (gDNA's strand probability ½, Jeffreys' ½), named where
-they are used; and the constants the native kernels share with Python, defined once in C++ and exported by
-:mod:`rigel.native`.
+Not here: identifiers and formats (enum codes, bit flags, schema versions, file names), which live with the format
+they define; mathematical definitions (gDNA's strand probability ½, Jeffreys' ½), named where they are used; and the
+constants the native kernels share with Python, defined in C++ and exported by :mod:`rigel.native`.
 """
 
 from __future__ import annotations
@@ -48,7 +46,7 @@ class EMConfig:
     convergence_delta : float
         Convergence threshold for theta updates (default 1e-6).
     assignment_mode : {"sample", "fractional"}
-        Post-EM fragment assignment (default ``"sample"``). ``"sample"`` gives every fragment to ONE
+        Post-EM fragment assignment (default ``"sample"``). ``"sample"`` gives every fragment to one
         component, count first: each component's fractional count is rounded within its EM locus, then
         each fragment is drawn from its own posterior, re-weighted toward the components still short of
         their rounded count, so whole counts land on the rounded fractional counts. ``"fractional"``
@@ -68,34 +66,24 @@ class EMConfig:
     Any positive value → cap at that many threads (the EM's own thread pool).
     """
     warm_start: Literal["coverage", "prior", "uniform"] = "coverage"
-    """⭐ What the EM's initial ``theta`` is derived FROM.
+    """What the EM's initial ``theta`` is derived from.
 
-    ``"coverage"`` (the default and the shipped behaviour) seeds it with each component's unambiguous
-    total plus a coverage-weighted share of the ambiguous fragments, and then projects that seed through
-    the calibration prior.
-
-    ``"uniform"`` seeds every component equally, so the seed asserts NOTHING — the EM's landing point
-    is then a property of the likelihood rather than of where it was put down. ⭐ It is the control that
-    separates *"the shipped seed steers the solver into a bad basin"* from *"the objective has one"*.
-
-    ``"prior"`` zeroes the seed, so ``theta`` starts proportional to the prior alone. ⛔ It exists
-    because the seed and the prior are two different methods and the projection MULTIPLIES them — a
-    coverage-weighted share scaled by a per-transcript allocation derived some other way is neither
-    method's answer. ⚠ Only meaningful together with a per-transcript weight: under the shipped
-    evidence-proportional rule an all-zero seed leaves the RNA pool at zero and hands the locus to gDNA,
-    because ``out[i]`` is proportional to ``raw[i]``."""
+    ``"coverage"`` (the default) seeds each component with its unambiguous total plus a coverage-weighted share of
+    the ambiguous fragments, then projects the seed through the calibration prior. ``"uniform"`` seeds every
+    component equally, so the EM's landing point depends on the likelihood alone: the control that tells a bad seed
+    from a bad objective. ``"prior"`` zeroes the seed, so ``theta`` starts proportional to the prior. It is meaningful
+    only with a per-transcript weight: under the default evidence-proportional rule an all-zero seed leaves the RNA
+    pool at zero and hands the locus to gDNA."""
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
-        # `Literal` is a type-checker annotation and not a runtime constraint, so an unrecognised
-        # value would otherwise fall through to the shipped path — a config field that reads as applied
-        # and is not.
+        # `Literal` is not checked at run time: an unknown value would silently run the default path
         if self.warm_start not in ("coverage", "prior", "uniform"):
             raise ValueError(f"Unknown warm start: {self.warm_start!r}")
-        # `None` would seed the draw from the OS's entropy, and one input would stop returning one answer.
+        # `None` would seed the draw from OS entropy, and one input would stop giving one answer
         try:
             operator.index(self.seed)
         except TypeError:
@@ -184,7 +172,7 @@ class BamScanConfig:
         remainder for scan workers.
     bgzf_threads : int or None
         BGZF decompression threads within the scan thread budget. ``None``, the
-        default, DERIVES them from the budget (see
+        default, derives them from the budget (see
         :meth:`BamScanConfig.resolved_scan_threads`); an integer overrides.
     fragments_per_chunk : int
         Buffered fragments per chunk (default 1M).
@@ -251,7 +239,7 @@ class BamScanConfig:
                 f"BamScanConfig.intron_overhang_tolerance must be >= 0; "
                 f"got {self.intron_overhang_tolerance}."
             )
-        # the scanner's tag modes; anything else used to become "XS,ts" in the scanner without a word
+        # the scanner's tag modes; anything else is refused here rather than reinterpreted by the scanner
         tags = self.sj_strand_tag
         spec = ",".join(tags) if isinstance(tags, (list, tuple)) else tags
         if spec not in ("auto", "none", "", "XS", "ts", "XS,ts", "ts,XS"):
@@ -269,13 +257,10 @@ class BamScanConfig:
     def resolved_scan_threads(self) -> tuple[int, int]:
         """Return ``(scan_worker_threads, bgzf_threads)`` within the budget.
 
-        The split is DERIVED from the budget, because the two sides do not scale alike: one
-        decompression thread keeps about eight scan workers fed on a name-sorted BAM, so every
-        thread given to decompression beyond that ratio is a worker taken away. Measured on the
-        18.6M-fragment library, scan seconds by budget and decompression threads — 4: (0) 32.0, (1)
-        41.2; 8: (1) 25.8, (2) 26.2, (0) 28.3, (4) 34.5; 16: (2) 17.6, (1) 19.6, (4) 20.1 — so
-        ``total // 8`` names the best cell at every budget measured and the ratio, not the count, is
-        the thing being set. ``bgzf_threads`` overrides it, and `--scan-bgzf-threads` is the flag.
+        The split is a ratio, not a count: one decompression thread keeps about
+        ``CONSTANTS.resources.scan_workers_per_bgzf_thread`` scan workers fed on a name-sorted BAM, so a
+        decompression thread beyond that ratio is a worker taken away. ``bgzf_threads``
+        (``--scan-bgzf-threads``) overrides it.
         """
         total = self.resolved_total_threads()
         want = (
@@ -295,97 +280,48 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for the calibrator (:func:`rigel.calibration.calibrate`).
+    """Configuration for the calibrator (:func:`rigel.calibration.calibrate.calibrate`).
 
-    The calibrator is the belief-propagation sweep over the region-boundary chain — a single
-    forward-backward pass per solve_chain call, each hop priced by both witnesses' counting plus the
-    pair's disagreement beyond it (``hop_price``, `native/transfer_rows.h`); ``sweep_logodds_step`` sets the
-    per-region log-odds lattice. See :func:`rigel.calibration.calibrate.calibrate`.
+    The calibrator is a belief-propagation sweep over the region-boundary chain, one forward and one backward pass
+    per solve; each region's gDNA share is solved on a log-odds lattice (``sweep_logodds_step``,
+    ``sweep_logodds_window``).
     """
 
-    #: The strand overdispersion is not config: it is 0 for both components, binomial by policy.
-
-    #: The λ lattice's STEP, in nats of log-odds. ψ's grid is ``λ ∈ [−L, L]`` at this spacing, ``K =
-    #: round(2L/step) + 1`` points at whatever bracket ``L`` a pass solves on (the floor below, or the
-    #: landscape prior's derived demand), so widening the bracket never coarsens the lattice. ONE lattice
-    #: serves every consumer — the read-out, the message rows, the AMBIG cube's λ axis and the
-    #: composition prior (a second, finer single-strand grid with a linear
-    #: regrid between the two measured worse than one grid on every in-scope stratum of both panels,
-    #: and the regrid was the reason).
-    #:
-    #: Dimensionless, so one value serves every depth and genome, and what it guarantees is readable: the
-    #: ½-quantile read-out is exact to 1 % of a step once a slot's posterior is wider than the step, and
-    #: quantised by at most ``n·f(1−f)·step/4`` fragments below it — at 0.2 a slot's composition is within
-    #: 1.25 % of its mass at worst, 0.6 % on average. The ladder (16 conditions, one lattice, ratio to the
-    #: retired 60/256 pair on the three in-scope strata, measured when the lattice was unified): 0.69 (30
-    #: points) 1.10–1.22×; 0.34 (60) 1.02–1.04×; 0.20 (101) 0.993 / 0.998 / 1.000; 0.146 (138) 0.990;
-    #: 0.10 (201) 0.987. The cost grows with ``K`` through the AMBIG cube (``K × (K_t + 2)`` per slot);
-    #: 0.2 is the coarsest step that loses nothing.
+    #: The λ lattice's step, in nats of log-odds: ψ's grid is ``K = round(2L/step) + 1`` points on ``[−L, L]``, so
+    #: widening the bracket never coarsens it. One lattice serves every consumer (the read-out, the message rows, the
+    #: AMBIG cube's λ axis, the composition prior), so nothing is regridded. At 0.2 the ½-quantile read-out puts a
+    #: slot's composition within 1.25 % of its mass (quantised by at most ``n·f(1−f)·step/4`` fragments); the AMBIG
+    #: cube costs ``K × (K_t + 2)`` per slot, and 0.2 is the coarsest step that loses no accuracy.
     sweep_logodds_step: float = 0.2
 
-    #: Log-odds grid FLOOR ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]``. This is the range the
-    #: Beta(½,½) reference needs to stay proper, and it is a FLOOR, not the value.
-    #:
-    #: The bracket actually solved on is ``max(this, the fitted prior's own demand)``, and the second
-    #: term is DERIVED rather than chosen:
-    #: `calibration.landscape.DensityLandscape.required_logodds_window`. ψ evaluates the landscape at
-    #: ``log ρ = log f + log M − log E`` and can only offer ``f ∈ [σ(−L), σ(L)]``, so a bracket narrower
-    #: than the landscape's own log-dynamic range leaves ψ with no coordinate for what its own prior
-    #: points at — acutely on a near-zero-gDNA library, where the floor sits orders of magnitude above
-    #: the density the prior favours.
+    #: Log-odds grid floor ``L``: ``f_g ∈ [σ(−L), σ(L)]``, the range the Beta(½,½) reference needs to stay proper. A
+    #: pass solves on ``max(L, the fitted prior's demand)`` (``DensityLandscape.required_logodds_window``), because a
+    #: bracket narrower than the landscape's log-dynamic range would leave ψ no coordinate for where its prior points.
     sweep_logodds_window: float = 10.0
 
-    #: The sweep's WORKING SET: the chain is solved one LOCUS BLOCK at a time — the chain cut at every
-    #: intergenic region (where message passing ends) and the pieces merged up to this many slots per
-    #: block (`calibration.region_chain.locus_blocks`). A PERFORMANCE tunable and nothing else: the
-    #: answer is the same for every value (ψ's read-out is chunk-exact, gated). ``None`` solves the whole
-    #: chain as one block.
-    #:
-    #: It SIZES THE KERNEL'S ARENA, which is what makes it a memory knob rather than a batching one: each
-    #: thread holds sixteen ``(slots, grid)`` float64 tables for the block it is solving, so the arena is
-    #: ``16 · slots · K · 8 B · threads`` — 1.19 GB at 5,000 slots, the refits' grid of 233 and eight
-    #: threads. Measured on the deep library at eight threads, two interleaved rounds, the sweep's seconds
-    #: and calibrate's peak by block size: 5,000 — 23.65 / 23.79 s, 8,431 / 8,271 MB; 2,000 — 23.63 /
-    #: 23.31 s, 7,687 / 7,558 MB; 1,000 — 23.22 / 23.26 s, 7,703 / 7,368 MB; 500 — 23.54 / 23.21 s,
-    #: 7,414 / 7,645 MB. The wall is FLAT and the memory is not, so the per-block overhead this used to
-    #: amortise is not measurable beside the arena it pays for; the default is the smallest size whose
-    #: memory gain is still larger than the run-to-run noise.
+    #: The sweep's working set: the chain, cut at every intergenic region, is solved in locus blocks of at most this
+    #: many slots (``calibration.region_chain.locus_blocks``; ``None`` is one block). Memory only: the answer is the
+    #: same at every value, the arena is ``16 · slots · K · 8 B · threads``, the wall time is flat in it, and 1000 is
+    #: the smallest size whose memory saving still exceeds run-to-run noise.
     sweep_block_slots: int | None = 1000
 
-    #: The message policy — what one neighbour tells another, on the two-phase backbone (prepare →
-    #: propagate → solve). ``"transfer"`` (:class:`~rigel.calibration.messages.transfer.TransferPolicy`,
-    #: the composition transfer) is the shipped default; ``"silent"``
-    #: (:class:`~rigel.calibration.messages.silent.SilentPolicy`) sends nothing, so ψ carries each slot's
-    #: local evidence and the fitted gDNA prior — the measured floor every policy is judged against.
-    #: Messages exist for the slots whose own
-    #: solve has no composition channel: unstranded data and the both-stranded (AMBIG) slots, where the
-    #: strand likelihood is flat and the local answer is a default rather than a measurement; on stranded
-    #: data a sighted exon's own solve is excellent and a message can mostly only disturb it. The standing
-    #: is re-derived by ``scripts/design/policy_benchmark.py``, the two halves read apart and never pooled,
-    #: and priced on the composition metric by ``calibration_vs_oracle.py --set calibration.message_policy=…``.
-    #: An unknown name RAISES: an arm that silently runs a policy other than the one it names is a
-    #: benchmark that cannot be trusted. ⛔ Flipping this default is a config default flip — the trigger
-    #: that has left instruments dead while the suite stayed green, because the TEST readers install the
-    #: policy themselves. Run the instruments, not just the suite.
+    #: The message policy: what one neighbour tells another. ``"transfer"`` (the composition transfer,
+    #: :class:`~rigel.calibration.messages.transfer.TransferPolicy`) is the default; ``"silent"``
+    #: (:class:`~rigel.calibration.messages.silent.SilentPolicy`) sends nothing and is the floor every policy is
+    #: judged against. Messages serve the slots whose own solve has no composition channel: unstranded data and the
+    #: both-stranded (AMBIG) slots. An unknown name raises. A change of default must be checked with the instruments,
+    #: not only the suite, because the tests install their policy themselves.
     message_policy: str = "transfer"
 
-    #: Calibration refit iterations — the prior BOOTSTRAP. Each iteration re-fits the population gDNA
-    #: landscape (:class:`~rigel.calibration.landscape.DensityLandscape`) on the current solved gDNA
-    #: densities and belief widths, then fully RESETS the belief and re-solves with it. So nothing but
-    #: the fitted landscape carries between iterations, and the prior sharpens only where the data has
-    #: earned it. ``0`` ⇒ the prior-free pass-0 alone.
-    #:
-    #: Cost is linear — one landscape fit plus one full sweep each — so lower it if
-    #: calibration wall-clock matters more than the last few percent of its accuracy. Why 3: measured
-    #: 2026-07-28 on that day's panel, the third refit captured 96 % of the gain the bootstrap reaches, each
-    #: later increment 2–3× smaller and every stratum improving monotonically; not re-measured since the
-    #: landscape was rebuilt.
+    #: Calibration refit iterations, the prior bootstrap: each re-fits the population gDNA landscape
+    #: (:class:`~rigel.calibration.landscape.DensityLandscape`) on the current solve, resets the belief and re-solves,
+    #: so only the landscape carries between iterations. ``0`` runs the prior-free pass alone; each iteration costs one
+    #: landscape fit and one sweep. Why 3: the third refit reaches nearly all of the bootstrap's gain, each later one
+    #: adding 2–3× less (a reading not repeated on the current landscape).
     calib_refit_iters: int = 3
 
-    #: ψ's thread budget: the slots of a block are solved by a pool of this many threads (``0``, the
-    #: default, is every core — the locus EM's reading of the same number), and the CLI's ``--threads``
-    #: sets it beside the scan's and the EM's. A resource budget, not a tunable of the answer: the solve is
-    #: bit-identical at every count (`simplex_logodds._solve_regions_logodds_all`).
+    #: ψ's thread budget (``0``, the default, is every core); ``--threads`` sets it beside the scan's and the EM's. The
+    #: solve is bit-identical at every count.
     n_threads: int = 0
 
     def __post_init__(self) -> None:
@@ -478,14 +414,8 @@ class PipelineConfig:
     scan: BamScanConfig = field(default_factory=BamScanConfig)
     scoring: FragmentScoringConfig = field(default_factory=FragmentScoringConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
-    #: The second pass's multinomial draw. Pass 1 holds every fragment whose unsequenced gap has more
-    #: than one surviving explanation, and every multimapping fragment more than one of whose
-    #: placements admits a surviving (placement, hypothesis); the drain picks one (placement,
-    #: hypothesis) each and re-deposits, and this seeds that draw.
-    #:
-    #: Deliberately NOT ``em.seed``. They are two independent RNG consumers, and sharing one field
-    #: would mean changing the EM's seed silently re-drew every held fragment — so an EM A/B would move
-    #: the tally it was being run against.
+    #: Seed of the second pass's draw of one (placement, hypothesis) per held fragment. Separate from ``em.seed``, so
+    #: a change of EM seed never re-draws the held fragments and moves the tally the EM reads.
     second_pass_seed: int = 0
     annotated_bam_path: str | Path | None = None
     emit_locus_stats: bool = False
@@ -509,9 +439,8 @@ class PipelineConfig:
 #
 # Every number an algorithm, a quality check or a resource budget depends on, each documented once with why it has
 # its value. The code reads them by name (``CONSTANTS.landscape.grid_points``) and never restates one. They are not
-# run settings: a change to any of them is a change to the method, so it re-runs the component's gates and is priced
-# on the instruments before it lands. An experiment varies one on a copy (:meth:`Constants.replaced`), never by
-# editing a module.
+# run settings: a change to any of them is a change to the method. An experiment varies one on a copy
+# (:meth:`Constants.replaced`), never by editing a module.
 
 
 @dataclass(frozen=True)
@@ -520,8 +449,8 @@ class JunctionFitConstants:
 
     The fit is an exact maximum-likelihood problem: the genuine junctions' wrong-strand rate κ, and three class
     shares (genuine, splice artifact, reversed), over the per-junction strand table. Nothing here is a model
-    choice: every field sets how the maximum is FOUND, and at these values the fit reaches it on every table
-    checked against an independent search (``tests/test_strand_model.py``'s ``TestGenuineKappa``).
+    choice: every field sets how the maximum is found, and at these values the fit reaches the maximum an
+    independent search finds.
     """
 
     # --- The search over κ: a scan locates the maximum, Brent's method refines it ---
@@ -532,8 +461,8 @@ class JunctionFitConstants:
 
     #: The scan's points, uniform in ``u = log(κ/(½ − κ))`` across that range, so the scan is as fine near ½ as
     #: near 0: at 129 points u steps by 0.42 (κ/(½ − κ) by ×1.5). A weakly stranded library's maximum rises out
-    #: of a flat all-artifact plateau just below ½, and a coarser scan can step over it — 65 points spaced on
-    #: log κ did (``test_a_weakly_stranded_library_is_fit_exactly``). Each point costs one share solve.
+    #: of a flat all-artifact plateau just below ½, and a coarser scan can step over it. Each point costs one share
+    #: solve.
     kappa_scan_points: int = 129
 
     #: Brent's method stops once u is known to this absolute tolerance.
@@ -600,9 +529,8 @@ class LandscapeConstants:
     """The population gDNA-density landscape (:mod:`rigel.calibration.landscape`): its grid and kernel grouping, and
     the modelling constants its fit was selected with.
 
-    ⚠ ``knn_scale`` and ``reliability_sd_decades`` were selected against gDNA-shaped data. They are not
-    component-specific by construction, but they have only ever been validated on one component; a second caller
-    inherits them and must say so in its results rather than discover it later.
+    ``knn_scale`` and ``reliability_sd_decades`` are selected against gDNA-shaped data and validated on that component
+    only; a second caller inherits them and must say so in its results.
     """
 
     # --- Computational budgets: discretization, not modelling (finer is slower and more exact) ---
@@ -620,24 +548,18 @@ class LandscapeConstants:
 
     #: Population-resolution scale for ``landscape.knn_widths``, selected by shape against a reference that is
     #: itself validated against ground truth: at 0.5 the fit renders the enriched mode at the width the truth has;
-    #: below it the landscape combs, above it the two modes merge and the enriched mass collapses. EMD does not
-    #: discriminate here — it is monotone in smoothing at every reference — so do not re-select on it.
+    #: below it the landscape combs, above it the two modes merge and the enriched mass collapses. It is selected by
+    #: shape, never by EMD, which is monotone in smoothing at every reference and cannot discriminate.
     knn_scale: float = 0.5
 
-    #: The reliability weight's reference spread, in decades of rate (its variance is ``(this · ln 10)²``).
-    #: ⚠ A tuning constant in disguise. It reads as "the kernel resolution floor", but the actual rendering
-    #: resolution is the grid step (~0.025 decades), and substituting that makes the weight more aggressive and
-    #: the census worse. What it really does is cap how far a confident region can be down-weighted. Changing it
-    #: is its own measured experiment; it must not ride along with anything else.
+    #: The reliability weight's reference spread, in decades of rate (its variance is ``(this · ln 10)²``). A tuned
+    #: constant: it caps how far a confident region can be down-weighted. It is not the kernel's resolution floor,
+    #: which is the grid step (about 0.025 decades) and would make the weight more aggressive and the census worse.
     reliability_sd_decades: float = 0.15
 
-    #: THE LOCATION FLOOR, in the variable every solve reports. The estimator's resolution wall is one fragment
-    #: (``max(count, 1)`` centres a kernel; ``count < 1`` is location-free and E-step placed), and a Poisson count
-    #: ``c`` has ``Var(log c) = 1/c``, so "below one fragment" is "the log-count is uncertain by more than one
-    #: nat²". ``RegionBelief.var_gdna`` is ``Var(log f_g)`` — at fixed mass, ``Var(log count)`` — whatever produced
-    #: the solve, so a slot wider than this has no location by the same floor the count rule applies, and does
-    #: not train the prior. Not a tuned constant: the identity's value at the wall
-    #: (``tests/calibration/test_landscape_training_population.py``).
+    #: The location floor on ``RegionBelief.var_gdna = Var(log f_g)`` (at fixed mass, ``Var(log count)``). The
+    #: estimator's resolution wall is one fragment, and a Poisson count ``c`` has ``Var(log c) = 1/c``, so a slot wider
+    #: than 1 is below the wall: it has no location and does not train the prior. The identity's value, not tuned.
     located_var: float = 1.0
 
     def __post_init__(self) -> None:
@@ -661,7 +583,7 @@ class CalibrationConstants:
     min_training_regions: int = 5
 
     #: The pooled gDNA rate's root bracket, as a multiple of the pooled rate (``gdna_density``). The one-sided
-    #: root is always BELOW the pooled rate (contamination only inflates it), so any multiple above 1 brackets
+    #: root is always below the pooled rate (contamination only inflates it), so any multiple above 1 brackets
     #: it; this is headroom, and the fit's ``bracket_ok`` reports if it ever failed.
     bracket_headroom: float = 10.0
 
@@ -701,10 +623,10 @@ class CalibrationConstants:
 class FragmentLengthConstants:
     """The fragment-length laws (``calibration.fl``)."""
 
-    #: Dirichlet pseudo-count of the smooth empirical-Bayes shrink of gDNA's pool law toward the global law. Not a
-    #: cliff: a pool total far above it gives the empirical law, far below it the global anchor, and 0 the anchor
-    #: exactly. ⚠ Not derived. RNA's law no longer uses it: it is read from its own counts
-    #: (``calibration.fl.own_count_law``), which is what replaces it for gDNA too.
+    #: Dirichlet pseudo-count of the empirical-Bayes shrink of gDNA's pool law toward the all-fragment law, with no
+    #: cliff: a pool total far above it gives the empirical law, far below it the anchor, and 0 the anchor exactly.
+    #: Chosen, not derived. RNA's law does not use it: it is read from its own counts
+    #: (``calibration.fl.own_count_law``).
     pool_prior_ess: float = 1000.0
 
     #: The own-count law smooths its deviation from the all-fragment law by a random walk whose step variance (per
@@ -772,10 +694,9 @@ class QcConstants:
     #: An error or warning that lists offending items (duplicate transcript groups, …) shows at most this many.
     report_examples: int = 5
 
-    # --- The QC report's display (``rigel report``). Each is a display choice the owner signed off on 2026-10-17,
-    # with no other reason recorded. They set how a headline tile is coloured, how much of a table the page
-    # embeds, how far a cell is rounded and how a chart bins and caps what it draws; none reaches a number Rigel
-    # computes ---
+    # --- The QC report's display (``rigel report``): display choices, not measured optima. They set how a headline
+    # tile is coloured, how much of a table the page embeds, how far a cell is rounded and how a chart bins and caps
+    # what it draws; none reaches a number Rigel computes ---
 
     #: The mapping tile is good at this share of the BAM's records mapped or more, ...
     mapping_rate_good: float = 0.75
@@ -873,33 +794,30 @@ class SimulatorConstants:
 
 @dataclass(frozen=True)
 class ResourceConstants:
-    """Memory, I/O and logging budgets: each sets speed, memory, file size or log volume. ``solve_block_bytes``
-    and ``capture_tile_cell_bytes`` set a row tile's height, and the fits they tile are gated to give the same
-    bits at every height (their comments name the gates)."""
+    """Memory, I/O and logging budgets: each sets speed, memory, file size or log volume, never a result. The
+    row-tiled fits (``solve_block_bytes``, ``capture_tile_cell_bytes``) and the alignable window give the same bits at
+    every tile height and window."""
 
-    #: Scan workers one BGZF decompression thread keeps fed, measured on the deep library
-    #: (``BamScanConfig.resolved_scan_threads`` carries the table): the budget is split by this ratio, so a
-    #: 4-thread run spends none on decompression and a 16-thread run spends two.
+    #: Scan workers one BGZF decompression thread keeps fed on a name-sorted BAM: the budget is split by this ratio
+    #: (``BamScanConfig.resolved_scan_threads``), so a 4-thread run spends none on decompression and a 16-thread run
+    #: spends two.
     scan_workers_per_bgzf_thread: int = 8
 
-    #: Chunks the scan buffer's spill writer holds queued at once. Each stays in memory until it is written, so
-    #: the buffer's memory can exceed ``BamScanConfig.buffer_size_bytes`` by up to this many chunks, and the scan
-    #: waits when it would queue one more. A resource choice the owner signed off on 2026-10-17, with no other
-    #: reason recorded.
+    #: Chunks the scan buffer's spill writer holds queued at once. Each stays in memory until it is written, so the
+    #: buffer's memory can exceed ``BamScanConfig.buffer_size_bytes`` by up to this many chunks, and the scan waits
+    #: when it would queue one more. A resource choice, not a measured optimum.
     spill_queue_chunks: int = 2
 
-    #: Cache-tiling target for the row-tiled fits (the landscape's kernels, the capture efficiency), as a
-    #: working-set size; ``simplex_logodds._block_rows`` turns it into rows. It orders no addition: the landscape
-    #: adds every row into its group's sum in row order, whatever the tile, and
-    #: ``tests/calibration/test_landscape.py`` holds the tile heights to the bit.
+    #: Cache-tiling target for the row-tiled fits (the landscape's kernels, the capture efficiency), as a working-set
+    #: size; ``simplex_logodds._block_rows`` turns it into rows. It orders no addition: the landscape adds every row
+    #: into its group's sum in row order, whatever the tile.
     solve_block_bytes: int = 1 << 20
 
-    #: The bytes per grid cell the capture efficiency's row tile is sized for (``_block_rows``'s itemsize): two
-    #: float64 arrays' worth, while a tile holds four at once (the expectation, its log-likelihood, the
-    #: alternative's log weight and its weight) and a temporary fifth at its peak, so a tile peaks at about two
-    #: and a half times ``solve_block_bytes``. A resource choice the owner signed off on 2026-10-17, with no other
-    #: reason recorded. It sets the tile height and no bit: every sum runs along one object's own row, and
-    #: ``tests/calibration/test_capture_efficiency.py`` holds the tile heights to the bit.
+    #: The bytes per grid cell the capture efficiency's row tile is sized for (``_block_rows``'s itemsize): two float64
+    #: arrays' worth, while a tile holds four at once (the expectation, its log-likelihood, the alternative's log
+    #: weight and its weight) and a temporary fifth at its peak, so a tile peaks at about two and a half times
+    #: ``solve_block_bytes``. A resource choice, not a measured optimum. It sets the tile height and no bit: every
+    #: sum runs along one object's own row.
     capture_tile_cell_bytes: int = 16
 
     #: Read size when the index digests its input files.
@@ -907,7 +825,7 @@ class ResourceConstants:
 
     #: Bases of an alignable store the index reads per call when it records a reference's unobservable runs: one
     #: read-length bin's counts cost 16 bytes a base, so a window is 160 MB. It sets memory only, since a run is
-    #: stitched across window edges, and ``tests/test_index_observable.py`` holds the mask to the bit at every window.
+    #: stitched across window edges.
     alignable_window_bp: int = 10_000_000
 
     #: The per-fragment annotation table is sized to the buffered fragment count plus this padding, and never
@@ -926,9 +844,8 @@ class ResourceConstants:
     #: run writes each shard with one, every shard being a process of its own.
     fastq_gzip_threads: int = 4
 
-    #: The gzip level the simulator writes its FASTQ at. It and the threads above set the speed and the
-    #: compressed bytes, never a read: resource choices the owner signed off on 2026-10-17, with no other reason
-    #: recorded.
+    #: The gzip level the simulator writes its FASTQ at. It and the threads above set the speed and the compressed
+    #: bytes, never a read: resource choices, not measured optima.
     fastq_gzip_level: int = 3
 
     #: Chunk size when the simulator concatenates gzip streams.
@@ -983,7 +900,7 @@ class TranscriptGeometry:
 
     That model is built by ``FragmentLengthModel.from_pmf`` from ``FLModels.rna_pmf``, which is derived
     from the accumulator payload alone. The effective lengths here and the calibration divisors read the
-    SAME pmf, so a change to it reaches every transcript in the EM, not only calibration.
+    same pmf, so a change to it reaches every transcript in the EM, not only calibration.
 
     Parameters
     ----------

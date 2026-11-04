@@ -35,6 +35,11 @@ def _model(pairs) -> StrandModel:
     return StrandModel(**_counts(pairs))
 
 
+def _contingency(model: StrandModel) -> tuple[int, int, int, int]:
+    """The model's 2×2, in the order ``SJStrandTable.contingency`` returns it."""
+    return (model.pos_pos, model.pos_neg, model.neg_pos, model.neg_neg)
+
+
 def _table(rows) -> SJStrandTable:
     """Build a table from ``[(motif_strand, n_sense, n_antisense), ...]``."""
     motif = [int(m) for m, _, _ in rows]
@@ -218,10 +223,10 @@ class TestStrandModelsContainer:
         assert models.p_r1_sense == pytest.approx(1.0)
 
     def test_spliced_2x2_is_the_table_marginal(self):
-        """The container's spliced model has ONE source of truth — the sj table."""
+        """The container's spliced model has one source of truth: the sj table."""
         rows = [(Strand.POS, 30, 3), (Strand.NEG, 12, 5)]
         models = StrandModels.from_scan(self._scan_dict(rows))
-        assert models.exonic_spliced.contingency_matches_table()
+        assert _contingency(models.exonic_spliced) == models.sj_table.contingency()
         assert models.sj_table.n_sj == 2
 
     def test_zero_observations_warns(self, caplog):
@@ -306,7 +311,7 @@ class TestTheScannersExonicCounts:
 
 
 class TestGenuineKappa:
-    """κ from the genuine junctions only (owner, 2026-09-30).
+    """κ from the genuine junctions only.
 
     In a stranded library a junction is genuine RNA (wrong-strand rate κ), a splice artifact —
     misaligned gDNA, wrong-strand rate ½ — or reversed (1 − κ). κ is the genuine class's rate, the
@@ -334,7 +339,7 @@ class TestGenuineKappa:
         assert pooled > 0.03  # the artifacts and reversed junctions inflate the pooled rate
         assert kappa == pytest.approx(0.01, abs=0.0015)
         assert model.p_r1_sense == pytest.approx(kappa, rel=0.01)  # the EM reads the same κ
-        assert model.contingency_matches_table()  # the 2x2 stays the observed record
+        assert _contingency(model) == table.contingency()  # the 2x2 stays the observed record
 
     def test_the_junction_classes_split_the_junctions_and_their_fragments(self):
         """The fit's class shares, read as a library diagnostic: the shallow artifacts are most of the junctions
@@ -435,8 +440,8 @@ class TestGenuineKappa:
         assert fit >= best - tol
 
     def test_a_maximum_at_the_kappa_boundary_is_found(self):
-        """A near-perfectly stranded library whose only wrong-strand reads are five single-read junctions (a real 1 %
-        VCaP draw's shape): the maximum calls them reversed, at κ → 0. EM stalled at a saddle 1.1 units short of it."""
+        """A near-perfectly stranded library whose only wrong-strand reads are five single-read junctions: the
+        maximum calls them reversed, at κ → 0, where an EM can stall at a saddle short of it."""
         fit, best, tol = self._independent_maximum(
             _table(
                 [(Strand.POS, 0, 1)] * 20000
@@ -447,7 +452,7 @@ class TestGenuineKappa:
         assert fit >= best - tol
 
     def test_a_weakly_stranded_library_is_fit_exactly(self):
-        """κ near ½ merges the classes and EM crawled for seconds; the profile fit is exact and bounded there."""
+        """κ near ½ merges the classes, where an EM crawls; the profile fit is exact and bounded there."""
         rows = (
             [(Strand.POS, 9, 11)] * 150
             + [(Strand.POS, 4, 6)] * 150

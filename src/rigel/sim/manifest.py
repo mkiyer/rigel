@@ -1,13 +1,6 @@
-"""The simulation manifest: condition naming, and the JSON both writers and readers agree on.
-
-:func:`condition_dir_name` is the single definition of a condition's directory name, so the
-generator and every consumer derive it the same way; an overdispersion slug appears only when the
-value is non-zero, which keeps names stable for suites that do not sweep that axis.
-:func:`write_manifest` serialises the config dataclasses and the per-condition entries to
-``manifest.json`` under the output directory, resolving genome, GTF and shadow-GTF paths to
-absolute ones so a manifest stays readable from anywhere, and records the index the transcriptome
-comes from: its resolved path and its own manifest, which holds the sha256 of its FASTA and GTF.
-"""
+"""The simulation manifest: condition directory names (:func:`condition_dir_name`, the one definition every
+consumer shares) and ``manifest.json`` (:func:`write_manifest`), which records the config, the conditions, absolute
+input paths and the index the transcriptome comes from."""
 
 from __future__ import annotations
 
@@ -30,11 +23,8 @@ def condition_dir_name(
     capture_label: str | None = None,
     gdna_strand_overdispersion: float = 0.0,
 ) -> str:
-    """Return the standard synthetic-suite condition directory name.
-
-    A ``_od_<value>`` slug is inserted only when ``gdna_strand_overdispersion > 0``, so suites
-    that do not sweep overdispersion keep their existing condition names.
-    """
+    """Return a condition's directory name. The ``_od_<value>`` slug appears only when
+    ``gdna_strand_overdispersion > 0``, so a suite that does not sweep it keeps short names."""
     name = f"gdna_{gdna_label}"
     if gdna_strand_overdispersion > 0.0:
         name = f"{name}_od_{gdna_strand_overdispersion:g}".replace(".", "p")
@@ -71,16 +61,13 @@ def write_manifest(
     index: dict[str, Any],
     n_shadow_transcripts: int = 0,
 ) -> Path:
-    """Write a simulation manifest and return its path. ``index`` is the index the transcriptome comes
-    from, as ``whole_genome._index_provenance`` returns it: ``{"path", "manifest"}``. Each truth file's
-    path is in its condition's entry, under one key."""
+    """Write ``manifest.json`` under ``outdir`` and return its path. ``index`` is ``{"path", "manifest"}`` as
+    ``whole_genome._index_provenance`` returns it; each truth file's path is in its condition's entry."""
     manifest = {
         "version": 1,
-        # The transcriptome is the index's, so the index is its source: the resolved path and the index's
-        # own manifest (the FASTA and the GTF it was built from, each with its sha256, and its build flags).
+        # the index's resolved path and its own manifest: its FASTA and GTF with their sha256, and its build flags
         "index": _jsonable(index),
-        # Shadow transcripts: unannotated transcription simulated from `shadow_gtf` and never given
-        # to the index — recorded here so a scored panel says it carried them.
+        # unannotated transcripts simulated from `shadow_gtf`, so a scored panel says it carried them
         "n_shadow_transcripts": int(n_shadow_transcripts),
         "simulation": _jsonable(getattr(config, "simulation", {})),
         "gdna": _jsonable(getattr(config, "gdna", {})),

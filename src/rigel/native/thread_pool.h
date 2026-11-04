@@ -6,10 +6,10 @@
  * while the caller executes fn(0).  Blocks until all workers complete.
  */
 
-#ifndef RIGEL_THREAD_POOL_H
-#define RIGEL_THREAD_POOL_H
+#pragma once
 
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -100,5 +100,3 @@ private:
 };
 
 } // namespace rigel
-
-#endif // RIGEL_THREAD_POOL_H

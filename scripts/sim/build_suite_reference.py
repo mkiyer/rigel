@@ -1,16 +1,11 @@
 """Carve a benchmark-suite reference out of the real human genome, optionally appending a synthetic one.
 
-⭐ **WHY A REAL BACKBONE.** The suite this replaces was a generated mini-genome, and it could not judge
-what it was used to judge: zero fragment-length variance, Poisson by
-construction, and a fine region set row-for-row identical to its merged one. Real human genes give
-calibration a real fragment-length distribution, a real strand model, and alternative TSS/TES that fall
-strictly inside exons, where the region partition cuts. The owner's plan is one chromosome as the training
-substrate, with a synthetic stress chromosome piggybacked on top.
+A real backbone gives calibration a real fragment-length distribution, a real strand model, and alternative
+TSS/TES that fall strictly inside exons, where the region partition cuts; a generated mini-genome has none of
+these. A synthetic stress chromosome can be appended on top.
 
-⚠ **The ERCC controls are kept deliberately, and not as filler.** A
-single-reference synthetic index hid a reference-id-space mismatch that silently dropped **476,719 of
-476,732** real fragments inside `deposit()` while every golden test passed. 92 tiny references cost
-~83 kb and make the ref-id space non-trivial, which is the configuration that would have caught it.
+The ERCC controls (`--ercc`) are kept on purpose: 92 tiny references cost about 83 kb and make the reference-id
+space non-trivial, so a reference-id mismatch cannot hide behind a single-reference index.
 
     python scripts/sim/build_suite_reference.py --fasta G.fa.bgz --gtf A.gtf -o OUT \\
         --refs chr22 --ercc [--append-fasta S.fa --append-gtf S.gtf]

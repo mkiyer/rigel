@@ -1,14 +1,9 @@
-"""The simulation and benchmarking workflow has one entry point, and its prerequisites are gated.
+"""The panel workflow's one entry point, `scripts/sim/panel.py`, and the refusals that gate its stages.
 
-`scripts/sim/panel.py` sequences five expensive, resumable stages. The failure it exists to prevent
-is running a stage for twenty minutes on a panel where the previous one never happened, so every
-stage names its prerequisite and REFUSES, and these tests are what keep the refusals real.
-
-No stage is executed here: each one costs minutes to hours and needs a panel tens of gigabytes
-across. What is testable without that is the part that rots — path derivation, condition discovery,
-the completeness rule for a cached condition, and every refusal — so this file says plainly what it
-does not cover rather than reading as more coverage than it has
-(`TRAPS: a-gate-that-reconstructs`).
+`panel.py` sequences five expensive, resumable stages, and each names its prerequisite and refuses without it, so no
+stage runs for minutes on a panel whose previous stage never happened. No stage is executed here (each costs minutes
+to hours on a panel tens of gigabytes across): these tests cover path derivation, condition discovery, the
+completeness rule for a cached condition and every refusal, and nothing more.
 """
 
 from __future__ import annotations
@@ -92,7 +87,7 @@ def test_the_probe_panel_is_the_one_the_capture_config_names(tmp_path):
 
 def test_every_path_is_expanded_as_the_simulator_expands_it(tmp_path, monkeypatch):
     """The in-repo configs name their paths under `$RIGEL_RUNS`. The workflow must derive the paths the
-    simulator reads, or `status` checks one directory while `simulate` writes another. PERTURBATION:
+    simulator reads, or `status` checks one directory while `simulate` writes another. Perturbation:
     any one of the five without the expansion is a directory literally named `$RIGEL_TEST_ROOT`."""
     root = tmp_path / "root"
     monkeypatch.setenv("RIGEL_TEST_ROOT", str(root))
@@ -159,9 +154,8 @@ def test_need_names_the_fix(tmp_path):
 
 
 def test_score_REFUSES_without_the_oracle_cache(tmp_path):
-    """The refusal this workflow was built for. Every truth-scoring instrument needs the
-    origin-split oracle cache, so a recipe that builds it only as a side effect of some other
-    instrument produces a panel every scorer rejects."""
+    """Every truth-scoring instrument needs the origin-split oracle cache, so `score` refuses without it: a
+    recipe that builds it only as a side effect of some other instrument produces a panel every scorer rejects."""
     p = PANEL.Panel(_config(tmp_path))
     args = type("A", (), {"jobs": 1, "arms": ["base"], "conditions": None})()
     with pytest.raises(SystemExit, match="oracle cache"):
@@ -223,13 +217,8 @@ def test_status_names_the_next_stage(tmp_path, capsys):
 
 
 def test_the_shipped_panel_configs_all_load(tmp_path):
-    """A config the workflow cannot parse is a panel nobody can rebuild. `example_*.yaml` are
-    documentation templates and are deliberately excluded."""
-    cfgs = [
-        c
-        for c in (ROOT / "scripts" / "sim" / "configs").glob("*.yaml")
-        if not c.name.startswith("example_")
-    ]
+    """A config the workflow cannot parse is a panel nobody can rebuild."""
+    cfgs = sorted((ROOT / "scripts" / "sim" / "configs").glob("*.yaml"))
     assert cfgs, "no panel configs found — this test would pass vacuously"
     for c in cfgs:
         p = PANEL.Panel(c)
@@ -242,10 +231,10 @@ def test_the_shipped_panel_configs_all_load(tmp_path):
 def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one_run(
     tmp_path, monkeypatch
 ):
-    """Two commands, in order: the scan cache (a stage that must STOP the workflow on failure), then
-    `calibration_oracle.py --build`, which builds every row's origin-split cache alike — the zero-gDNA
-    rows too, there is no hold-out — and certifies `slot_truth.npz` in the same run. Its exit code is
-    reported, never fatal: a failed FIELD gate still writes the COMPOSITION table."""
+    """Two commands, in order: the scan cache (a stage that must stop the workflow on failure), then
+    `calibration_oracle.py --build`, which builds every row's origin-split cache alike, the zero-gDNA
+    rows too, and certifies `slot_truth.npz` in the same run. Its exit code is reported, never fatal:
+    a failed field gate still writes the composition table."""
     p = PANEL.Panel(_config(tmp_path))
     for c in ("gdna_g00_ss_0.50_x", "gdna_g50_ss_0.50_x"):
         (p.dir / c).mkdir(parents=True)
@@ -275,7 +264,7 @@ def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one
     assert not any("prewarm" in c for c in cmd), "there is no zero-gDNA hold-out to pre-warm"
     assert "--force" not in cmd and not any("--force" in c for _, c in issued)
 
-    # --force reaches BOTH caches: the scan cache and the origin-split partitions, keyed alike and alike stale
+    # --force reaches both caches: the scan cache and the origin-split partitions, keyed alike and alike stale
     issued.clear()
     launched.clear()
     args.force = True
@@ -308,8 +297,8 @@ def test_the_parameter_file_is_read_as_the_aligner_reads_it(tmp_path):
 
 
 def test_the_rung_aligns_with_the_MANUALs_recommended_STAR_settings():
-    """The STAR rung is the input the MANUAL tells a user to make: its parameter file carries the two
-    settings the MANUAL recommends, so the benchmark cannot drift from the advice."""
+    """The STAR rung is the input the user's manual tells a user to make: its parameter file carries the two
+    settings the manual recommends, so the benchmark cannot drift from the advice."""
     opts = " ".join(PANEL.star_options(PANEL.STAR_PARAMS))
     manual = (ROOT / "docs" / "MANUAL.md").read_text()
     for setting in ("--sjdbScore 0", "--outFilterMultimapScoreRange 2"):
@@ -390,9 +379,8 @@ def _simulator_bam(path, pairs):
 
 def test_align_rebuilds_a_missing_pair_from_the_simulators_BAM(tmp_path):
     """The panels keep no FASTQs: the simulator's BAM holds every read as it was written, so `align` rebuilds a
-    missing pair with `samtools fastq -N`, byte for byte the FASTQs the simulator wrote (a whole 10 M-pair ladder
-    condition and a test-chromosome one hashed identical, 2026-10-22), aligns it and deletes it. With neither the
-    reads nor the BAM it refuses, naming both.
+    missing pair with `samtools fastq -N`, byte for byte the FASTQs the simulator wrote, aligns it and deletes it.
+    With neither the reads nor the BAM it refuses, naming both.
 
     Perturbation: no rebuild refuses the condition; a rebuild without `-N` drops the `/1`, `/2` the simulator's
     names carry; a rebuilt pair left behind is what the panels shed."""

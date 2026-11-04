@@ -1,21 +1,8 @@
-"""
-rigel.sim — Simulation framework for synthetic RNA-seq test scenarios.
+"""Simulation of synthetic RNA-seq libraries with per-fragment truth.
 
-Modules
--------
-genome
-    ``MutableGenome`` — random DNA generation with positional editing.
-annotation
-    ``GeneBuilder`` — gene/transcript annotation with splice-motif injection.
-reads
-    ``ReadSimConfig`` / ``GDNAConfig`` — single-condition read-simulation config dataclasses
-    (the engine itself is ``wgs_engine.WholeGenomeSimulator``).
-scenario
-    ``Scenario``, ``ScenarioResult`` — end-to-end orchestration
-    (genome → GTF → TranscriptIndex → FASTQ → BAM).
-benchmark
-    ``BenchmarkResult``, ``TranscriptAccuracy``, ``run_benchmark`` —
-    accuracy benchmarking comparing observed vs expected counts.
+``Scenario`` builds a small random genome, its annotation, the index and the reads end to end; ``whole_genome`` runs
+a YAML-configured condition grid on a real reference. Both drive one engine, ``wgs_engine.WholeGenomeSimulator``,
+and every read name carries its fragment's origin (``read_name``).
 
 Quick Start
 -----------

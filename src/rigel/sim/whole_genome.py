@@ -1,48 +1,14 @@
-"""Whole-genome RNA-seq read simulator: config, abundances, and the condition grid.
+"""Whole-genome read simulation from one YAML config: parsing, the transcript set, abundances, and the run.
 
-Parses one YAML scenario, builds the transcript set, assigns the mature abundances, and hands every
-condition to :func:`rigel.sim.orchestrator.run_condition_grid`, which applies the nascent setting,
-generates the reads, the optional oracle BAM and the per-condition truth, and writes one molecular-truth table
-per nascent setting (``truth_abundances_nrna_<label>.tsv``) beside the condition directories.
-Finishes by writing ``manifest.json``, which records the index the transcriptome comes from.
+:func:`run_simulation` loads the transcript set from the rigel index (:func:`load_transcripts_from_index`: annotated
+transcripts plus the synthetic nascent entities, ``t_index`` equal to the index row), appends any shadow transcripts,
+assigns the base abundances (a log-uniform draw, or a salmon / kallisto / sim file) and hands the condition grid to
+:func:`rigel.sim.orchestrator.run_condition_grid`. It writes ``manifest.json`` last.
 
-The transcript set is the rigel index's (:func:`load_transcripts_from_index`): annotated
-transcripts plus the synthetic single-exon nascent entities, each with ``t_index`` equal to its
-index row, so the simulator, the oracle and ``rigel quant`` speak about the same rows. A shadow
-GTF, if configured, is appended on top (:func:`merge_shadow_transcripts`) and is transcription the
-index never sees. Mature abundance comes either from a log-uniform draw over transcripts flagged
-expressed with probability ``frac_expressed``, or from a salmon / kallisto / sim TSV file.
-
-Nascent RNA
------------
-Nascent abundance lives on the nascent entities: every multi-exon transcript links through
-``span_t_index`` to one entity spanning its TSS/TES cluster, and annotated multi-exon transcripts
-always end with ``nrna_abundance = 0``. Two modes set the entity levels. ``sparse``
-(``abundance_ranges`` + ``on_fraction``) switches each entity on with probability ``on_fraction``
-and draws its level log-uniformly over ``(lo, hi)``; that level is absolute and independent of the
-mature level, so ``nascent > mature`` occurs and the nascent fragment share is emergent rather
-than solved — priceable with :func:`expected_rna_weights`. ``additive_ratio`` (``ratios``) is the
-ratio mode: an entity's molecules are the sum over its contributors of
-``contributor.abundance x nrna_ratio``, so nascent mass tracks mature abundance and cannot exceed
-it. Under either mode, sampling is one multinomial over all RNA rows, mature and entity alike, with
-probability proportional to abundance x effective length, so the fragment share follows from the
-molecules and their lengths and is never imposed.
-
-Budget and grid
----------------
-``n_rna_fragments`` is the whole RNA budget and gDNA is added on top; when ``n_total_fragments``
-is set instead, the total is fixed and ``gdna_rate`` decides only the split
-(:func:`rigel.sim.orchestrator.resolve_depths`)::
-
-    n_gdna = round(n_rna x gdna_rate)                          # n_total_fragments unset
-    n_rna  = round(total / (1 + gdna_rate));  n_gdna = total - n_rna
-
-Nascent always comes out of ``n_rna`` and never on top of it: the entities are rows of the one RNA
-multinomial, so the split inside ``n_rna`` is realised and read off the origin counts afterwards
-rather than allocated. The grid sweeps ``nrna x gdna rates x gDNA strand overdispersions x strand
-specificities x capture scenarios``, the ``nrna`` axis being one condition per configured entry of
-whichever key the selected mode reads — collapsed to one condition when the abundance file itself
-supplies nRNA values.
+Nascent abundance lives on the entities: every multi-exon transcript links through ``span_t_index`` to the entity
+over its TSS/TES cluster and keeps ``nrna_abundance = 0`` itself. Sampling is one multinomial over all RNA rows,
+transcript and entity alike, in proportion to abundance x effective length, so the nascent fragment share follows
+from molecules and lengths and is never imposed.
 """
 
 from __future__ import annotations
@@ -141,23 +107,22 @@ _SECTION_KEYS = {
 
 
 def _refuse_unknown_keys(raw: dict, known: frozenset[str], where: str) -> None:
-    """Raise on a key the parser does not read: ignored, a misspelt key would run on its default."""
+    """Raise on a key the parser does not read, since a misspelt key would otherwise run on its default."""
     unknown = sorted(set(raw) - known)
     if unknown:
         raise ValueError(f"{where}: unknown key(s) {unknown}; known: {sorted(known)}")
 
 
-#: A variable reference in a path, ``$NAME`` or ``${NAME}``: the pattern :func:`os.path.expandvars` reads, an
-#: unclosed ``${`` included, so every reference the expansion would leave in place is one the check sees.
+#: A variable reference in a path, ``$NAME`` or ``${NAME}``, as :func:`os.path.expandvars` reads it (an unclosed
+#: ``${`` included), so the check sees every reference the expansion would leave in place.
 _PATH_VARIABLE = re.compile(r"\$(\w+|\{[^}]*\}?)", re.ASCII)
 
 
 def expand_config_path(value, key: str):
-    """A path a sim config names, with ``~`` and every ``$NAME`` / ``${NAME}`` expanded: the one expansion
-    every path in a config goes through, so a config names its data root as ``$RIGEL_RUNS`` rather than
-    as an absolute path. A variable that is unset or empty is refused by name: left in place it would
-    make a path literally named ``$RIGEL_RUNS``, and expanded to nothing it would move the path to ``/``.
-    A value that is not a string (an absent key's ``None``) is returned as it is."""
+    """A config path with ``~`` and every ``$NAME`` / ``${NAME}`` expanded, so a config can name its data root by a
+    variable. An unset or empty variable is refused by name: left in place it would make a literal ``$NAME`` path,
+    and expanded to nothing it would move the path to ``/``. A non-string (an absent key's ``None``) is returned
+    as is."""
     if not isinstance(value, str):
         return value
     names = {ref.strip("{}") for ref in _PATH_VARIABLE.findall(value)}
@@ -171,9 +136,8 @@ def expand_config_path(value, key: str):
 
 
 def _refuse_a_run_that_keeps_no_reads(cfg: WholeGenomeSimConfig) -> None:
-    """Raise when ``oracle_bam`` and ``emit_fastq`` are both false. No oracle BAM is written and the FASTQs
-    are deleted once each condition's truth is, so no condition keeps a read; and without a BAM the FASTQ
-    is the condition's resume key, so the next run simulates every condition again."""
+    """Raise when ``oracle_bam`` and ``emit_fastq`` are both false: no condition would keep a read, and without
+    either file a condition has no resume key."""
     if not cfg.oracle_bam and not cfg.emit_fastq:
         raise ValueError(
             "oracle_bam and emit_fastq are both false (--no-oracle sets oracle_bam false): no condition "
@@ -190,8 +154,8 @@ def _capture_config_from_mapping(
     label: str = "capture",
     require_probes_when_enabled: bool = False,
 ) -> CaptureConfig:
-    """Build a CaptureConfig from a YAML mapping plus optional defaults. A key it does not know is refused:
-    silently ignored, it would read as applied — a retired ``gdna_split_penalty`` above all."""
+    """Build a CaptureConfig from a YAML mapping plus optional defaults. An unknown key is refused, since ignored it
+    would read as applied."""
     merged = dict(defaults or {})
     merged.update(raw)
     unknown = sorted(set(merged) - _CAPTURE_KEYS)
@@ -203,7 +167,7 @@ def _capture_config_from_mapping(
     if not enabled:
         return CaptureConfig()
 
-    probes = merged.get("probes", None)
+    probes = merged.get("probes")
     if not probes:
         if require_probes_when_enabled and raw.get("enabled") is True:
             raise ValueError(f"capture config '{label}' is enabled but has no probes")
@@ -285,8 +249,6 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     sim_raw = raw.get("simulation", {})
     sim = cfg.simulation
     sim.n_rna_fragments = int(sim_raw.get("n_rna_fragments", sim.n_rna_fragments))
-    # Optional fixed-total budget: when present, `gdna.rates` decides only the RNA/gDNA split
-    # instead of adding gDNA on top of the RNA budget (`orchestrator.resolve_depths`).
     _total = sim_raw.get("n_total_fragments")
     sim.n_total_fragments = None if _total is None else int(_total)
     sim.sim_seed = int(sim_raw.get("sim_seed", sim.sim_seed))
@@ -308,7 +270,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     ab.frac_expressed = float(ab_raw.get("frac_expressed", ab.frac_expressed))
     ab.file = expand_config_path(ab_raw.get("file", ab.file), "abundance.file")
 
-    # nRNA spike-in sweep — top-level "nrna:" section is canonical
+    # Nascent RNA sweep
     nrna_raw = raw.get("nrna", {})
     nrna = cfg.nrna
     nrna.mode = str(nrna_raw.get("mode", nrna.mode))
@@ -320,8 +282,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     raw_abundance_ranges = nrna_raw.get("abundance_ranges", None)
     if raw_abundance_ranges is not None:
         for pair in raw_abundance_ranges:
-            # a range is a pair: a longer entry is refused rather than truncated to its first two,
-            # which would quietly run a scenario other than the one configured.
+            # a range must be a pair: truncating a longer entry would run another scenario
             if not hasattr(pair, "__len__") or len(pair) != 2:
                 raise ValueError(
                     f"nrna.abundance_ranges entries must be [lo, hi] pairs; got {pair!r}"
@@ -332,10 +293,8 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     nrna.seed = int(nrna_raw.get("seed", nrna.seed))
     if nrna.mode == "sparse" and nrna.abundance_ranges is None:
         raise ValueError("nrna.abundance_ranges is required for mode='sparse'")
-    # A field the selected mode cannot read is a config the author did not write, so it is refused
-    # rather than ignored: without this, `abundance_ranges` + `on_fraction` with `mode:` omitted
-    # parses clean and runs `additive_ratio` at ratio 0.0 — a nascent-free run whose conditions are
-    # still named for the nascent label, which looks like the configured scenario and is another one.
+    # A field the selected mode cannot read is refused: `abundance_ranges` + `on_fraction` with `mode:` omitted
+    # would otherwise run `additive_ratio` at ratio 0.0, a nascent-free run named like the configured one.
     _MODE_FIELDS = {
         "additive_ratio": ("ratios",),
         "sparse": ("abundance_ranges", "on_fraction"),
@@ -398,10 +357,8 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
 
     # Misc
     cfg.oracle_bam = bool(raw.get("oracle_bam", True))
-    # Drop sim_R1/R2.fq.gz once each condition's truth is written: no calibration instrument reads
-    # a FASTQ and they dominate a panel's on-disk size. A third-party tool comparison does need
-    # them, so a panel built this way cannot be compared against another aligner or quantifier
-    # without re-simulating. Honoured by `sim.orchestrator.run_condition_grid`.
+    # False drops each condition's FASTQs once its truth is written, saving most of a panel's disk; a panel
+    # without FASTQs cannot be re-aligned or given to another quantifier without re-simulating.
     cfg.emit_fastq = bool(raw.get("emit_fastq", True))
     _refuse_a_run_that_keeps_no_reads(cfg)
     cfg.verbose = bool(raw.get("verbose", True))
@@ -442,17 +399,12 @@ def load_transcripts(gtf_path: str | Path) -> list[Transcript]:
 def merge_shadow_transcripts(
     transcripts: list[Transcript], shadow_gtf: str | Path
 ) -> list[Transcript]:
-    """Append shadow transcripts: unannotated transcription the simulator draws from and the index
-    never sees.
+    """Append shadow transcripts, unannotated transcription the simulator draws from and the index never sees.
 
-    ``transcripts`` is the index's list (annotated rows plus nascent entities). The shadow GTF is read
-    with the ordinary GTF loader and appended with ``t_index`` continuing after the index's rows,
-    ``is_synthetic = False`` and ``span_t_index = -1`` — a shadow carries no nascent because it is
-    itself the unannotated RNA. A shadow whose ``t_id`` the index already knows is refused: it
-    would be annotated, and the point of a shadow is that the tool cannot know about it. Their
-    fragments are named like any RNA fragment (``{t_id}:…``), so the oracle split files them as
-    ``mrna`` and the certified per-slot truth shows RNA exactly where the annotation says there is
-    none. Gate: ``tests/test_sim_shadow_transcripts.py``."""
+    The shadow GTF's rows follow the index's (``transcripts``) in ``t_index``, with ``is_synthetic = False``,
+    ``span_t_index = -1`` and no nascent. A shadow whose ``t_id`` the index knows is refused, since the tool could
+    know it. Their fragments are named like any RNA fragment, so the truth shows RNA where the annotation has none.
+    """
     shadows = load_transcripts(shadow_gtf)
     known = {t.t_id for t in transcripts}
     clash = sorted(t.t_id for t in shadows if t.t_id in known)
@@ -476,23 +428,18 @@ def merge_shadow_transcripts(
 
 
 def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
-    """The simulation's transcriptome is the rigel index's.
+    """One :class:`Transcript` per row of the rigel index, annotated transcripts and nascent entities, with the
+    index's structure flags and ``t_index`` equal to the row, so the simulator and `rigel quant` see the same set.
 
-    Rebuilds one :class:`Transcript` per index row — annotated transcripts and the synthetic nascent
-    entities, with ``is_single_exon`` / ``is_synthetic`` / ``span_t_index`` / ``span_n_contributors``
-    exactly as the index carries them and ``t_index`` equal to the index row — so the simulator, the
-    oracle and `rigel quant` all speak about the same transcript set. The GTF loader is not used here because it
-    cannot know what the index did (duplicate collapse, nascent consolidation), and a simulator fed the
-    raw GTF would carry a different nascent model from the tool's. Each kept transcript carries the ids of the
-    duplicates the index folded into it (its alias table), so a probe panel designed on the raw annotation still
-    binds the molecule its probe names. Raises if the rebuilt rows are not contiguous ``t_index`` 0..n-1, or if an
-    index row has no exon intervals.
+    The index, not the GTF, is read because only it knows the duplicate collapse and the nascent entities. Each
+    transcript carries the ids of the duplicates folded into it (``aliases``), so a probe panel designed on the raw
+    annotation still binds. Raises if the rows are not contiguous ``t_index`` 0..n-1 or a row has no exons.
     """
     import pandas as pd
 
     from ..index import TRANSCRIPT_ALIASES_FEATHER, TranscriptIndex
 
-    index = TranscriptIndex.load(index_dir, retain_test_structures=True)
+    index = TranscriptIndex.load(index_dir, retain_lookup_maps=True)
     t_df = index.t_df
     aliases: dict[str, list[str]] = {}
     alias_path = Path(index_dir) / TRANSCRIPT_ALIASES_FEATHER
@@ -540,9 +487,8 @@ def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
 
 
 def ensure_index(cfg: "WholeGenomeSimConfig") -> Path:
-    """The index the simulation reads its transcriptome from: ``cfg.index`` if set, else built from
-    ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` (duplicates collapsed, as `panel.py build`
-    does) — and reused on the next run."""
+    """The index the transcriptome comes from: ``cfg.index`` if set, else one built from ``genome`` + ``gtf`` into
+    ``<outdir>/rigel_index`` (duplicates collapsed) and reused on the next run."""
     from ..index import TranscriptIndex
 
     if cfg.index:
@@ -569,16 +515,10 @@ def ensure_index(cfg: "WholeGenomeSimConfig") -> Path:
 
 
 def _index_provenance(index_dir: Path, gtf: str | Path) -> dict:
-    """The index the transcriptome comes from, as ``manifest.json`` records it: the index's resolved path
-    and its own manifest verbatim (the FASTA and GTF it was built from, each with its sha256, and its
-    build flags).
+    """The index record ``manifest.json`` carries: its resolved path and its own manifest verbatim.
 
-    Refuses a ``gtf`` whose content is not the GTF the index was built from: the transcriptome is the
-    index's, so without the check a config could name one annotation and simulate another. The test is
-    the content digest the index recorded (``index.source_record``), so a byte-identical copy at another
-    path passes and an edited file at the same path does not. Called once :meth:`TranscriptIndex.load`
-    has accepted the index, which refuses one without a manifest. Gate:
-    ``tests/test_whole_genome_sim_config.py``."""
+    Refuses a ``gtf`` whose sha256 is not the one the index recorded, so a config cannot name one annotation and
+    simulate another; a byte-identical copy elsewhere passes. Gate: ``tests/test_whole_genome_sim_config.py``."""
     from ..index import load_manifest, source_record
 
     index_manifest = load_manifest(index_dir)
@@ -603,37 +543,27 @@ def assign_random_abundances(
     transcripts: list[Transcript],
     config: AbundanceConfig,
 ) -> None:
-    """Assign random total-RNA abundances using log-uniform sampling.
-
-    All abundance is assigned to ``t.abundance`` (mRNA).  ``nrna_abundance``
-    is left at zero. The nascent mode (``apply_nrna_ratio`` or ``apply_sparse_nrna``)
-    is applied per condition in ``orchestrator.run_condition_grid``.
-
-    1. Bernoulli(frac_expressed) → expressed flag.
-    2. For expressed: total_RNA ~ LogUniform(min, max).
-    3. Assign total RNA to ``t.abundance``, nRNA = 0.
+    """Draw each annotated transcript's ``abundance``: expressed with probability ``frac_expressed``, then
+    LogUniform(min, max). ``nrna_abundance`` is set to 0; the nascent mode is applied per condition.
     """
     if config.min <= 0:
         raise ValueError(f"abundance min must be > 0 for log-uniform, got {config.min}")
 
     rng = np.random.default_rng(config.seed)
     n = len(transcripts)
-    # A synthetic nascent entity is not a mature molecule, so it never draws a mature abundance. The
-    # draw runs over the annotated rows only, in index order, so the synthetic rows do not shift it.
+    # The draw runs over the annotated rows only, in index order: a nascent entity has no mature abundance, and
+    # the synthetic rows must not shift the stream.
     annotated = np.array([not t.is_synthetic for t in transcripts], dtype=bool)
 
-    # Step 1: expressed?
     expressed = np.zeros(n, dtype=bool)
     expressed[annotated] = rng.random(int(annotated.sum())) < config.frac_expressed
 
-    # Step 2: log-uniform total RNA for expressed transcripts
     total_rna = np.zeros(n)
     n_expr = int(expressed.sum())
     log_min = np.log(config.min)
     log_max = np.log(config.max)
     total_rna[expressed] = np.exp(rng.uniform(log_min, log_max, size=n_expr))
 
-    # Step 3: assign total RNA as mRNA, nRNA = 0
     for i, t in enumerate(transcripts):
         t.abundance = float(total_rna[i])
         t.nrna_abundance = 0.0
@@ -655,23 +585,18 @@ def assign_random_abundances(
 def _detect_abundance_format(
     path: str | Path,
 ) -> tuple[str, object]:
-    """Auto-detect file format and return (format_name, dataframe).
+    """Detect an abundance file's format, plain or gzipped, and return ``(format_name, dataframe)``:
 
-    Accepts plain-text or gzip-compressed (``.gz``) files.
+    salmon   — ``quant.sf``: ``Name``, ``TPM``.
+    kallisto — ``abundance.tsv``: ``target_id``, ``tpm``.
+    sim      — the molar truth table (:func:`rigel.sim.truth.write_molar_truth`): ``transcript_id``,
+               ``mrna_abundance`` and optionally ``nrna_abundance``.
 
-    Supported formats
-    -----------------
-    salmon   — ``quant.sf`` with columns ``Name``, ``TPM``.
-    kallisto — ``abundance.tsv`` with columns ``target_id``, ``tpm``.
-    sim      — the simulator's own molar table (:func:`rigel.sim.truth.write_molar_truth`) with
-               ``transcript_id``, ``mrna_abundance`` (and optionally ``nrna_abundance``).
-
-    A condition's truth table (:func:`rigel.sim.truth.write_post_capture_truth`) is refused: it holds the
-    fragments one condition realised, which are not molecules.
+    A condition's truth table is refused: it holds realised fragments, not molecules.
     """
     import pandas as pd
 
-    # Detect gzip by magic bytes (robust even without .gz extension)
+    # gzip is detected by its magic bytes, whatever the extension
     compression: str = "infer"
     try:
         with open(path, "rb") as fh:
@@ -683,23 +608,19 @@ def _detect_abundance_format(
     df = pd.read_csv(path, sep="\t", compression=compression)
     cols = set(df.columns)
 
-    # A condition's table is known by its realised column, whatever else it carries: one written before
-    # the realised counts' molar-named copies were dropped still holds them as ``mrna_abundance``.
+    # A condition's table is known by its realised column, whatever else it carries.
     if "observed_mrna_fragments" in cols:
         raise ValueError(
             f"{path} is a condition's truth table, the fragments one condition realised, not an "
             "abundance input; the molar table is the run's truth_abundances_nrna_<label>.tsv"
         )
-    # salmon quant.sf
     if {"Name", "TPM"}.issubset(cols):
         return "salmon", df
-    # kallisto abundance.tsv
     if {"target_id", "tpm"}.issubset(cols):
         return "kallisto", df
-    # sim TSV (transcript_id + mrna_abundance required)
     if {"transcript_id", "mrna_abundance"}.issubset(cols):
         return "sim", df
-    # Try case-insensitive fallback for kallisto (some versions capitalize)
+    # kallisto, case-insensitively
     low_cols = {c.lower() for c in df.columns}
     if {"target_id", "tpm"}.issubset(low_cols):
         df.columns = [c.lower() for c in df.columns]
@@ -717,17 +638,8 @@ def _detect_abundance_format(
 def _load_abundance_map(
     path: str | Path,
 ) -> tuple[dict[str, tuple[float, float | None]], str]:
-    """Load transcript abundances → {transcript_id: (total_rna, nrna|None)}.
-
-    Returns
-    -------
-    abund_map : dict[str, (float, float | None)]
-        Keys are transcript IDs.  The second element is ``None`` when
-        nRNA information is not available (salmon, kallisto, or sim TSV
-        without ``nrna_abundance``).
-    fmt : str
-        Detected format ("salmon", "kallisto", or "sim").
-    """
+    """Load ``{transcript_id: (abundance, nrna or None)}`` and the detected format; the nRNA value is ``None`` when
+    the file has none."""
     fmt, df = _detect_abundance_format(path)
 
     abund_map: dict[str, tuple[float, float | None]] = {}
@@ -749,18 +661,12 @@ def _load_abundance_map(
 
 
 def assign_nrna_to_entities(transcripts: list[Transcript], per_contributor: np.ndarray) -> int:
-    """Pool each contributor's nascent molecules onto its nascent entity.
+    """Pool each contributor's nascent molecules onto its nascent entity; return how many entities received any.
 
-    ``per_contributor[i]`` is transcript ``i``'s nascent molecular abundance (zero for anything that
-    is not an expressed multi-exon transcript). Every multi-exon transcript links to one entity through
-    ``span_t_index`` — the index's synthetic single-exon transcript over the clustered span, or the
-    annotated single-exon transcript that already covers it — and the entity's ``nrna_abundance`` is
-    the sum over its contributors. Annotated multi-exon transcripts end with ``nrna_abundance = 0``:
-    their nascent molecules are the entity's, and are sampled on the entity's template.
-
-    Raises rather than skipping when a contributor has no entity (``span_t_index < 0``) or is
-    single-exon: both mean the transcript list did not come from a rigel index.
-    Returns the number of entities that received nascent.
+    ``per_contributor[i]`` is transcript ``i``'s nascent molecular abundance. Each multi-exon transcript links
+    through ``span_t_index`` to one single-exon entity (synthetic, or an annotated transcript covering the span),
+    whose ``nrna_abundance`` becomes the sum over its contributors; every other row ends at 0. Raises when a
+    contributor is single-exon or has no entity: the list did not come from a rigel index.
     """
     by_index = {t.t_index: t for t in transcripts}
     for t in transcripts:
@@ -787,9 +693,8 @@ def apply_nrna_ratio(
     transcripts: list[Transcript],
     ratio: float,
 ) -> None:
-    """Nascent RNA at a MOLECULAR ratio of mature RNA: ``ratio`` nascent molecules per mature molecule
-    of every expressed multi-exon transcript, pooled onto its nRNA entity
-    (:func:`assign_nrna_to_entities`)."""
+    """Nascent RNA at a molecular ratio: ``ratio`` nascent molecules per molecule of every expressed multi-exon
+    transcript, pooled onto its entity (:func:`assign_nrna_to_entities`)."""
     per = np.array(
         [
             (t.abundance or 0.0) * ratio if (t.abundance or 0.0) > 0 and len(t.exons) > 1 else 0.0
@@ -811,32 +716,15 @@ def apply_nrna_ratio(
 
 
 def fl_pmf(sim: "SimulationParams") -> tuple[np.ndarray, np.ndarray]:
-    """The fragment-length pmf the engine draws from, evaluated exactly rather than sampled, so a quantity derived
-    from it is deterministic: `sampling.truncated_normal_frag_lengths` rounds a Normal draw to the nearest integer
-    and keeps it in ``[frag_min, frag_max]``, so length ``k`` has the Normal's mass on ``[k − ½, k + ½)``,
-    renormalised over the window. Each mass is taken on the side of the mean where it is a difference of two
-    small tails, never of two numbers near 1."""
+    """The exact fragment-length pmf the engine draws from: `sampling.truncated_normal_frag_lengths` rounds a Normal
+    draw and keeps it in ``[frag_min, frag_max]``, so length ``k`` has the Normal's mass on ``[k − ½, k + ½)``,
+    renormalised over the window. Each mass is taken on the side of the mean where it is a difference of two small
+    tails, never of two numbers near 1."""
     widths = np.arange(int(sim.frag_min), int(sim.frag_max) + 1, dtype=np.int64)
     lo = (widths - 0.5 - float(sim.frag_mean)) / float(sim.frag_std)
     hi = lo + 1.0 / float(sim.frag_std)
     p = np.where(lo > 0.0, ndtr(-lo) - ndtr(-hi), ndtr(hi) - ndtr(lo))
     return widths, p / p.sum()
-
-
-def expected_rna_weights(
-    transcripts: list[Transcript], sim: "SimulationParams"
-) -> tuple[float, float]:
-    """``(mature, nascent)`` expected sampling weight in the UNCAPTURED library:
-    ``Σ_t abundance_t · E_w[max(0, L_t − w + 1)]``, the exact expectation over the fragment-length
-    pmf rather than the effective length at the mean width (they differ wherever a transcript is
-    short relative to the fragment length, which is most of them).
-    """
-    widths, p = fl_pmf(sim)
-    L = np.array([float(t.length or t.compute_length()) for t in transcripts])
-    eff = (np.maximum(0.0, L[:, None] - widths[None, :] + 1.0) * p[None, :]).sum(axis=1)
-    am = np.array([float(t.abundance or 0.0) for t in transcripts])
-    an = np.array([float(t.nrna_abundance) for t in transcripts])
-    return float((am * eff).sum()), float((an * eff).sum())
 
 
 def apply_sparse_nrna(
@@ -846,34 +734,15 @@ def apply_sparse_nrna(
     on_fraction: float,
     seed: int,
 ) -> float:
-    """Sparse nascent RNA: absent from most gene spans, present and measurable in a minority.
+    """Sparse nascent RNA: each eligible entity is transcribed with probability ``on_fraction`` and, if so, draws an
+    absolute molecular abundance log-uniformly over ``abundance_range``. Returns the realised nascent:mature
+    molecular ratio. Requires ``0 < lo <= hi`` and ``0 <= on_fraction <= 1``.
 
-    Draws, per nascent entity, whether it is transcribed at all (Bernoulli ``on_fraction``) and, where
-    it is, its absolute molecular abundance log-uniformly over ``abundance_range``. Returns the
-    realised nascent:mature molecular ratio.
-
-    The level is independent of the mature level, which is what this mode gives that the ratio mode
-    cannot. Under a ratio, ``nascent = mature × ratio``, so nascent mass tracks mature abundance and
-    can never exceed it; the steady state says the opposite, since mature reflects synthesis and
-    degradation while nascent reflects synthesis alone, making the nascent:mature ratio a stability
-    parameter rather than an expression one. An abundant stable transcript shows almost no nascent
-    signal and an unstable rare one can show more nascent than mature, so drawing the two
-    independently makes ``nascent > mature`` a case the tool has to survive.
-
-    The draw is log-uniform because the levels span decades where nascent is present: a linear draw
-    over a range such as (0.05, 2) concentrates nearly all its mass in the top decade and cannot
-    express "very low in some, high in others".
-
-    The unit of sparsity is the entity, not the transcript, and the difference is measurable. An
-    entity is one TSS/TES-clustered gene span shared by several isoforms, so drawing per contributor
-    would give a gene with 5 isoforms a ``1 - (1 - p)^5`` chance of carrying nascent at
-    ``on_fraction = p`` and the intron slots calibration reads would be several times less sparse than
-    configured. Per entity, the configured fraction is the fraction of gene spans and therefore of
-    intron slots, which matches pre-mRNA being a property of a locus being transcribed.
-
-    The nascent fragment share is emergent here rather than solved, bounded by the sparse subset and
-    the range; a caller can price it exactly with :func:`expected_rna_weights`, and the orchestrator
-    records it per condition. Requires ``0 < lo <= hi`` and ``0 <= on_fraction <= 1``.
+    The level is independent of the mature level, because the nascent:mature ratio reflects stability, not
+    expression: a stable abundant transcript shows little nascent signal and an unstable rare one can show more
+    nascent than mature. The draw is log-uniform because present levels span decades. The unit is the entity, not
+    the transcript, so ``on_fraction`` is the fraction of gene spans: drawn per isoform, a gene with ``n`` isoforms
+    would carry nascent with probability ``1 - (1 - p)^n``.
     """
     lo, hi = float(abundance_range[0]), float(abundance_range[1])
     if lo <= 0.0 or hi < lo:
@@ -888,9 +757,7 @@ def apply_sparse_nrna(
     for t in transcripts:
         t.nrna_abundance = 0.0
 
-    # an entity is eligible iff at least one expressed multi-exon transcript names it: a silent gene
-    # is not being transcribed, so it has no pre-mRNA, and that must read as an exact zero rather than
-    # a small number: biology puts nothing there
+    # an entity is eligible iff an expressed multi-exon transcript names it: a silent gene's span must be exactly 0
     eligible: list[Transcript] = []
     seen: set[int] = set()
     for t in transcripts:
@@ -936,27 +803,17 @@ def assign_file_abundances(
     transcripts: list[Transcript],
     tsv_path: str | Path,
 ) -> bool:
-    """Load abundances from a file (salmon, kallisto, or sim TSV).
-
-    Auto-detects file format:
-
-    - **salmon** ``quant.sf`` — uses ``TPM`` as total RNA abundance.
-    - **kallisto** ``abundance.tsv`` — uses ``tpm`` as total RNA abundance.
-    - **sim TSV** — uses ``mrna_abundance`` (and optionally
-      ``nrna_abundance``).
-
-    Returns ``True`` if the file provided explicit nRNA data (sim TSV
-    with ``nrna_abundance`` column), ``False`` otherwise.  When the file
-    does not supply nRNA, the caller applies the configured nRNA sweep.
+    """Load abundances from a salmon, kallisto or sim file (:func:`_detect_abundance_format`); a transcript the file
+    does not name gets 0. Returns whether the file supplied nRNA values; when it did not, the caller applies the
+    configured nascent sweep.
     """
     abund_map, fmt = _load_abundance_map(tsv_path)
     logger.info("Detected abundance format: %s (%d entries)", fmt, len(abund_map))
 
     matched = 0
     has_nrna_data = False
-    # A file names annotated transcripts, and its nRNA column is that transcript's nascent molecules,
-    # which live on its entity. Collect them per contributor and pool in one pass, exactly as the
-    # ratio mode does; a file row naming an entity directly is honoured too.
+    # A file's nRNA value for a multi-exon transcript is pooled onto its entity, as in the ratio mode; a value on an
+    # entity or single-exon row is kept directly.
     per_contributor = np.zeros(len(transcripts))
 
     for i, t in enumerate(transcripts):
@@ -968,7 +825,7 @@ def assign_file_abundances(
                 if len(t.exons) > 1:
                     per_contributor[i] = nrna
                 else:
-                    t.nrna_abundance = nrna  # already an entity / single-exon row
+                    t.nrna_abundance = nrna
             matched += 1
         else:
             t.abundance = 0.0
@@ -979,7 +836,7 @@ def assign_file_abundances(
             if transcripts[i].nrna_abundance > 0
         }
         assign_nrna_to_entities(transcripts, per_contributor)
-        for i, amount in direct.items():  # keep any nascent named on an entity row directly
+        for i, amount in direct.items():
             transcripts[i].nrna_abundance += amount
 
     logger.info(
@@ -1017,14 +874,9 @@ def _build_nrna_pairs(
     cfg: WholeGenomeSimConfig,
     has_file_nrna: bool,
 ) -> list[tuple[str, str, float | tuple[float, float] | None, int]]:
-    """Build nRNA sweep pairs — one ``(label, mode, value, index)`` per nRNA condition.
-
-    When the abundance file supplied explicit nRNA data, returns the single entry
-    ``("file", "file", None, 0)``: the TSV is the one source of nascent weight and the sweep
-    is skipped entirely. Otherwise one entry per configured value of whichever key the mode
-    reads — ``ratios`` for ``additive_ratio``, and an ``(lo, hi)`` pair from ``abundance_ranges``
-    for ``sparse``. ``index`` is the entry's
-    position, which ``sparse`` also folds into its per-condition seed.
+    """One ``(label, mode, value, index)`` per nascent condition: per ``ratios`` entry for ``additive_ratio``, per
+    ``abundance_ranges`` pair for ``sparse`` (which folds ``index`` into its seed), or the single
+    ``("file", "file", None, 0)`` when the abundance file supplied nRNA values.
     """
     if has_file_nrna:
         return [("file", "file", None, 0)]
@@ -1053,18 +905,10 @@ def _build_nrna_pairs(
 
 
 def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
-    """Run full simulation.
-
-    1. Load the transcripts from the rigel index (built from genome + GTF when none is
-       configured; a GTF the index was not built from is refused), plus any shadow GTF
-    2. Assign base abundances (total RNA) once
-    3. Sweep nRNA settings x gdna_rates x gDNA strand overdispersions x strand_specificities
-       x capture scenarios
-    4. Write manifest, recording the index the transcriptome comes from
-
-    Returns list of condition dicts (for manifest).
+    """Run the whole simulation: load the index's transcripts and any shadows, assign the base abundances once, run
+    the condition grid and write the manifest. Returns the per-condition manifest entries.
     """
-    # checked again here because a caller can set `oracle_bam` after the config is read (--no-oracle)
+    # checked again: a caller can set `oracle_bam` after the config is read (--no-oracle)
     _refuse_a_run_that_keeps_no_reads(cfg)
     outdir = Path(cfg.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -1077,8 +921,6 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     if not gtf_path.exists():
         raise FileNotFoundError(f"GTF not found: {gtf_path}")
 
-    # 1. Load transcripts from the rigel index, so the simulated transcriptome (annotated transcripts
-    #    plus the synthetic nascent entities) is exactly the one `rigel quant` reads.
     index_dir = ensure_index(cfg)
     transcripts = load_transcripts_from_index(index_dir)
     if not transcripts:
@@ -1092,7 +934,6 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         transcripts = merge_shadow_transcripts(transcripts, cfg.shadow_gtf)
         n_shadow = len(transcripts) - n_before
 
-    # 2. Assign base abundances (total RNA, nRNA = 0)
     ab = cfg.abundance
     has_file_nrna = False
     if ab.mode == "random":
@@ -1105,12 +946,10 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         raise ValueError(f"Unknown abundance mode: {ab.mode}")
 
     if has_file_nrna:
-        logger.info("Abundance file provided nRNA data — skipping nRNA spike-in sweep")
+        logger.info("Abundance file provided nascent abundances — skipping the nascent sweep")
 
-    # Save base abundances
     base_abundances = [(t.abundance or 0.0, t.nrna_abundance) for t in transcripts]
 
-    # 3. Build condition grid: nrna × gdna × strand_specificities × capture
     sim = cfg.simulation
 
     gdna_pairs: list[tuple[str, float]] = []
@@ -1118,9 +957,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         label = gdna_label_for_rate(rate, cfg.gdna.rate_labels, i)
         gdna_pairs.append((label, rate))
 
-    # The genomic/RNA-only split is a scenario input: a config that asks for gDNA without stating
-    # which references are genomic is rejected rather than guessed at, since inferring it from "the
-    # reference has an annotation" puts gDNA on RNA-only spike-ins.
+    # Which references are genomic is an input, never inferred: an annotated reference can be an RNA-only spike-in.
     genomic_refs = cfg.gdna.genomic_refs
     if genomic_refs is None:
         if any(rate > 0 for rate in cfg.gdna.rates):
@@ -1131,8 +968,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
             )
         genomic_refs = []
 
-    # gDNA strand-overdispersion sweep axis (one condition per value). None ⇒ a single value
-    # (= strand_overdispersion), which keeps condition names unchanged when it is 0.
+    # The strand-overdispersion axis: one condition per value, or one at `strand_overdispersion`.
     _od_values = (
         cfg.gdna.strand_overdispersions
         if cfg.gdna.strand_overdispersions is not None
@@ -1176,7 +1012,6 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         emit_fastq=cfg.emit_fastq,
     )
 
-    # 4. Write manifest
     manifest_path = write_manifest(
         outdir, cfg, conditions, index=index_record, n_shadow_transcripts=n_shadow
     )

@@ -1,20 +1,4 @@
-"""The gDNA background rate, and which counts are gDNA counts at all.
-
-The rate blocks gate the closed form `poisson_lower_mean` and the contamination-robust one-sided
-root. The last block gates
-`density_model.count_observable_masks`, the selector deciding which counts are gDNA counts at all; its
-rule is signature arithmetic and nothing else. A
-REGION is count-observable iff it carries no exon bit, because an exon's contained count holds
-unspliced mature RNA; a contiguous BOUNDARY is count-observable iff its two flanks SHARE no exon bit,
-because one exon strand continuing across the boundary is what lets unspliced mature RNA cross it,
-and two exons on opposite strands share no bit, so nothing continues and the crossing count is gDNA.
-
-PERTURBATION (`TRAPS: perturb-every-gate`): a `poisson_lower_mean` that drops the `floor` fires 9
-gates, and a bisection returning the pooled rate
-instead of the one-sided root fires 1. Bracketing the bisection from exactly `0.0` fires NOTHING,
-because `F(0+) < 0` walks the bracket off the boundary by itself — so that guard is speculative, and
-`test_the_returned_rate_is_actually_a_root` checks the property instead.
-"""
+"""The gDNA background rate: the closed form `poisson_lower_mean` and the contamination-robust one-sided root."""
 
 from __future__ import annotations
 
@@ -22,16 +6,9 @@ import numpy as np
 import pytest
 from scipy.stats import poisson
 
-from rigel.calibration.density_model import count_observable_masks
 from rigel.calibration.gdna_density import (
     one_sided_rate,
     poisson_lower_mean,
-)
-from rigel.calibration.signature import (
-    BIT_EXON_NEG,
-    BIT_EXON_POS,
-    BIT_INTRON_NEG,
-    BIT_INTRON_POS,
 )
 
 
@@ -43,7 +20,7 @@ LAMS = (0.05, 0.3, 1.0, 2.7, 10.0, 55.5, 200.0, 999.0)
 
 @pytest.mark.parametrize("lam", LAMS)
 def test_poisson_lower_mean_matches_the_exact_truncated_sum(lam):
-    """``E[(lam-N)+] = sum_{k<=lam} (lam-k) P(N=k)`` — a DIFFERENT algorithm, not the same formula twice."""
+    """``E[(lam-N)+] = sum_{k<=lam} (lam-k) P(N=k)``: a different algorithm, not the same formula twice."""
     k = np.arange(0, int(np.floor(lam)) + 1)
     exact = float(((lam - k) * poisson.pmf(k, lam)).sum())
     assert poisson_lower_mean(np.array([lam]))[0] == pytest.approx(exact, rel=1e-12)
@@ -63,7 +40,7 @@ def test_poisson_lower_mean_is_zero_at_zero_and_finite_at_scale():
 
 
 def test_dropping_the_floor_breaks_the_identity():
-    """PERTURBATION: ``lam**(lam+1)/Gamma(lam+1)``, with no ``floor``, is a different function."""
+    """``lam**(lam+1)/Gamma(lam+1)``, with no ``floor``, is a different function."""
     from scipy.special import gammaln
 
     lam = 2.7
@@ -72,13 +49,10 @@ def test_dropping_the_floor_breaks_the_identity():
 
 
 def test_the_log_gamma_table_is_the_direct_form_TO_THE_BIT():
-    """The log-gamma inside the Poisson identity is evaluated at integers, so it is tabulated. A table of
-    the same function at the same points is exact, and this asserts that rather than trusting it: over a
-    dense grid, the two forms must be EQUAL, not close.
-
-    Both branches are covered on purpose — the table is used only when it is smaller than the data, so the
-    short arrays here fall back to the direct call and the long ones take the table. PERTURBATION: a table
-    built at ``k`` instead of ``k + 1`` fires this gate on every row.
+    """The log-gamma inside the Poisson identity is evaluated at integers, so it is tabulated, and a table of the same
+    function at the same points is exact: over a dense grid the two forms must be equal, not close. Both branches are
+    covered (the table is used only when it is smaller than the data, so short arrays fall back to the direct call and
+    long ones take the table); a table built at ``k`` instead of ``k + 1`` would fail on every row.
     """
     from scipy.special import gammaln
 
@@ -110,13 +84,9 @@ def test_uncontaminated_poisson_recovers_its_own_rate():
 
 
 def test_the_bisection_on_its_closed_bracket_is_the_fixed_200_step_loop_TO_THE_BIT():
-    """The termination rule moved from a step count to the bracket's own closure, and the answer may not
-    move with it: a float64 bracket closes in about sixty halvings, so the 140 further steps the old loop
-    always ran reassigned a value that could no longer change.
-
-    The oracle here is that old loop, written out. PERTURBATION: stopping the shipped loop one halving
-    EARLY — the same code with ``mid <= lo`` relaxed to a relative width — moves the rate, so this gate is
-    not vacuous about where closure sits.
+    """The bisection stops when its float64 bracket closes, about sixty halvings, and must equal a fixed 200-step loop
+    to the bit, since a closed bracket can no longer change the value. Stopping one halving early (``mid <= lo`` relaxed
+    to a relative width) would move the rate.
     """
     from rigel.calibration.gdna_density import poisson_lower_mean as _plm
 
@@ -150,7 +120,8 @@ def test_the_bisection_on_its_closed_bracket_is_the_fixed_200_step_loop_TO_THE_B
 
 
 def test_contamination_moves_the_pooled_rate_but_not_the_one_sided_one():
-    """The point of the module: same gDNA, half the objects given a large additive contaminant."""
+    """Same gDNA, half the objects given a large additive contaminant: the pooled rate moves, the one-sided one does
+    not."""
     rng = np.random.default_rng(3)
     e = rng.uniform(50.0, 5000.0, size=4000)
     rho = 0.02
@@ -167,7 +138,7 @@ def test_contamination_moves_the_pooled_rate_but_not_the_one_sided_one():
 
 
 def test_the_bias_is_one_sided_never_low():
-    """Contamination pushes the root UP, never down — the direction the derivation claims."""
+    """Contamination pushes the root up, never down, as the derivation claims."""
     rng = np.random.default_rng(5)
     e = rng.uniform(50.0, 5000.0, size=3000)
     rho = 0.02
@@ -194,7 +165,7 @@ def test_adding_a_contaminant_never_lowers_the_estimate():
 
 
 def test_zero_counts_declines_rather_than_fabricating_a_rate():
-    """A zero-gDNA library has no gDNA density. It must SAY so, not return a number."""
+    """A zero-gDNA library has no gDNA density and must say so rather than return a number."""
     e = np.full(100, 500.0)
     fit = one_sided_rate(np.zeros(100), e)
     assert not fit.informative and fit.rate == 0.0
@@ -205,12 +176,9 @@ def test_no_exposure_declines():
 
 
 def test_the_returned_rate_is_actually_a_root():
-    """The property, not the algorithm: ``F(rate) = 0``, re-derived here rather than trusting the
-    bisection.
-
-    PERTURBATION: asserting only ``rate > 0`` cannot fail, because bracketing from exactly 0.0 passes
-    it — ``F(0+) < 0`` walks the bracket off the boundary by itself. A gate no perturbation can fire
-    is not a gate, so the root is checked directly.
+    """``F(rate) = 0``, re-derived here rather than trusting the bisection. A check of ``rate > 0`` alone could not
+    fail, because a bracket starting at exactly 0.0 already walks off the boundary (``F(0+) < 0``), so the root is
+    checked directly.
     """
     rng = np.random.default_rng(2)
     e = rng.uniform(100.0, 1000.0, size=500)
@@ -232,56 +200,3 @@ def test_the_returned_rate_is_actually_a_root():
 def test_misaligned_inputs_raise():
     with pytest.raises(ValueError):
         one_sided_rate(np.ones(4), np.ones(5))
-
-
-# ── which counts are gDNA counts: the count-observable masks ─────────────────────────────────
-
-
-def _masks(signatures, ref_id=None):
-    sig = np.asarray(signatures, dtype=np.uint8)
-    ref = (
-        np.zeros(sig.shape[0], dtype=np.int64)
-        if ref_id is None
-        else np.asarray(ref_id, dtype=np.int64)
-    )
-    return count_observable_masks(sig, ref)
-
-
-def test_an_exon_region_is_not_count_observable_and_intron_and_intergenic_are():
-    """The region rule, on all four kinds: intergenic (0) and intron are gDNA counts; either exon strand,
-    or an exon overlapping an intron, is not."""
-    region, _ = _masks(
-        [
-            0,
-            BIT_INTRON_POS,
-            BIT_INTRON_NEG,
-            BIT_EXON_POS,
-            BIT_EXON_NEG,
-            BIT_EXON_POS | BIT_INTRON_NEG,
-        ]
-    )
-    np.testing.assert_array_equal(region, [True, True, True, False, False, False])
-
-
-def test_a_boundary_is_observable_unless_an_EXON_STRAND_CONTINUES_across_it():
-    """The boundary rule is SHARING, not presence. exon+|exon+ shares a bit — mature RNA crosses, not
-    observable. exon+|intron+ shares none — the exon ends there, so the crossing count is gDNA."""
-    _, boundary = _masks([BIT_EXON_POS, BIT_EXON_POS, BIT_INTRON_POS, 0])
-    np.testing.assert_array_equal(boundary, [False, True, True])
-
-
-def test_two_exons_on_OPPOSITE_strands_share_no_bit_so_the_boundary_IS_observable():
-    """The tell that the rule is `sig[lo] & sig[hi] & EXON_BITS` and not `either flank is an exon`: no
-    single exon strand continues across an exon+|exon− junction, so no unspliced mature RNA crosses
-    it."""
-    _, boundary = _masks([BIT_EXON_POS, BIT_EXON_NEG])
-    np.testing.assert_array_equal(boundary, [True])
-
-
-def test_masks_are_on_their_own_axes_and_no_boundary_straddles_a_reference():
-    """N regions, and E = N − (number of references) boundaries: two single-region references own ZERO
-    boundaries between them, so nothing can leak across a reference edge."""
-    region, boundary = _masks([BIT_INTRON_POS, BIT_INTRON_POS, BIT_EXON_POS], ref_id=[0, 1, 1])
-    assert region.shape == (3,)
-    assert boundary.shape == (1,)  # only the (1, 2) pair inside reference 1
-    np.testing.assert_array_equal(boundary, [True])  # intron+ | exon+ shares no bit

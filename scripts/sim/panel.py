@@ -1,32 +1,23 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ THE SIMULATION + BENCHMARKING WORKFLOW, AS ONE COMMAND PER STAGE.
+"""The simulation and benchmarking workflow, one command per stage.
 
-    panel.py status    what exists and what is missing — run this FIRST
+    panel.py status    what exists and what is missing; run this first
     panel.py build     reference + index + capture probes
     panel.py simulate  the conditions
-    panel.py cache     the scan cache AND the oracle cache
+    panel.py cache     the scan cache and the oracle cache
     panel.py align     optional: every condition's reads aligned by STAR or rustar, the ladder's STAR rung
     panel.py score     run rigel end to end, score against per-fragment truth (`--bam NAME`: an aligned input)
     panel.py report    the tables
 
-⛔⛔ **WHY THIS EXISTS: THE RECIPE STOPPED HALFWAY AND THE MISSING HALF WAS THE POINT.** `TESTING.md` §2
-documented five manual shell steps ending at "cache the scans". **Running the tool and scoring it against
-truth — the entire purpose — was in no recipe anywhere**. Worse, the ORACLE cache (the origin-split truth every scoring instrument reads) had no
-step at all: it was a *side effect* of running an instrument's `--oracle-cache`, so a reader who
-followed the documented steps ended up with a panel that every scorer refused.
+This script adds no measurement code. Every stage shells out to the instrument that owns it (the simulator engine
+in `rigel.sim`, `build_scan_cache.py`, `calibration_oracle.py --build`, `quant_accuracy.py`), so a baseline and a
+ceiling cannot drift apart; its value is sequencing and prerequisites, and any number it prints an instrument
+printed first. `cache` builds both caches: the scan cache, and the oracle cache that holds the origin-split truth
+every scoring instrument reads.
 
-⭐ **THIS SCRIPT ADDS NO MEASUREMENT CODE.** Every stage shells out to the instrument that already owns
-it — the simulator engine in `rigel.sim`, `build_scan_cache.py`, `calibration_oracle.py --build`,
-`quant_accuracy.py`. Duplicating a scorer is how a baseline and a ceiling drift apart
-(`TRAPS: score-the-consumers-own-count`), so the value here is *sequencing and prerequisites*, not new
-arithmetic. Anything this prints about a number, the underlying instrument printed first.
-
-⭐ **EVERY PATH DERIVES FROM THE CONFIG**: `genome`, `gtf`, `outdir`, and `index`, the index the simulator
-reads. A config without `index:` gets the reference directory's sibling by convention, and `--index`
-overrides either.
-
-⚠ **`status` is the command to run when you do not know where you are.** Each stage is expensive and
-resumable, and the failure mode this replaces is discovering after 20 minutes that step 3 never ran.
+Every path derives from the config: `genome`, `gtf`, `outdir`, and `index`, the index the simulator reads. A
+config without `index:` gets the reference directory's sibling by convention, and `--index` overrides either.
+Each stage is expensive and resumable; `status` says where a panel stands and names the next stage.
 """
 
 from __future__ import annotations
@@ -112,7 +103,7 @@ class Panel:
 
     @property
     def conditions(self) -> list[str]:
-        """The conditions actually ON DISK — a simulated condition is one with an oracle BAM."""
+        """The conditions on disk: a simulated condition is one with an oracle BAM."""
         if not self.dir.is_dir():
             return []
         return sorted(p.name for p in self.dir.iterdir() if (p / "sim_oracle.bam").is_file())
@@ -136,8 +127,8 @@ def arm_file(p: Panel, arm: str, bam: str | None) -> Path:
 
 
 def run(cmd: list[str], *, what: str) -> None:
-    """One stage. ⛔ A non-zero exit STOPS the workflow — a stage that failed must not look like a
-    stage that was skipped, which is how a partial panel gets scored as a complete one."""
+    """One stage. A non-zero exit stops the workflow, so a failed stage never looks like a skipped one and a
+    partial panel is never scored as complete."""
     print(f"\n\033[1m── {what}\033[0m\n   $ {' '.join(str(c) for c in cmd)}\n", flush=True)
     rc = subprocess.run([str(c) for c in cmd], cwd=str(REPO)).returncode
     if rc != 0:
@@ -156,8 +147,8 @@ def need(ok: bool, what: str, fix: str) -> None:
 def cmd_status(p: Panel, args) -> int:
     conds = p.conditions
     n_scan = len(list(p.scan_cache.glob("*/payload.npz"))) if p.scan_cache.is_dir() else 0
-    # ⭐ an oracle condition is complete only when every part is present; counting directories
-    # would call a half-written condition done (`TRAPS: could-the-arm-have-fired`, storage form).
+    # an oracle condition is complete only when every part is present; counting directories would call a
+    # half-written condition done
     n_oracle = 0
     if p.oracle_cache.is_dir():
         n_oracle = sum(
@@ -206,8 +197,8 @@ def cmd_status(p: Panel, args) -> int:
 
 
 def cmd_build(p: Panel, args) -> int:
-    """Reference, index, capture probes. ⚠ The reference build is NOT driven from the panel config —
-    it needs the source genome/GTF the panel was carved from, which the panel config does not name."""
+    """Reference, index, capture probes. The reference itself is not built from the panel config: it needs
+    the source genome and GTF the panel was carved from, which the config does not name."""
     need(
         p.genome.is_file() and p.gtf.is_file(),
         f"the reference ({p.genome}, {p.gtf})",
@@ -262,21 +253,14 @@ def cmd_simulate(p: Panel, args) -> int:
 
 
 def cmd_cache(p: Panel, args) -> int:
-    """⛔ BOTH caches, and the oracle one is the reason this stage exists as a named step.
-
-    The scan cache makes calibration re-runnable without rescanning. The ORACLE cache is the
-    origin-split truth — `gdna` / `mrna` / `nrna` and the two transcript-strand partitions, checked
-    sum-to-full against the scan cache — and every truth-scoring instrument refuses to run without it;
-    `calibration_oracle.py --build` builds it, every row alike, and certifies `slot_truth.npz` in the
-    same run."""
+    """Both caches. The scan cache makes calibration re-runnable without rescanning. The oracle cache is the
+    origin-split truth (`gdna` / `mrna` / `nrna` and the two transcript-strand partitions, checked sum-to-full
+    against the scan cache) that every truth-scoring instrument requires; `calibration_oracle.py --build`
+    builds it and certifies `slot_truth.npz` in the same run."""
     need(bool(p.conditions), f"simulated conditions in {p.dir}", "panel.py simulate")
     conds = args.conditions or p.conditions
-    # ⛔ `--force` MUST reach the scan cache, and this used to be the one stage it did not. A scan cache
-    #    is keyed by the index, the graph and the scan CONFIG — never by the accumulator's output — so a
-    #    change to what the scanner DEPOSITS leaves the key identical and the stale cache is silently
-    #    reused. Measured 2026-08-19: after the chimera repair every condition reported `cached / skip`
-    #    and the rebuild was a no-op (`TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`
-    #    is the change that exposed it).
+    # `--force` must reach the scan cache: its key covers the index, the graph and the scan config but not
+    # the accumulator's output, so after a change to what the scanner deposits a stale cache keeps its key
     run(
         [
             sys.executable,
@@ -290,10 +274,9 @@ def cmd_cache(p: Panel, args) -> int:
         ],
         what=f"scan cache -> {p.scan_cache}",
     )
-    # ⭐ BUILD + CERTIFY in one run. `--jobs` reaches the build: one condition's cache is a BAM split plus
-    #    five scans, core-bound, ~2 GB of real memory, so it shards cleanly. The exit code is reported,
-    #    not fatal: `calibration_oracle.py` exits non-zero when a FIELD gate fails while still writing
-    #    the COMPOSITION-level table.
+    # build and certify in one run; `--jobs` shards the build (one condition is a BAM split plus five
+    # core-bound scans). The exit code is reported, not fatal: `calibration_oracle.py` exits non-zero when a
+    # field gate fails while still writing the composition-level table.
     cmd = [
         sys.executable,
         str(DESIGN / "calibration_oracle.py"),
@@ -304,8 +287,8 @@ def cmd_cache(p: Panel, args) -> int:
         "--build",
         "--jobs",
         str(args.jobs),
-        # ⛔ and it must reach the origin-split partitions too, keyed the same way and as stale after a scan
-        #    change: a stale partition still loads and then fails sum-to-full against the fresh scan cache
+        # and the origin-split partitions, keyed the same way: a stale partition still loads, then fails
+        # sum-to-full against the fresh scan cache
         *(["--force"] if args.force else []),
         *(["--condition", *conds] if args.conditions else []),
     ]
@@ -349,9 +332,8 @@ def cmd_score(p: Panel, args) -> int:
                 "--out",
                 arm_file(p, arm, bam),
                 *(["--bam", f"{bam}.bam"] if bam else []),
-                # the benchmark protocol (owner, 2026-09-19): the shipped assignment is a sampled draw,
-                # so every arm is read under fractional assignment, with the scan pinned so an A/B pair
-                # is exactly reproducible
+                # the shipped assignment is a sampled draw, so every arm is read under fractional
+                # assignment with the scan pinned, which makes an A/B pair exactly reproducible
                 "--set",
                 "em.assignment_mode=fractional",
                 "--set",
@@ -364,15 +346,14 @@ def cmd_score(p: Panel, args) -> int:
 
 
 def cmd_align(p: Panel, args) -> int:
-    """Every condition's simulated reads aligned by STAR, or rustar (its Rust port, which reads STAR's index
-    and options), into `<condition>/<name>.bam`: the input a real library gives Rigel, beside the simulator's
-    own alignments, which place every read where it was drawn. One condition at a time with every thread: the
-    alignment is the expensive half and is done once, while `score --bam <name>` re-reads it after every change
-    to Rigel. Resumable: a condition with its record is skipped unless `--force`. The record (`<name>.align.json`:
-    the aligner and its version, the index, the parameter file, the time) is written last, once the BAM holds
-    every template the simulator drew, so an interrupted alignment never counts. The panels keep no FASTQs: a
-    missing pair is rebuilt from the simulator's BAM, which holds every read as it was written (`samtools fastq -N`
-    gives back the simulator's FASTQs byte for byte), and deleted once aligned."""
+    """Every condition's simulated reads aligned by STAR or rustar (its Rust port, which reads STAR's index and
+    options) into `<condition>/<name>.bam`: the input a real library gives Rigel, beside the simulator's own
+    alignments, which place every read where it was drawn. One condition at a time with every thread; the
+    alignment is done once and `score --bam <name>` re-reads it after every change to Rigel. A condition with its
+    record is skipped unless `--force`. The record (`<name>.align.json`: the aligner and its version, the index,
+    the parameter file, the time) is written last, once the BAM holds every template the simulator drew, so an
+    interrupted alignment never counts. A missing FASTQ pair is rebuilt from the simulator's BAM (`samtools fastq
+    -N` gives back its FASTQs byte for byte) and deleted once aligned."""
     conds = args.conditions or p.conditions
     need(bool(conds), "simulated conditions", "panel.py simulate")
     aligner = Path(args.aligner) if args.aligner else None

@@ -1,14 +1,11 @@
-"""The payload's RNA pmf reaches EVERY transcript's effective length in the EM, along the chain
+"""The payload's RNA pmf reaches every transcript's effective length in the EM, along the chain
 ``payload -> build_fl_models -> FLModels.rna_pmf -> FragmentLengthModel.from_pmf ->
 compute_all_transcript_eff_lens -> effective_lengths``.
 
 The shrunk pmf is reused for the EM's transcript effective lengths, so a frame error in the anchor
-propagates into every transcript row and not only into calibration — the path with the largest blast
-radius and the least visibility. Re-deriving the expected value through the same call the pipeline
-makes would be a check that cannot fail; what makes this a real gate is that the left-hand side comes
-out of a full ``run_pipeline`` while the right-hand side is rebuilt from the PAYLOAD alone, so a
-pipeline feeding its effective lengths from anything else, or from a differently-built model, cannot
-agree with it.
+propagates into every transcript row and not only into calibration. The left-hand side comes out of a
+full ``run_pipeline`` while the right-hand side is rebuilt from the payload alone, so a pipeline feeding
+its effective lengths from anything else, or from a differently-built model, cannot agree with it.
 """
 
 from __future__ import annotations
@@ -63,8 +60,7 @@ def _config():
 
 def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
     """The pipeline's per-transcript effective lengths must be **exactly** what the payload's RNA pmf
-    produces. Any other source — a stale model, the scanner's deleted histogram, a default fallback —
-    gives a different array.
+    produces. Any other source (a stale model, a default fallback) gives a different array.
     """
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.sj_opportunity import crossing_probability_from_index
@@ -76,7 +72,7 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
 
     # Rebuilt from the payload alone, by the same route production takes but from an independent scan.
     #
-    # The DRAIN is part of that route: the RNA pmf calibration sees is fitted from the DRAINED tally,
+    # The drain is part of that route: the RNA pmf calibration sees is fitted from the drained tally,
     # so an undrained payload gives a different array on every transcript. Production's own helper is
     # called rather than its three steps repeated, so "the same route" cannot quietly stop being true.
     _, strand_models, _, payload = scan_and_buffer(
@@ -85,9 +81,9 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
     payload = _drain_side_buffer(
         payload, scenario.index, strand_models, seed=config.second_pass_seed
     )
-    # `TRAPS: divide-by-a-probability`: the RNA pool is de-tilted by its own sj opportunity before the
-    # model is fitted, so the reproduction has to include it. Omitting it here would not merely
-    # mismatch — it would make this gate pass on the day production dropped the divisor.
+    # The RNA pool is de-tilted by its own sj opportunity before the model is fitted, so the
+    # reproduction has to include it: omitting it here would make this gate pass were production to
+    # drop the divisor.
     fl_models = build_fl_models(
         payload,
         sj_opportunity=crossing_probability_from_index(scenario.index, int(payload.max_length)),
@@ -103,8 +99,8 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
 def test_the_eff_lengths_MOVE_when_the_rna_pmf_moves(scenario):
     """The equality above is worth nothing unless the quantity is actually sensitive to the pmf.
 
-    PERTURBATION: a constant array satisfies it, so shifting the RNA pmf must change the effective
-    lengths — otherwise the blast radius is imaginary and the check above is decoration.
+    Perturbation: a constant array satisfies it, so shifting the RNA pmf must change the effective
+    lengths.
     """
     from rigel.calibration.fl import build_fl_models
 
@@ -137,10 +133,8 @@ def test_the_n_observations_GUARD_ON_THAT_PATH_CANNOT_FIRE(scenario):
     :meth:`FragmentLengthModel.from_pmf`, which sets ``_total_weight = 1.0`` — so ``n_observations`` is
     **exactly 1, always**, whatever went into the pmf, and the refusal cannot fire there.
 
-    That is not a bug to fix here — an empty RNA pool is EB-shrunk all the way to the anchor by
-    ``build_fl_models``, so the reachable behaviour is the right one. It is recorded because the
-    refusal's *appearance* of an empty-pool check is what would let a future empty-pool bug hide
-    behind it.
+    That is right: an empty RNA pool is EB-shrunk all the way to the anchor by ``build_fl_models``. It is
+    pinned because the refusal's *appearance* of an empty-pool check could hide an empty-pool bug.
     """
     from rigel.calibration.fl import build_fl_models
 

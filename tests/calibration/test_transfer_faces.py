@@ -1,16 +1,15 @@
-"""Gates for the transfer policy's per-face message builders, every row recomputed on the live
-toy by a second implementation so a policy bug cannot hide; the row constructors and flag predicates are
-the native ones (`native.transfer_rows`, bound for the gates), and a rule is applied to a claim by driving
-one hop of the native pass (`_transfer_harness._rule`).
+"""Tests for the transfer policy's per-face message builders, every row recomputed on the live toy by a second
+implementation so a policy bug cannot hide. The row constructors and flag predicates are the native ones
+(`native.transfer_rows`), and a rule is applied to a claim by driving one hop of the native pass
+(`_transfer_harness._rule`).
 
-The intron|exon face: the licence refuses unmeasured population changes; the splice-in face map is
-monotone and capped by a measured flux, with its width exactly the face's counting variance; the
-splice-out row is the count form marginalised over the ratio's counting; the boundary-to-intron
-licence needs one shared strand; and every row lands at exactly the licensed slots. The edge and
-the terminus: the one-sided edge level with a vacuous zero count; the orientation read from the
-flag alone; the sj+terminus boundary placing the junction's flux on the junction's exon side; the
-level-kept map and the crossing bound; and the level rule into every inside. The alternative
-splice site: the flanks from the flag kind, and both flanks' rules, priced per pair.
+The intron|exon face: the licence refuses unmeasured population changes; the splice-in face map is monotone and capped
+by a measured flux, with its width exactly the face's counting variance; the splice-out row is the count form
+marginalised over the ratio's counting; the boundary-to-intron licence needs one shared strand; and every row lands at
+exactly the licensed slots. The edge and the terminus: the one-sided edge level with a vacuous zero count; the
+orientation read from the flag alone; the sj+terminus boundary placing the junction's flux on the junction's exon side;
+the level-kept map and the crossing bound; and the level rule into every inside. The alternative splice site: the flanks
+from the flag kind, and both flanks' rules, priced per pair.
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ from _transfer_harness import (
     _with_populated_inside,
 )
 
-#: the nine equal-probability nodes the splice-out marginal is taken on — the kernel's
+#: the nine equal-probability nodes the splice-out marginal is taken on, the kernel's
 MARGINAL_NODES = np.asarray(R.MARGINAL_NODES)
 
 
@@ -43,9 +42,8 @@ MARGINAL_NODES = np.asarray(R.MARGINAL_NODES)
 
 
 def _expected_exon_rows(si, ctx, src, lam, strand_of_si=None):
-    """The splice-in exon rows recomputed INDEPENDENTLY of the policy: for every licensed
-    intron|exon face of every exon, the intron row pushed through the face map and widened by
-    the face's counting variance — a second implementation, so a policy bug cannot hide."""
+    """The splice-in exon rows recomputed independently of the policy: for every licensed intron|exon face of every
+    exon, the intron row pushed through the face map and widened by the face's counting variance."""
     from scipy.special import polygamma
 
     from rigel.calibration.splice_graph import (
@@ -78,7 +76,7 @@ def _expected_exon_rows(si, ctx, src, lam, strand_of_si=None):
         add = np.zeros(lam.shape[0])
         live = False
         for b in (left[e], right[e]):
-            # the intergenic|exon EDGE's level, lower bound only
+            # the intergenic|exon edge's level, lower bound only
             if b < 0 or not is_bnd[b]:
                 continue
             o = left[b] if right[b] == e else right[b]
@@ -131,9 +129,8 @@ def _expected_exon_rows(si, ctx, src, lam, strand_of_si=None):
 
 
 def test_the_face_licence_refuses_unmeasured_population_changes():
-    """The licence predicate, gated directly: the integration gate cannot falsify the terminus
-    branch on this toy, because no terminus-flagged intron|exon face exists there, so the pure
-    function carries the falsification instead."""
+    """The licence predicate, tested directly: no terminus-flagged intron|exon face exists on this toy, so the
+    integration test cannot falsify the terminus branch and the pure function carries it."""
     from rigel.calibration.splice_graph import (
         FLAG_TES_NEG,
         FLAG_TES_POS,
@@ -152,17 +149,16 @@ def test_the_face_licence_refuses_unmeasured_population_changes():
 
 
 def test_the_face_map_is_monotone_and_flux_capped():
-    """The map lam_e(lam_u) is monotone nondecreasing; a measured spliced density CAPS the
-    exon's claimable f_g at the closed-form ceiling; s = 0 degenerates to a pure shift by the
-    opportunity ratio."""
+    """The map lam_e(lam_u) is monotone nondecreasing; a measured spliced density caps the exon's claimable f_g at the
+    closed-form ceiling; s = 0 degenerates to a pure shift by the opportunity ratio."""
 
     lam = np.linspace(-10, 10, 401)
     n_u, A_g_b, A_r_b, A_g_e, A_r_e, s = 40.0, 200.0, 210.0, 800.0, 790.0, 3.0
     le = R.face_map_lambda(lam, n_u, A_g_b, A_r_b, A_g_e, A_r_e, s)
     assert np.all(np.diff(le) >= -1e-12), "the map must be monotone nondecreasing"
     ceiling = np.log(n_u / A_g_b * A_g_e) - np.log(s * A_r_e)
-    # the ceiling is a SUPREMUM: the grid's last point sits sigma(+L)-short of it (~5e-5 nats
-    # at L = 10), so approach is asserted at that scale and the CAP is asserted hard.
+    # the ceiling is a supremum: the grid's last point sits sigma(+L) short of it (~5e-5 nats at L = 10), so approach is
+    # asserted at that scale and the cap is asserted hard.
     assert le[-1] == pytest.approx(ceiling, abs=1e-3)
     assert le.max() <= ceiling + 1e-9, "certified flux must CAP the claimable f_g"
     le0 = R.face_map_lambda(lam, n_u, A_g_b, A_r_b, A_g_e, A_r_e, 0.0)
@@ -171,9 +167,9 @@ def test_the_face_map_is_monotone_and_flux_capped():
 
 
 def test_the_ingredient_width_adds_the_counting_variance():
-    """A Gaussian factor transported through an identity-shaped map must widen by exactly the
-    face's counting variance trigamma(n_u+1/2) + trigamma(n_s+1/2), the delta-method width — the
-    analytic property an inverted or mis-scaled kernel cannot fake."""
+    """A Gaussian factor transported through an identity-shaped map must widen by exactly the face's counting variance
+    trigamma(n_u+1/2) + trigamma(n_s+1/2), the delta-method width, which an inverted or mis-scaled kernel cannot fake.
+    """
     from scipy.special import polygamma
 
     lam = np.linspace(-10, 10, 401)
@@ -194,11 +190,10 @@ def test_the_ingredient_width_adds_the_counting_variance():
 
 
 def _expected_splice_out_rows(si, ctx, kappa, lam):
-    """The splice-out boundary rows recomputed INDEPENDENTLY of the policy: for every licensed
-    intron|exon face of every exon whose strand channel is live, the exon's conditional-binomial
-    strand row read at the component-specific splice-in map, with the measured route rate
-    marginalised over its existing log-rate counting uncertainty on nine
-    equal-probability nodes — a second implementation, so a policy bug cannot hide."""
+    """The splice-out boundary rows recomputed independently of the policy: for every licensed intron|exon face of every
+    exon whose strand channel is live, the exon's conditional-binomial strand row read at the component-specific
+    splice-in map, with the measured route rate marginalised over its log-rate counting uncertainty on nine
+    equal-probability nodes."""
     from scipy.special import polygamma
     from scipy.stats import norm
 
@@ -260,10 +255,9 @@ def _expected_splice_out_rows(si, ctx, kappa, lam):
 
 
 def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
-    """The splice-out row's three analytic properties: (i) with equal face and region geometry its
-    mode sits at f_b = f_E (U+S)/U, the enrichment ratio having cancelled;
-    (ii) more gDNA at the boundary than in the exon whenever S > 0 (the reversed subtraction cannot
-    pass); (iii) the marginal over log rho is WIDER at a thin face than at a deep one."""
+    """The splice-out row's three analytic properties: (i) with equal face and region geometry its mode sits at f_b =
+    f_E (U+S)/U, the enrichment ratio cancelling; (ii) more gDNA at the boundary than in the exon whenever S > 0, which
+    a reversed subtraction cannot give; (iii) the marginal over log rho is wider at a thin face than at a deep one."""
 
     lam = np.linspace(-8, 8, 801)
     sig = 1 / (1 + np.exp(-lam))
@@ -322,11 +316,10 @@ def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
 
 
 def _expected_boundary_rows(si, ctx, kappa, lam):
-    """The boundary→intron rows recomputed INDEPENDENTLY of the policy: for every intron|exon pair whose
-    boundary admits the intron's SINGLE strand set and whose strand channel the solver declares live
-    (``own.tau_lam > 0`` at the boundary — the strand Fisher information itself, there being no
-    factory at a boundary), the boundary's conditional-binomial strand row on the intron's count frame, summed at the
-    intron — a second implementation, so a policy bug cannot hide."""
+    """The boundary→intron rows recomputed independently of the policy: for every intron|exon pair whose boundary admits
+    the intron's single strand set and whose strand channel the solver declares live (``own.tau_lam > 0`` at the
+    boundary, the strand Fisher information itself, since a boundary has no factory), the boundary's
+    conditional-binomial strand row on the intron's count frame, summed at the intron."""
     pairs, _n = _expected_pairs(si)
     fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
     live = np.asarray(ctx.has_own_composition, bool)
@@ -347,10 +340,9 @@ def _expected_boundary_rows(si, ctx, kappa, lam):
 
 
 def test_the_boundary_strand_licence_requires_one_shared_strand():
-    """The pair predicate, gated DIRECTLY — the integration toy cannot falsify it (every pair there
-    shares one strand), so the pure function carries the falsification: one strand, shared by both
-    flanks, is licensed; an AMBIG pair (whose strand split constrains the tilt, never f_g), a
-    strand-set change and an empty boundary refuse."""
+    """The pair predicate, tested directly, since every pair on the integration toy shares one strand: one strand shared
+    by both flanks is licensed; an AMBIG pair (whose strand split constrains the tilt, never f_g), a strand-set change
+    and an empty boundary refuse."""
 
     assert R.boundary_shares_strand(True, False, True, False)
     assert R.boundary_shares_strand(False, True, False, True)
@@ -360,10 +352,10 @@ def test_the_boundary_strand_licence_requires_one_shared_strand():
 
 
 def test_the_intron_face_carries_the_density_mixture_and_the_face_map(sweep_inputs):
-    """The intron's face, as claims and rules: its own claim is its observed strand profile and its rule into
-    each boundary preserves density odds (FORWARD); the rule from a licensed face into the exon, applied to
-    the intron's claim and summed with the edge's level rule, equals the independently recomputed
-    splice-in + edge rows of that exon; an unlicensed face has no rule into the exon."""
+    """The intron's face, as claims and rules: its own claim is its observed strand profile and its rule into each
+    boundary preserves density odds (forward); the rule from a licensed face into the exon, applied to the intron's
+    claim and summed with the edge's level rule, equals the independently recomputed splice-in and edge rows of that
+    exon; an unlicensed face has no rule into the exon."""
     from dataclasses import replace
 
     from rigel.calibration.messages.transfer import TransferPolicy
@@ -374,7 +366,7 @@ def test_the_intron_face_carries_the_density_mixture_and_the_face_map(sweep_inpu
     pairs, _n = _expected_pairs(sweep_inputs)
     assert pairs, "the toy must carry at least one intron|exon pair or this gate proves nothing"
     ctx = _ctx_of(sweep_inputs)
-    # Isolate intron-originating claims. Other face families have their own integration gates.
+    # Isolate intron-originating claims; other face families have their own integration tests.
     ctx = replace(ctx, has_own_composition=ctx.has_own_composition & _intron_mask(ctx))
     kappa = _kappa_of(sweep_inputs)
     prepared = _prepared(TransferPolicy(kappa=kappa), ctx)
@@ -447,7 +439,7 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
                 continue
             other = left[b] if right[b] == e else right[b]
             if other < 0 or not intron[other]:
-                continue  # the terminus and alternative-splice rules leave through exon|exon faces: their own gates
+                continue  # the terminus and alternative-splice rules leave through exon|exon faces and have their own tests
             r = _rule(prepared, e, b)
             if r is not None and np.ptp(r) > 1e-9:
                 got[int(b)] = got.get(int(b), 0.0) + (r - r.max())
@@ -480,9 +472,8 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
 
 
 def test_the_edge_level_is_one_sided_and_a_zero_count_is_vacuous():
-    """The edge's level, in the form the ladder kept: below the edge's level the count's exact
-    Poisson — the exon has at least the edge's gDNA density; nothing above it, because no local
-    witness prices capture's enrichment of the interior; and a zero count is vacuous, because
+    """The edge's level: below it, the count's exact Poisson (the exon has at least the edge's gDNA density); nothing
+    above it, because no local witness prices capture's enrichment of the interior; and a zero count is vacuous, because
     darkness under capture is not absence."""
 
     lam = np.linspace(-8, 8, 801)
@@ -502,9 +493,9 @@ def test_the_edge_level_is_one_sided_and_a_zero_count_is_vacuous():
 
 
 def _item5_slots(ctx):
-    """The terminus rules' delivery sites — every exon|exon boundary carrying one terminus direction and no sj
-    whose outside flank shares its single strand, and that outside exon — derived from the flags
-    alone, so the earlier gates can hand these slots to the terminus's own gate."""
+    """The terminus rules' delivery sites (every exon|exon boundary carrying one terminus direction and no sj whose
+    outside flank shares its single strand, and that outside exon), derived from the flags alone, so the earlier tests
+    can hand these slots to the terminus test."""
 
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -525,8 +516,8 @@ def _item5_slots(ctx):
 
 
 def _terminus_flags_cleared(ctx):
-    """The context with every exon|exon boundary's terminus bits cleared — the terminus rules see none,
-    every other message is unchanged (they read flags at intron|exon faces only)."""
+    """The context with every exon|exon boundary's terminus bits cleared: the terminus rules see none, and every other
+    message is unchanged (they read flags at intron|exon faces only)."""
     import dataclasses as _dc
 
     from rigel.calibration.splice_graph import FLAG_TERMINUS
@@ -542,11 +533,11 @@ def _terminus_flags_cleared(ctx):
 
 
 def test_the_terminus_orientation_reads_the_flag_alone():
-    """The orientation table, gated DIRECTLY: a + start or a − end extends genomic-right, so the
-    OUTSIDE flank is the left one; a + end or a − start extends left, so it is the right one; termini
-    pointing both ways or no terminus at all give no side. A splice junction sharing the boundary does
-    NOT change the side, which is the sj+terminus case: the four ladder families resolve as their
-    terminus does, and a junction with no terminus still gives no side (the perturbation)."""
+    """The orientation table, tested directly: a + start or a − end extends genomic-right, so the outside flank is the
+    left one; a + end or a − start extends left, so it is the right one; termini pointing both ways or no terminus give
+    no side. A splice junction sharing the boundary does not change the side (the sj+terminus case: the four families
+    resolve as their terminus does), and a junction with no terminus gives no side.
+    """
     from rigel.calibration.splice_graph import (
         FLAG_ACCEPTOR_NEG,
         FLAG_ACCEPTOR_POS,
@@ -591,19 +582,19 @@ def test_the_terminus_orientation_reads_the_flag_alone():
     assert R.junction_exon_side(FLAG_DONOR_POS | FLAG_ACCEPTOR_POS, 7, 9) is None, (
         "junctions both ways"
     )
-    # the perturbations: a junction alone gives no side; termini both ways with a junction give none
+    # a junction alone gives no side; termini both ways with a junction give none
     assert R.outside_flank(FLAG_DONOR_POS, 7, 9) == (None, None)
     assert R.outside_flank(FLAG_ACCEPTOR_NEG | FLAG_DONOR_NEG, 7, 9) == (None, None)
     assert R.outside_flank(FLAG_TSS_POS | FLAG_TES_POS | FLAG_ACCEPTOR_POS, 7, 9) == (None, None)
 
 
 def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sweep_inputs):
-    """On the toy with one boundary made an sj+terminus boundary (a TSS flag added to a licensed
-    acceptor): the terminus rule now serves the inside exon and its totals' disagreement carries the
-    junction's flux (a lower price than without it, since the RNA joining at the junction is measured),
-    while the strand-mode prediction keeps the crossing alone; the junction rules (the splice-in map, the
-    alternative splice site) leave
-    that face. PERTURBATION: with the flux zeroed the price rises back to the plain form's."""
+    """On the toy with one boundary made an sj+terminus boundary (a TSS flag added to a licensed acceptor): the terminus
+    rule serves the inside exon and its totals' disagreement carries the junction's flux (a lower price than without it,
+    since the RNA joining at the junction is measured), while the strand-mode prediction keeps the crossing alone; the
+    junction rules (the splice-in map, the alternative splice site) leave that face. With the flux zeroed the price
+    rises back to the plain form's.
+    """
     import dataclasses
 
     from rigel.calibration.splice_graph import (
@@ -662,14 +653,13 @@ def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sw
 
 
 def _expected_level_rows(si, ctx, kappa, lam):
-    """The level rule recomputed INDEPENDENTLY of the policy: at every terminus boundary with an inside
-    EXON (the outside an exon or an intron), the boundary's own strand row through the level-kept map
-    (the boundary's share times its crossing density, times the inside's opportunity, over the
-    inside's total), blurred by both totals' counting plus the pair's discrepancies — the totals'
-    disagreement beyond counting and, where both strand channels are live, the two strand modes'
-    disagreement beyond counting. Keyed by the inside slot; ``(rows, served pairs)``. Every served
-    boundary on the toy is live and single-strand with interior strand modes, which is asserted rather
-    than branched on: the no-claim upper bound is the level test's ``own=None`` probe."""
+    """The level rule recomputed independently of the policy: at every terminus boundary with an inside exon (the
+    outside an exon or an intron), the boundary's own strand row through the level-kept map (the boundary's share times
+    its crossing density, times the inside's opportunity, over the inside's total), blurred by both totals' counting
+    plus the pair's discrepancies: the totals' disagreement beyond counting and, where both strand channels are live,
+    the two strand modes' disagreement beyond counting. Keyed by the inside slot; returns ``(rows, served pairs)``.
+    Every served boundary on the toy is live and single-strand with interior strand modes, which is asserted rather than
+    branched on; the no-claim upper bound is the level test's ``own=None`` probe."""
 
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -678,7 +668,7 @@ def _expected_level_rows(si, ctx, kappa, lam):
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
     flags = np.asarray(ctx.boundary_flags, np.uint16)
     n_u = np.asarray(ctx.n_slot, np.float64)
-    n_s = np.asarray(ctx.spliced_slot, np.float64)
+    n_s = np.asarray(ctx.spliced_count, np.float64).sum(axis=1)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
     live = np.asarray(ctx.has_own_composition, bool)
@@ -727,11 +717,10 @@ def _expected_level_rows(si, ctx, kappa, lam):
 
 
 def test_the_level_map_keeps_the_level_and_the_bound_is_vacuous_below_the_total():
-    """The level rule's arithmetic, gated directly: through the level-kept map a boundary whose share is
-    f_b and whose crossing density is d lands the inside at f_b * d * E_i / T_i (the gDNA level kept,
-    the inside's own total supplying the rest); the map is monotone; a profile read through it keeps
-    its peak there and its width grows with the dampening; the total's upper bound charges nothing
-    below the crossing's density and charges above it."""
+    """The level rule's arithmetic, tested directly: through the level-kept map a boundary with share f_b and crossing
+    density d lands the inside at f_b * d * E_i / T_i (the gDNA level kept, the inside's own total supplying the rest);
+    the map is monotone; a profile read through it keeps its peak there and widens with the dampening; the total's upper
+    bound charges nothing below the crossing's density and charges above it."""
 
     lam = np.linspace(-8, 8, 801)
     sig = 1 / (1 + np.exp(-lam))
@@ -764,9 +753,9 @@ def test_the_level_map_keeps_the_level_and_the_bound_is_vacuous_below_the_total(
 
 def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_clear(sweep_inputs):
     """The terminus rules, as claims and rules: at every exon|exon terminus boundary the rule outside exon → boundary
-    applied to the exon's claim is the independently recomputed splice-out row with the SPLICED
-    crossing, the rule boundary → outside exon applied to the boundary's claim the recomputed face-map
-    row; the rules exist exactly at the outside pairs and vanish when the terminus bits are cleared."""
+    applied to the exon's claim is the independently recomputed splice-out row with the spliced crossing, and the rule
+    boundary → outside exon applied to the boundary's claim is the recomputed face-map row; the rules exist exactly at
+    the outside pairs and vanish when the terminus bits are cleared."""
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     pol, n_grid, window = _full_policy(sweep_inputs)
@@ -778,7 +767,7 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
     is_exon = np.asarray(ctx.is_exon_region, bool)
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
     n_u = np.asarray(ctx.n_slot, np.float64)
-    n_s = np.asarray(ctx.spliced_slot, np.float64)
+    n_s = np.asarray(ctx.spliced_count, np.float64).sum(axis=1)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     A_r = np.asarray(ctx.eff_rna, np.float64)
     flags = np.asarray(ctx.boundary_flags)
@@ -796,8 +785,8 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
             for (s, i) in prepared.faces.pairs()
             if (s == b and is_exon[i]) or (i == b and is_exon[s])
         ]
-        # every exon|exon boundary on the toy is a served terminus; the negative half — no rule without a
-        # terminus — is the cleared-flags check below
+        # every exon|exon boundary on the toy is a served terminus; that no rule exists without a terminus is the
+        # cleared-flags check below
         assert int(b) in sites, b
         served += 1
         (o,) = (
@@ -845,12 +834,11 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
 
 
 def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(sweep_inputs):
-    """The level rule, as a rule: at every terminus boundary with an inside exon —
-    exon|exon and exon|intron alike — the rule applied to the boundary's OWN claim equals the
-    independent recompute; what the boundary HOLDS changes nothing (an imputation never becomes a
-    level); with no own claim the crossing total's upper bound is what crosses; the rule vanishes when
-    the terminus bits are cleared; and no library-wide parameter exists — changing another pair's
-    counts leaves this pair's message unchanged."""
+    """The level rule, as a rule: at every terminus boundary with an inside exon (exon|exon and exon|intron alike) the
+    rule applied to the boundary's own claim equals the independent recompute; what the boundary holds changes nothing
+    (an imputation never becomes a level); with no own claim the crossing total's upper bound is what crosses; the rule
+    vanishes when the terminus bits are cleared; and no library-wide parameter exists, so changing another pair's counts
+    leaves this pair's message unchanged."""
     import dataclasses as _dc
 
     from rigel.calibration.simplex_logodds import _logodds_grid
@@ -898,9 +886,9 @@ def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(
 
 
 def test_the_junction_flanks_read_the_flag_kind_alone():
-    """The flank predicate, gated DIRECTLY: a DONOR bit puts the intron to the right on either strand
-    (the flags are genomic-order), an ACCEPTOR bit to the left; a terminus on the boundary, no junction,
-    or junctions both ways give no flanks."""
+    """The flank predicate, tested directly: a DONOR bit puts the intron to the right on either strand (the flags are in
+    genomic order), an ACCEPTOR bit to the left; a terminus on the boundary, no junction, or junctions both ways give no
+    flanks."""
     from rigel.calibration.splice_graph import (
         FLAG_ACCEPTOR_NEG,
         FLAG_ACCEPTOR_POS,
@@ -923,11 +911,10 @@ def test_the_junction_flanks_read_the_flag_kind_alone():
 
 
 def _expected_alt_splice_rows(si, ctx, kappa, lam):
-    """The alternative-splice rows recomputed INDEPENDENTLY of the policy on the patched context: at
-    each junction boundary the two flanks' own strand rows through the splice-out map (E with
-    S_b + F, C with S_b) into the boundary, and the boundary's own row through the face map into
-    each flank, each blurred by the pair's OWN disagreement beyond counting — per pair, nothing
-    pooled. Keyed by slot; the pair widths returned beside."""
+    """The alternative-splice rows recomputed independently of the policy on the patched context: at each junction
+    boundary the two flanks' own strand rows through the splice-out map (E with S_b + F, C with S_b) into the boundary,
+    and the boundary's own row through the face map into each flank, each blurred by the pair's own disagreement beyond
+    counting, per pair with nothing pooled. Keyed by slot; the pair widths are returned beside."""
 
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -935,7 +922,7 @@ def _expected_alt_splice_rows(si, ctx, kappa, lam):
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
     flags = np.asarray(ctx.boundary_flags, np.uint16)
     n_u = np.asarray(ctx.n_slot, np.float64)
-    n_s = np.asarray(ctx.spliced_slot, np.float64)
+    n_s = np.asarray(ctx.spliced_count, np.float64).sum(axis=1)
     flux = np.asarray(ctx.sj_count, np.float64).sum(axis=1)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     A_r = np.asarray(ctx.eff_rna, np.float64)

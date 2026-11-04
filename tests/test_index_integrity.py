@@ -1,14 +1,13 @@
-"""`rigel.index` end to end — what `TranscriptIndex.load()` produces, what it refuses, the
-duplicate-transcript guard the reader applies, and the layout iterator underneath the interval and
-region tables. The first block verifies every structure `load()` builds: the transcript and gene
-tables and their derived arrays, collapsed and exon intervals, splice junctions, the fragment
-resolver, and the build/load round trip on a larger index and on edge cases. The second gates what
-`build()` and `load()` refuse: a reordered transcript table or a gapped gene index, an index missing
-a file `load()` reads (the alias table it never reads stays optional), a setting `IndexConfig`
-refuses and a GTF with no transcripts (both refused before an existing index is touched), and an
-index whose rebuild stopped part-way. The third gates
-the duplicate-exon-structure guard in `read_transcripts` and its collapse flag. The fourth gates
-`_iter_reference_layout`, which both `intervals.feather` and `regions.feather` are derived from.
+"""`rigel.index` end to end: what `TranscriptIndex.load()` produces, what it refuses, the duplicate-transcript
+guard the reader applies, and the layout iterator underneath the interval and region tables.
+
+The first block verifies every structure `load()` builds (the transcript and gene tables and their derived arrays,
+exon intervals, splice junctions, the fragment resolver) and the build/load round trip. The second gates what
+`build()` and `load()` refuse: a reordered transcript table or a gapped gene index, an index missing a file `load()`
+reads, a setting `IndexConfig` refuses and a GTF with no transcripts (both refused before an existing index is
+touched), and an index whose rebuild stopped part-way. The third gates the duplicate-exon-structure guard in
+`read_transcripts` and its collapse flag; the fourth `_iter_reference_layout`, which both `intervals.feather` and
+`regions.feather` are derived from.
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ from rigel.index import (
     read_transcripts,
 )
 from rigel.transcript import Transcript
-from rigel.types import GenomicInterval, Interval, IntervalType, Strand
+from rigel.types import Interval, Strand
 
 
 def _mini_sources(base: Path) -> tuple[Path, Path]:
@@ -66,12 +65,12 @@ class TestTranscriptTable:
     """Verify t_df and derived arrays."""
 
     def test_num_transcripts(self, mini_index):
-        assert mini_index.num_transcripts == 5  # 3 annotated + 2 synthetic nRNA
+        assert mini_index.num_transcripts == 5  # 3 annotated + 2 synthetic spans
 
     def test_num_genes(self, mini_index):
-        # Option A: synthetic nRNA transcripts get dedicated gene-neutral
-        # rows in g_df. ``num_genes`` is the kernel-facing count (annotated
-        # + synthetic), ``num_annotated_genes`` is user-facing.
+        # Synthetic spans get dedicated gene-neutral rows in g_df.
+        # ``num_genes`` is the kernel-facing count (annotated + synthetic),
+        # ``num_annotated_genes`` is user-facing.
         assert mini_index.num_annotated_genes == 2
         assert mini_index.num_genes == 4  # 2 annotated + 2 synthetic
 
@@ -82,20 +81,20 @@ class TestTranscriptTable:
     def test_transcript_ids(self, mini_index):
         t_ids = mini_index.t_df["t_id"].tolist()
         assert t_ids[:3] == ["t1", "t2", "t3"]
-        # 2 synthetic nRNA transcripts appended
+        # 2 synthetic spans appended
         assert len(t_ids) == 5
         assert all(tid.startswith("RIGEL_NRNA_") for tid in t_ids[3:])
 
     def test_gene_ids(self, mini_index):
         g_ids = mini_index.t_df["g_id"].tolist()
         assert g_ids[:3] == ["g1", "g1", "g2"]
-        # Synthetic nRNA transcripts are gene-neutral: their g_id equals
+        # Synthetic spans are gene-neutral: their g_id equals
         # their own t_id (``RIGEL_NRNA_...``).
         assert all(gid.startswith("RIGEL_NRNA_") for gid in g_ids[3:])
         assert g_ids[3:] == mini_index.t_df["t_id"].tolist()[3:]
 
     def test_t_to_g_arr(self, mini_index):
-        # Synthetics now claim their own g_index (2 and 3); which maps to
+        # Synthetics claim their own g_index (2 and 3); which maps to
         # which depends on merge order but each annotated gene still has
         # its two transcripts at indices 0, 1, 2.
         arr = mini_index.t_to_g_arr
@@ -136,86 +135,12 @@ class TestGeneTable:
 
     def test_gene_num_transcripts(self, mini_index):
         g_df = mini_index.g_df
-        # Annotated gene rows now contain only annotated transcripts;
+        # Annotated gene rows contain only annotated transcripts;
         # synthetics get their own dedicated rows (num_transcripts == 1).
         assert g_df.loc[0, "num_transcripts"] == 2  # t1, t2
         assert g_df.loc[1, "num_transcripts"] == 1  # t3
         assert g_df.loc[2, "num_transcripts"] == 1  # synthetic
         assert g_df.loc[3, "num_transcripts"] == 1  # synthetic
-
-
-# ═════════════════════════════════════════════════════════════════════
-# Collapsed interval index (cgranges)
-# ═════════════════════════════════════════════════════════════════════
-
-
-class TestCollapsedIntervals:
-    """Verify the cgranges overlap index + _iv_type + _iv_t_set."""
-
-    def test_query_exon_t0_t1_shared(self, mini_index):
-        """Query the first exon (99-200) shared by t0 and t1."""
-        gi = GenomicInterval("chr1", 99, 200, 1)
-        hits = mini_index.query(gi)
-        exon_hits = [h for h in hits if h[2] == int(IntervalType.EXON)]
-        # Should find at least one exon hit containing {0, 1}
-        tsets = [h[3] for h in exon_hits]
-        merged = frozenset().union(*tsets) if tsets else frozenset()
-        assert 0 in merged
-        assert 1 in merged
-
-    def test_query_exon_t0_only(self, mini_index):
-        """Query the middle exon (299-400) unique to t0."""
-        gi = GenomicInterval("chr1", 299, 400, 1)
-        hits = mini_index.query(gi)
-        exon_hits = [h for h in hits if h[2] == int(IntervalType.EXON)]
-        tsets = [h[3] for h in exon_hits]
-        merged = frozenset().union(*tsets) if tsets else frozenset()
-        assert 0 in merged
-        assert 1 not in merged  # t1 doesn't have this exon
-
-    def test_query_exon_t2_neg_strand(self, mini_index):
-        """Query t2's first exon (999-1100) on neg strand."""
-        gi = GenomicInterval("chr1", 999, 1100, 2)
-        hits = mini_index.query(gi)
-        exon_hits = [h for h in hits if h[2] == int(IntervalType.EXON)]
-        tsets = [h[3] for h in exon_hits]
-        merged = frozenset().union(*tsets) if tsets else frozenset()
-        assert 2 in merged
-        assert 0 not in merged
-        assert 1 not in merged
-
-    def test_query_intergenic(self, mini_index):
-        """Query a region between gene clusters — should be intergenic."""
-        gi = GenomicInterval("chr1", 700, 800, 0)
-        hits = mini_index.query(gi)
-        types = {h[2] for h in hits}
-        # Should have an intergenic hit
-        assert int(IntervalType.INTERGENIC) in types
-
-    def test_transcript_span_hits(self, mini_index):
-        """Query should include TRANSCRIPT-type intervals for full spans."""
-        gi = GenomicInterval("chr1", 200, 350, 1)
-        hits = mini_index.query(gi)
-        tx_hits = [h for h in hits if h[2] == int(IntervalType.TRANSCRIPT)]
-        # t0 spans 99-600, this query overlaps that
-        tsets = [h[3] for h in tx_hits]
-        merged = frozenset().union(*tsets) if tsets else frozenset()
-        assert 0 in merged
-
-    def test_iv_type_and_iv_t_set_lengths_match(self, mini_index):
-        """_iv_type and _iv_t_set must have the same length."""
-        assert len(mini_index._iv_type) == len(mini_index._iv_t_set)
-
-    def test_iv_t_set_are_frozensets(self, mini_index):
-        """All transcript sets should be frozensets."""
-        for tset in mini_index._iv_t_set:
-            assert isinstance(tset, frozenset)
-
-    def test_all_iv_types_are_valid(self, mini_index):
-        """All interval types should be valid IntervalType values."""
-        valid = {int(e) for e in IntervalType}
-        for itype in mini_index._iv_type:
-            assert itype in valid, f"Unknown interval type: {itype}"
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -383,20 +308,12 @@ class TestFragmentResolver:
 
 
 # ═════════════════════════════════════════════════════════════════════
-# Round-trip: build → load → query consistency
+# Round-trip: build → load consistency
 # ═════════════════════════════════════════════════════════════════════
 
 
 class TestBuildLoadRoundTrip:
     """Build an index, load it, verify all structures agree."""
-
-    @pytest.fixture
-    def round_trip_index(self, tmp_path):
-        """Build and load an index from GENCODE-style GTF."""
-        fasta_path, gtf_path = _mini_sources(tmp_path)
-        idx_dir = tmp_path / "idx"
-        TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-        return TranscriptIndex.load(idx_dir, retain_test_structures=True)
 
     def test_two_loads_produce_same_data(self, tmp_path):
         """Loading twice from the same dir should yield identical structures."""
@@ -404,21 +321,14 @@ class TestBuildLoadRoundTrip:
         idx_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
 
-        idx1 = TranscriptIndex.load(idx_dir, retain_test_structures=True)
-        idx2 = TranscriptIndex.load(idx_dir, retain_test_structures=True)
+        idx1 = TranscriptIndex.load(idx_dir, retain_lookup_maps=True)
+        idx2 = TranscriptIndex.load(idx_dir, retain_lookup_maps=True)
 
         # Transcript tables
         assert idx1.t_df.equals(idx2.t_df)
         assert idx1.g_df.equals(idx2.g_df)
         np.testing.assert_array_equal(idx1.t_to_g_arr, idx2.t_to_g_arr)
         np.testing.assert_array_equal(idx1.t_to_strand_arr, idx2.t_to_strand_arr)
-
-        # Collapsed intervals
-        assert len(idx1._iv_type) == len(idx2._iv_type)
-        assert idx1._iv_type == idx2._iv_type
-        assert len(idx1._iv_t_set) == len(idx2._iv_t_set)
-        for s1, s2 in zip(idx1._iv_t_set, idx2._iv_t_set):
-            assert s1 == s2
 
         # Exon intervals
         assert set(idx1._t_exon_intervals.keys()) == set(idx2._t_exon_intervals.keys())
@@ -430,33 +340,6 @@ class TestBuildLoadRoundTrip:
 
         # Splice junctions
         assert idx1.sj_map == idx2.sj_map
-
-    def test_query_all_exons_round_trip(self, round_trip_index):
-        """Query each exon from t_exon_intervals and confirm EXON hits.
-
-        Synthetic nRNA transcripts are intentionally absent from the
-        cgranges overlap index (they are derived on-the-fly from real-tx
-        hits via ``nrna_parent_index`` inside the C++ resolver).  Skip
-        them here.
-        """
-        idx = round_trip_index
-        is_synth = (
-            idx.t_df["is_synthetic"].to_numpy()
-            if "is_synthetic" in idx.t_df.columns
-            else np.zeros(len(idx.t_df), dtype=bool)
-        )
-        for t_idx, exons in idx._t_exon_intervals.items():
-            if t_idx < is_synth.size and is_synth[t_idx]:
-                continue
-            for start, end in exons:
-                gi = GenomicInterval("chr1", int(start), int(end), 0)
-                hits = idx.query(gi)
-                exon_hits = [h for h in hits if h[2] == int(IntervalType.EXON)]
-                tsets = [h[3] for h in exon_hits]
-                merged = frozenset().union(*tsets) if tsets else frozenset()
-                assert t_idx in merged, (
-                    f"t_idx={t_idx} not in exon query result for ({start},{end}): {merged}"
-                )
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -529,7 +412,7 @@ class TestLargerIndex:
         return build_test_index(tmp_path_factory, gtf_text, genome_size=6000, name="complex_idx")
 
     def test_transcript_count(self, complex_index):
-        # 7 annotated + 5 synthetic nRNA (gA:2, gB:2, gC:1)
+        # 7 annotated + 5 synthetic spans (gA:2, gB:2, gC:1)
         assert complex_index.num_transcripts == 12
 
     def test_gene_count(self, complex_index):
@@ -557,7 +440,7 @@ class TestLargerIndex:
             t_id = row["t_id"]
             exons = complex_index._t_exon_intervals[t_idx]
             if t_id.startswith("RIGEL_NRNA_"):
-                # synthetic nRNA transcripts are single-exon
+                # synthetic spans are single-exon
                 assert exons.shape[0] == 1, (
                     f"{t_id} (t_idx={t_idx}): synthetic nRNA should have "
                     f"1 exon, got {exons.shape[0]}"
@@ -580,28 +463,6 @@ class TestLargerIndex:
 
     def test_the_resolver_and_calibration_hold_the_same_junctions(self, complex_index):
         assert _resolver_junctions(complex_index) == _calibration_junctions(complex_index)
-
-    def test_overlapping_exons_both_found(self, complex_index):
-        """Query exon region 900-1100 shared by gA and gC transcripts."""
-        gi = GenomicInterval("chr1", 899, 1100, 0)
-        hits = complex_index.query(gi)
-        exon_hits = [h for h in hits if h[2] == int(IntervalType.EXON)]
-        tsets = [h[3] for h in exon_hits]
-        merged = frozenset().union(*tsets) if tsets else frozenset()
-        # tA1, tA2, tA3 all have exons at 900-1100; tC1 has exon at 800-1100
-        t_df = complex_index.t_df
-        for _, row in t_df.iterrows():
-            t_id = row["t_id"]
-            t_idx = int(row["t_index"])
-            if t_id in ("tA1", "tA2", "tA3", "tC1"):
-                assert t_idx in merged, f"{t_id} (t_idx={t_idx}) should overlap query 899-1100"
-
-    def test_intergenic_between_gene_clusters(self, complex_index):
-        """Region 3500-3900 should be intergenic."""
-        gi = GenomicInterval("chr1", 3500, 3900, 0)
-        hits = complex_index.query(gi)
-        types = {h[2] for h in hits}
-        assert int(IntervalType.INTERGENIC) in types
 
     def test_exon_interval_values_are_int32(self, complex_index):
         for t_idx, exons in complex_index._t_exon_intervals.items():
@@ -642,17 +503,11 @@ class TestEdgeCases:
             exons = single_exon_index._t_exon_intervals[t_idx]
             assert exons.shape == (1, 2)
 
-    def test_single_exon_query(self, single_exon_index):
-        gi = GenomicInterval("chr1", 99, 500, 1)
-        hits = single_exon_index.query(gi)
-        exon_hits = [h for h in hits if h[2] == int(IntervalType.EXON)]
-        assert len(exon_hits) > 0
-
     def test_single_exon_resolver_exists(self, single_exon_index):
         assert single_exon_index.resolver is not None
 
 
-# ── What ``TranscriptIndex`` REFUSES — a reordered table, a missing file, a refused setting, an empty GTF, a half-rebuilt index ─
+# ── What ``TranscriptIndex`` refuses: a reordered table, a missing file, a bad setting, an empty GTF, a half rebuild ─
 
 
 def test_load_refuses_a_reordered_transcript_table(tmp_path: Path):
@@ -692,8 +547,8 @@ def test_load_refuses_a_gene_index_with_a_gap(tmp_path: Path):
     ],
 )
 def test_load_refuses_an_index_missing_a_file_it_reads_by_name(tmp_path: Path, required):
-    """`rigel quant` reports a load refusal as an error; a missing file used to escape as pyarrow's
-    ``FileNotFoundError`` or a bare ``RuntimeError``, a traceback with no remedy."""
+    """`rigel quant` reports a load refusal as an error, so a missing file is refused by name rather than
+    escaping as pyarrow's ``FileNotFoundError`` or a bare ``RuntimeError``, a traceback with no remedy."""
     fasta, gtf = _mini_sources(tmp_path)
     idx_dir = tmp_path / "idx"
     TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
@@ -726,8 +581,9 @@ def test_load_does_not_need_the_alias_table(tmp_path: Path):
 def test_build_refuses_a_setting_its_config_refuses_before_writing(
     tmp_path: Path, setting, refusal
 ):
-    """`build` validates its settings as one `IndexConfig`, for every caller: a negative tolerance clustered as 0 does
-    and was recorded in the manifest as given, and a blacklist count below 1 was recorded whenever no store was."""
+    """`build` validates its settings as one `IndexConfig`, for every caller: a negative tolerance would cluster as 0
+    does while the manifest records it as given, and a blacklist count below 1 would be recorded whenever no store
+    is."""
     fasta, gtf = _mini_sources(tmp_path)
     idx_dir = tmp_path / "idx"
 
@@ -983,7 +839,7 @@ def test_collapsed_duplicates_are_written_as_an_alias_map(tmp_path: Path):
 
 def test_the_index_writes_no_column_nothing_reads(tmp_path: Path):
     """The simulator's abundances and the exon count in ``transcripts.feather``, and the constant interval type
-    in ``sj.feather``, were written and never read."""
+    in ``sj.feather``, are not written: nothing reads them."""
     from rigel.index import SJ_FEATHER
 
     fasta, gtf = _mini_sources(tmp_path)
@@ -996,7 +852,8 @@ def test_the_index_writes_no_column_nothing_reads(tmp_path: Path):
 
 def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_both():
     """The nascent entity a single-exon transcript stands for holds every multi-exon transcript of every span it
-    covers: one span of one transcript and one of two, three in all. An overwrite kept the last span's two."""
+    covers: one span of one transcript and one of two, three in all. An overwrite would keep only the last span's
+    two."""
     from rigel.index import create_nrna_transcripts
 
     def tx(t_index, t_id, exons):
@@ -1048,7 +905,7 @@ def test_collapse_is_noop_without_duplicates(tmp_path: Path):
 #
 # The layout iterator is the single source of truth for ``intervals.feather`` and
 # ``regions.feather`` alike, so what it yields must be a perfect tiling of every reference:
-# alternating INTERGENIC / GENIC spans, no overlaps, no gaps, synthetic nRNAs excluded.
+# alternating INTERGENIC / GENIC spans, no overlaps, no gaps, synthetic spans excluded.
 
 
 def _mk_tx(
@@ -1143,12 +1000,12 @@ def test_disjoint_transcripts_yield_separate_genic_spans():
 
 
 def test_synthetic_excluded_from_layout():
-    """Synthetic nRNAs must not coalesce or extend genic spans."""
+    """Synthetic spans must not coalesce or extend genic spans."""
     real = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
     syn = _mk_tx(1, "chr1", Strand.POS, [(150, 800)], is_synthetic=True)
     spans = list(_iter_reference_layout(1000, sorted([real, syn], key=lambda x: (x.start, x.end))))
     _assert_tiles(spans, 1000)
-    # The synthetic [150,800) must NOT extend the real [100,200) genic span.
+    # The synthetic [150,800) must not extend the real [100,200) genic span.
     genic = [s for s in spans if isinstance(s, _GenicSpan)]
     assert len(genic) == 1
     assert (genic[0].start, genic[0].end) == (100, 200)

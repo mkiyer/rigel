@@ -57,11 +57,9 @@ echo ""
 echo "Building conda package from conda/meta.yaml…"
 echo "────────────────────────────────────────────"
 
-# No --numpy build pin: rigel's native extensions use nanobind (no numpy
-# C-API — numpy is not even a build dependency), so the build-time numpy
-# version never enters the binary. Runtime numpy is pinned in conda/meta.yaml
-# (numpy >=1.26, which allows numpy 2.x). Pinning --numpy here would only
-# install an unused numpy into conda-build's host env and mislead readers.
+# No --numpy build pin: the native extensions use nanobind, not numpy's C API
+# (numpy is not a build dependency), so the build-time numpy never enters the
+# binary. Runtime numpy is pinned in conda/meta.yaml (numpy >=1.26).
 conda-build conda/ \
     --channel conda-forge \
     --channel bioconda \

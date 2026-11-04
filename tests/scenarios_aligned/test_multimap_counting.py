@@ -1,13 +1,11 @@
-"""Aligner-dependent scenarios that verify a multimapping fragment is counted
-once per physical molecule throughout the pipeline, never inflated by the number
-of alignment hits it has, and that the EM resolves the paralog cases sensibly.
-Each genome duplicates some region so reads map to two or more places —
-intergenic duplicates, an intronic region with an intergenic copy, exonic
-paralogs identical in sequence, a processed pseudogene beside its spliced
-parent, mixed exonic-plus-intergenic hits, a three-way hit, all of them in one
-genome, and paralogs made distinguishable by a unique exon — and every class
-pairs its own counting claim with a fragment-budget conservation assertion and a
-stress arm combining gDNA, nascent RNA and low strand specificity.
+"""Aligner-dependent scenarios: a multimapping fragment is counted once per physical molecule throughout the
+pipeline, never once per alignment hit, and the EM resolves the paralog cases sensibly.
+
+Each genome duplicates some region so reads map to two or more places: intergenic duplicates, an intronic region
+with an intergenic copy, exonic paralogs identical in sequence, a processed pseudogene beside its spliced parent,
+mixed exonic-plus-intergenic hits, a three-way hit, all of them in one genome, and paralogs made distinguishable by a
+unique exon. Every class pairs its counting claim with a fragment-budget conservation assertion and a stress case
+combining gDNA, nascent RNA and low strand specificity.
 """
 
 import shutil
@@ -176,11 +174,11 @@ class TestIntronicIntergenicMultimappers:
         [14000-14300][14700-15000] gene g_helper (+ strand, spliced)
         [17000-17300] gene g_ctrl (- strand, abundance=0)
 
-    nRNA fragments from g1's intron can align to both:
-      (a) the intronic region [1300-3000] → resolved to g1 nRNA
+    Nascent fragments from g1's intron can align to both:
+      (a) the intronic region [1300-3000] → resolved to g1's synthetic span
       (b) the intergenic copy [8000-9700] → unresolved (intergenic)
 
-    With the bugfix, if ANY hit resolves, intergenic is NOT counted.
+    If any hit resolves, the fragment is not counted intergenic.
     """
 
     def _make_scenario(self, tmp_path, name_suffix=""):
@@ -190,7 +188,7 @@ class TestIntronicIntergenicMultimappers:
             seed=SIM_SEED,
             work_dir=tmp_path / ("intr_ig" + name_suffix),
         )
-        # Gene with large intron → nRNA reads come from intron
+        # Gene with large intron → nascent reads come from the intron
         sc.add_gene(
             "g1",
             "+",
@@ -220,7 +218,7 @@ class TestIntronicIntergenicMultimappers:
         return sc
 
     def test_nrna_budget(self, tmp_path):
-        """nRNA fragments from g1 multimap to the intergenic copy.
+        """Nascent fragments from g1 multimap to the intergenic copy.
         Fragment budget must be conserved."""
         sc = self._make_scenario(tmp_path, "_nrna")
         try:
@@ -237,7 +235,7 @@ class TestIntronicIntergenicMultimappers:
             sc.cleanup()
 
     def test_nrna_plus_gdna(self, tmp_path):
-        """Combined nRNA + gDNA.  Both contribute multimappers
+        """Nascent RNA and gDNA combined.  Both contribute multimappers
         to the intronic/intergenic duplicate."""
         sc = self._make_scenario(tmp_path, "_nrna_gdna")
         try:
@@ -279,7 +277,7 @@ class TestIntronicIntergenicMultimappers:
 
 
 class TestExonicParalogBudget:
-    """Identical single-exon paralogs — all mRNA reads are NH=2.
+    """Identical single-exon paralogs: every RNA read is NH=2.
 
     Same structure as TestParalogMultimapping but focused on
     fragment budget conservation rather than EM accuracy.
@@ -331,7 +329,7 @@ class TestExonicParalogBudget:
         return sc
 
     def test_budget_no_gdna(self, tmp_path):
-        """Pure mRNA multimappers — budget must be exact."""
+        """RNA multimappers alone: budget must be exact."""
         sc = self._make_scenario(tmp_path, name_suffix="_budget_no_gdna")
         try:
             bench = build_and_run(
@@ -352,7 +350,7 @@ class TestExonicParalogBudget:
             sc.cleanup()
 
     def test_budget_with_gdna(self, tmp_path):
-        """mRNA multimappers + gDNA — budget conserved."""
+        """RNA multimappers + gDNA: budget conserved."""
         sc = self._make_scenario(tmp_path, name_suffix="_budget_gdna")
         try:
             bench = build_and_run(
@@ -411,13 +409,13 @@ class TestPseudogene:
 
     Genome layout (20 kb):
         [1000-1300][2000-2300] gene g_parent (+ strand, two exons,
-                               spliced mRNA of 600bp)
+                               spliced RNA of 600bp)
         [8000-8600]  pseudogene g_pseudo (+ strand, single exon,
                      sequence = concatenation of parent exons)
         [14000-14300][14700-15000] gene g_helper
         [17000-17300] gene g_ctrl (- strand, abundance=0)
 
-    mRNA reads from g_parent span exon1+exon2 (spliced).  When
+    RNA reads from g_parent span exon1+exon2 (spliced).  When
     aligned, they match:
       (a) g_parent at the spliced locus (with intron gap in CIGAR)
       (b) g_pseudo contiguously (no splice)
@@ -574,12 +572,12 @@ class TestExonicIntergenicMultimappers:
         [12000-12300][12700-13000] gene g_helper
         [17000-17300] gene g_ctrl (- strand, abundance=0)
 
-    mRNA reads from g1 exon 1 align to:
-      (a) the gene itself (resolved → mRNA/EM)
+    RNA reads from g1 exon 1 align to:
+      (a) the gene itself (resolved → the EM)
       (b) the intergenic copy at 7000-7300 (unresolved → intergenic)
 
-    With the bugfix, if hit (a) resolves, the intergenic hit (b) must
-    NOT also increment n_intergenic.  The molecule enters the EM once.
+    If hit (a) resolves, the intergenic hit (b) does not also
+    increment n_intergenic.  The molecule enters the EM once.
     """
 
     def _make_scenario(self, tmp_path, name_suffix=""):
@@ -615,7 +613,7 @@ class TestExonicIntergenicMultimappers:
         return sc
 
     def test_budget_no_gdna(self, tmp_path):
-        """mRNA reads multimap to exonic + intergenic.  Budget exact."""
+        """RNA reads multimap to exonic + intergenic.  Budget exact."""
         sc = self._make_scenario(tmp_path, "_budget")
         try:
             bench = build_and_run(
@@ -676,7 +674,7 @@ class TestExonicIntergenicMultimappers:
 
 
 class TestTripleMultimapper:
-    """Single-exon gene duplicated to TWO other locations → NH=3.
+    """Single-exon gene duplicated to two other locations → NH=3.
 
     Genome layout (24 kb):
         [1000-1500]  gene g1 exon (+ strand, abundance=100)
@@ -685,7 +683,7 @@ class TestTripleMultimapper:
         [16000-16300][16700-17000] gene g_helper
         [20000-20300] gene g_ctrl (- strand, abundance=0)
 
-    Every mRNA read from g1/g2/g3 aligns to all three loci (NH=3).
+    Every RNA read from g1/g2/g3 aligns to all three loci (NH=3).
     The EM must handle 3-way multimappers and the budget must not
     inflate to 3× the true count.
     """
@@ -947,25 +945,21 @@ class TestMixedMultimapperKitchenSink:
 
 #: The identical-paralog gates run the EM to convergence. On two sequence-identical templates the split is the EM's
 #: own degeneracy: it drifts from the even start toward a vertex, slowly, and at the shipped iteration budget it can
-#: stop on the way (513 / 39 at gDNA 20, a vertex 552 / 0 converged, the total the same) — where the SOLVER stops,
-#: not a property of the model. The shape is asserted where the model decides it; the start-independence gate
-#: (`tests/test_em_start_independence.py`) reads its converged answer for the same reason.
+#: stop on the way, which is where the solver stops, not a property of the model. The shape is asserted where the
+#: model decides it.
 CONVERGED_EM = EMConfig(seed=PIPELINE_SEED, iterations=100_000, convergence_delta=1e-12)
 
 
 def assert_identical_paralogs(t1, t2, *, tol: float) -> None:
-    """What the EM can be held to on two SEQUENCE-IDENTICAL templates: the TOTAL, and the SHAPE.
+    """What the EM can be held to on two sequence-identical templates: the total, and the shape.
 
-    The two are not separable — every fragment inside them multimaps to both — so the split is an open
-    EM degeneracy: it is BIMODAL rather than noisy, landing even or at a vertex, and which one is decided
-    by the symmetry of the two loci's priors, not by depth. Until calibration counted multimappers the
-    two loci's priors were identical (both empty), so the symmetric start stayed symmetric and the split
-    read even by accident; now calibration draws each multimapper to one placement, the two priors differ
-    by that draw's noise, and the degenerate EM leaves the knife-edge for a vertex at every gDNA level.
-    Asserting the shape is stronger than tolerating it: an even split within ``tol`` or a clean vertex,
-    and nothing in between — a split that is neither is a third behaviour this gate would name.
-    Do NOT widen it, and do not fix it by moving a seed or a depth until a mode comes out even: that is
-    tuning to green. `TestDistinguishableParalogs` is the arm where the split is identifiable at all.
+    The two are not separable (every fragment inside them multimaps to both), so the split is an open
+    EM degeneracy: bimodal rather than noisy, landing even or at a vertex, decided by the symmetry of the
+    two loci's priors, not by depth. Calibration draws each multimapper to one placement, so the two
+    priors differ by that draw's noise and the degenerate EM leaves the knife-edge for a vertex. The
+    shape is asserted: an even split within ``tol`` or a clean vertex, and nothing in between. The
+    tolerance must stay as it is, and no seed or depth may be moved until a mode comes out even, because
+    that tunes the gate to green. `TestDistinguishableParalogs` is where the split is identifiable.
     """
     total = t1.observed + t2.observed
     if total <= 10:
@@ -1082,17 +1076,11 @@ class TestParalogMultimapping:
         sc = self._make_scenario(tmp_path, 100, 100, name_suffix=f"_gdna_{gdna}")
         try:
             # n_fragments is 6× the default, so the EM has plenty of symmetric shared-multimapper
-            # signal. It does NOT make the split between two identical paralogs reliable, and reading
-            # the depth that way would be a mistake: the collapse is BIMODAL rather than noisy — the
-            # split either lands even or goes all-or-nothing, and depth does not decide which. The
-            # TOTAL is right either way; it is only the division between two literally
-            # sequence-identical templates that collapses.
-            #
-            # This is an open EM degeneracy and not a simulator defect: the tie is broken only by
-            # gDNA fragments extending into unique flanking sequence, which are short and rare once
-            # the simulator models the effective length. Do NOT fix it by moving a seed or a depth
-            # until the mode comes out even; that is tuning to green. `TestDistinguishableParalogs`
-            # is the arm where the split is identifiable at all.
+            # signal. That does not make the split between two identical paralogs reliable: the
+            # collapse is bimodal, not noisy, and depth does not decide which way it goes; the total
+            # is right either way. The tie is broken only by gDNA fragments extending into unique
+            # flanking sequence, which are short and rare, so this is an EM degeneracy, not a
+            # simulator defect (`assert_identical_paralogs`).
             bench = build_and_run(
                 sc,
                 n_fragments=3000,
@@ -1105,11 +1093,10 @@ class TestParalogMultimapping:
             assert_negative_control(bench, gdna_abundance=gdna)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-            # The TOTAL is the property calibration's multimapper second pass restored: with both
-            # paralog exons counted at their density, the locus priors hold the gDNA and the EM's total
-            # runs near the truth instead of absorbing the gDNA as RNA (158 against 146 at gDNA 100,
-            # from 183 while calibration was blind to multimappers). It is a draw under
-            # `assignment_mode="sample"`, so it is held to a band, not pinned.
+            # The total: with both paralog exons counted at their density by calibration's multimapper
+            # second pass, the locus priors hold the gDNA and the EM's total runs near the truth instead
+            # of absorbing the gDNA as RNA. It is a draw under `assignment_mode="sample"`, so it is held
+            # to a band, not pinned.
             assert t1.observed + t2.observed == pytest.approx(
                 t1.expected + t2.expected, abs=0.20 * (t1.expected + t2.expected) + 10
             )
@@ -1145,8 +1132,8 @@ class TestParalogMultimapping:
         )
         try:
             # 6× the default depth, matching the gDNA sweep above: at heavy gDNA on identical
-            # paralogs the mRNA pool is tiny and mostly multimapped, so the default depth leaves too
-            # few UNIQUE SPLICED reads for the strand model to be identifiable at all.
+            # paralogs the RNA pool is tiny and mostly multimapped, so the default depth leaves too
+            # few unique spliced reads for the strand model to be identifiable at all.
             bench = build_and_run(
                 sc,
                 n_fragments=3000,

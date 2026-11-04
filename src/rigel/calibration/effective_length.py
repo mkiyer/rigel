@@ -1,51 +1,25 @@
-"""The divisor that turns a count into a start density.
+"""Effective lengths: the divisor that turns a count into a start density (layer 2, opportunity).
 
-Gate: ``tests/calibration/test_effective_length.py``, which enumerates every formula rather than
-restating it.
-
-An effective length is the expected number of admissible fragment START POSITIONS at an object. It
-is pure geometry against a fragment-length pmf: identical for any species, and applied per
-component, because gDNA and RNA have different length distributions and different templates.
-
-Two frames, one family. With ``w`` the molecule length and ``f`` its pmf::
+An effective length is the expected number of admissible fragment start positions at an object under a
+fragment-length pmf ``f`` over molecule length ``w``. It is pure geometry, applied per component because gDNA and
+RNA have different length laws and different templates::
 
     contained   E_f[ (region_len - w + 1)+ ]                              fits wholly inside a region
     crossing    E_f[ max(0, min(w-1, R_lo, R_hi, R_lo + R_hi - w + 1)) ]  spans a 0-bp boundary
 
-The CONSERVED SHARE (:func:`conserved_cut_shares`) is the third reading of the same placements: not how
-many starts reach an object but how much of each placement's unit the deposit rule gives it, so that a
-template's objects share its fl-marginal length with nothing counted twice — the frame the
-capture-contracted length is priced in.
+``R_lo`` / ``R_hi`` are the molecule's own remaining template either side of the boundary, so reach is per
+component: gDNA's template is the chromosome (:data:`UNBOUNDED_REACH`, and the divisor collapses to ``mu - 1``),
+RNA's ends with its transcript, which an sj boundary passes as the annotation's exonic reach. At a contiguous
+boundary the unspliced RNA reach is :data:`UNBOUNDED_REACH`, a value rather than a second code path. The conserved
+share (:func:`conserved_cut_shares`) reads the same placements a third way: how much of each placement's unit the
+deposit rule gives an object, so a template's objects share its fl-marginal length with nothing counted twice. The
+``observable_*`` forms read all three over the observable genome (a start whose fragment touches a masked base is no
+place at all); with nothing masked each equals its plain form to the bit.
 
-The crossing formula covers both boundary kinds and both components, with ``R_lo`` / ``R_hi`` the
-molecule's own remaining template either side of the boundary. Mean fragment length is its
-large-reach limit, not a separate case: gDNA's template is the chromosome, so its reaches are
-:data:`UNBOUNDED_REACH` and the divisor collapses to ``mu - 1``. RNA's template ends where its
-transcript ends, so its reaches come from the annotation.
+An object with no opportunity returns 0, and the caller must treat 0 as "no evidence" rather than floor it: a short
+region cannot measure a long component, and a floored division turns no data into a confident wrong answer.
 
-Reach is per component, not per boundary, and that is what makes it awkward. An unspliced crossing
-is a gDNA/RNA mixture: the RNA part is bounded by its transcript, the gDNA part is not, so a
-boundary does not have "a" reach — each component has its own and only the RNA one is finite. An sj
-boundary is the easy case, since only a spliced molecule uses it, and it is where the annotation's
-exonic reach is actually passed. At a contiguous boundary the unspliced RNA reach is
-:data:`UNBOUNDED_REACH` by ruling, which this module expresses as a value rather than as a second
-code path.
-
-OBSERVABLE OPPORTUNITY. A start counts only where its fragment could be observed: one touching a base of the index's
-unobservable mask (`rigel.observable`) is no place at all. :func:`observable_contained_eff_length`,
-:func:`observable_crossing_eff_length` and :func:`observable_cut_shares` read the partition's observable geometry
-(`region_arrays`): a region's contained support summed over its observable pieces, and gDNA's template at a boundary
-ending at the nearest masked base on either side. With nothing masked each is its plain form's number, to the bit.
-
-The ``+1`` in the contained formula is the discrete count of start positions, not a fudge: a
-fragment ``[s, s+w)`` sits inside ``[a, a+L)`` iff ``s`` is in ``[a, a+L-w]``, which is
-``L - w + 1`` positions. Dropping it makes the divisor exactly 0 when a region is one fragment
-long, and a division by zero floored to an epsilon then produces astronomical densities on every
-short region of a fine partition.
-
-An object with no opportunity must return 0, and the caller must treat 0 as "no evidence" rather
-than flooring it. A short region genuinely cannot measure a long component; that is physics, and a
-floored division turns "no data" into a confident wrong answer.
+Gate: ``tests/calibration/test_effective_length.py``.
 """
 
 from __future__ import annotations
@@ -70,9 +44,8 @@ __all__ = [
     "observable_cut_shares",
 ]
 
-#: The reach of a molecule whose template does not end — gDNA, always; and RNA wherever the taper is
-#: deliberately not applied. Large enough to exceed any fragment length by orders of magnitude, finite so
-#: that it survives the integer arithmetic below without special-casing infinity.
+#: The reach of a molecule whose template does not end: gDNA always, and RNA wherever no taper applies. It exceeds
+#: any fragment length by orders of magnitude and is finite, so the arithmetic below needs no case for infinity.
 UNBOUNDED_REACH = 1.0e12
 
 
@@ -86,14 +59,11 @@ def _as_pmf(fl_pmf: np.ndarray) -> np.ndarray:
 
 
 def contained_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndarray:
-    """``E_f[(region_len − w + 1)+]`` per region — the count of starts placing the whole molecule inside.
+    """``E_f[(region_len − w + 1)+]`` per region: the number of starts that place the whole molecule inside.
 
-    Computed as ``(L+1)·F(L) − S(L)`` with ``F`` the pmf's CDF and ``S(L) = Σ_{w≤L} w f(w)``; beyond the
-    support the full sums apply, giving ``L + 1 − mean``.
-
-    This is the frame that needs a length model. Containment probability differs several-fold
-    between gDNA and RNA at a short region, so an error in either fitted pmf moves the composition
-    directly: the length models are load-bearing here, not hygiene.
+    The ``+1`` counts start positions: ``[s, s+w)`` sits inside ``[a, a+L)`` iff ``s`` is in ``[a, a+L−w]``.
+    Computed as ``(L+1)·F(L) − S(L)`` with ``F`` the pmf's CDF and ``S(L) = Σ_{w≤L} w f(w)``; beyond the support the
+    full sums apply, giving ``L + 1 − mean``.
     """
     p = _as_pmf(fl_pmf)
     n = p.shape[0]
@@ -109,28 +79,17 @@ def contained_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.nd
 def crossing_eff_length(
     fl_pmf: np.ndarray, reach_lo: np.ndarray, reach_hi: np.ndarray
 ) -> np.ndarray:
-    """``E_f[max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1))]`` per object — one formula, both boundary kinds.
+    """``E_f[max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1))]`` per object, for both boundary kinds.
 
-    A molecule of length ``w`` crossing the boundary lies ``a`` bases to its left and ``w − a`` to its right,
-    with ``1 ≤ a ≤ w − 1``; it must fit in what remains of its own template on each side, so
-    ``a ≤ R_lo`` and ``w − a ≤ R_hi``. Counting the admissible ``a`` gives the four-way ``min`` — each
-    term is one of the four binding constraints, and none is droppable:
+    A molecule of length ``w`` crossing the boundary has ``a`` bases left of it and ``w − a`` right, with
+    ``1 ≤ a ≤ w − 1``, and must fit its own template on each side: ``a ≤ R_lo`` and ``w − a ≤ R_hi``. Counting the
+    admissible ``a`` gives the four-way ``min``: ``w − 1`` (both sides need a base), ``R_lo`` / ``R_hi`` (one side
+    runs out of template) and ``R_lo + R_hi − w + 1`` (the molecule outgrows both remainders together).
 
-    ==============================  ==================================================================
-    ``w − 1``                       both sides need at least one base; the unbounded-reach limit
-    ``R_lo`` / ``R_hi``             one side alone runs out of template
-    ``R_lo + R_hi − w + 1``         the molecule is longer than BOTH remainders together
-    ==============================  ==================================================================
-
-    Computed in closed form from the pmf's cumulative sums, in ``O(objects)`` with no
-    ``(objects × lengths)`` matrix — that matrix cost 9 GB of transient on the human sj axis
-    (`tests/calibration/test_effective_length.py` holds the enumerated and the matrix brute forces).
-    Pass :data:`UNBOUNDED_REACH` on both sides for gDNA and the result is ``mean - 1`` exactly. The
-    taper is not a refinement: where the remaining template is shorter than the mean fragment, the
-    tapered divisor is an order of magnitude below the untapered one, so using the mean blindly
-    under-reads the density by the same factor.
-
-    ``reach_lo`` and ``reach_hi`` broadcast against each other; the result has their broadcast shape.
+    Computed in closed form from the pmf's cumulative sums in ``O(objects)``, with no ``(objects × lengths)`` matrix;
+    :data:`UNBOUNDED_REACH` on both sides gives ``mean − 1`` exactly, but a finite reach must keep its taper: where the
+    remaining template is shorter than the mean fragment the divisor is far below ``mean − 1``. ``reach_lo`` and
+    ``reach_hi`` broadcast against each other; the result has their broadcast shape.
     """
     p = _as_pmf(fl_pmf)
     n = p.shape[0]
@@ -145,9 +104,7 @@ def crossing_eff_length(
     #   a + 1 < w ≤ b + 1:    a                  (the short side alone binds)
     #   b + 1 < w ≤ a + b + 1: a + b + 1 − w     (the molecule is longer than both remainders together)
     #   beyond:               0
-    # so its expectation is three sums over the pmf, each read off the two cumulative sums at the
-    # segment's end — O(objects), and no (objects × lengths) matrix. Beyond the support the full sums
-    # apply, and UNBOUNDED_REACH on both sides gives mean − 1 exactly.
+    # so its expectation is three sums over the pmf, each read off the two cumulative sums at the segment's end.
     a = np.minimum(lo, hi)
     b = np.maximum(lo, hi)
 
@@ -161,23 +118,21 @@ def crossing_eff_length(
     f1, s1 = at(a + 1.0)
     f2, s2 = at(b + 1.0)
     f3, s3 = at(a + b + 1.0)
-    # the first sum runs from one base: a zero-length molecule places nowhere, and the brute force
-    # clamps it per length where the cumulative sums would credit it (0 − 1)·f(0)
+    # the first sum starts at w = 1: a zero-length molecule places nowhere, so add back the (0 − 1)·f(0) the
+    # cumulative sums credit it
     out = (s1 - f1 + p[0]) + a * (f2 - f1) + (a + b + 1.0) * (f3 - f2) - (s3 - s2)
     return np.maximum(out, 0.0).reshape(lo.shape)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  THE CONSERVED FRAME — where a template's placements put their unit
+#  The conserved frame: where a template's placements put their unit
 #
-#  The accumulator splits a crossing fragment's unit over the objects it crosses: its path is cut into
-#  slices by the boundaries it crosses (and, spliced, by the junctions at its blocks' ends), and each
-#  slice's share of the fragment — its bases over the fragment's length — is shared equally by the objects
-#  bounding it (`tests/native/_accumulator_reference.py`, ``Accumulator.deposit``). Summed over a template's
-#  placements that gives each object the template's CONSERVED SHARE of it: a piece's contained share
-#  (:func:`contained_eff_length`) and a cut's share (:func:`conserved_cut_shares`), which add up to the
-#  template's fl-marginal length exactly, however many cuts one fragment crosses. The capture-contracted
-#  length prices each share at its object's capture efficiency (`capture_eff_length`, `priors`).
+#  The accumulator splits a crossing fragment's unit over the objects it crosses: the boundaries it crosses (and,
+#  spliced, the junctions at its blocks' ends) cut its path into slices, and each slice's share (its bases over the
+#  fragment's length) is split equally between the objects bounding it (``Accumulator.deposit`` in
+#  `tests/native/_accumulator_reference.py`). Summed over a template's placements, the pieces' contained shares
+#  (:func:`contained_eff_length`) and the cuts' shares (:func:`conserved_cut_shares`) add up to the template's
+#  fl-marginal length exactly. The capture-contracted length prices each share at its object's capture efficiency.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -238,11 +193,9 @@ def conserved_cut_shares(
     and ``L_b(w − x)/w`` from its right, ``a`` and ``b`` the two pieces' lengths (:func:`_side_share`); the
     reaches are the template's bases left and right of the cut (``reach_lo ≥ a``, ``reach_hi ≥ b``;
     :data:`UNBOUNDED_REACH` for gDNA, whose template does not end). A junction is a cut like any other in a
-    spliced template's own coordinates. Where neither reach binds the sums close to
-    ``left = ½ E_f[min(a, w − 1)]`` and ``right = ½ E_f[min(b, w − 1)]``. With the pieces' contained shares
-    a template's shares total its fl-marginal length ``E_f[(L − w + 1)⁺]`` exactly, and each object's share
-    is what the deposit rule gives it (gate: ``tests/calibration/test_effective_length.py``, per object
-    against the reference accumulator).
+    spliced template's own coordinates. Where neither reach binds, ``left = ½ E_f[min(a, w − 1)]`` and
+    ``right = ½ E_f[min(b, w − 1)]``. With the pieces' contained shares, a template's shares total its fl-marginal
+    length ``E_f[(L − w + 1)⁺]`` exactly, and each object's share is what the deposit rule gives it.
     """
     p = _as_pmf(fl_pmf)
     a = np.asarray(a, dtype=np.float64)
@@ -256,7 +209,7 @@ def conserved_cut_shares(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  OBSERVABLE OPPORTUNITY — the same three readings over the observable genome
+#  Observable opportunity: the same three readings, where a fragment touching a masked base is no place
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 

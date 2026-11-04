@@ -8,11 +8,7 @@ from rigel.native import transfer_rows as rows
 
 
 def poisson_blur(log_density, count, opportunity, variance, step):
-    """Independent discrete convolution, evaluating the source outside any table.
-
-    The four-sd kernel is the existing operator, held fixed in this audit.
-    This is not a proposed truncation constant or a different blur law.
-    """
+    """Independent discrete convolution with the shipped four-sd kernel, evaluating the source outside any table."""
     half = max(int(np.ceil(4 * np.sqrt(variance) / step)), 1)
     offsets = np.arange(-half, half + 1) * step
     log_kernel = -0.5 * offsets**2 / variance

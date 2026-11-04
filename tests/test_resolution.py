@@ -1,9 +1,7 @@
-"""Fragment resolution — turning an aligned pair into a fragment with a candidate transcript set.
+"""Fragment resolution: turning an aligned pair into a fragment with a candidate transcript set.
 
-Fragment resolution end to end; the overlap profile and the filtering it drives; discrimination on
-implied fragment length; and the intronic base-pair accumulation. Several gates are run twice, once
-against the Python reference and once against the C++ kernel the scanner actually executes, because
-the two can disagree silently.
+Splice-junction narrowing, the per-candidate overlap profile and the filtering it drives, isoform discrimination,
+and the exonic and intronic base counts, all through the C++ ``FragmentResolver`` on indexes built from GTF strings.
 """
 
 import textwrap
@@ -21,16 +19,12 @@ from _resolution_reference import (
 
 
 # =====================================================================
-# resolve_fragment — real C++ FragmentResolver tests
+# resolve_fragment through the C++ FragmentResolver
 # =====================================================================
 #
-# All tests below use real TranscriptIndex instances built from GTF strings.
-# The C++ FragmentResolver handles interval queries, SJ matching, and
-# overlap computation.  Mock indexes have been removed.
-#
-# Each test class defines a session-scoped fixture that builds the
-# specific TranscriptIndex it needs.  A shared mini_index fixture (from
-# conftest.py) is reused when the MINI_GTF layout suffices.
+# Each test class uses a session-scoped fixture that builds the
+# TranscriptIndex it needs; the shared mini_index fixture (from
+# conftest.py) serves when the MINI_GTF layout suffices.
 # =====================================================================
 
 
@@ -95,8 +89,8 @@ def antisense_index(tmp_path_factory):
 
 class TestTheIndexInstallsTheTranscriptStrands:
     """The resolver reads each transcript's strand, and a fragment whose candidates disagree on it is
-    ``ambig_strand``. The strands are an index fact, so the loaded index carries them: when only the scan installed
-    them, a fragment resolved without a scan (every resolver test) read every overlap as single-stranded."""
+    ``ambig_strand``. The strands are an index fact, so the loaded index installs them and a fragment resolved
+    without a scan sees them too."""
 
     def test_an_antisense_overlap_is_strand_ambiguous_without_a_scan(self, antisense_index):
         tm = _t_map(antisense_index)
@@ -396,7 +390,7 @@ class TestFragLengthDiscrimination:
         assert result.t_inds == frozenset({tm["t2"]})
 
     def test_unspliced_read_in_shared_exon(self, mini_index):
-        """Unspliced read fully in shared exon1 → t1, t2, and synthetic nRNA."""
+        """Unspliced read fully in shared exon1 → t1, t2, and the nascent span."""
         tm = _t_map(mini_index)
         frag = make_fragment(exons=(_exon("chr1", 120, 180),), introns=())
         result = resolve_fragment(frag, mini_index)
@@ -408,7 +402,7 @@ class TestFragLengthDiscrimination:
         """Unspliced read in exon2 (299,400) — exonic for t1 only.
 
         t2's transcript span (99,600) also covers this region via
-        intronic overlap, and the synthetic nRNA exon covers the full
+        intronic overlap, and the nascent span covers the full
         span, so all three are candidates; scoring differentiates.
         """
         tm = _t_map(mini_index)
@@ -432,7 +426,7 @@ class TestFragLengthDiscrimination:
 
 
 # =====================================================================
-# Intronic bp regression tests
+# Exonic and intronic bp
 # =====================================================================
 
 

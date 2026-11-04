@@ -23,10 +23,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--config", required=True, help="YAML configuration file")
-    p.add_argument("--genome", help="Genome FASTA (overrides YAML)")
-    p.add_argument("--gtf", help="Gene annotation GTF (overrides YAML)")
-    p.add_argument("--outdir", help="Output directory (overrides YAML)")
-    p.add_argument("--n-rna", type=int, help="Number of RNA fragments (overrides YAML)")
     p.add_argument(
         "-j",
         "--n-workers",
@@ -35,7 +31,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Worker processes for parallel read generation (overrides YAML)",
     )
     p.add_argument("--no-oracle", action="store_true", help="Skip oracle BAM generation")
-    p.add_argument("--verbose", action="store_true", default=None, help="Verbose logging")
     return p
 
 
@@ -48,20 +43,10 @@ def main() -> int:
     cfg = parse_yaml_config(args.config)
 
     # CLI overrides
-    if args.genome:
-        cfg.genome = args.genome
-    if args.gtf:
-        cfg.gtf = args.gtf
-    if args.outdir:
-        cfg.outdir = args.outdir
-    if args.n_rna is not None:
-        cfg.simulation.n_rna_fragments = args.n_rna
     if args.n_workers is not None:
         cfg.simulation.n_workers = args.n_workers
     if args.no_oracle:
         cfg.oracle_bam = False
-    if args.verbose is not None:
-        cfg.verbose = args.verbose
 
     level = logging.DEBUG if cfg.verbose else logging.INFO
     logging.basicConfig(
@@ -85,9 +70,8 @@ def main() -> int:
     print(f"  Workers:          {cfg.simulation.n_workers}", flush=True)
     print(f"  gDNA rates:       {cfg.gdna.rates}", flush=True)
     print(f"  Strand specs:     {cfg.strand_specificities}", flush=True)
-    # Print the configured nRNA mode, whichever it is. Whether the nascent sweep is actually run
-    # cannot be reported here: it is decided later, by whether the loaded abundance file carried an
-    # `nrna_abundance` column, which is why the file case prints a conditional line of its own.
+    # the configured nRNA mode; whether the nascent sweep runs is decided later, by whether the abundance file
+    # carries an `nrna_abundance` column, so the file case prints a conditional line of its own
     if cfg.nrna.mode == "additive_ratio":
         print(f"  nRNA ratios:      {cfg.nrna.ratios}", flush=True)
     elif cfg.nrna.mode == "sparse":

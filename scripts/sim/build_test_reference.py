@@ -1,50 +1,37 @@
 #!/usr/bin/env python3
-"""BUILD THE METHOD-DEVELOPMENT TEST REFERENCE — one chromosome described in ONE YAML file, everything
-else derived from it.
+"""Build the method-development test reference: one chromosome described in one YAML file, everything else
+derived from it.
 
-⭐⭐⭐ **THIS IS THE BENCHMARK THE MESSAGE-PROPAGATION POLICY IS DEVELOPED AGAINST** (owner, 2026-08-19):
-*"over the course of this method development, we will add transcripts to a 'test chromosome' … the test
-reference chromosome, test transcript GTF, and test abundances comprise a critical method development
-benchmark."* It grows one structure at a time, and the policy must solve the new structure AND
-everything already there.
-
-**THE ONE HAND-EDITED FILE (owner ruling, 2026-09-02): `test_chr.yaml`.** It is the `rigel sim`
-scenario schema — ``genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}``,
-exons 0-based half-open — plus two keys the
-scenario schema lacks: ``probed`` per gene (the capture panels are DESIGNED from it) and ``shadow_genes``
-(unannotated transcription on the BLANK contig, simulator-only). ⛔ **Every other file in
-`test_reference/` is RENDERED from it by this script and must never be hand-edited**:
+`test_reference/test_chr.yaml` is the one hand-edited file. It is the `rigel sim` scenario schema
+(``genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}``, exons 0-based
+half-open) plus two keys: ``probed`` per gene (the capture panels are designed from it) and ``shadow_genes``
+(unannotated transcription on the blank contig, simulator-only). Every other file in `test_reference/` is
+rendered from it by this script and is never edited by hand:
 
 ===========================  ========================================================================
-`test_chr.gtf`               one `exon` line per exon — what `rigel index` reads
-`test_shadow.gtf`            the shadow transcripts, reference `test_blank` — what the SIMULATOR reads
-`test_abundances.tsv`        `transcript_id / mrna_abundance / nrna_abundance` (no comment lines — both
+`test_chr.gtf`               one `exon` line per exon, what `rigel index` reads
+`test_shadow.gtf`            the shadow transcripts on `test_blank`, what the simulator reads
+`test_abundances.tsv`        `transcript_id / mrna_abundance / nrna_abundance` (no comment lines: both
                              readers key on the first line)
-`test_probes.bed`            the BENIGN capture panel: each probed gene's exon UNION tiled 8 × 125 bp
-                             seamless from each union piece's start, never spanning an sj
-`test_probes_sparse.bed`     the SPARSE adversarial panel: one 125 bp probe CENTRED on every annotated
-                             exon of a probed gene (faces depleted, mid-exon enriched)
-`test_probes_junction.bed`   the JUNCTION adversarial panel: one BED12 two-block probe (62 + 63 bp,
-                             contiguous only in cDNA) per sj of a probed gene, and nothing else
+`test_probes.bed`            the benign panel: each probed gene's exon union tiled 8 × 125 bp seamless
+                             from each union piece's start, never spanning a junction
+`test_probes_sparse.bed`     the sparse panel: one 125 bp probe centred on every annotated exon of a
+                             probed gene (faces depleted, mid-exon enriched)
+`test_probes_junction.bed`   the junction panel: one BED12 two-block probe (62 + 63 bp, contiguous only
+                             in cDNA) per junction of a probed gene, and nothing else
 `test_chr.fa` + the index    written to the runs dir only (`--out`)
 ===========================  ========================================================================
 
-The renders are written into the repo directory beside the YAML (versioned, so a reader sees the
-annotation without running anything) AND copied into the runs dir. ``--check`` re-renders in memory and
-refuses if any checked-in render has drifted from the YAML — the suite gate
-(`tests/test_test_reference_renders.py`) runs exactly that.
+The renders are written beside the YAML (versioned, so a reader sees the annotation without running anything)
+and copied into the runs dir. ``--check`` re-renders in memory and refuses if a checked-in render has drifted;
+`tests/test_test_reference_renders.py` runs exactly that.
 
-⛔ **WHY THE FASTA IS DERIVED RATHER THAN VERSIONED.** A spliced transcript needs a GT..AG at every
-intron or the aligner and the simulator disagree with the annotation. Deriving the sequence FROM the
-annotation makes that impossible to get wrong: the chromosome is regenerated from a fixed seed and
-every declared intron gets its motif injected.
-
-⭐ **The nascent RNA needs no declaration.** `rigel index` creates a single-exon nascent ENTITY spanning
-each multi-exon transcript; give it abundance through its contributor's ``nrna_abundance``.
-
-⭐ **Strands (owner, 2026-09-02): every gene carries an explicit strand and the chromosome keeps EQUAL
-representation of + and −** — a sign error in any strand-dependent rule is invisible on a one-strand
-chromosome. The builder refuses a chromosome whose strand counts differ by more than one.
+The FASTA is derived rather than versioned: a spliced transcript needs a GT..AG at every intron or the aligner
+and the simulator disagree with the annotation, so the chromosome is regenerated from a fixed seed and every
+declared intron gets its motif. Nascent RNA needs no declaration: `rigel index` creates a single-exon nascent
+entity spanning each multi-exon transcript, weighted by its contributor's ``nrna_abundance``. Every gene carries
+an explicit strand, and the builder refuses a chromosome whose + and − counts differ by more than one, since a
+sign error in a strand-dependent rule is invisible on a one-strand chromosome.
 
 Usage::
 
@@ -79,14 +66,13 @@ REF_NAME = "test_chr"
 #: FASTA (the YAML may override both the seed and the length)
 GENOME_SEED = 20260819
 GENOME_LENGTH = 1_500_000
-#: ⭐⭐ THE BLANK CHROMOSOME (owner design, 2026-08-29): a second contig with NO annotation, so `rigel index`
-#: knows nothing on it — while the SIMULATOR draws unannotated "shadow" transcripts there. Its own seed;
-#: its own length. gDNA is drawn on it too (`gdna.genomic_refs`).
+#: the blank chromosome: a second contig with no annotation, so `rigel index` knows nothing on it while the
+#: simulator draws unannotated "shadow" transcripts there. gDNA is drawn on it too (`gdna.genomic_refs`).
 BLANK_REF_NAME = "test_blank"
 BLANK_GENOME_SEED = 20260829
 BLANK_GENOME_LENGTH = 1_500_000
 
-#: the probe geometry — the benign tiling and the two adversarial designs (owner directive 2026-09-01)
+#: the probe geometry: the benign tiling and the two adversarial designs
 PROBE_LEN = 125
 PROBES_PER_PIECE = 8
 JUNCTION_BLOCKS = (62, 63)
@@ -152,7 +138,7 @@ def _tx(t_id: str, g_id: str, ref: str, strand: str, exons, abundance: float, nr
 def spec_from_dict(cfg: dict) -> Spec:
     """The YAML as a :class:`Spec`. Shape problems (a gene without a strand, an exon that is not a
     pair) are collected into ``spec.problems`` rather than raised, so the builder reports every problem
-    at once like it always has."""
+    at once."""
     problems: list[str] = []
 
     def genes_of(key: str, ref: str, with_probed: bool) -> list[Gene]:
@@ -223,8 +209,8 @@ def intron_spans(transcripts: list[Transcript]) -> list[tuple[int, int, Strand]]
 def inject_motifs(genome: MutableGenome, introns: list[tuple[int, int, Strand]]) -> int:
     """GT..AG at every intron, reverse-complemented on the minus strand (CT..AC in genomic terms).
 
-    ⛔ The motif is written in GENOMIC orientation, which is what an aligner reads. Getting this
-    backwards on ``−`` is invisible in the FASTA and shows up only as unaligned spliced reads.
+    The motif must be written in genomic orientation, which is what an aligner reads: backwards on ``−`` it
+    is invisible in the FASTA and shows up only as unaligned spliced reads.
     """
     for start, end, strand in introns:
         donor, acceptor = ("GT", "AG") if strand != Strand.NEG else ("CT", "AC")
@@ -237,11 +223,10 @@ def check_transcripts(transcripts: list[Transcript], abundances: dict, shadows: 
                       *, genome_length: int = GENOME_LENGTH, blank_length: int = BLANK_GENOME_LENGTH) -> list[str]:
     """Everything that would make a transcript unusable, reported together rather than one per run.
 
-    ``transcripts`` must live on ``test_chr`` (the annotated chromosome, the one the index is built from);
-    ``shadows`` must live on ``test_blank`` (the BLANK chromosome — unannotated by construction); ids are
-    unique across BOTH sets (a shadow the index would know is not a shadow); every transcript of either
-    set has an abundance row and every row names a transcript of one of them; a shadow carries no
-    nascent abundance (a shadow IS the unannotated RNA)."""
+    ``transcripts`` must live on ``test_chr`` (the annotated chromosome the index is built from) and
+    ``shadows`` on ``test_blank`` (unannotated by construction); ids are unique across both sets (a shadow
+    the index would know is not a shadow); every transcript has an abundance row and every row names a
+    transcript; a shadow carries no nascent abundance (a shadow is the unannotated RNA)."""
     problems: list[str] = []
     seen: dict[str, Transcript] = {}
     shadows = shadows or []
@@ -263,7 +248,7 @@ def check_transcripts(transcripts: list[Transcript], abundances: dict, shadows: 
             if right.start < left.end:
                 problems.append(f"{t.t_id}: exons overlap at {left.end}/{right.start}")
             elif right.start - left.end < 4:
-                # ⛔ a GT..AG needs 4 bases; a shorter gap cannot carry a motif
+                # a GT..AG needs 4 bases; a shorter gap cannot carry a motif
                 problems.append(f"{t.t_id}: intron [{left.end}, {right.start}) is under 4 bp")
         if t.t_id not in abundances:
             problems.append(f"{t.t_id}: no row in the abundances")
@@ -277,8 +262,8 @@ def check_transcripts(transcripts: list[Transcript], abundances: dict, shadows: 
 
 
 def check_strand_balance(genes: list[Gene]) -> list[str]:
-    """⭐ Equal representation of the two strands (owner, 2026-09-02): the counts may differ by at most
-    one. A one-strand chromosome cannot see a sign error."""
+    """Equal representation of the two strands: the counts may differ by at most one. A one-strand
+    chromosome cannot see a sign error."""
     pos = sum(1 for g in genes if g.strand == "+")
     neg = len(genes) - pos
     if genes and abs(pos - neg) > 1:
@@ -314,7 +299,7 @@ def _num(x: float) -> str:
 
 
 def render_abundances(spec: Spec) -> str:
-    """⛔ No comment lines — both readers key on the first line."""
+    """No comment lines: both readers key on the first line."""
     lines = ["transcript_id\tmrna_abundance\tnrna_abundance"]
     for t in spec.transcripts + spec.shadows:
         lines.append(f"{t.t_id}\t{_num(t.abundance or 0.0)}\t{_num(t.nrna_abundance or 0.0)}")
@@ -358,7 +343,7 @@ def probe_lines(genes: list[Gene], mode: str) -> list[str]:
         if mode == "benign":
             for k, (s, e) in enumerate(exon_union(g), 1):
                 if e - s < PROBE_LEN:
-                    # a piece shorter than one probe gets a single probe CENTRED on it, spilling into its
+                    # a piece shorter than one probe gets a single probe centred on it, spilling into its
                     # flanks as a real panel's probe over a tiny exon does (the tiny-exon block)
                     a = (s + e) // 2 - PROBE_LEN // 2
                     emit(_bed12(ref, a, a + PROBE_LEN, f"probe_{g.gene_id}_e{k}_0", [PROBE_LEN], [0]))
@@ -429,8 +414,8 @@ def check_renders(spec: Spec, render_dir: Path = HERE) -> list[str]:
 
 
 def _write_two_record_fasta(genomes: list[MutableGenome], path: Path) -> Path:
-    """One FASTA, two records, 80-column wrap, + ``samtools faidx``. ⚠ The file keeps the name
-    ``test_chr.fa`` so every panel config's ``genome:`` path stays valid; it carries BOTH contigs."""
+    """One FASTA, two records, 80-column wrap, + ``samtools faidx``. The file is named ``test_chr.fa``,
+    the path every panel config's ``genome:`` names, and carries both contigs."""
     import pysam
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -484,7 +469,7 @@ def build(spec_path: Path, out: Path, render_dir: Path | None = HERE) -> dict:
 
 
 def self_test() -> int:
-    """⛔ Every check perturbed, no I/O against the real reference."""
+    """Every check perturbed, with no I/O against the real reference."""
     ok = fail = 0
 
     def check(name, cond):
@@ -537,7 +522,7 @@ def self_test() -> int:
     check("the wrong reference name is caught",
           any("expected" in p for p in check_transcripts([tx("X", [(10, 90)], ref="chr1")], {"X": (1.0, 0.0)})))
 
-    # ── the BLANK chromosome and its shadows (2026-08-29)
+    # ── the blank chromosome and its shadows
     sh = [tx("shadow_A", [(1000, 2000), (5000, 6000)], ref=BLANK_REF_NAME)]
     both = {"T1": (100.0, 25.0), "shadow_A": (5.0, 0.0)}
     check("a shadow on the blank chromosome with an abundance row passes", check_transcripts(good, both, sh) == [])
@@ -556,11 +541,11 @@ def self_test() -> int:
     check("the two contigs are distinct sequences",
           MutableGenome(2000, seed=GENOME_SEED, name=REF_NAME).seq != MutableGenome(2000, seed=BLANK_GENOME_SEED, name=BLANK_REF_NAME).seq)
 
-    # ── zero transcripts is the STARTING state and must be legal
+    # ── zero transcripts is the starting state and must be legal
     check("zero transcripts is legal", check_transcripts([], {}) == [])
     check("zero transcripts declares no intron", intron_spans([]) == [])
 
-    # ── the YAML spec (2026-09-02): shape problems are collected, not raised
+    # ── the YAML spec: shape problems are collected, not raised
     cfg = {"genome_length": 50_000, "genes": [
         {"gene_id": "gA", "strand": "+", "probed": True,
          "transcripts": [{"t_id": "A", "exons": [[1000, 2000], [9000, 10000]], "abundance": 10, "nrna_abundance": 3}]},
@@ -579,7 +564,7 @@ def self_test() -> int:
     bad = spec_from_dict({**cfg, "shadow_genes": [{**cfg["shadow_genes"][0], "probed": True}]})
     check("a probed shadow is caught", any("shadow gene cannot be probed" in p for p in bad.problems))
 
-    # ── strand balance (owner, 2026-09-02): equal representation, the counts differ by at most one
+    # ── strand balance: the counts differ by at most one
     gpos = Gene("g", "+", False, [tx("P", [(10, 90)])])
     gneg = Gene("g", "-", False, [tx("N", [(10, 90)])])
     check("balanced strands pass", check_strand_balance([gpos, gneg, gpos]) == [])

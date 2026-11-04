@@ -1,9 +1,7 @@
-"""
-rigel.index — Build, load, and query the rigel reference index.
+"""Build, load and query the rigel reference index.
 
-The index is constructed from a genome FASTA (with samtools .fai) and a
-GENCODE GTF annotation file. It produces feather files (with optional
-TSV mirrors) in an output directory:
+The index is built from a genome FASTA (with a samtools .fai) and a GTF annotation. It writes Feather files, with
+optional TSV mirrors, to an output directory:
 
     ref_lengths.feather        — reference names and lengths
     transcripts.feather        — one row per transcript with integer indices
@@ -20,8 +18,7 @@ TSV mirrors) in an output directory:
                                  ``--collapse-duplicate-transcripts`` folded
     manifest.json              — the format version, the build sources and flags
 
-The ``TranscriptIndex`` class provides both the ``build()`` method for creating
-the index and ``load()`` / query methods for using it during quantification.
+:class:`TranscriptIndex` builds the index (``build()``) and loads and queries it for quantification (``load()``).
 """
 
 import collections
@@ -32,13 +29,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, Literal
 
-from .native import cgranges as _cgranges_cls
 import numpy as np
 import pandas as pd
 import pysam
 
 from .config import CONSTANTS, IndexConfig
-from .types import GenomicInterval, IntervalType, AnnotatedInterval
+from .types import IntervalType, AnnotatedInterval
 from .transcript import Transcript
 
 
@@ -81,15 +77,8 @@ TRANSCRIPT_ALIASES_TSV = "transcript_aliases.tsv"
 
 MANIFEST_JSON = "manifest.json"
 
-#: On-disk index format version, bumped whenever the schema or the meaning of any persisted column
-#: changes; :meth:`TranscriptIndex.load` refuses any other. 8 is the splice graph: ``regions.feather`` +
-#: ``edges.feather``, both mandatory, adjacent regions not merged (a merge deletes the region bound at a
-#: majority of real transcript termini). 9 drops the columns nothing read, adds the duplicate-transcript
-#: alias table and the splice blacklist's count, and counts every span's contributors to a nascent entity
-#: that covers several. 10 names the transcript table's columns for what they hold (``is_single_exon``,
-#: ``span_t_index``, ``span_n_contributors``) and the manifest's ``nascent_tolerance``, and writes 0 in the
-#: contiguous boundaries' reach columns, which nothing reads. 11 records the unobservable mask
-#: (``unobservable.feather``) and its measure in the manifest's ``observable`` block.
+#: On-disk index format version, bumped whenever the schema or the meaning of any persisted column changes;
+#: :meth:`TranscriptIndex.load` refuses any other.
 INDEX_FORMAT_VERSION = 11
 
 
@@ -125,16 +114,11 @@ def _sha256_of_directory(path: Path) -> str:
 
 
 def source_record(path: str | Path) -> dict:
-    """Provenance for ONE build input: where it was, how big it was, and what it contained.
+    """Provenance for one build input: its path, its size and its content's sha256.
 
-    This is not the stale-cache trap. That one forbids storing a hash of an artifact BESIDE that
-    artifact, because the two drift and the stale hash then verifies clean. This hashes an input the
-    index cannot recompute from itself — the genome and the annotation are not in the index — so it is
-    provenance, not a cache key. ``partition_hash`` and ``graph_hash`` stay computed on demand.
-
-    ``sha256`` rather than the ``blake2b`` used for the two partition keys, deliberately: those are
-    internal cache keys nobody types, while this one is meant to be checked against ``shasum -a 256`` on
-    the command line by whoever is trying to find the source again.
+    The genome and the annotation are not in the index, so this hash is provenance, not a cache key on the index's
+    own content (``partition_hash`` and ``graph_hash`` are computed on demand). It is sha256, unlike those blake2b
+    keys, so a user can check it with ``shasum -a 256``.
     """
     resolved = Path(path).resolve()
     if resolved.is_dir():
@@ -244,13 +228,11 @@ def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
 def _duplicate_transcript_groups(transcripts: list[Transcript]) -> dict[tuple, list[int]]:
     """Group transcripts by identical exon structure.
 
-    Two transcripts are duplicates when they share the same reference sequence,
-    strand, and bit-identical sorted ``(start, end)`` exon tuple. Such transcripts
-    are mathematically unidentifiable from any read data. Transcripts that share an
-    intron chain but differ in 5'/3' UTR boundaries are *not* duplicates.
+    Two transcripts are duplicates when they share reference, strand and sorted ``(start, end)`` exon tuple; no read
+    data can tell them apart. Transcripts that share an intron chain but differ at a UTR end are not duplicates.
 
-    Returns ``{(ref, strand, exon_tuple): [transcript list-index, ...]}`` containing
-    only groups with two or more members. Exon-less transcripts are ignored.
+    Returns ``{(ref, strand, exon_tuple): [transcript list-index, ...]}`` for the groups of two or more. Exon-less
+    transcripts are ignored.
     """
     from collections import defaultdict
 
@@ -265,12 +247,9 @@ def _duplicate_transcript_groups(transcripts: list[Transcript]) -> dict[tuple, l
 
 
 def _check_no_duplicate_transcripts(transcripts: list[Transcript]) -> None:
-    """Raise ``ValueError`` if two transcripts share an identical exon structure.
+    """Raise ``ValueError`` if two transcripts share an identical exon structure (:func:`_duplicate_transcript_groups`).
 
-    Duplicate transcripts (see :func:`_duplicate_transcript_groups`) are
-    mathematically unidentifiable from any read data and must be resolved before
-    indexing — either by collapsing them in the GTF upstream, or by passing
-    ``--collapse-duplicate-transcripts`` to let rigel drop them automatically.
+    They must be resolved before indexing: in the GTF upstream, or with ``--collapse-duplicate-transcripts``.
     """
     duplicates = _duplicate_transcript_groups(transcripts)
     if not duplicates:
@@ -295,14 +274,11 @@ def _check_no_duplicate_transcripts(transcripts: list[Transcript]) -> None:
 
 
 def _collapse_duplicate_transcripts(transcripts: list[Transcript]) -> list[Transcript]:
-    """Drop duplicate transcripts, keeping the lexicographically-smallest ID per group.
+    """Drop duplicate transcripts (:func:`_duplicate_transcript_groups`), keeping the lexicographically smallest ID per
+    group and recording the dropped IDs as its aliases.
 
-    Duplicate groups are identified exactly as in :func:`_check_no_duplicate_transcripts`
-    (same ref, strand, and sorted exon ``(start, end)`` tuple). Because identical-
-    coordinate transcripts are mathematically unidentifiable in quantification,
-    collapsing each group to a single representative is loss-free for abundance
-    estimation. Returns the filtered list (original order preserved); logs a summary of
-    what was dropped. When there are no duplicates the input list is returned unchanged.
+    Identical transcripts are unidentifiable, so the collapse is loss-free. Returns the filtered list in its original
+    order (the input itself when there are no duplicates) and logs what was dropped.
     """
     duplicates = _duplicate_transcript_groups(transcripts)
     if not duplicates:
@@ -375,12 +351,8 @@ def read_transcripts(
     Parameters
     ----------
     collapse_duplicate_transcripts : bool
-        Controls handling of transcripts with identical exon structure
-        (same ``(ref, strand, sorted exon coordinates)``). When ``False``
-        (default) such duplicates raise ``ValueError``. When ``True`` they
-        are collapsed to a single representative — the lexicographically-
-        smallest transcript ID per group — via
-        :func:`_collapse_duplicate_transcripts`.
+        Transcripts with identical exon structure raise ``ValueError`` when ``False`` (the default), and are collapsed
+        by :func:`_collapse_duplicate_transcripts` when ``True``.
     ref_lengths : dict, optional
         The FASTA's references and lengths. A transcript on a reference it lacks, or running past one's end, follows
         ``gtf_parse_mode``: strict refuses it by name, warn-and-skip drops it with a warning.
@@ -388,10 +360,8 @@ def read_transcripts(
     Raises
     ------
     ValueError
-        If ``collapse_duplicate_transcripts`` is ``False`` and the GTF
-        contains two or more transcripts with identical
-        ``(ref, strand, sorted exon coordinates)``. See
-        :func:`_check_no_duplicate_transcripts`.
+        On duplicate transcripts when ``collapse_duplicate_transcripts`` is ``False``, or on a transcript off the
+        FASTA under strict parsing.
     """
     transcripts = Transcript.read_gtf(
         str(gtf_file),
@@ -421,7 +391,7 @@ def transcripts_to_dataframe(transcripts: list[Transcript]) -> pd.DataFrame:
     return pd.DataFrame(t.to_dict() for t in transcripts)
 
 
-# -- Tolerance-based nRNA merging (unified architecture) ----------------------
+# -- Synthetic nRNA spans: start and end sites clustered within a tolerance ---
 
 
 def _cluster_coordinates(coords: np.ndarray, tolerance: int) -> np.ndarray:
@@ -448,27 +418,17 @@ def create_nrna_transcripts(
     transcripts: list[Transcript],
     tolerance: int = IndexConfig.nascent_tolerance,
 ) -> tuple[list[Transcript], dict[int, tuple], dict[tuple, int], dict[tuple, "Transcript"]]:
-    """Create synthetic nRNA transcripts, detect annotated equivalents.
+    """Create synthetic nRNA transcripts and detect their annotated equivalents.
 
-    This function implements the unified nRNA architecture:
-
-    1. Collect (ref, strand, start, end) for each **multi-exon** transcript.
-    2. Cluster nearby TSS and TES within *tolerance* bp independently.
-       The merged span uses the **outer envelope** (min start, max end)
-       so synthetics are never smaller than any contributing transcript.
-    3. Check if an existing **single-exon** transcript already covers
-       each merged span (exact match or full containment).
-       If so, that transcript is the span's entity — no synthetic needed;
-       its ``span_n_contributors`` counts the span's transcripts.
-    4. For uncovered spans, create a synthetic single-exon ``Transcript``
-       flagged ``is_synthetic = True`` (and ``is_single_exon = True``).
-    5. Synthetic transcripts are **gene-neutral** by design: they receive a
-       sentinel ``g_id`` equal to their own ``t_id`` and ``g_type =
-       "nascent_rna"``.  Rigel is transcript-centric, and a merged nRNA span
-       may be contributed to by transcripts from more than one annotated
-       gene — inheriting one contributor's gene metadata would bake an
-       arbitrary projection into the core index.  Gene-oriented summaries
-       are derived downstream from annotated contributors only.
+    1. Collect (ref, strand, start, end) for each multi-exon transcript.
+    2. Cluster start and end sites within *tolerance* bp, independently. The merged span is the outer envelope
+       (min start, max end), so a synthetic is never smaller than a contributing transcript.
+    3. A single-exon transcript that already covers a merged span (exact match or full containment) is the span's
+       entity, and its ``span_n_contributors`` counts the span's transcripts.
+    4. Each uncovered span becomes a synthetic single-exon ``Transcript`` (``is_synthetic``, ``is_single_exon``).
+    5. Synthetics are gene-neutral: their sentinel ``g_id`` is their own ``t_id`` and ``g_type`` is
+       ``"nascent_rna"``. A merged span may draw on transcripts of several genes, so inheriting one contributor's gene
+       would be arbitrary; gene summaries are derived downstream from annotated contributors only.
 
     Parameters
     ----------
@@ -514,7 +474,7 @@ def create_nrna_transcripts(
     # Store as {t_index: (merged_start, merged_end)}.
     t_to_merged_span: dict[int, tuple[int, int]] = {}
 
-    for (ref, strand), grp in groups.items():
+    for grp in groups.values():
         # Cluster starts
         starts = np.array([t.start for t in grp], dtype=np.int64)
         order_s = np.argsort(starts, kind="mergesort")
@@ -549,9 +509,8 @@ def create_nrna_transcripts(
             t_to_merged_span[t.t_index] = (int(rep_starts[j]), int(rep_ends[j]))
 
     # -- Step 3: Dedup merged spans -------------------------------------------
-    # Track one representative transcript per span only to preserve stable
-    # iteration order across hash-table rebuilds.  Synthetics are gene-neutral
-    # (see docstring) so we do NOT inherit any gene metadata from the rep.
+    # One representative transcript per span, kept only for a stable iteration order; synthetics are
+    # gene-neutral, so nothing is inherited from it
     merged_spans: dict[tuple, Transcript] = {}  # key → first-seen transcript
     span_contributor_count: dict[tuple, int] = collections.defaultdict(int)
     t_to_span_key: dict[int, tuple] = {}  # annotated t_index → span key
@@ -829,9 +788,9 @@ def build_index_artifacts(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Build ``intervals.feather`` and the splice graph (``regions`` + ``boundaries``).
 
-    The per-reference layout (intergenic / genic spans) feeds ONLY the cgranges-style annotated
-    interval table (:func:`_emit_genomic_intervals`). The calibration partition is built
-    INDEPENDENTLY, by :func:`rigel.calibration.splice_graph.build_splice_graph`.
+    The per-reference layout (intergenic / genic spans) feeds only the annotated interval table
+    (:func:`_emit_genomic_intervals`); the calibration partition is built separately, by
+    :func:`rigel.calibration.splice_graph.build_splice_graph`.
 
     Returns ``(intervals_df, regions_df, edges_df)``, typed per the on-disk schemas. ``intervals_df``
     carries the columns of :class:`AnnotatedInterval`, sorted by ``(ref, start, end, strand)``.
@@ -861,13 +820,10 @@ def build_index_artifacts(
 
 
 class TranscriptIndex:
-    """In-memory reference index for fast transcript/gene overlap queries.
+    """The in-memory reference index.
 
-    Use ``TranscriptIndex.build()`` to create the on-disk index from a FASTA +
-    GTF, then ``TranscriptIndex.load()`` to read it back for quantification.
-
-    The gene table is derived on-the-fly from the transcript table, so
-    no gene table is stored on disk.
+    ``TranscriptIndex.build()`` writes the on-disk index from a FASTA and a GTF; ``TranscriptIndex.load()`` reads it
+    back for quantification. The gene table is derived from the transcript table at load, never stored.
     """
 
     def __init__(self):
@@ -882,19 +838,13 @@ class TranscriptIndex:
         self.t_to_g_arr: np.ndarray | None = None
         self.t_to_strand_arr: np.ndarray | None = None
 
-        # Unified cgranges index (collapsed EXON + TRANSCRIPT + INTERGENIC)
-        # Label = index into _iv_type and _iv_t_set lookup lists.
-        self.cr: _cgranges_cls | None = None
-        self._iv_type: list[int] | None = None
-        self._iv_t_set: list[frozenset[int]] | None = None
-
         # Splice-junction exact-match map  (ref, start, end, strand) → frozenset[int]
         self.sj_map: dict | None = None
 
         # Splice-artifact blacklist size, set at load():
         #   None → not loaded
-        #   0    → no blacklisted sj active (artifact detection is OFF)
-        #   >0   → number of blacklisted sj active (detection is ON)
+        #   0    → no blacklisted sj active (artifact detection is off)
+        #   >0   → number of blacklisted sj active (detection is on)
         self.sj_blacklist_size: int | None = None
         # The digest of the blacklist rows handed to the resolver, "none" when none are: set at load(), and read
         # by the scan cache's key, because the blacklist changes what a scan tallies.
@@ -907,9 +857,9 @@ class TranscriptIndex:
         # The same exons as flat CSR arrays, built once by build_exon_csr().
         self._exon_csr_cache: tuple | None = None
 
-        # When True, load() keeps the Python-side lookup structures
-        # (cr, _iv_type, _iv_t_set, sj_map, _t_exon_intervals).
-        self._retain_test_structures: bool = False
+        # When True, load() keeps the Python-side copies of what the native resolver owns
+        # (sj_map, _t_exon_intervals).
+        self._retain_lookup_maps: bool = False
 
     # -- properties -----------------------------------------------------------
 
@@ -919,11 +869,9 @@ class TranscriptIndex:
 
     @property
     def num_genes(self) -> int:
-        """Total rows in ``g_df`` (annotated genes + synthetic nRNA placeholders).
+        """Rows in ``g_df``, annotated genes and synthetic nRNA placeholders, so ``g_index == row``.
 
-        This is the kernel-facing count used by ``_aggregate_to_gene``; it
-        matches ``len(g_df)`` and preserves the ``g_index == row`` invariant.
-        User-facing summaries should use :attr:`num_annotated_genes` instead.
+        User-facing summaries use :attr:`num_annotated_genes`.
         """
         return len(self.g_df)
 
@@ -934,23 +882,16 @@ class TranscriptIndex:
 
     @property
     def partition_hash(self) -> str:
-        """16-hex-char content hash of **the partition the scanner actually sees** — the cache key.
+        """16-hex-char content hash of the partition the scanner sees: a cached scan's key.
 
-        Hashes exactly the ``(boundary_positions, ref_pos_offsets, region_types)`` triple that
-        :meth:`rigel.native.BamScanner.set_regions` receives, plus the reference lengths. Two indexes
-        produce the same hash **iff** a scan against them yields an identically-shaped, identically-keyed
-        accumulator payload — which is precisely the condition under which a cached payload is reusable.
+        Hashes the ``(boundary_positions, ref_pos_offsets, region_types)`` triple that
+        :meth:`rigel.native.BamScanner.set_regions` receives, plus the reference lengths, so two indexes share a
+        hash iff a scan against them yields an identically keyed accumulator payload. Computed on demand, never
+        stored, so it cannot go stale against the Feather files.
 
-        Computed on demand, never stored. A hash written into ``manifest.json`` at build time is a
-        derived value that can go stale against the feathers beside it; this one cannot.
-
-        It covers ``regions.feather`` only, and that is deliberate — it is the key for a cached SCAN,
-        and the scan sees the region-bound array and nothing else. ``edges.feather`` (the flags and
-        reaches) can change without invalidating a payload, and does: a flag-filter change can rewrite
-        every boundary file while leaving every region file byte-identical. Anything that caches a
-        BOUNDARY-derived artifact must carry its own provenance; this hash will not catch it.
-
-        Cost is tens of milliseconds at human scale — negligible against the BAM scan it gates.
+        It covers ``regions.feather`` only, because a scan sees the region bounds and nothing else;
+        ``edges.feather`` can change while every region stays byte-identical. A cache of anything derived from the
+        boundaries needs its own key (:attr:`graph_hash`).
         """
         import hashlib
 
@@ -967,20 +908,12 @@ class TranscriptIndex:
 
     @property
     def graph_hash(self) -> str:
-        """16-hex-char content hash of **everything the accumulator payload depends on** — regions AND boundaries.
+        """16-hex-char content hash of everything the accumulator payload depends on: regions and boundaries.
 
-        `partition_hash` is not enough for a payload, and that is not an oversight in either of
-        them. That hash keys a cached SCAN, and a scan sees the region-bound array; this one keys a
-        cached TALLY, whose sj axis is meaningless against a different sj CSR. The two genuinely
-        differ — a change can rewrite every ``edges.feather`` while leaving every ``regions.feather``
-        byte-identical, so a regions-only key would verify CLEAN against a stale payload and feed
-        every downstream comparison the old sj.
-
-        So it is ``partition_hash``'s inputs plus the sj CSR — the donor offsets, the acceptor
-        region-bound indices and the annotated strands, i.e. exactly what crosses into ``set_sj``.
-
-        Computed on demand, never stored. A hash written beside the data it describes can go stale
-        against it; this one cannot.
+        :attr:`partition_hash` keys a cached scan; this keys a cached tally, whose sj axis is meaningless against a
+        different sj CSR, and the boundaries can change while the regions stay byte-identical. So it hashes
+        ``partition_hash``'s inputs plus the sj CSR that crosses into ``set_sj``: the donor offsets, the acceptor
+        region-bound indices and the annotated strands. Computed on demand, never stored.
         """
         import hashlib
 
@@ -989,9 +922,8 @@ class TranscriptIndex:
         h = hashlib.blake2b(digest_size=8)
         h.update(self.partition_hash.encode())
         sj = build_sj_arrays(self)
-        # `edge_row` is deliberately absent: it is a join key back to `edges_df`, it never crosses
-        # the ABI, and hashing it would invalidate a good payload whenever an unrelated boundary row
-        # moved.
+        # `edge_row` is left out: a join key back to `edges_df` that never crosses the ABI, so hashing it would
+        # invalidate a good payload whenever an unrelated boundary row moved
         for array in (sj.offsets, sj.boundary_right, sj.strand):
             contiguous = np.ascontiguousarray(array)
             h.update(str(contiguous.dtype).encode())
@@ -1130,13 +1062,8 @@ class TranscriptIndex:
         synthetics, t_to_span_key, span_to_syn_idx, covered_equiv = create_nrna_transcripts(
             transcripts, tolerance=nascent_tolerance
         )
-        # Synthetic transcripts are gene-neutral (see create_nrna_transcripts
-        # docstring). Each synthetic gets its OWN dedicated g_index — we do
-        # not map synthetics into any annotated gene, because a merged nRNA
-        # span may be contributed to by transcripts from multiple genes and
-        # rigel is transcript-centric.  The dedicated g_index keeps the
-        # invariant ``t.g_index == row in g_df`` while preventing phantom
-        # contributions from polluting real gene-level summaries.
+        # Each synthetic gets a g_index of its own (they are gene-neutral, see create_nrna_transcripts), which
+        # keeps ``t.g_index == row in g_df`` and keeps synthetics out of annotated genes' summaries
         next_g_index = max((t.g_index for t in transcripts), default=-1) + 1
 
         # Assign t_index and g_index to each synthetic; build span→t_index
@@ -1221,9 +1148,8 @@ class TranscriptIndex:
             mask_df.to_csv(output_dir / UNOBSERVABLE_TSV, sep="\t", index=False)
 
         # -- Manifest --------------------------------------------------------
-        # Everything needed to REBUILD this index: without both the sources and the flags a rebuild
-        # has to infer them. Defaults are written out explicitly, so a rebuilder need not know this
-        # rigel version's defaults to reproduce the artifact.
+        # Everything needed to rebuild this index: the sources and every flag, defaults written out, so a
+        # rebuild need not know this version's defaults
         logger.info("[START] Digesting build sources for the manifest")
         manifest = {
             "format_version": INDEX_FORMAT_VERSION,
@@ -1231,15 +1157,12 @@ class TranscriptIndex:
             "sources": {
                 "fasta": source_record(fasta_file),
                 "gtf": source_record(gtf_file),
-                # `null`, never omitted: absent says "no store was supplied", a missing key would say
-                # "this manifest predates the field".
+                # `null`, never omitted: null says "no store was supplied", a missing key would say the field is unknown
                 "alignable_zarr": (
                     None if alignable_zarr_path is None else source_record(alignable_zarr_path)
                 ),
             },
-            # Hand-listed, and `tests/test_index_provenance.py` reads the expected key set off
-            # `inspect.signature(build)` — so a NEW build parameter that does not reach here fails that
-            # test rather than silently escaping the provenance.
+            # Every parameter of `build` must appear here; a test checks this set against build's signature
             "build_flags": {
                 "collapse_duplicate_transcripts": collapse_duplicate_transcripts,
                 "feather_compression": feather_compression,
@@ -1265,14 +1188,10 @@ class TranscriptIndex:
 
     @staticmethod
     def _build_gene_table(t_df: pd.DataFrame) -> pd.DataFrame:
-        """Derive a gene-level summary table from the transcript table.
+        """Derive the gene table from the transcript table.
 
-        Every ``g_index`` in ``t_df`` gets one row here, including synthetic
-        nRNA gene rows (which are gene-neutral placeholders, one per synthetic
-        transcript).  The ``is_synthetic`` column flags those rows so callers
-        can filter them out of user-facing gene summaries.  Keeping them in
-        the table preserves the invariant ``g_df.index == g_df["g_index"]``
-        used by the EM aggregation kernels.
+        Every ``g_index`` gets one row, including each synthetic transcript's gene-neutral placeholder, flagged
+        ``is_synthetic`` for callers to filter; keeping them preserves ``g_df.index == g_df["g_index"]``.
         """
         g_df = (
             t_df.groupby("g_index", sort=True)
@@ -1298,21 +1217,20 @@ class TranscriptIndex:
         cls,
         index_dir: str | Path,
         *,
-        retain_test_structures: bool = False,
+        retain_lookup_maps: bool = False,
     ) -> "TranscriptIndex":
         """Load an index from the Feather files in *index_dir*.
 
         Parameters
         ----------
-        retain_test_structures : bool
-            If True, keep the Python-side lookup structures (``cr``,
-            ``_iv_type``, ``_iv_t_set``, ``sj_map``, ``_t_exon_intervals``);
-            :meth:`query` and :meth:`get_exon_intervals` raise without them.
+        retain_lookup_maps : bool
+            If True, keep the Python-side copies of what the native resolver owns, ``sj_map`` and
+            the per-transcript exon intervals; :meth:`get_exon_intervals` raises without them.
         """
         index_dir = str(index_dir)
         self = cls()
         self.index_dir = index_dir
-        self._retain_test_structures = retain_test_structures
+        self._retain_lookup_maps = retain_lookup_maps
 
         # -- manifest (version gate) ------------------------------------------
         manifest = load_manifest(index_dir)
@@ -1407,12 +1325,10 @@ class TranscriptIndex:
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
 
-        # -- the splice graph: THE calibration partition ----------------------
-        # The load-time validation is the GRAPH-INTERNAL half only. The checks that need the
-        # transcripts (seconds to reconstruct at human scale) run at BUILD instead, so a `signature`
-        # or `flags` column that has drifted from the annotation loads clean; what this catches is a
-        # graph that is internally inconsistent or truncated, which is what has historically gone
-        # wrong with a stale index.
+        # -- the splice graph: the calibration partition -----------------------
+        # Load checks only that the graph is internally consistent and complete; the checks against the
+        # transcripts run at build, so a `signature` or `flags` column that has drifted from the annotation
+        # loads clean
         from .calibration.splice_graph import load_boundaries, load_regions, validate_graph
 
         logger.debug("Reading splice graph")
@@ -1425,14 +1341,8 @@ class TranscriptIndex:
         iv_df = pd.read_feather(os.path.join(index_dir, INTERVALS_FEATHER))
 
         # -- collapsed interval index -----------------------------------------
-        # Group rows by (ref, start, end, interval_type) and merge
-        # transcript indices into frozensets, one collapsed interval per
-        # unique key.  With retain_test_structures, the Python cgranges
-        # index ``cr`` holds each collapsed interval, labelled by its
-        # position in _iv_type and _iv_t_set.
-        #
-        # Vectorised: encode refs as integers, sort, detect boundaries via
-        # diff, then build frozensets in a single pass.
+        # One collapsed interval per unique (ref, start, end, interval_type), its transcript indices merged into
+        # a frozenset: refs encoded as integers, sorted, group boundaries found by diff, then one pass
         logger.debug("Building collapsed interval index")
         _iv_refs = iv_df["ref"].values
         _iv_starts = iv_df["start"].values
@@ -1467,8 +1377,7 @@ class TranscriptIndex:
         _group_starts = np.where(_changed)[0]
         _group_ends = np.append(_group_starts[1:], n)
 
-        # Pre-convert numpy arrays to Python lists once (avoids per-element
-        # int()/str() overhead in the 1.2 M-iteration loop below).
+        # Python lists once, to avoid per-element int()/str() conversion in the loop below
         _rr_list = _rr.tolist()
         _ss_list = _ss.tolist()
         _ee_list = _ee.tolist()
@@ -1491,19 +1400,10 @@ class TranscriptIndex:
             iv_type.append(itype)
             iv_t_set.append(tset)
             _collapse_keys.append((ref, start, end, itype))
-        if retain_test_structures:
-            cr = _cgranges_cls()
-            for label, (ref, start, end, _itype) in enumerate(_collapse_keys):
-                cr.add(ref, start, end, label)
-            cr.index()
-            self.cr = cr
-            self._iv_type = iv_type
-            self._iv_t_set = iv_t_set
         logger.debug(f"Interval index: {len(iv_df)} rows → {len(iv_type)} collapsed")
 
         # -- per-transcript exon intervals for coverage-weight model ----------
-        # Vectorised: extract raw arrays, sort by (t_index, start), then
-        # split at group boundaries — avoids pandas groupby overhead.
+        # Sorted by (t_index, start), then split at group boundaries
         _iv_itype_arr = iv_df["interval_type"].values
         _iv_tidx_arr = iv_df["t_index"].values
         _iv_start_arr = iv_df["start"].values
@@ -1538,13 +1438,8 @@ class TranscriptIndex:
             s = group_starts[i]
             t_exon_intervals[int(unique_tidx[i])] = _ex_coords[s : s + group_counts[i]]
 
-        # Synthetic nRNA transcripts are intentionally excluded from
-        # cgranges (see _gen_transcript_intervals) but their single-exon
-        # spans must still be recorded for (a) the per-transcript exon
-        # CSR consumed by C++ FL/derive-on-demand code and (b) the
-        # `_t_exon_intervals` accessor used by tests.  Reconstruct them
-        # from t_df (synthetics are single-exon by construction:
-        # exon == [start, end)).
+        # Synthetics are absent from the interval table (see _gen_transcript_intervals), but the exon CSR the
+        # native code reads and `_t_exon_intervals` still need their single exon, [start, end) from t_df
         syn_mask = self.t_df["is_synthetic"].to_numpy(dtype=bool)
         if syn_mask.any():
             syn_t_idx = np.where(syn_mask)[0].astype(np.int32)
@@ -1618,13 +1513,9 @@ class TranscriptIndex:
 
         ctx = FragmentResolver()
 
-        # 0. Seed the ref-ID space in canonical ref_names order. Without this the
-        #    resolver assigns ref ids by first-seen interval order (gene order),
-        #    which scrambles them relative to index.ref_name_to_id and silently
-        #    mis-routes the calibration accumulator deposit on multi-reference
-        #    genomes (the accumulator partition is laid out in ref_names order;
-        #    the deposit indexes it with the resolver's ref id). A single-ref
-        #    synthetic index hides this — the two orderings coincide there.
+        # 0. Seed the ref-ID space in ref_names order. The resolver would otherwise number refs in first-seen
+        #    interval order, and the accumulator deposit, which indexes a partition laid out in ref_names order by
+        #    the resolver's ref id, would be mis-routed on a multi-reference genome (one reference hides it).
         ctx.set_ref_names([str(name) for name in self.ref_names])
 
         # 1. Overlap index from collapsed data
@@ -1669,7 +1560,7 @@ class TranscriptIndex:
             sj_t_offsets,
         )
         # C++ resolver owns the SJ data now; free the Python dict.
-        if not retain_test_structures:
+        if not retain_lookup_maps:
             self.sj_map = None
 
         # 2b. Splice-junction artifact blacklist: used only when the manifest records the store it
@@ -1711,7 +1602,7 @@ class TranscriptIndex:
         # 3. Per-transcript exon CSR: each candidate's introns, for its path through the
         #    gaps and its length. build_exon_csr() is the single owner of this CSR (it is
         #    also consumed by scoring), and it frees ``_t_exon_intervals`` unless
-        #    retain_test_structures.
+        #    retain_lookup_maps.
         exon_offsets, exon_starts_flat, exon_ends_flat, _ = self.build_exon_csr()
         ctx.build_exon_index(
             exon_offsets.tolist(),
@@ -1728,10 +1619,8 @@ class TranscriptIndex:
         #     or not.
         ctx.set_transcript_strands(self.t_to_strand_arr.tolist())
 
-        # 5. nRNA parent-index for derive-on-demand resolution.
-        #    Synthetic nRNAs are intentionally absent from cgranges
-        #    (see _gen_transcript_intervals).  The resolver materialises
-        #    each synthetic candidate from real-tx hits via nrna_parent_.
+        # 5. nRNA parent index: synthetics are absent from the interval table (see _gen_transcript_intervals), so
+        #    the resolver derives each synthetic candidate from its annotated hits through nrna_parent_
         is_synth = self.t_df["is_synthetic"].to_numpy(dtype=bool)
         span_idx = self.t_df["span_t_index"].to_numpy(dtype=np.int32)
         parent = np.full(span_idx.shape, -1, dtype=np.int32)
@@ -1746,51 +1635,11 @@ class TranscriptIndex:
 
         return self
 
-    # -- query methods --------------------------------------------------------
-
-    def query(
-        self,
-        exon: GenomicInterval,
-    ) -> list[tuple[int, int, int, frozenset[int]]]:
-        """Query the collapsed interval index with an aligned exon block.
-
-        Returns one entry per unique ``(ref, start, end, type)`` boundary
-        that overlaps the query.  The transcript set is already
-        pre-collapsed into a ``frozenset[int]``.
-
-        Parameters
-        ----------
-        exon : GenomicInterval
-            An aligned exon block.
-
-        Returns
-        -------
-        list[tuple[int, int, int, frozenset[int]]]
-            List of ``(hit_start, hit_end, interval_type, t_set)``
-            tuples.  ``t_set`` is empty for INTERGENIC intervals.
-        """
-        if self._iv_t_set is None:
-            raise RuntimeError(
-                "query() unavailable: load the index with retain_test_structures=True. "
-                "Use the C++ resolver for production overlap queries."
-            )
-        hits: list[tuple[int, int, int, frozenset[int]]] = []
-        for h_start, h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):
-            hits.append(
-                (
-                    h_start,
-                    h_end,
-                    self._iv_type[label],
-                    self._iv_t_set[label],
-                )
-            )
-        return hits
-
     def get_exon_intervals(self, t_idx: int) -> np.ndarray | None:
         """Return sorted exon ``[start, end)`` intervals for a transcript.
 
         Needs the per-transcript dict, which :meth:`build_exon_csr` frees at load unless the index was
-        loaded with ``retain_test_structures`` — the same contract as :meth:`query`.
+        loaded with ``retain_lookup_maps``.
 
         Parameters
         ----------
@@ -1806,7 +1655,7 @@ class TranscriptIndex:
         if self._t_exon_intervals is None:
             raise RuntimeError(
                 "get_exon_intervals() unavailable: the exon intervals were freed after the exon CSR "
-                "was built. Load the index with retain_test_structures=True."
+                "was built. Load the index with retain_lookup_maps=True."
             )
         return self._t_exon_intervals.get(t_idx)
 
@@ -1815,13 +1664,8 @@ class TranscriptIndex:
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Build CSR arrays for per-transcript exon positions.
 
-        Converts the per-transcript exon dict into flat CSR arrays
-        suitable for direct C++ consumption, eliminating the need for
-        a Python dict → C++ dict-unpacking round-trip.
-
-        The result is cached: subsequent calls return the same arrays
-        and the source ``_t_exon_intervals`` dict is freed after the
-        first call to reclaim memory (unless ``retain_test_structures``).
+        Flattens the per-transcript exon dict into CSR arrays the native code reads directly. The result is
+        cached, and the first call frees ``_t_exon_intervals`` unless the index keeps ``retain_lookup_maps``.
 
         Returns
         -------
@@ -1870,7 +1714,7 @@ class TranscriptIndex:
                 np.cumsum(lengths[:-1], out=cumsum_before[off + 1 : off + n])
 
         # CSR arrays now hold all exon data; free the per-transcript dict.
-        if not self._retain_test_structures:
+        if not self._retain_lookup_maps:
             self._t_exon_intervals = None
         result = (offsets, starts, ends, cumsum_before)
         self._exon_csr_cache = result

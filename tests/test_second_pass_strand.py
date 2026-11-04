@@ -2,10 +2,9 @@
 
 A held record's placements are compared by the product of their factors, so every placement's strand factor must
 be the probability of its observed orientation under its own reading. A placement with a sequenced motif is RNA on
-that motif's strand under every hypothesis, so its factor is ``p`` or ``1 - p``. It was left at 1 on the grounds that
-it is constant within the placement, which holds; but across a multimapper's placements it then outweighed an
-unspliced hit's ½ even on the wrong strand, where its true factor is ``1 - p``. Specification:
-``second_pass.strand_terms``.
+that motif's strand under every hypothesis, so its factor is ``p`` or ``1 - p``, not 1: a constant is harmless within
+one placement, but across a multimapper's placements a 1 outweighs an unspliced hit's ½ even on the wrong strand.
+Specification: ``second_pass.strand_terms``.
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ def _gtf() -> str:
 
 def _scan(tmp_path_factory, label: str, multi_xs):
     """``N_SENSE`` unique fragments spliced across chr1's annotated junction with R1 on the motif's strand, and
-    ``N_MULTI`` multimappers whose first hit is spliced across that junction with R1 on the OTHER strand, its motif
+    ``N_MULTI`` multimappers whose first hit is spliced across that junction with R1 on the other strand, its motif
     tag *multi_xs* (``None``: the aligner wrote none), and whose second hit is unspliced, contained in chr2's first
     exon."""
     import pysam
@@ -159,9 +158,9 @@ def _spliced_placements(scanned):
 def test_an_untagged_annotated_splice_reads_its_junctions_strand(scanned_untagged):
     """The deposit books a placement spliced when an observed intron resolves to an annotated junction, whatever the
     aligner tagged; so the draw reads it as RNA on the strand of the transcripts holding the junction, ``1 - p`` for
-    R1 on the other strand, never gDNA's ½ (`ISSUES: the-second-pass-corrections`, the motif rule).
+    R1 on the other strand, never gDNA's ½.
 
-    PERTURBATION: reading the motif tag alone gives ½ here.
+    Perturbation: reading the motif tag alone gives ½ here.
     """
     scores, _fl, d, p, spliced = _spliced_placements(scanned_untagged)
     for q, hyp in spliced:
@@ -173,7 +172,7 @@ def test_an_observed_annotated_splice_reads_the_RNA_length_law(scanned):
     """A placement whose observed intron resolves to an annotated junction is certified RNA under every one of its
     paths, so each takes the RNA length law; the unconditional anchor is for a path whose component is unknown.
 
-    PERTURBATION: choosing the law from the implied introns alone reads the anchor here.
+    Perturbation: choosing the law from the implied introns alone reads the anchor here.
     """
     scores, fl, d, _p, spliced = _spliced_placements(scanned)
     assert not np.array_equal(fl.rna_pmf, fl.global_pmf), (
@@ -191,7 +190,7 @@ def test_a_spliced_placement_never_takes_gDNAs_bound(scanned):
     books spliced holds no gDNA, so it keeps its own junction traffic even where that is none: chr2's junction,
     which no unique fragment crossed, reads 0 beside a bulk of 1, and chr1's reads its own traffic.
 
-    PERTURBATION: flooring every placement reads chr2's junction at the bulk.
+    Perturbation: flooring every placement reads chr2's junction at the bulk.
     """
     from rigel.calibration.effective_length import observable_contained_eff_length
     from rigel.second_pass import placement_abundance

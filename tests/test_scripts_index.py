@@ -1,15 +1,8 @@
-"""The instrument shelf's index is checked in both directions, because a hand-written one drifts.
+"""The hand-written indexes of `scripts/` are checked against the disk in both directions.
 
-The only index of `scripts/design/` is a table in `CLAUDE.md`, maintained by hand, and an index nobody
-can trust is worse than none: a reader takes its silence as "that script does not exist" and rebuilds
-the instrument. These gates make the table's two promises true — every instrument on disk has a row, so
-nothing is invisible, and every row names a file that exists, so nothing points at a ghost — and they
-hold the same two promises for `scripts/profiling/` against `scripts/README.md`. Every script in all
-three trees must also import and carry a module docstring, since an instrument that raises on import is
-still indexed and still documented. No count of instruments or of lines is carried here: re-derive one
-(`TRAPS: re-record-the-baseline`). The gates deliberately do not judge whether a row's prose is
-ACCURATE — a test cannot, and pretending otherwise would read as more coverage than it has
-(`TRAPS: a-gate-that-reconstructs`).
+`scripts/design/` is indexed by a table in `CLAUDE.md` and `scripts/profiling/` by `scripts/README.md`. Every script
+on disk must have a row and every row must name a file that exists; every script in the three trees must also import
+and carry a module docstring. The gates do not judge whether a row's prose is accurate, which no test can.
 """
 
 from __future__ import annotations
@@ -39,11 +32,7 @@ IN_TABLE = frozenset(_ROW.findall(CLAUDE.read_text()))
 
 SIM_DIR = SCRIPTS / "sim"
 
-#: The third tree. `scripts/profiling/` was covered by no gate while `design/` and `sim/` were, and it
-#: rotted twice with the one defect class the gates here already catch — a driver reading ``sys.argv[1]``
-#: at import time, and an instrument importing two names its helper did not export, so even ``--help``
-#: raised. Only the gate's REACH differed (`TRAPS: a-green-suite-hid-five-dead-instruments`), so the
-#: remedy was to extend it rather than delete the tree.
+#: The third tree, held to the same import and docstring gates as `design/` and `sim/`.
 PROFILING_DIR = SCRIPTS / "profiling"
 
 
@@ -51,7 +40,7 @@ def _instruments(directory: pathlib.Path) -> list[pathlib.Path]:
     return [p for p in directory.glob("*.py") if p.name != "__init__.py"]
 
 
-#: every script the import + docstring gates cover, all THREE trees.
+#: every script the import + docstring gates cover, all three trees.
 ALL_SCRIPTS = sorted(
     _instruments(DESIGN_DIR) + _instruments(SIM_DIR) + _instruments(PROFILING_DIR),
     key=lambda p: (p.parent.name, p.name),
@@ -65,11 +54,10 @@ def _rel(path: pathlib.Path) -> str:
 def _import_error(path: pathlib.Path) -> str | None:
     """Import *path* the way ``python scripts/<tree>/x.py`` would, and return the error, if any.
 
-    Two things the naive spelling gets wrong, both of which read as false failures on instruments that
-    run perfectly (`TRAPS: a-gate-that-reconstructs` — a gate that rebuilds its subject tests the
-    rebuild): the module must be in `sys.modules` BEFORE `exec_module`, or a dataclass resolving its own
-    `__module__` gets `None`; and the script's OWN directory is `sys.path[0]` under a real invocation,
-    which is how the sibling-importing instruments (`_sibling`) resolve.
+    Two things a naive import gets wrong, each a false failure on an instrument that runs: the module must
+    be in `sys.modules` before `exec_module`, or a dataclass resolving its own `__module__` gets `None`; and
+    the script's own directory is `sys.path[0]` under a real invocation, which is how the sibling-importing
+    instruments (`_sibling`) resolve.
     """
     name = f"_gate_{path.stem}"
     spec = importlib.util.spec_from_file_location(name, path)
@@ -89,15 +77,11 @@ def _import_error(path: pathlib.Path) -> str | None:
 
 
 def test_every_instrument_still_imports():
-    """A `src/` deletion kills instruments silently, and nothing else here can see it.
+    """A `src/` deletion breaks instruments silently, since the rest of the suite stays green.
 
-    Being indexed and having a docstring are both true of a script that raises on line 1, so importing
-    is the cheapest check that an instrument is still connected to the code it measures — and it is the
-    one that rots, since a deletion in `src/` is green everywhere else
-    (`TRAPS: a-green-suite-hid-five-dead-instruments`).
-
-    Import only, never execution: an instrument's numbers need its substrate, so this is a connectivity
-    gate rather than a claim that the script is CORRECT (`TRAPS: a-gate-that-reconstructs`).
+    Importing is the cheapest check that an instrument is still connected to the code it measures. Import
+    only, never execution: an instrument's numbers need its substrate, so this is a connectivity gate, not
+    a claim that the script is correct.
     """
     broken = {_rel(p): err for p in ALL_SCRIPTS if (err := _import_error(p))}
     assert not broken, (
@@ -107,7 +91,7 @@ def test_every_instrument_still_imports():
 
 
 def test_every_instrument_is_in_the_index():
-    """A script nobody indexed is a script the next session rebuilds."""
+    """Every instrument on disk has a row in `CLAUDE.md`'s table."""
     missing = sorted(ON_DISK - IN_TABLE)
     assert not missing, (
         f"{len(missing)} instruments are not in CLAUDE.md's table: {missing}. Add a row describing WHAT "
@@ -116,7 +100,7 @@ def test_every_instrument_is_in_the_index():
 
 
 def test_the_index_does_not_point_at_ghosts():
-    """The same rot in the other direction — a row for a file that was deleted."""
+    """Every row in `CLAUDE.md`'s table names a file that exists."""
     ghosts = sorted(IN_TABLE - ON_DISK)
     assert not ghosts, (
         f"CLAUDE.md's table has rows for files that do not exist: {ghosts}. A reader who trusts the table "
@@ -125,11 +109,8 @@ def test_the_index_does_not_point_at_ghosts():
 
 
 def test_the_profiling_tree_is_indexed_in_the_scripts_readme():
-    """The third tree has its own index, and it is `scripts/README.md` rather than `CLAUDE.md`.
-
-    `CLAUDE.md`'s table indexes `scripts/design/`; the profiling drivers are indexed in the README's
-    `profiling/` row instead, so this checks the same two promises there — nothing on disk is invisible,
-    and no row points at a ghost.
+    """The profiling drivers are indexed in `scripts/README.md`'s `profiling/` row, in both directions:
+    every driver on disk is named there, and every name there exists.
     """
     readme = (SCRIPTS / "README.md").read_text()
     # Tree-qualified, like `CLAUDE.md`'s `design/…` rows: a bare basename would let a README mention of
@@ -149,8 +130,8 @@ def test_the_profiling_tree_is_indexed_in_the_scripts_readme():
 
 
 def test_every_instrument_says_what_it_is_for():
-    """A module docstring is the only thing a reader has before running an instrument. One with none is
-    unusable without reading its argument parser. All three trees, the same reach as the import gate.
+    """Every script in the three trees carries a module docstring, the only thing a reader has before
+    running it.
     """
     bare = sorted(
         _rel(p)
@@ -164,7 +145,6 @@ def test_every_instrument_says_what_it_is_for():
 
 
 def test_the_index_is_not_vacuous():
-    """`TRAPS: could-the-arm-have-fired` applied here: if the row regex matched nothing, every test
-    above would pass while checking nothing at all."""
+    """If the row regex matched nothing, every test above would pass while checking nothing."""
     assert IN_TABLE, "no rows parsed from CLAUDE.md — the table format moved"
     assert ON_DISK, "no instruments found — DESIGN_DIR moved"

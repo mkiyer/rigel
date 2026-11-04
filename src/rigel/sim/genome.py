@@ -1,10 +1,5 @@
-"""
-rigel.sim.genome — Mutable genome sequence for simulation.
-
-Generates a random DNA sequence of configurable length using a seeded
-RNG, stores it as a mutable list for O(1) edits (e.g., injecting
-splice-site motifs), and writes FASTA + ``samtools faidx`` index.
-"""
+"""A seeded random genome held as a mutable list for O(1) edits (splice-site motifs), written as FASTA with a
+``samtools faidx`` index."""
 
 import textwrap
 from pathlib import Path
@@ -14,10 +9,8 @@ import pysam
 
 __all__ = ["MutableGenome", "reverse_complement", "random_dna_array", "write_fasta_file"]
 
-# DNA complement table for reverse-complement
 _DNA_COMPLEMENT = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 
-# Integer encoding
 _DNA_BASES = np.array(list("ACGT"), dtype="<U1")
 
 

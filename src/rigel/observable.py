@@ -1,22 +1,20 @@
-"""The observable genome — the bases a read pair can be observed at.
+"""rigel.observable — the observable genome, the bases a read pair can be observed at.
 
-A fragment is observed only where a read pair drawn there is placed back there. A base the reference does not know
-(``N``) is never observed, and neither is one an aligner cannot place; both are mappability. The index records the
-complement of the observable genome as a MASK: half-open runs on each reference, merged, written beside the regions
-(``unobservable.feather``). Its rule:
+A fragment is observed only where a read pair drawn there is placed back there, so neither an unknown base (``N``) nor
+one an aligner cannot place is observable. The index records the complement as a mask: merged half-open runs on each
+reference, written beside the regions (``unobservable.feather``).
 
-* **With an alignable store** — the companion tool that tiles a genome with read pairs, aligns them and counts, per
-  base and read-length bin, the pairs covering the base and those placed back where they came from — the mask is the
-  store's ZERO set at its longest read-length bin: every base no covering pair was placed back at
-  (`AlignableStore.unmappable_regions` at threshold 0). N is in it by its own measure, since no read maps to N, while
-  a short gap whose pairs span it on known sequence stays observable, as it is to an aligner. The longest bin is the
-  universal set: a longer read maps more, so what it cannot place is unobservable to the shorter reads too, but for a
-  sliver. A reference the store does not hold takes its N runs, named in a warning; one it holds at another length is
-  another assembly, and refused.
-* **Without a store** — synthetic genomes, and panels whose simulator places every fragment by truth — the mask is the
-  reference's unknown runs, where a base is unknown iff it is ``N`` or ``n``: the one unobservability known with no
-  aligner's word, and the rule the simulator draws by (`rigel.sim.capture.sampler`,
-  `tests/test_sim_unknown_sequence.py`).
+* With an alignable store (the companion tool that tiles a genome with read pairs, aligns them and counts, per base and
+  read-length bin, the pairs covering the base and those placed back where they came from), the mask is the store's
+  zero set at its longest read-length bin: every base no covering pair was placed back at
+  (``AlignableStore.unmappable_regions`` at threshold 0). It holds every N, since no read maps to N, while a short gap
+  whose pairs span it on known sequence stays observable, as it is to an aligner. The longest bin serves every read
+  length: a longer read maps more, so what it cannot place is unobservable to shorter reads too, up to a sliver. A
+  reference the store lacks takes its N runs, with a warning; one it holds at another length is another assembly, and
+  is refused.
+* Without a store (synthetic genomes, and panels whose simulator places every fragment by truth), the mask is the
+  reference's unknown runs, ``N`` or ``n``: the one unobservability known without an aligner, and the rule the
+  simulator draws by (``rigel.sim.capture.sampler``).
 
 Gate: ``tests/test_index_observable.py``.
 """

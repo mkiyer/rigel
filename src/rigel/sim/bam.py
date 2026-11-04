@@ -1,15 +1,8 @@
-"""BAM record construction and coordinate projection, shared by every simulator path.
+"""BAM record construction and coordinate projection, shared by every simulator writer.
 
-Two groups, with no state between them. The projections map a fragment from a template's own
-coordinates into genomic ones: :func:`transcript_to_genomic_blocks` splits a spliced-transcript
-interval into the exon blocks it covers, flipping it end-for-end on a minus-strand transcript, so
-callers always pass strand-oriented template coordinates.
-
-The BAM group turns blocks into records: :func:`blocks_to_cigar` writes gaps between blocks as
-``N`` operations, so a fragment spanning a junction reads as spliced, and
-:func:`make_aligned_segment` fills in the simulator's standard defaults. The flag constants, the
-two base flags for R1 and R2 and the base quality are here so the writers cannot disagree about
-them.
+:func:`transcript_to_genomic_blocks` maps a strand-oriented transcript interval to the genomic exon blocks it
+covers; :func:`blocks_to_cigar` writes the gaps between blocks as ``N`` operations; :func:`make_aligned_segment`
+fills in the simulator's defaults. The flags and the base quality live here so the writers cannot disagree.
 """
 
 from __future__ import annotations
@@ -45,8 +38,7 @@ FLAG_READ2 = 0x80
 BASE_R1_FLAG = FLAG_PAIRED | FLAG_PROPER_PAIR | FLAG_READ1
 BASE_R2_FLAG = FLAG_PAIRED | FLAG_PROPER_PAIR | FLAG_READ2
 
-#: The quality every simulated base carries, in the FASTQ and in the oracle BAM alike: Phred+33 ``I``,
-#: Q40.
+#: The quality of every simulated base, in the FASTQ and the oracle BAM: Phred+33 ``I``, Q40.
 BASE_QUALITY = "I"
 
 
@@ -55,7 +47,7 @@ def transcript_to_genomic_blocks(
     frag_end: int,
     transcript: Transcript,
 ) -> list[tuple[int, int]]:
-    """Map a spliced transcript-space interval to genomic exon blocks."""
+    """Map a strand-oriented transcript interval to genomic exon blocks, ascending."""
     exons = transcript.exons
 
     if transcript.strand == Strand.NEG:

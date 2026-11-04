@@ -1,16 +1,11 @@
-"""gDNA comes from GENOMIC references, from at least two of them, and never runs past the end of one.
+"""gDNA comes from genomic references, from at least two of them, and never runs past the end of one.
 
-Deriving the gDNA reference set from the annotation puts "has an annotation" in place of "is
-genomic", and an RNA-only spike-in reference carrying one transcript then qualifies — so the panel
-holds gDNA molecules on spike-ins, which cannot exist, on exactly the references whose truth
-abundance is the false-positive control (`TRAPS: annotated-is-not-genomic`). The fixture is built so
-that the annotation proxy would PASS it: its spike-in reference is ANNOTATED, so the two readings
-disagree on it, where a fixture whose RNA-only reference had no annotation would be green with the
-defect present. Requiring at least TWO genomic references is not decoration either, because a
-single-reference synthetic index hides a reference-id-space mismatch that drops nearly every
-fragment inside ``deposit()`` while the golden tests pass
-(`TRAPS: one-reference-hides-refid-bugs`), and the gDNA intergenic branch is its own path through
-the scanner.
+The genomic set is stated, not derived from the annotation: "has an annotation" is not "is genomic", and an RNA-only
+spike-in reference carrying one transcript would otherwise receive gDNA molecules, which cannot exist, on exactly the
+references whose truth abundance is the false-positive control. The fixture's spike-in reference is annotated, so an
+annotation-derived set would include it. At least two genomic references are required because a single-reference
+index hides a reference-id mismatch that drops nearly every fragment inside ``deposit()``, and the gDNA intergenic
+branch is its own path through the scanner.
 """
 
 from __future__ import annotations
@@ -63,7 +58,7 @@ def _transcript(t_id: str, ref: str, exons: list[tuple[int, int]], abundance: fl
 
 @pytest.fixture
 def mixed_reference(tmp_path):
-    """Two genomic references plus one ANNOTATED RNA-only spike-in reference."""
+    """Two genomic references plus one annotated RNA-only spike-in reference."""
     rng = np.random.default_rng(7)
     lengths = {"chrA": 40_000, "chrB": 30_000, SPIKE_REF: 900}
     sequences = {name: "".join(random_dna_array(n, rng)) for name, n in lengths.items()}
@@ -144,7 +139,7 @@ class TestGenomicReferenceSet:
         assert all(count > 0 for count in per_ref.values()), per_ref
 
     def test_g_s6_no_gdna_fragment_runs_past_its_own_reference(self, tmp_path, mixed_reference):
-        """G-S6 — a regression guard. A 400 bp molecule cannot come from a 273 bp contig."""
+        """A 400 bp molecule cannot come from a 273 bp contig."""
         fasta, transcripts, lengths = mixed_reference
         origins = _simulate_gdna(
             tmp_path, fasta, transcripts, genomic_refs=GENOMIC_REFS, n_gdna=4_000
@@ -159,7 +154,7 @@ class TestGenomicReferenceSet:
 
 
 class TestTheClassificationIsAnInput:
-    """The set is stated, never inferred — and a mis-statement must be loud, not silent."""
+    """The set is stated, never inferred, and a mis-statement raises."""
 
     def test_an_annotated_reference_left_out_of_the_set_gets_no_gdna(
         self, tmp_path, mixed_reference

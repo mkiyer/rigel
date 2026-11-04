@@ -15,8 +15,7 @@
 #   5. Commits ("Release vX.Y.Z"), tags `vX.Y.Z`, and pushes both to origin.
 #
 # Pushing the tag triggers .github/workflows/publish.yml, which builds sdist +
-# wheels and uploads to PyPI via OIDC. You no longer need to create a GitHub
-# Release by hand — the tag push is the trigger.
+# wheels and uploads to PyPI via OIDC; the tag push is the only trigger.
 #
 # After this script finishes, wait for the workflow to go green, then run:
 #

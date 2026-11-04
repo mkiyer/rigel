@@ -1,17 +1,14 @@
-"""RNA strand-balance model: the library RNA sense mean ``rna_sense_frac`` (κ).
+"""The library RNA sense fraction κ, ``rna_sense_frac`` (layer 4).
 
-The genuine junctions' sense rate over annotated spliced unique mappers: the ``StrandModel``'s
-:attr:`~rigel.strand_model.StrandModel.p_r1_sense` reads its genuine sense count, the per-sj table with the splice
-artifacts and reversed junctions taken out (:func:`rigel.junction_fit.genuine_sense_fraction`), scaled so that
-``rna_sense_frac = (n_same + 1) / (n_obs + 2)`` here is that fit's κ. It strand-cleans the count density
-and parameterises the per-region strand likelihood.
+κ is the sense rate of the genuine junctions over annotated spliced unique mappers: the ``StrandModel``'s
+:attr:`~rigel.strand_model.StrandModel.p_r1_sense` reads the per-sj table with splice artifacts and reversed junctions
+removed (:func:`rigel.junction_fit.genuine_sense_fraction`), and ``rna_sense_frac = (n_same + 1) / (n_obs + 2)`` here
+is that fit's κ. It strand-cleans the count density and parameterises the per-region strand likelihood. With no
+spliced read the ``Beta(1, 1)`` prior gives κ = ½ and ``fallback_used`` is set; calibration reads such a library as
+unstranded, with a dead strand channel (``region_init.strand_discriminability``), never as an error.
 
-Zero spliced reads give ``Beta(1, 1)`` and hence κ = 0.5, which ``fallback_used`` announces;
-calibration reads such a library as unstranded — its strand channel is dead
-(``region_init.strand_discriminability``) — never as an error.
-
-⛔ κ's own posterior width (:meth:`StrandModel.posterior_variance`) is not a strand overdispersion — the
-spread of individual sj about κ, a different axis, which is 0 by policy.
+κ's own posterior width (:meth:`StrandModel.posterior_variance`) is not a strand overdispersion, the spread of single
+junctions about κ: the strand likelihood is binomial and has none.
 """
 
 from __future__ import annotations
@@ -33,12 +30,8 @@ class StrandBalance:
 
 
 def fit_strand_balance(strand_model: "StrandModels") -> StrandBalance:
-    """RNA strand mean: the posterior mean of the spliced sense rate.
-
-    The RNA strand Beta-Binomial is the posterior-predictive ``BB(n, n_same + 1, n_opp + 1)`` from the
-    ``StrandModel``'s 2×2 spliced-fragment counts, and ``rna_sense_frac`` is its posterior mean. With
-    ``n_obs == 0`` the ``Beta(1, 1)`` prior gives ``rna_sense_frac = 0.5`` (the strand channel adds no pull)
-    and ``fallback_used`` is set.
+    """RNA strand mean: κ's posterior is ``Beta(n_same + 1, n_opp + 1)`` from the ``StrandModel``'s spliced 2×2
+    counts, and ``rna_sense_frac`` is its mean. With ``n_obs == 0`` that is ½ and ``fallback_used`` is set.
     """
     n_obs = float(strand_model.n_observations)
     p_sense = float(strand_model.p_r1_sense)  # MLE n_same / n_obs (0.5 when n_obs == 0)

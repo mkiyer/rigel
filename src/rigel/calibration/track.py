@@ -1,12 +1,7 @@
-"""Genome-wide gDNA track from the calibration result.
+"""The genome-wide per-region gDNA track, a QC view of the calibration result (layer 7).
 
-Calibration solves each region for a gDNA/RNA split; joined to the region
-coordinates this yields a per-region gDNA level across the genome — a QC track
-that traces contamination and, on capture libraries, on-target enrichment.
-
-This is pure persistence: every value is already in ``CalibrationResult`` (the
-per-region deconvolved counts + the density-correct effective length) and
-``RegionArrays`` (the coordinates). No new calibration computation.
+Joined to the region coordinates, calibration's per-region split traces contamination and, on capture libraries,
+on-target enrichment. Every value is already in ``CalibrationResult`` and ``RegionArrays``; nothing is computed anew.
 """
 
 from __future__ import annotations
@@ -20,16 +15,11 @@ from ..config import CONSTANTS
 def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     """Per-region gDNA track: ``(ref, start, end, count_gdna, count_rna, gdna_density, fraction_gdna)``.
 
-    Rows are in genomic order (``RegionArrays`` is sorted by ``(ref_id, start)``),
-    which is the same order the ``CalibrationResult`` per-REGION arrays are aligned
-    to. ``count_gdna`` and ``count_rna`` are the region's contained fragments
-    calibration deconvolves into gDNA and RNA; ``gdna_density`` is the density-correct
-    contained gDNA count per bp (``count_gdna`` / ``gdna_region_eff_len``);
-    ``fraction_gdna`` is gDNA's share of the region's contained count.
-
-    Contained only, deliberately: a contiguous boundary is a 0-bp boundary, so it has no genomic
-    extent to occupy a row of a track, and attributing its crossing count to a flank region would
-    report a density at a position where those fragments were never contained.
+    Rows are in genomic order, the order of the result's per-region arrays. ``count_gdna`` and ``count_rna`` are the
+    region's contained fragments as deconvolved; ``gdna_density`` is ``count_gdna / gdna_region_eff_len``;
+    ``fraction_gdna`` is gDNA's share of the contained count. Boundaries are left out: a 0-bp boundary has no extent
+    to occupy a row, and assigning its crossings to a flank would report a density where those fragments were never
+    contained.
     """
     gdna = np.asarray(calibration.count_gdna_region, dtype=np.float64)
     rna = np.asarray(calibration.count_rna_region, dtype=np.float64)
@@ -65,8 +55,8 @@ def write_bedgraph(
 ) -> None:
     """Write a bedGraph of one track column (default gDNA density) for genome browsers.
 
-    bedGraph is ``chrom  start  end  value`` (tab-separated). A ``track`` header
-    line names it for IGV/UCSC. Rows follow the track's genomic order.
+    bedGraph is ``chrom  start  end  value`` (tab-separated), under a ``track`` header line that names it for
+    IGV/UCSC. Rows follow the track's genomic order.
     """
     with open(path, "w") as fh:
         fh.write(

@@ -1,19 +1,17 @@
-// transfer_kernel.h — the COMPOSITION TRANSFER policy's three kernels, on plain views of their tables:
+// transfer_kernel.h — the composition transfer policy's three kernels, on plain views of their tables:
 //
-//   prepare_block   the BUILDERS for one block (phase 0): every node's own claim, the recipient's rule per directed
-//                   face and the level lanes, written into the tables the caller provides;
-//   pass_block      ONE DIRECTIONAL PASS (phase 1): in chain order the recipient receives what its neighbour sends —
-//                   the face's composition rule and each lane's level — writing a received table in place;
-//   solve_block     THE SOLVE (phase 2, the policy's half): the two received tables into ψ's two channels — the fused
+//   prepare_block   the builders for one block (phase 0): every node's own claim, the recipient's rule per directed
+//                   face and the level lanes, written into tables the caller provides;
+//   pass_block      one directional pass (phase 1): in chain order each recipient receives what its neighbour
+//                   sends (the face's composition rule and each lane's level), written into a received table in place;
+//   solve_block     the solve (phase 2, the policy's half): the two received tables into ψ's two channels, the fused
 //                   λ rows and the cube delivery at the AMBIG nodes.
 //
-// Every table is a VIEW of raw pointers with its sizes, so the same kernels run on the block pipeline's arena
-// (`solve_kernel.cpp`, the production path: one native call per sweep, a pool of threads over the blocks) and on the
-// numpy arrays the gates allocate through the bindings (the same file). The row constructors are `transfer_rows.h`,
-// shared with ψ's kernel. This is the ONE implementation of the policy's arithmetic — there is no Python kernel
-// beside it — and its gates are the transfer gates (`tests/calibration/test_transfer_faces.py`,
-// `test_transfer_policy.py`, `test_transfer_rna_lanes.py`: the tables, single hops of the pass and the delivered
-// channels against independent recomputes) and `profiling/sweep_replay.py replay` on a captured sweep.
+// Every table is a view of raw pointers with its sizes, so the same kernels run on the block pipeline's arena
+// (`solve_kernel.cpp`: one native call per sweep, a thread pool over the blocks) and on numpy arrays passed through
+// the bindings. The row constructors are in `transfer_rows.h`, shared with ψ's kernel. This is the only
+// implementation of the policy's arithmetic; there is no Python twin.
+// Gate: tests/calibration/test_transfer_*.py, against independent recomputes.
 #pragma once
 
 #include <algorithm>
@@ -31,7 +29,7 @@ namespace transfer_kernel {
 
 using namespace transfer_rows;
 
-// ═══ THE BUILDERS (phase 0) ═══════════════════════════════════════════════════════════════════════════
+// ═══ The builders (phase 0) ═══════════════════════════════════════════════════════════════════════════
 
 // ---- the boundary flags (calibration/splice_graph.py) ----------------------------------------------
 
@@ -39,17 +37,17 @@ constexpr int TSS_POS = 1 << 0, TSS_NEG = 1 << 1, TES_POS = 1 << 2, TES_NEG = 1 
 constexpr int DON_POS = 1 << 4, DON_NEG = 1 << 5, ACC_POS = 1 << 6, ACC_NEG = 1 << 7;
 constexpr int TERMINUS = TSS_POS | TSS_NEG | TES_POS | TES_NEG;
 constexpr int SJ_FLAGS = DON_POS | DON_NEG | ACC_POS | ACC_NEG;
-//: a transcript body that extends genomic-RIGHT from its terminus leaves the OUTSIDE flank on the left
+// a transcript body that extends genomic-right from its terminus leaves the outside flank on the left
 constexpr int BODY_RIGHT = TSS_POS | TES_NEG, BODY_LEFT = TES_POS | TSS_NEG;
-//: a DONOR bit marks the intron's LOW end (the intron lies right), an ACCEPTOR its HIGH end
+// a donor bit marks the intron's low end (the intron lies right), an acceptor bit its high end
 constexpr int INTRON_RIGHT = DON_POS | DON_NEG, INTRON_LEFT = ACC_POS | ACC_NEG;
-//: a strand's four boundary bits and its terminus bits, by strand 0 = +, 1 = −
+// a strand's four boundary bits and its terminus bits, by strand 0 = +, 1 = −
 constexpr int ALL_BITS[2] = {TSS_POS | TES_POS | DON_POS | ACC_POS, TSS_NEG | TES_NEG | DON_NEG | ACC_NEG};
 constexpr int TERM_BITS[2] = {TSS_POS | TES_POS, TSS_NEG | TES_NEG};
 
-//: the splice-out row's marginal over log rho is taken on equal-probability nodes of the standard normal —
-//: quadrature resolution, like ψ's tilt nodes, not a model constant: Φ⁻¹((t + ½)/9), t = 0..8
-//: (`scipy.stats.norm.ppf`, every digit numpy prints — a hand-typed digit off at 1e-8 moved f_g by 1e-7)
+// The splice-out row's marginal over log rho uses equal-probability nodes of the standard normal,
+// Φ⁻¹((t + ½)/9) for t = 0..8: a quadrature resolution like ψ's tilt nodes, not a model constant. The values are
+// `scipy.stats.norm.ppf`'s at full double precision, and must stay so: f_g is sensitive to their last digits.
 constexpr int N_MARGINAL_NODES = 9;
 constexpr double MARGINAL_NODES[N_MARGINAL_NODES] = {
     -1.5932188180230507, -0.9674215661017012, -0.5894557978497783, -0.28221614706250814, 0.0,
@@ -87,10 +85,8 @@ inline void junction_flanks(int f, int64_t left, int64_t right, int64_t& c, int6
     else if (to_left && !to_right) { c = left; e = right; }
 }
 // read_column: the genome-strand column strand `col`'s RNA reads on — its own when the library reads sense
-// (kappa >= 1/2, or no fitted strand model), the other under an antisense protocol
-inline int read_column(int col, bool has_strand, double kappa) {
-    return (!has_strand || kappa >= 0.5) ? col : 1 - col;
-}
+// (kappa >= 1/2), the other under an antisense protocol
+inline int read_column(int col, double kappa) { return kappa >= 0.5 ? col : 1 - col; }
 
 // ---- the chain as the builders read it ------------------------------------------------------------
 
@@ -104,12 +100,11 @@ struct Chain {
     const double *route_lo, *route_hi, *sj_lo, *sj_hi;  // (n, 2) by transcript strand
     const double* flux;                                 // the sj count over both strands
     const bool* terminal;  // the caller's terminals (`ChainView.terminal`): the regions that admit no RNA strand
-    bool has_strand;
     double kappa;
 
-    // the two structural classes of a non-exon region: an INTRON admits a strand; an INTERGENIC region admits none
-    // and is a terminal, read from the caller and never re-derived here, so the sweep's cut, the library's gDNA
-    // coordinate and these builders read one predicate
+    // the two structural classes of a non-exon region: an intron admits a strand; an intergenic region admits none
+    // and is a terminal. Terminals come from the caller and are never re-derived here, so the sweep's cut, the
+    // library's gDNA coordinate and these builders read one predicate.
     bool intron(int i) const { return !is_bnd[i] && !is_exon[i] && (fp[i] || fn[i]); }
     bool intergenic(int i) const { return terminal[i]; }
     int64_t other_flank(int64_t b, int64_t e) const { return right[b] == e ? left[b] : right[b]; }
@@ -133,7 +128,7 @@ struct Chain {
         }
         norm_inplace(out, K);
     }
-    // a node's own strand MODE and its log-odds variance; false at a vertex mode
+    // a node's own strand mode and its log-odds variance; false at a vertex mode
     bool strand_mode(int64_t y, double& f, double& v) const {
         const double c0 = cnt[2 * y], nn = c0 + cnt[2 * y + 1];
         const double p = c0 / nn;
@@ -148,7 +143,7 @@ struct Chain {
 
 // ---- the tables the builders write ----------------------------------------------------------------
 
-struct RowsOut {  // OPTIONAL ROWS over the nodes: a matrix (n, K), unfilled, and a presence mask (n,)
+struct RowsOut {  // optional rows over the nodes: a matrix (n, K), unfilled, and a presence mask (n,)
     double* rows; bool* mask; int K;
     void set(int64_t i, const double* row) { std::copy(row, row + K, rows + i * K); mask[i] = true; }
     void set_zero(int64_t i) { std::fill(rows + i * K, rows + (i + 1) * K, 0.0); mask[i] = true; }
@@ -192,8 +187,8 @@ struct FacesOut {  // the composition rules as typed tables over (destination, s
     }
 
     void shared_density(int64_t s, int64_t i, Scratch& S) {
-        // The same density mixture has different COUNT odds on different component opportunities.
-        // Pull the source profile back at lambda_src(lambda_dst); equal ratios remain the identity.
+        // The same density mixture has different count odds on different component opportunities, so the
+        // source profile is pulled back at lambda_src(lambda_dst); equal ratios leave it unchanged.
         if (!(c->a_g[s] > 0.0 && c->a_r[s] > 0.0 && c->a_g[i] > 0.0 && c->a_r[i] > 0.0)) return;
         const double shift = std::log(c->a_g[s] / c->a_r[s]) - std::log(c->a_g[i] / c->a_r[i]);
         if (shift == 0.0) { set(s, i, FORWARD); return; }
@@ -208,10 +203,9 @@ struct LaneOut {  // a level lane's tables: faces, two-sided faces, own levels, 
     double* witness; bool* witness_mask;     // (n, 2), (n,)
 };
 
-// ---- the builders — one per shipped message ---------------------------------------------------------
+// ---- the builders, one per message ------------------------------------------------------------------
 
 inline void claims(const Chain& c, RowsOut& own, Scratch& S) {
-    if (!c.has_strand) return;
     for (int x = 0; x < c.n; ++x) {
         const bool single = c.fp[x] != c.fn[x];
         if (!(single && c.has_own[x])) continue;
@@ -275,7 +269,7 @@ inline void terminus_rules(const Chain& c, FacesOut& F, Scratch& S) {
                   c.a_r[b], c.a_r[o], rate);
             F.set(b, o, TRANSPORT, S.a.data(), nullptr, c.n_u[b], s_out);
         }
-        // THE LEVEL RULE: the boundary's gDNA level into the inside region
+        // the level rule: the boundary's gDNA level into the inside region
         if (!(c.is_exon[i] && (c.is_exon[o] || c.intron(o)))) continue;
         if (!(c.n_u[b] > 0 && c.n_u[i] > 0 && c.a_g[b] > 0 && c.a_g[i] > 0)) continue;
         if (!boundary_shares_strand(c.fp[b], c.fn[b], c.fp[i], c.fn[i])) continue;
@@ -286,7 +280,7 @@ inline void terminus_rules(const Chain& c, FacesOut& F, Scratch& S) {
         const double lr = std::log(r);
         double v_pair = std::max(0.0, lr * lr - (1.0 / c.n_u[i] + 1.0 / total_i));
         const double r_mode = (c.n_u[i] / c.a_g[i]) / (total_b / c.a_g[b]);
-        if (c.has_strand && c.has_own[b] && c.has_own[i]) {
+        if (c.has_own[b] && c.has_own[i]) {
             double f_b, v_b, f_i, v_i;
             if (c.strand_mode(b, f_b, v_b) && c.strand_mode(i, f_i, v_i)) {
                 const double f_pred = std::min(f_b / r_mode, 1.0 - EPS);
@@ -302,7 +296,6 @@ inline void terminus_rules(const Chain& c, FacesOut& F, Scratch& S) {
 }
 
 inline void alternative_splice_site(const Chain& c, FacesOut& F, Scratch& S) {
-    if (!c.has_strand) return;
     for (int64_t b = 0; b < c.n; ++b) {
         if (!(c.is_bnd[b] && c.left[b] >= 0 && c.right[b] >= 0)) continue;
         const int64_t lo = c.left[b], hi = c.right[b];
@@ -374,8 +367,8 @@ inline void rna_lane(const Chain& c, const RowsOut& own, int strand, double rho_
     const bool* free = strand == 0 ? c.fp : c.fn;
     const bool* exon_s = strand == 0 ? c.exon_pos : c.exon_neg;
     const int col = strand;
-    const int col_read = read_column(col, c.has_strand, c.kappa);
-    const double kappa_read = c.has_strand ? std::max(c.kappa, 1.0 - c.kappa) : 0.5;
+    const int col_read = read_column(col, c.kappa);
+    const double kappa_read = std::max(c.kappa, 1.0 - c.kappa);
     const int all_bits = ALL_BITS[strand], term_bits = TERM_BITS[strand];
     auto intron_s = [&](int64_t r) { return !c.is_bnd[r] && free[r] && !exon_s[r]; };
     for (int64_t i = 0; i < c.n; ++i) {
@@ -439,8 +432,8 @@ inline void rna_lane(const Chain& c, const RowsOut& own, int strand, double rho_
     }
 }
 
-// THE BUILDERS IN ONE CALL: every node's own claim, the face rules, the lanes — the gDNA lane only where the library
-// has a gDNA coordinate (`gdna` nullptr otherwise; a gDNA-free library still has its RNA lanes)
+// The builders in one call: every node's own claim, the face rules and the lanes. The gDNA lane is built only where
+// the library has a gDNA coordinate (`gdna` is nullptr otherwise); a gDNA-free library still has its RNA lanes.
 inline void prepare_block(const Chain& c, RowsOut& own, FacesOut& F, LaneOut* gdna, LaneOut& pos, LaneOut& neg,
                           double rho_gdna, double rho_rna, Scratch& S) {
     claims(c, own, S);
@@ -454,7 +447,7 @@ inline void prepare_block(const Chain& c, RowsOut& own, FacesOut& F, LaneOut* gd
 }
 
 
-// ═══ THE PASS (phase 1) ═══════════════════════════════════════════════════════════════════════════════
+// ═══ The pass (phase 1) ═══════════════════════════════════════════════════════════════════════════════
 
 // ---- the tables as the pass reads them ------------------------------------------------------------
 
@@ -555,7 +548,7 @@ inline bool lane_emit(const LaneView& ln, LevelsView& L, int K, int s, int x, in
     return true;
 }
 
-// a FULL recipient re-prices row x in place
+// a full recipient re-prices row x in place
 inline void lane_receive(const LaneView& ln, LevelsView& L, int K, const double* lam, int x, int side, Scratch& S) {
     const double n_sent = L.count[x], a_sent = L.opportunity[x];
     const double cnt = ln.count[x], a_x = ln.a[x];
@@ -646,7 +639,7 @@ inline const double* faces_apply(const FacesView& F, int i, int side, const doub
     return out;
 }
 
-// ONE DIRECTIONAL PASS: for every destination in `seq` (chain order) with a neighbour `nbr[i] >= 0` that is not a
+// One directional pass: for every destination in `seq` (chain order) with a neighbour `nbr[i] >= 0` that is not a
 // terminal, the face's composition rule and each lane's level, written into the received table in place. The
 // backbone's `has_neighbour` bit is the caller's to set.
 inline void pass_block(const double* lam, int K, const int64_t* seq, int n, const int64_t* nbr, const bool* term,
@@ -678,16 +671,18 @@ inline void pass_block(const double* lam, int K, const int64_t* seq, int n, cons
 }
 
 
-// ═══ THE SOLVE (phase 2) ══════════════════════════════════════════════════════════════════════════════
+// ═══ The solve (phase 2) ══════════════════════════════════════════════════════════════════════════════
 //
-// At every node the two held compositions add (independent witnesses about one slot); a held gDNA level on either
+// At every node the two held compositions add (independent witnesses about one slot). A held gDNA level on either
 // side is read as the node's composition row through its own total (two bounds on one density intersect) and joins
-// them; the fused row is re-normalised. THE CEILINGS at single-strand nodes: an RNA level of the node's live strand,
-// read ONLY from a face that sent no composition (a licensed face's map already carries the flux and a composition
-// already carries its sender's witnesses), intersected with the node's own junction flux at that face, says "at most
-// this much gDNA" and joins the row. THE CUBE at AMBIG nodes: per strand the held levels intersected with the node's
-// own level's lower side, delivered with the node's total, RNA opportunity and the lanes' reference density — the
-// ingredients ψ evaluates at its own θ nodes (`psi_kernel.h`).
+// them, and the fused row is re-normalised.
+// Ceilings at single-strand nodes: an RNA level of the node's live strand, read only from a face that sent no
+// composition (a licensed face's map already carries the flux, and a composition already carries its sender's
+// witnesses), is intersected with the node's own junction flux at that face; it says "at most this much gDNA" and
+// joins the row.
+// The cube at AMBIG nodes: per strand, the held levels intersected with the node's own level's lower side, delivered
+// with the node's total, RNA opportunity and the lanes' reference density; ψ evaluates them at its own θ nodes
+// (`psi_kernel.h`).
 
 struct SolveLane {  // a level lane as the solve reads it
     bool built = false; int field = 0;
@@ -750,7 +745,7 @@ inline std::pair<bool, int> solve_block(const double* lam, int K, int n, const R
             }
         }
         if (fused) { norm_inplace(r, K); live = true; }
-        // THE CEILINGS at a single-strand node, from the faces that sent no composition
+        // the ceilings at a single-strand node, from the faces that sent no composition
         if (!ambig) {
             for (int s = 0; s < 2; ++s) {
                 const SolveLane& L = rna[s];
@@ -773,7 +768,7 @@ inline std::pair<bool, int> solve_block(const double* lam, int K, int n, const R
                 live = true;
             }
         }
-        // THE CUBE at an AMBIG node: per strand, the held levels and the own level's lower side intersected
+        // the cube at an AMBIG node: per strand, the held levels and the own level's lower side intersected
         if (ambig && rna[0].built && rna[1].built && !rna[0].empty[i]) {
             if (d >= cube.capacity) throw std::runtime_error("transfer_solve: the cube table is full");
             bool any_profile = false;

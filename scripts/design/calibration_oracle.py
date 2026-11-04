@@ -1,27 +1,22 @@
 """What is the certified per-object truth? Run this before debugging calibration against anything.
 
-For every REGION and BOUNDARY slot of the chain this instrument derives the accumulator's own tally
-(``count``, the mixture calibration deconvolves), the realized ``n_gdna`` / ``n_nrna`` / ``n_mrna``
-from the origin-split oracle caches (each partition scanned by the same accumulator), the same RNA
-split again by transcript strand (``n_rna_pos`` / ``n_rna_neg``), and ``true_f_g``, all in the drained
-frame production calibrates. It refuses to write the table unless its named gates pass: sum-to-full
-(the partitions reconstruct every bank of the full scan), partition-projects-exactly (``n_gdna + n_nrna
-+ n_mrna == count`` at every slot), gdna-field-uniformity (at capture-OFF every slot's expected gDNA
-count is ``rho_ref x E_g``, scored as Poisson z per slot and a ratio-z per object class, the signature
-of a counting or divisor bug), exact-zeros (a bank that must be empty is identically zero, and an empty
-bank is vacuous rather than a pass), nascent-in-annotation (nascent RNA only where a transcript span
-admits RNA) and rna-strands-close (the strand split and the mature/nascent split are two partitions of
-the same reads). Two certification levels: COMPOSITION (``true_f_g``, no opportunity model anywhere in
-it) and FIELD (gdna-field-uniformity as well, so a density ``n/E`` may be trusted). A merely plausible
-oracle is how a calibration bug and a truth bug survive each other. The analytic per-object RNA
-expectation is not certified here; the RNA truth is realized. No solver runs. Writes ``slot_truth.npz``
-beside each oracle cache, which every slot-scored instrument reads.
+For every slot of the chain, in the drained frame production calibrates, this derives the accumulator's tally
+``count``, the realized ``n_gdna`` / ``n_nrna`` / ``n_mrna`` from the origin-split oracle caches, the RNA split by
+transcript strand (``n_rna_pos`` / ``n_rna_neg``), and ``true_f_g``. No solver runs. It writes
+``slot_truth.npz`` beside each oracle cache only if the gates pass:
 
-``--build`` first BUILDS the origin-split caches every truth instrument reads — the oracle BAM split by
-read-name origin, each partition scanned by the production scanner, and the two transcript-strand
-partitions beside them — keyed by the shipped scan-cache loader and checked sum-to-full against the
-scan cache, so a stale cache is refused rather than reused, in parallel over conditions with ``--jobs``
-(one condition saturates one core at ~2 GB), then certifies. ``panel.py cache`` runs it.
+- sum-to-full: the partitions reconstruct every bank of the full scan;
+- partition-projects-exactly: ``n_gdna + n_nrna + n_mrna == count`` at every slot;
+- gdna-field-uniformity (capture-OFF only): each slot's gDNA count is Poisson about ``rho_ref x E_g``, scored as
+  a z per slot and a ratio-z per object class, which is how a counting or divisor bug shows;
+- exact-zeros: a bank that must be empty is identically zero (an empty selection is vacuous, not a pass);
+- nascent-in-annotation: nascent RNA only where a transcript span admits RNA;
+- rna-strands-close: the strand split and the mature/nascent split partition the same reads.
+
+Composition certification (every gate but uniformity) makes ``true_f_g`` sound; field certification adds the
+uniformity gate, so a density ``n/E`` may be trusted too. ``--build`` first builds the origin-split caches (the
+oracle BAM split by read-name origin, each part scanned by the production scanner), one condition per ``--jobs``
+worker at about 2 GB each, then certifies; ``panel.py cache`` runs it.
 
 Usage::
 
@@ -67,19 +62,17 @@ from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
-from calibration._oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth, lift_drain_parts  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "calibration"))
+from _oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth, lift_drain_parts  # noqa: E402
 
 _EPS = 1.0e-12
-#: |z| above which a slot is flagged under gdna-field-uniformity. 4 sigma two-sided is ~6e-5 expected
-#: false flags per slot; the gate is on the flag rate and the class ratio, not on any single slot.
+#: |z| above which gdna-field-uniformity flags a slot (~6e-5 false flags per slot); the gate reads the flag rate.
 _Z_FLAG = 4.0
-#: Poisson slots below this expectation are pooled into their class rather than z-scored singly:
-#: the normal approximation is not honest there, and a per-slot z on a tiny lambda flags noise.
+#: Slots below this Poisson expectation are not z-scored singly, where the normal approximation fails.
 _MIN_LAMBDA = 5.0
 
 
-# ── the gates, arrays in / verdict out, so the self-test can feed synthetic inputs ────────────────
+# ── the gates: arrays in, verdict out, so the self-test can feed synthetic inputs ─────────────────
 
 
 def gate_partition(count: np.ndarray, n_g, n_n, n_m, atol: float = 1e-6) -> dict:
@@ -94,9 +87,8 @@ def gate_uniformity(n_g: np.ndarray, eff_g: np.ndarray, classes: np.ndarray,
                     select: np.ndarray) -> dict:
     """gdna-field-uniformity: Poisson uniformity of the realized gDNA field against ``rho x E_g``, per class.
 
-    The class ratio-z is the counting-bug detector: a deposit-rule or divisor bug is per kind
-    (regions vs boundaries vs a signature class), so it shows as one class sitting off the shared
-    rate while per-slot flags stay unremarkable. Vacuous when the selected field is empty.
+    A deposit-rule or divisor bug shows as one class off the shared rate, which the class ratio-z catches.
+    Vacuous when the selected field is empty.
     """
     sel = select & (eff_g > 0.0)
     tot_n, tot_e = float(n_g[sel].sum()), float(eff_g[sel].sum())
@@ -114,8 +106,7 @@ def gate_uniformity(n_g: np.ndarray, eff_g: np.ndarray, classes: np.ndarray,
         cn, ce = float(n_g[m].sum()), float(rho * eff_g[m].sum())
         cz = (cn - ce) / np.sqrt(max(ce, _EPS))
         rows.append({"class": cls, "n": cn, "expected": ce, "ratio": cn / max(ce, _EPS), "z": cz})
-        # class totals are large, so a real bias is hundreds of sigma; 6 allows the slight
-        # non-independence of the shared rho-hat without admitting any real bias.
+        # class totals are large, so a real bias is hundreds of sigma; 6 allows for the shared rho-hat
         if abs(cz) > 6.0:
             ok = False
     return {"gate": "gate gdna-field-uniformity", "ok": ok and flag_rate < 1e-3, "vacuous": False,
@@ -132,8 +123,7 @@ def gate_zero(n: np.ndarray, select: np.ndarray, what: str) -> dict:
 
 def gate_rna_strands_close(n_pos: np.ndarray, n_neg: np.ndarray, n_m: np.ndarray,
                            n_n: np.ndarray, atol: float = 1e-6) -> dict:
-    """rna-strands-close: the transcript-strand split and the mature/nascent split are two partitions
-    of the same RNA reads, so they must agree at every slot."""
+    """rna-strands-close: the transcript-strand and mature/nascent splits must agree at every slot."""
     gap = np.abs((n_pos + n_neg) - (n_m + n_n))
     worst = float(gap.max()) if gap.size else 0.0
     return {"gate": "gate rna-strands-close", "ok": bool(worst <= atol), "worst_gap": worst,
@@ -151,9 +141,8 @@ def gate_nascent_scope(n_n: np.ndarray, rna_admissible: np.ndarray) -> dict:
 #: Either strand's exon bit: a boundary flank is "exonic" if any transcript has an exon there.
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
 
-#: The seven slot populations, in report order: mutually exclusive and exhaustive over the chain, asserted
-#: in :func:`stratum_labels`. The boundary axis is split by whether mature RNA can cross, not by whether a
-#: sj attaches: an ``exon|exon`` boundary sits inside a contiguous exonic stretch that mature RNA crosses.
+#: The seven slot populations, in report order, a partition of the chain (asserted in :func:`stratum_labels`).
+#: Boundaries are split by whether mature RNA can cross them, not by whether a splice junction attaches.
 STRATA = (
     "R intergenic",
     "R intron",
@@ -168,25 +157,17 @@ STRATA = (
 def stratum_labels(chain, statics, region_arrays) -> np.ndarray:
     """Per-slot stratum label, from the annotation alone, asserted to partition the chain.
 
-    The boundary classification is by exon-ness of the two flanks, because a boundary's
-    unspliced-crossing population is the molecules that crossed it contiguously, which mature RNA can
-    do only where the template is contiguous exon on both sides:
+    A boundary is classified by the exon-ness of its two flanks, since mature RNA crosses a boundary
+    contiguously only where both sides are exon:
 
-    ================  =================================================================================
-    ``B exon|intron``  exactly one flank exonic, both flanks inside a gene: mature RNA cannot cross, it
-                       splices, so near-pure gDNA under sparse unspliced nascent; in-gene, so the
-                       on-target gDNA anchor under capture
-    ``B exon|exon``    both flanks exonic, an alternative splice site inside a contiguous exonic
-                       stretch; mature RNA crosses it freely, so not an anchor
-    ``B intron|intron`` neither flank exonic, both inside a gene (adjacent introns of different
-                       signature); off-target, nascent-only RNA
-    ``B gene edge``    at least one flank intergenic, a TSS/TES interface; the ``g1_locked`` boundary
-                       class, structurally pure gDNA on both strands
-    ================  =================================================================================
+    - ``B exon|intron``: one flank exonic, both in a gene; mature RNA splices rather than crossing, so near-pure
+      gDNA, and the on-target gDNA anchor under capture;
+    - ``B exon|exon``: both flanks exonic (an alternative splice site); mature RNA crosses freely;
+    - ``B intron|intron``: neither flank exonic, both in a gene; off-target, nascent-only RNA;
+    - ``B gene edge``: at least one flank intergenic (a TSS/TES); the ``g1_locked`` class, pure gDNA.
 
-    ``R intergenic`` is cross-checked against ``g1_locked``, the predicate the solver pins on; if the
-    pair separates, the labels describe a different population than the one the solver reasons over,
-    and this raises.
+    ``R intergenic`` must equal ``g1_locked`` on regions, the predicate the solver pins on; this raises if they
+    separate.
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -197,8 +178,7 @@ def stratum_labels(chain, statics, region_arrays) -> np.ndarray:
     slot_type = np.where(is_region, rtype[np.clip(obj, 0, max(n_regions - 1, 0))], -1)
     locked = g1_locked(np.asarray(statics.free_pos, bool), np.asarray(statics.free_neg, bool))
 
-    # the two flanks' signatures, through the chain's own adjacency (a BOUNDARY always has a REGION on
-    # both sides, so the ``-1`` branch has no cases — `build_region_statics` makes the same argument)
+    # the two flanks' signatures through the chain's adjacency (a boundary always has a region on both sides)
     slot_sig = np.where(is_region, sig[np.clip(obj, 0, max(n_regions - 1, 0))] if n_regions else 0, 0)
     left = np.clip(np.asarray(chain.left), 0, max(int(chain.n_slots) - 1, 0))
     right = np.clip(np.asarray(chain.right), 0, max(int(chain.n_slots) - 1, 0))
@@ -234,11 +214,8 @@ def stratum_labels(chain, statics, region_arrays) -> np.ndarray:
 
 
 def slot_counts(payload, region_arrays, chain) -> np.ndarray:
-    """One payload's unspliced/contained count per slot, the mixture ψ deconvolves and nothing else:
-    ``region_contained`` at a REGION, ``boundary_unspliced`` at a BOUNDARY, exactly the populations
-    :attr:`RegionGeometry.unspliced_count` carries, so a truth built from the origin partitions and an
-    estimate built from the full payload are on one basis.
-    """
+    """One payload's unspliced count per slot, the mixture ψ deconvolves: ``region_contained`` at a region and
+    ``boundary_unspliced`` at a boundary, as :attr:`RegionGeometry.unspliced_count` carries."""
     sub = CalibrationSubstrate.from_payload(payload, region_arrays)
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -259,8 +236,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
     lift: dict = {}
     kw = calibration_inputs(cache, index, lift_out=lift)
-    # the drained frame: the truth certified here must describe the tally production calibrates, so
-    # the whole and every partition below are drained consistently.
+    # the drained frame: the whole and every partition below are drained consistently, as production calibrates
     payload = kw["payload"]
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     statics = build_region_statics(chain, region_arrays, bflags)
@@ -270,9 +246,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     )
     label = stratum_labels(chain, statics, region_arrays)
 
-    # sum-to-full is a hard gate inside from_parts, asserted on the drained frame, which makes it
-    # the lift's own end-to-end identity check; an exception is the verdict. The parts are loaded
-    # pass-one and drained by replaying the whole's choices (`from_cached_parts`).
+    # sum-to-full is a hard gate inside from_cached_parts on the drained frame; an exception is the verdict
     root = Path(suite) / "oracle_cache" / condition
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
     truth = OracleTruth.from_cached_parts(payload, parts, lift)
@@ -281,8 +255,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     n_g = slot_counts(truth.parts["gdna"], region_arrays, chain)
     n_n = slot_counts(truth.parts["nrna"], region_arrays, chain)
     n_m = slot_counts(truth.parts["mrna"], region_arrays, chain)
-    # the same RNA reads again, keyed by transcript strand: the per-component truth. Refused rather
-    # than skipped if absent: an instrument that silently drops to two arms would measure a different thing.
+    # the same RNA reads keyed by transcript strand, the per-component truth; refused if absent
     try:
         strand_parts = {k: read_scan_cache(root / k, index).payload for k in RNA_STRAND_ORIGINS}
     except Exception as exc:  # noqa: BLE001
@@ -291,10 +264,8 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
             "built by `calibration_oracle.py --build` (via `panel.py cache`) alongside the three ORIGINS ones; "
             "without them there is no per-strand RNA truth and the three-arm map cannot be scored."
         ) from exc
-    # the second exact partitioning of the same whole, drained with the same choice queue, gdna
-    # first in both lists so the shared member takes the identical choice slice and the two
-    # partitionings' RNA remainders stay consistent (`lift_drain_parts`' docstring). `drain` is pure,
-    # so the undrained `parts["gdna"]` loaded above is reusable here.
+    # the second partitioning, drained with the same choice queue; gdna comes first in both lists so it takes the
+    # identical choice slice, and `drain` is pure, so the undrained `parts["gdna"]` is reused
     strand_drained, n_amb_strand = lift_drain_parts(
         lift, [parts["gdna"], strand_parts["rna_pos"], strand_parts["rna_neg"]]
     )
@@ -305,8 +276,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     obj = np.asarray(chain.obj_idx, np.int64)
     is_region = kind == REGION
     left = np.clip(np.asarray(chain.left, np.int64), 0, int(chain.n_slots) - 1)
-    # a slot's reference: a REGION's own; a BOUNDARY sits between two regions of ONE reference,
-    # so its left flank's region names it.
+    # a slot's reference: a region's own; a boundary takes its left flank's (both flanks share one reference)
     ref = np.where(is_region, region_arrays.ref_id[np.clip(obj, 0, len(region_arrays.ref_id) - 1)], -1)
     ref = np.where(is_region, ref, ref[left])
     eff_g = np.asarray(geom.eff_gdna, np.float64)
@@ -316,8 +286,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     gdna_refs = np.array(sorted({int(r) for r in ref[n_g > 0]}), np.int64)
 
     verdicts = [gate_partition(count, n_g, n_n, n_m), gate_rna_strands_close(n_rp, n_rn, n_m, n_n)]
-    # the drained frame's own report, informational and never a pass/fail: the leak is production's
-    # behaviour (`ISSUES: drain-contaminates-certified-rna`) and the ambiguity bounds the lift.
+    # informational, never pass/fail: the leak is production's drain behaviour and the ambiguity bounds the lift
     verdicts.append({
         "gate": "drained-frame report", "ok": True, "vacuous": False,
         "gdna_spliced_leak": truth.gdna_spliced_leak,
@@ -335,7 +304,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
         if gdna_refs.size == 0:
             verdicts.append({"gate": "gate gdna-field-uniformity", "ok": True, "vacuous": True,
                              "note": "no gDNA anywhere (a zero condition)"})
-    # refs that carry no gDNA at all must be exactly zero (ERCC backbone, and every ref at g00)
+    # refs that carry no gDNA at all must be exactly zero (the ERCC backbone, and every ref in a zero-gDNA condition)
     verdicts.append(gate_zero(n_g, ~np.isin(ref, gdna_refs), "gdna outside genomic refs"))
     verdicts.append(gate_nascent_scope(n_n, rna_ok))
 
@@ -352,15 +321,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
 
 
 def report(condition: str, verdicts: list[dict]) -> tuple[bool, bool]:
-    """Print the verdicts and return ``(composition_ok, field_ok)``, two certification levels because
-    the gates certify two different things.
-
-    COMPOSITION-certified (sum-to-full, partition-projects-exactly, exact-zeros, rna-strands-close,
-    nascent-in-annotation): ``true_f_g`` is sound, realized counts against realized counts through one
-    accumulator, with no opportunity model anywhere in it. FIELD-certified (gdna-field-uniformity as
-    well): the deposit geometry also matches the opportunity model, so a density ``n/E`` may be
-    trusted too. The table is stamped with both verdicts rather than one.
-    """
+    """Print the verdicts and return ``(composition_ok, field_ok)``, the two certification levels."""
     comp_ok, field_ok = True, True
     print(f"\n== {condition}")
     for v in verdicts:
@@ -386,7 +347,7 @@ def report(condition: str, verdicts: list[dict]) -> tuple[bool, bool]:
     return comp_ok, field_ok
 
 
-# ── self-test: every gate shown to fire on the defect it exists for ───────────────────────────────
+# ── self-test: every gate fires on the defect it exists for ───────────────────────────────────────
 
 
 def self_test() -> int:
@@ -453,11 +414,8 @@ def self_test() -> int:
 
 
 def build_one(index, suite: Path, condition: str, work_dir: Path, force: bool = False) -> None:
-    """One condition's oracle cache under ``<suite>/oracle_cache/<condition>``: the three origin
-    partitions and the two transcript-strand ones (`_oracle_arms.load_or_build_oracle`, which
-    re-runs sum-to-full against the scan cache on a hit and rebuilds on a miss). The whole is never
-    copied: every reader takes it from ``<suite>/scan_cache/<condition>``. The drained frame: the
-    partitions are lifted by replaying the whole's drain, exactly as `derive` reads them."""
+    """One condition's oracle cache under ``<suite>/oracle_cache/<condition>``, via
+    `_oracle_arms.load_or_build_oracle`; the whole stays in ``<suite>/scan_cache/<condition>``."""
     OA = sibling("_oracle_arms.py")
     scan_dir = Path(suite) / "scan_cache" / condition
     if not (scan_dir / "payload.npz").is_file():
@@ -474,9 +432,8 @@ def build_one(index, suite: Path, condition: str, work_dir: Path, force: bool = 
 
 def build(index, suite: Path, conds: list[str], jobs: int, work_dir: Path, args_index: Path,
           force: bool = False) -> None:
-    """Every condition's cache, in parallel over conditions when ``jobs > 1`` — each worker is this
-    script on one condition with ``--skip-certify``; a worker that fails is rebuilt serially here, so
-    the numbers do not depend on ``jobs``."""
+    """Every condition's cache, in parallel when ``jobs > 1``: each worker is this script on one condition with
+    ``--skip-certify``, and a failed worker's condition is rebuilt serially here."""
     todo = list(conds)
     failed = set(todo)  # what the serial pass must build itself
     if jobs > 1 and len(todo) > 1:
@@ -533,7 +490,7 @@ def main() -> int:
     for c in conds:
         try:
             table, verdicts = derive(index, region_arrays, args.suite, c)
-        except Exception as exc:  # noqa: BLE001 — **sum-to-full** failures surface here and must be a verdict
+        except Exception as exc:  # noqa: BLE001 — sum-to-full failures surface here and must be a verdict
             print(f"\n== {c}\n   ⛔ gate sum-to-full / cache validation FAILED: {type(exc).__name__}: {exc}")
             bad += 1
             continue

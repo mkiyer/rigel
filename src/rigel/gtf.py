@@ -1,8 +1,6 @@
-"""rigel.gtf — Streaming GTF/GFF2 parser.
+"""rigel.gtf — a streaming GTF/GFF2 parser.
 
-Reads GENCODE-style GTF annotation files (plain or gzipped) into
-``GTFRecord`` dataclasses.  Used by ``rigel.index`` during reference
-index construction.  Python-only; no C++ dependency.
+Reads GENCODE-style GTF files, plain or gzipped, into ``GTFRecord`` dataclasses for ``rigel.index``'s build.
 """
 
 import gzip
@@ -21,9 +19,7 @@ AttrValue = str | list[str]
 
 @dataclass(slots=True)
 class GTFRecord:
-    """
-    Represents a single line in a GTF file
-    """
+    """One GTF line, its coordinates converted to 0-based half-open."""
 
     seqname: str
     source: str
@@ -36,24 +32,19 @@ class GTFRecord:
     attrs: dict[str, AttrValue] = field(default_factory=dict)
     tags: set[str] = field(default_factory=set)
 
-    # Pre-compiled regex for performance
-    # Matches: key "value";  or  key value;  — the last attribute's `;` is optional, as many files omit it
-    # Group 1: key, Group 2: quoted value, Group 3: unquoted value
+    # `key "value";` or `key value;`, the last attribute's `;` optional, as many files omit it.
+    # Group 1: key; group 2: quoted value; group 3: unquoted value.
     ATTR_TOKEN_PATTERN = re.compile(r'\s*([^";\s]+)\s+(?:"([^"]*)"|([^;]+))\s*(?:;|$)')
 
     @classmethod
     def from_str(cls, s: str) -> "GTFRecord":
-        """
-        Parses a raw GTF string line into a GTF object.
-        """
+        """Parse one GTF line."""
         fields = s.rstrip("\n").split("\t")
         if len(fields) < 9:
             raise ValueError(f"Malformed GTF line, expected 9 columns: {s}")
 
-        # Parse coordinates (Convert 1-based to 0-based)
+        # GTF is 1-based inclusive; convert to 0-based half-open
         try:
-            # GTF is 1-based inclusive.
-            # We convert to 0-based exclusive (Python/BED standard)
             start_pos = int(fields[3]) - 1
             end_pos = int(fields[4])
         except ValueError:
@@ -61,7 +52,7 @@ class GTFRecord:
         if end_pos <= start_pos:
             raise ValueError(f"{fields[2]} ends ({fields[4]}) before it starts ({fields[3]})")
 
-        # Parse Score: '.' -> None
+        # score: '.' -> None
         score_val = None
         if fields[5] != ".":
             try:
@@ -69,12 +60,11 @@ class GTFRecord:
             except ValueError as exc:
                 raise ValueError(f"Non-numeric score in line: {fields[5]}") from exc
 
-        # Validate phase field (CDS: 0/1/2 or '.')
+        # phase: 0, 1, 2 or '.'
         phase_val = fields[7]
         if phase_val != "." and phase_val not in {"0", "1", "2"}:
             raise ValueError(f"Invalid phase value: {phase_val}")
 
-        # Parse Attributes
         parsed_attrs, parsed_tags = cls._parse_attrs(fields[8])
 
         return cls(
@@ -91,13 +81,9 @@ class GTFRecord:
         )
 
     def __str__(self) -> str:
-        """
-        Convert GTF object back to string representation.
-        """
-        # Convert score and phase back to string
+        """The record as a GTF line, 1-based."""
         score_str = "." if self.score is None else str(self.score)
 
-        # Reconstruct attributes field
         attr_parts = []
         for k, v in self.attrs.items():
             if isinstance(v, list):
@@ -113,7 +99,7 @@ class GTFRecord:
             self.seqname,
             self.source,
             self.feature,
-            str(self.start + 1),  # Convert back to 1-based
+            str(self.start + 1),  # back to 1-based
             str(self.end),
             score_str,
             self.strand,
@@ -128,8 +114,7 @@ class GTFRecord:
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
     ) -> Generator["GTFRecord", None, None]:
-        """
-        Generator to parse lines from an iterator (file object or list).
+        """Parse GTF lines from an iterable, skipping blank and comment lines.
 
         Parameters
         ----------
@@ -156,10 +141,7 @@ class GTFRecord:
 
     @classmethod
     def _parse_attrs(cls, raw_attr_field: str) -> tuple[dict[str, AttrValue], set[str]]:
-        """
-        Parse the attribute column into attrs and tags.
-        Preserves duplicate keys (e.g., multiple ont values in GENCODE) as lists.
-        """
+        """Parse the attribute column into attrs and tags; a repeated key (such as GENCODE's ``ont``) becomes a list."""
         attrs: dict[str, AttrValue] = {}
         tags: set[str] = set()
 
@@ -188,10 +170,7 @@ class GTFRecord:
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
     ) -> Generator["GTFRecord", None, None]:
-        """
-        Parse a GTF file and yield GTF objects.
-        Handles both plain text and gzip files (.gz).
-        """
+        """Parse a GTF file, plain or gzipped (``.gz``)."""
         filepath = Path(filepath)
         if not filepath.exists():
             raise FileNotFoundError(f"GTF file not found: {filepath}")

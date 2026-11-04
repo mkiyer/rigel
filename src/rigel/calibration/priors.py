@@ -1,17 +1,10 @@
-"""assemble_priors — the bridge from CalibrationResult to the per-locus EM prior.
+"""``assemble_priors``: from a finished ``CalibrationResult`` to the per-locus EM prior inputs (layer 7, assemble).
 
-Turns the calibration's per-object deconvolved mass and geometric length into the two per-locus numbers
-the locus EM takes from calibration: ``gdna_count``, calibration's count of the locus's gDNA fragments,
-and the gDNA component's effective length, gDNA's conserved shares of the locus's objects at their capture
-efficiencies (``Σ S_r c_r + Σ M_e c_e``).
-
-The EM's two pseudocounts are built from ``gdna_count`` and the EM's OWN counts of the locus's fragments
-(``pipeline.em_pseudocounts``): calibration says how much of the locus is gDNA, the EM says how many
-fragments the locus holds. Calibration's RNA count does not enter, so the two stages never have to agree
-on which fragments are spliced. The prior does not attribute RNA mass to individual transcripts, which is
-what the EM is for.
-
-Layer: LAYER 7. It reads a finished `CalibrationResult` and never re-solves anything.
+Calibration gives the locus EM two numbers per locus: ``gdna_count``, its count of the locus's gDNA fragments, and the
+gDNA component's effective length, gDNA's conserved shares of the locus's objects at their capture efficiencies
+(``Σ S_r c_r + Σ M_e c_e``). The EM forms its two pseudocounts from ``gdna_count`` and its own count of the locus's
+fragments (``pipeline.em_pseudocounts``), so calibration's RNA count does not enter and the two stages never have to
+agree on which fragments are spliced. Nothing here re-solves calibration or attributes RNA to transcripts.
 """
 
 from __future__ import annotations
@@ -42,14 +35,11 @@ def _region_locus_shares(
     multi_loci: "list[MultiLocus]",
     n_loci: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(region_idx, locus_idx, share)`` — THE region↔locus overlap, computed exactly once.
+    """``(region_idx, locus_idx, share)``: each region's fractional overlap with each ``MultiLocus`` block.
 
-    For each region, the fractional overlap with each ``MultiLocus`` block, normalised across the loci
-    it touches. A region overlapping no locus (intergenic) emits nothing and is thereby dropped.
-
-    Published as triples rather than folded straight into sums, because the BOUNDARY axis needs the
-    same shares (:func:`_boundary_locus_shares`) and a second traversal computing the same predicate is how
-    two homes for one rule come about.
+    The overlaps are normalised across the loci a region touches; a region overlapping no locus (intergenic) emits
+    nothing. They are returned as triples so the boundary projection (:func:`_boundary_locus_shares`) reuses them
+    rather than re-deriving the overlap.
     """
     r_idx: list[int] = []
     l_idx: list[int] = []
@@ -75,9 +65,9 @@ def _region_locus_shares(
         blocks = blocks_by_ref.get(ref_id)
         if not blocks:
             continue
-        # Each block overlaps one contiguous run of regions, `[first, last)` (`overlapping_region_runs`).
-        # Visiting each region's overlapping blocks in sorted-block order keeps every float sum in the same
-        # order as a scan over all earlier blocks, while touching only the pairs that overlap.
+        # Each block overlaps one contiguous run of regions, `[first, last)` (`overlapping_region_runs`). A region's
+        # blocks are visited in sorted-block order, so every float sum has a fixed order and only overlapping pairs
+        # are touched.
         b_start = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
         b_end = np.fromiter((b[1] for b in blocks), dtype=np.int64, count=len(blocks))
         first, last = overlapping_region_runs(
@@ -132,33 +122,23 @@ def _boundary_locus_shares(
     *,
     region_shares: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(edge_idx, locus_idx, share)`` — a locus's boundaries are the boundaries that touch its regions.
+    """``(edge_idx, locus_idx, share)``: a locus's boundaries are the boundaries that touch its regions.
 
-    THE RULE: a BOUNDARY owns the fragments that cross it, a REGION owns only the
-    fragments contained in it, and nothing is re-attributed between them. Every region contributes both of
-    its boundaries, so a locus of ``k`` contiguous regions carries ``k + 1`` boundaries — its two OUTER ones
-    included, which is correct because a fragment crossing a locus's outer boundary overlaps the locus
-    and is therefore one of its EM candidates.
+    A boundary owns the fragments that cross it and a region only those contained in it; nothing is re-attributed
+    between them. Every region contributes both of its boundaries, so a locus of ``k`` contiguous regions carries
+    ``k + 1``, its two outer ones included, because a fragment crossing an outer boundary overlaps the locus and is one
+    of its EM candidates::
 
         share(e, L) = max( share(lo(e), L), share(hi(e), L) )
 
-    ``max`` and not a sum: the rule is *"if a region is part of a locus, its two boundaries are part of that
-    locus"*, so a boundary inherits the stronger of its two flanks' memberships rather than accumulating
-    them.
+    ``max``, not a sum: a boundary belongs to a locus if either flank does, with the stronger membership. A boundary
+    must be projected as a boundary rather than folded into a flank region's total, because the region shares divide
+    by region length and a 0-bp boundary has no extent. Shares sum above 1 only at a contended boundary (adjacent
+    regions in different multi-loci), which carries no mass: a fragment crossing it would be a candidate in both loci,
+    and the union-find would have merged them. Its shares are therefore not renormalised.
 
-    ⛔ Do not fold a boundary's mass into one flank region's total instead: ``_region_locus_shares``
-    divides by the region length and a 0-bp boundary has no extent, so such a fold then needs an
-    intergenic re-key to stop a locus's far-left boundary vanishing into its dropped intergenic flank.
-    Projecting a boundary AS a boundary removes both.
-
-    Shares can sum above 1 only for a CONTENDED boundary — adjacent regions in different multi-loci —
-    and that boundary carries no mass: any fragment crossing it overlaps transcripts in both loci, so it is
-    a candidate in both and the union-find has already merged them into one multi-locus. The
-    configuration is therefore unreachable for a boundary with mass, and its shares are not renormalised.
-
-    ``region_shares`` is :func:`_region_locus_shares`'s triples when the caller already holds them, which is
-    what makes that function's "computed exactly once" true on the pipeline's path: `assemble_priors` needs
-    the region projection itself and hands the same triples down instead of paying for a second traversal.
+    ``region_shares`` takes :func:`_region_locus_shares`'s triples when the caller already holds them, so the overlap
+    is computed once on the pipeline's path.
     """
     r_idx, l_idx, w = (
         _region_locus_shares(region_arrays, multi_loci, n_loci)
@@ -240,67 +220,43 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior inputs from the calibration result.
 
-    A REGION OWNS THE FRAGMENTS CONTAINED IN IT; A BOUNDARY OWNS THE FRAGMENTS THAT CROSS IT; NOTHING
-    IS RE-ATTRIBUTED. A locus collects both kinds of object — its regions by genomic
-    overlap (:func:`_region_locus_shares`) and its boundaries by touching those regions
-    (:func:`_boundary_locus_shares`)::
+    A locus collects its regions by genomic overlap (:func:`_region_locus_shares`) and its boundaries by touching those
+    regions (:func:`_boundary_locus_shares`)::
 
         gdna_count = Σ_regions share(r,L)·gdna_mass_region[r] + Σ_boundaries share(e,L)·gdna_mass_boundary[e]·q[e]
 
         gdna_eff_len = Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·M_e·c̃_e
 
-    ``c̃`` is each object's capture efficiency, the calibration's own
-    (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``; `capture_efficiency`), ``S_r`` a
-    region's contained support and ``M_e`` gDNA's conserved share at a boundary
+    ``c̃`` is each object's calibrated capture efficiency (``CalibrationResult.gdna_capture_efficiency_region`` /
+    ``_boundary``), ``S_r`` a region's contained support and ``M_e`` gDNA's conserved share at a boundary
     (``gdna_boundary_conserved_len``).
 
-    THE COUNT IS A CONSERVED FRAGMENT COUNT. The EM compares it with its own count of the locus's fragments
-    (``pipeline.em_pseudocounts``), which holds each fragment ONCE, since a multi-locus is a connected
-    component of transcripts linked by shared fragments. The region term is already such a count
-    (a contained fragment deposits on exactly one region). Only the CROSSING term is converted, by one
-    multiply against ``q = boundary_mass_per_crossing`` — the accumulator's own ``mass / count`` at that
-    boundary, which undoes the ``+1``-per-crossed-boundary inflation. ``q`` is a geometry,
-    ``[min(w−1,a) + min(w−1,b)] / 2(w−1)`` under a uniform field.
+    The count is a conserved fragment count, because the EM compares it with its own count of the locus's fragments,
+    which holds each fragment once. A contained fragment deposits on exactly one region, so the region term already is
+    one; the crossing term is converted by ``q = boundary_mass_per_crossing``, the accumulator's own ``mass / count``
+    at the boundary, which undoes the one-per-crossed-boundary inflation (under a uniform field
+    ``q = [min(w−1,a) + min(w−1,b)] / 2(w−1)``). The outer boundaries are included because their straddling fragments
+    are EM candidates of the locus, so a first-base count of the locus's fragments differs from this one by exactly
+    those straddlers.
 
-    ⛔ A locus's OUTER boundaries are included, and that is the point: a fragment crossing a locus's
-    boundary overlaps the locus, so it is one of its EM candidates and must load its prior. It follows
-    that a *first-base* count of the locus's fragments is NOT this quantity — it drops exactly the
-    straddlers — so an oracle built that way reads a one-way excess here that is semantics, not error.
+    The length counts what the count counts: gDNA's share of the same objects at their own efficiencies. ``M_e``
+    splits a crossing start over the boundaries its fragment crosses as the deposit rule splits the fragment
+    (``effective_length.conserved_cut_shares``), so the locus holds each start once, as the count holds each fragment
+    once; the crossing support ``E_f[w − 1]`` would count a start at every boundary crossed and, over pieces shorter
+    than a fragment, read gDNA at a fraction of the field's density. ``M_e`` must stay gDNA's own geometry, never the
+    count's pooled ``q``, which is RNA's where RNA holds most of a boundary's crossings, and the length must keep the
+    boundary objects whose masses the count keeps.
 
-    THE gDNA EFFECTIVE LENGTH COUNTS WHAT THE COUNT COUNTS. The count is the calibration's
-    gDNA mass on the locus's regions and on its boundaries, so the length the EM divides that count by is
-    gDNA's share of those same objects at their own efficiencies: every region's contained support ``S_r``
-    at ``c̃_r`` and every boundary's CONSERVED SHARE ``M_e`` at ``c̃_e``. The deposit rule counts a crossing
-    fragment at every boundary it crosses and splits its unit over them, and ``M_e`` is gDNA's starts split
-    the same way (`effective_length.conserved_cut_shares`), so the locus's objects hold each start once — as
-    the count holds each fragment once — however many boundaries its fragment crosses. The crossing support
-    ``E_f[w − 1]`` counts a start at every boundary its fragment crosses instead, and over a locus of pieces
-    shorter than a fragment it reads the gDNA at a fraction of the field's density (gate:
-    ``test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fragment_once``, a
-    brute-force enumeration of the deposit rule on three 40-bp pieces). The share is gDNA's own geometry,
-    never the count's pooled ``q``, which is RNA's where RNA holds most of a boundary's crossings. ⛔ One
-    other form is refused by measurement: a length over the locus's BASES at the regions' efficiencies
-    alone drops the boundary objects whose masses the count keeps, and where the calibration's crossing
-    masses sit above their geometry the gDNA component reads denser than its objects, over-claims the
-    exonic unspliced fragments and every probed gene under-calls (the test chromosome's `g50 ss.99 ON` row:
-    gene-level Σ|Δ| 25,633 → 38,174 against 23,967 here).
+    With no landscape, or a one-basin landscape, every efficiency is exactly 1 and ``gdna_eff_len == Σ S_r + Σ M_e``
+    bit-identically: an unenriched library contracts nothing. Under capture each share is weighted by its object's
+    yield against the bulk, the unit the transcripts' lengths share (``capture_eff_length``), so a common factor
+    cancels in the EM. There is no floor and no shrinkage: the efficiencies are posterior means under the landscape,
+    so a locus with little evidence reads the population's level.
 
-    The bedrock invariant — factor 1 under uniform gDNA. With no landscape, or a landscape of one basin,
-    every efficiency is exactly 1 and ``gdna_eff_len == Σ S_r + Σ M_e`` bit-identically: an unenriched
-    library contracts NOTHING. Under capture every object contributes its share at its efficiency, a relative
-    yield against the bulk, so the length weighs the probed footprint by its enrichment; the transcripts'
-    lengths are in the same unit (`capture_eff_length`), and a factor common to all of them cancels in the EM.
-
-    ⛔ NO RNA COUNT. The EM's gDNA share is gDNA's share of EVERY fragment in the locus, spliced ones
-    included: the deterministic spliced fragments skip the E-step but are added to every M-step, and a
-    transcript's length counts its spliced start positions. Calibration's RNA count is its UNSPLICED
-    RNA, which states the unspliced fragments' split as the whole locus's and leans the EM toward gDNA in
-    proportion to the spliced share (``tests/test_em_pseudocounts.py``). The RNA side is therefore the EM's
-    own count less this one, formed where the EM's count exists.
-
-    No floor and no shrinkage: the efficiencies are posterior means under the population landscape, so a
-    locus with little evidence reads the population's own level, never a fabricated 0 and never the
-    uncontracted span.
+    No RNA count is produced. The EM's gDNA share is a share of every fragment in the locus, spliced ones included
+    (they skip the E-step but enter every M-step), while calibration's RNA count is its unspliced RNA only, so using it
+    would lean the EM toward gDNA in proportion to the spliced share. The RNA side is the EM's own count less this
+    one, formed where the EM's count exists.
     """
     if calibration.n_regions != region_arrays.n_regions:
         raise ValueError(
@@ -319,15 +275,15 @@ def assemble_priors(
     def by_boundary(values):
         return _sum_by_locus(e_idx, e_lid, e_w, values, n_loci)
 
-    # THE gDNA COUNT. The region term is already a fragment count; only the crossing term is converted, by the
-    # accumulator's own conserved mass-per-crossing at that boundary.
+    # the gDNA count: the region term is already a fragment count; the crossing term is converted by the
+    # accumulator's own mass-per-crossing at the boundary
     q = np.asarray(calibration.boundary_mass_per_crossing, dtype=np.float64)
     gdna_boundary = np.asarray(calibration.count_gdna_boundary, dtype=np.float64) * q
     gdna_locus = np.maximum(
         by_region(calibration.count_gdna_region) + by_boundary(gdna_boundary), 0.0
     )
 
-    # THE gDNA EFFECTIVE LENGTH: gDNA's conserved shares of the count's own objects at their efficiencies.
+    # the gDNA effective length: gDNA's conserved shares of the count's own objects at their efficiencies
     region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
     boundary_m = np.maximum(
         np.asarray(calibration.gdna_boundary_conserved_len, dtype=np.float64), 0.0
@@ -338,23 +294,20 @@ def assemble_priors(
 
     return LocusPriors(
         gdna_count=gdna_locus,
-        # In the efficiencies' unit, the bulk: a captured locus's yield exceeds its plain support, as its
-        # transcripts' do (`capture_eff_length`). No floor: a locus with no start position has a yield of 0,
-        # and the EM reads a zero yield as "cannot emit".
+        # in the efficiencies' unit, the bulk; no floor, because the EM reads a zero yield as "cannot emit"
         gdna_eff_len=eff_len,
     )
 
 
 def intergenic_gdna_rate(calibration: "CalibrationResult", region_arrays: "RegionArrays") -> float:
     """``λ``, the gDNA rate at an intergenic place: fragments per start of the gDNA law, in the unit every capture
-    efficiency is read in, so that it stands beside a locus's gDNA component, whose rate is its count over its
+    efficiency is read in, so it stands beside a locus's gDNA component, whose rate is its count over its
     capture-weighted length.
 
-    An intergenic place is uncaptured (owner, 2026-10-27), so its rate is the bulk, ``gdna_bulk_density``: the
-    uncaptured gDNA density, a mode of the landscape. The pooled intergenic count over its support is not, under
-    capture: an aligner places captured genic fragments on intergenic copies, and on the STAR rung those copies hold a
-    third of the intergenic count. With no landscape every efficiency is 1 and the unit is a start, and the rate is the
-    intergenic regions' gDNA count over their contained support.
+    Intergenic sequence is uncaptured, so the rate is the bulk, ``gdna_bulk_density``: the uncaptured gDNA density, a
+    mode of the landscape. Under capture the pooled intergenic count over its support is not the bulk, because an
+    aligner places captured genic fragments on intergenic copies. With no landscape every efficiency is 1, the unit is
+    a start, and the rate is the intergenic regions' gDNA count over their contained support.
     """
     if calibration.gdna_bulk_density is not None:
         return float(calibration.gdna_bulk_density)

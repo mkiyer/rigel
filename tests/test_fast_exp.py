@@ -1,12 +1,9 @@
-"""`fast_exp`, the vectorised exponential the EM's E-step kernel runs, against `math.exp`.
+"""`fast_exp`, the vectorised exponential the EM's E-step kernel runs, against `math.exp` (libm, so a real
+reference rather than a second approximation).
 
-Accuracy over a uniform sweep of the full range and at the three regimes that behave differently —
-near zero, moderate, deep negative — then the edge cases: exact zero, the cutoff and its
-continuity, negative infinity, odd-length and single-element and empty arrays. The vector and
-scalar paths must agree with each other, since an odd tail is handled by the scalar code, and the
-worst-case error is bounded in ULP rather than by a tolerance anyone picked. `math.exp` delegates
-to libm, which is what the C++ would call, so it is a real reference rather than a second
-approximation.
+Accuracy over the full range and at near-zero, moderate and deep-negative inputs; the edge cases (zero, the cutoff,
+negative infinity, short and empty arrays); agreement between the vector lanes and the scalar tail; and the
+worst-case error in ULP.
 """
 
 import math
@@ -90,7 +87,7 @@ class TestFastExpEdgeCases:
         assert result[0] == 0.0
 
     def test_odd_length_array(self):
-        """Odd-length input exercises the scalar tail after NEON pairs."""
+        """Odd-length input exercises the scalar tail after the vector blocks."""
         x = np.array([-1.0, -2.0, -3.0])
         result = _fast_exp_test_array(x)
         expected = np.array([math.exp(-1.0), math.exp(-2.0), math.exp(-3.0)])
@@ -108,18 +105,17 @@ class TestFastExpEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# NEON vs scalar consistency
+# Vector vs scalar consistency
 # ---------------------------------------------------------------------------
 
 
 class TestFastExpNeonScalarConsistency:
-    """Ensure NEON-processed lanes match scalar-processed lanes."""
+    """Lanes the vector path computes match lanes the scalar tail computes (NEON 2-wide, AVX2 4-wide, AVX-512
+    8-wide)."""
 
     def test_paired_vs_tail(self):
-        """Compare results: first 2 elements (NEON) vs element 3 (scalar tail).
-
-        Uses identical values so NEON and scalar should agree exactly.
-        """
+        """Three identical values: on NEON the first two take the vector path and the third the scalar tail,
+        and all three agree exactly."""
         val = -123.456
         x = np.array([val, val, val])
         result = _fast_exp_test_array(x)
@@ -127,7 +123,7 @@ class TestFastExpNeonScalarConsistency:
         assert result[0] == result[1] == result[2]
 
     def test_large_array_consistency(self):
-        """Random values — even-indexed results from NEON, last from scalar."""
+        """Random values at sizes that leave a scalar tail after the vector blocks."""
         rng = np.random.default_rng(99)
         for size in [3, 5, 7, 11, 101, 1001]:
             x = rng.uniform(-708.0, 0.0, size=size)
@@ -139,15 +135,16 @@ class TestFastExpNeonScalarConsistency:
 
 
 # ---------------------------------------------------------------------------
-# ULP error measurement (informational)
+# Worst-case ULP error
 # ---------------------------------------------------------------------------
 
 
 class TestFastExpULP:
-    """Measure the maximum ULP error (informational, not gating)."""
+    """The maximum ULP error, printed and bounded."""
 
     def test_max_ulp_error(self):
-        """Compute and report max ULP error over 1M values in [-708, 0]."""
+        """The max ULP error over 1M values in [-708, 0] is under 50: the degree-11 Horner truncation (about
+        25 ULP) plus FMA rounding."""
         rng = np.random.default_rng(42)
         x = rng.uniform(-708.0, 0.0, size=1_000_000)
         result = _fast_exp_test_array(x)
@@ -164,5 +161,5 @@ class TestFastExpULP:
 
         # Report
         print(f"\nMax ULP error over 1M values: {max_ulp:.2f}")
-        # Gate: must be under 50 ULP (degree-11 Horner truncation ~25 ULP + FMA rounding)
+        # under 50 ULP, the bound the docstring derives
         assert max_ulp < 50.0, f"Max ULP error {max_ulp:.2f} exceeds 50.0"

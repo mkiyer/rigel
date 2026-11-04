@@ -1,12 +1,9 @@
-"""The simulator's coordinate helpers, and the orientation of the oracle BAM they write.
+"""The simulator's coordinate helpers, and the oracle BAM they write.
 
-Projecting a transcript-space interval back to genomic blocks, projecting a pre-mRNA interval, the
-CIGAR those blocks imply, and the take-from-left/right helpers that trim a fragment to its two
-reads. Then the whole-genome simulator's oracle BAM, whose read names, mate orientation and strand
-flags are what every truth-scoring instrument reads a fragment's origin from — an inverted pair there
-is a truth source that disagrees with itself, and a name the engine writes other than as
-:mod:`rigel.sim.read_name` defines it is one the parser misreads. Its header names the Rigel that
-wrote it, and the FASTQ and the BAM give every base the one simulated quality.
+Projecting transcript-space intervals to genomic blocks and the CIGAR they imply; then the whole-genome simulator's
+oracle BAM, whose read names, mate orientation and strand flags are what every truth-scoring instrument reads a
+fragment's origin from, so its names must follow :mod:`rigel.sim.read_name` and its pairs must not be inverted. Its
+header names the Rigel that wrote it, its records carry NM, and the FASTQ and the BAM share one base quality.
 """
 
 import gzip
@@ -200,7 +197,7 @@ class TestWholeGenomeOracleBamOrientation:
             _make_pos_transcript([(200, 500), (700, 1000)], t_id="tx_pos", g_id="g_pos"),
             _make_neg_transcript([(1400, 1700), (1900, 2200)], t_id="tx_neg", g_id="g_neg"),
         ]
-        # nascent lives on single-exon ENTITIES over each span (one per strand here), as the index
+        # nascent lives on single-exon entities over each span (one per strand here), as the index
         # makes them; the entities' reads carry the `nrna_` tag and contiguous genomic blocks
         pos_entity = Transcript(
             ref="ref",

@@ -1,16 +1,12 @@
 """The drain: one tally path, conservation, and byte-identity with the specification.
 
-The second pass replays each held fragment with ONE chosen hypothesis, and the claim worth gating is
-that it does so through no new code — the drain re-enters ``Accumulator.deposit`` with the chosen
-hypothesis alone, a set of size one, so the arbitration is degenerate and the fragment deposits or is
-rejected by the ordinary rules. That is checkable directly: a fragment drained with hypothesis ``h``
-must give a byte-identically equal tally to the same fragment offered ``hypotheses=(h,)`` in the first
-place, and if it does, the drain has no tally semantics of its own left to test. The rest of this file
-holds the parts the replay cannot inherit — the conservation identity and the emptied bank, the draw's
-reproducibility and its confinement to its own record's run, the per-reference sj arithmetic on a
-two-contig payload, and the arbitration census, which must read the same whatever was chosen because a
-census that moved with the draw would depend on the RNG. Specification:
-``tests/native/_accumulator_reference.py``, ``Accumulator.drain``.
+The second pass replays each held fragment with one chosen hypothesis by re-entering ``Accumulator.deposit`` with a set
+of size one, so the arbitration is degenerate and the fragment deposits or is rejected by the ordinary rules. That is
+checked directly: a fragment drained with hypothesis ``h`` must give a byte-identical tally to the same fragment offered
+``hypotheses=(h,)``. The rest of the module covers what the replay cannot inherit: conservation and the emptied bank,
+the draw's reproducibility and confinement to its own record's run, the per-reference sj arithmetic on a two-contig
+payload, the arbitration census (which must not move with the draw, or it would depend on the RNG), and the rule that
+combines the score's factors. Specification: ``tests/native/_accumulator_reference.py``, ``Accumulator.drain``.
 """
 
 from __future__ import annotations
@@ -54,7 +50,7 @@ def _hypotheses() -> tuple[GapHypothesis, ...]:
 
 
 def _offer_held(accumulator: ReferenceAccumulator, n: int = 1) -> None:
-    """Offer ``n`` fragments that span the gap unspliced, so each is HELD with three hypotheses."""
+    """Offer ``n`` fragments that span the gap unspliced, so each is held with three hypotheses."""
     for _ in range(n):
         outcome = accumulator.deposit(
             0,
@@ -78,8 +74,8 @@ def _tally_fields() -> list[str]:
 
 
 def _compare(left: Tally, right: Tally) -> list[str]:
-    """Field names on which two tallies differ. Read off ``dataclasses.fields`` so a new channel is
-    compared automatically rather than when someone remembers to add it here."""
+    """Field names on which two tallies differ, read off ``dataclasses.fields`` so a new channel is compared
+    automatically."""
     differing = []
     for name in _tally_fields():
         a, b = getattr(left, name), getattr(right, name)
@@ -94,22 +90,18 @@ def _compare(left: Tally, right: Tally) -> list[str]:
     return differing
 
 
-# ── ONE TALLY PATH ─────────────────────────────────────────────────────────────────────────────────
+# ── One tally path ─────────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("choice", [0, 1, 2])
 def test_draining_a_choice_equals_depositing_it_directly(choice):
-    """Draining a held fragment with hypothesis ``choice`` must give byte-identically the tally that
-    offering only that hypothesis would have given.
+    """Draining a held fragment with hypothesis ``choice`` gives byte-identically the tally that offering only that
+    hypothesis would have given.
 
-    Not a tautology, because the two routes differ in everything except the deposit: one goes through
-    arbitration with three hypotheses, a canonical sort and a replay; the other deposits once. If they
-    agree on every ``Tally`` field then the drain genuinely has no tally semantics of its own.
-
-    ``qc`` must agree too: the drained route counted a `deferred` on the way in, and the drain takes it
-    back out with the bank (:func:`test_the_drain_consumes_the_bank_and_conserves` checks that on its
-    own). The one field allowed to differ is ``gap_resolution``, and it is named in the assertion below:
-    every other field is compared.
+    The two routes share only the deposit: one goes through arbitration over three hypotheses, a canonical sort and a
+    replay; the other deposits once. ``qc`` must agree too: the drained route counted a ``deferred`` on the way in, and
+    the drain takes it back out with the bank. The one field allowed to differ is ``gap_resolution``, named in the
+    assertion.
     """
     drained = _fresh()
     _offer_held(drained)
@@ -127,8 +119,8 @@ def test_draining_a_choice_equals_depositing_it_directly(choice):
     assert outcome.value == "deposited"
 
     differing = set(_compare(drained.tally, direct.tally))
-    # `gap_resolution` differs by construction: the direct route arbitrated one hypothesis and the drained
-    # route arbitrated three, and the drain deliberately restores pass one's census.
+    # `gap_resolution` differs by construction: the direct route arbitrated one hypothesis and the drained route three,
+    # and the drain restores pass one's census.
     assert differing <= {"gap_resolution"}, (
         f"a drained deposit must be byte-identical to a direct one on every tally channel; differs on "
         f"{sorted(differing)}"
@@ -152,20 +144,18 @@ def test_the_drain_consumes_the_bank_and_conserves():
     )
     assert counters["chose_no_implied_intron"] + counters["chose_implied_intron"] == 7
     assert len(accumulator.tally.deferred) == 0, "the drain consumes the bank"
-    # The held counter goes to 0 WITH the bank. The two must describe one population — the payload
-    # refuses a bank that disagrees with its counter at the door, and a drained payload gets no exception.
+    # The held counter goes to 0 with the bank. The two describe one population: the payload refuses a bank that
+    # disagrees with its counter, drained or not.
     assert accumulator.tally.qc["deferred_undetermined_gap"] == 0
     assert int(accumulator.tally.region_start_count.sum()) == accumulator.tally.qc["deposited"]
     assert int(accumulator.tally.deposited_lengths.sum()) == accumulator.tally.qc["deposited"]
 
 
 def test_the_drain_leaves_the_ARBITRATION_census_alone():
-    """The RNG-dependent census. ``_record_gap_resolution`` sends a size-one SPLICED set to
-    ``RESOLVED_SPLICED`` and returns early on an all-unspliced one, so a drain that let it run would
-    move the census by however many draws picked a spliced path — and chosen-∅ fragments would vanish
-    from it.
-
-    The census must read the same whatever was chosen, and the drain's own axis carries the difference.
+    """``_record_gap_resolution`` sends a size-one spliced set to ``RESOLVED_SPLICED`` and returns early on an
+    all-unspliced one, so a drain that let it run would move the census by however many draws picked a spliced path, and
+    chosen-∅ fragments would vanish from it. The census must read the same whatever was chosen; the drain's own axis
+    carries the difference.
     """
     censuses = []
     for choices in ([0, 0, 0], [2, 2, 2], [0, 1, 2]):
@@ -187,22 +177,20 @@ def test_the_drain_leaves_the_ARBITRATION_census_alone():
 
 
 def test_a_choice_vector_of_the_wrong_length_is_refused():
-    """The choices index the canonical queue. A length mismatch means the producer of the scores and
-    the consumer of the draw walked different queues, which is a wrong answer that looks plausible."""
+    """The choices index the canonical queue. A length mismatch means the producer of the scores and the consumer of the
+    draw walked different queues, a wrong answer that looks plausible."""
     accumulator = _fresh()
     _offer_held(accumulator, n=3)
     with pytest.raises(ValueError, match="choices"):
         accumulator.drain([0, 1])
 
 
-# ── THE DRAW, and its reproducibility ──────────────────────────────────────────────────────────────
+# ── The draw and its reproducibility ───────────────────────────────────────────────────────────────
 
 
 def test_the_draw_respects_the_scores_and_is_reproducible():
-    """One multinomial draw per record, from one seed and one stream, in canonical order.
-
-    A degenerate score vector is the sharp test — a hypothesis with all the mass must always be chosen,
-    and one with none never. That is checkable without a threshold, unlike "roughly 60/40".
+    """One multinomial draw per record, from one seed and one stream, in canonical order. A degenerate score vector
+    gives a test without a threshold: a hypothesis with all the mass must always be chosen, and one with none never.
     """
     from rigel.second_pass import choose_hypotheses
 
@@ -231,17 +219,12 @@ def test_the_draw_respects_the_scores_and_is_reproducible():
 
 
 def test_the_draw_never_leaks_into_the_NEXT_records_run():
-    """A draw that overshoots its run's cumulative total lands on the NEXT run's first slot — another
-    fragment's hypothesis, silently, and every downstream number stays plausible.
+    """A draw that overshoots its run's cumulative total would land on the next run's first slot, another fragment's
+    hypothesis, with every downstream number still plausible.
 
-    The adversarial case is CONSTRUCTED, not sampled. With properly normalised scores the overshoot
-    needs a uniform within one ULP of the run total, which random draws never produce, so a gate that
-    just drew a lot of uniforms would pass whether or not the guard existed. Feeding scores that sum to
-    0.5 per run makes every draw above 0.5 overshoot, which is half of them.
-
-    PERTURBATION: the property is the function's contract rather than one arithmetic accident — a
-    choice is always inside its own record's run, whatever the caller's normalisation — so removing the
-    clamp fails here even though it survives any amount of ordinary sampling.
+    The case is constructed, not sampled: with normalised scores an overshoot needs a uniform within one ULP of the run
+    total, which random draws never produce. Scores summing to 0.5 per run make every draw above 0.5 overshoot, half of
+    them. The contract is that a choice always lies inside its own record's run, whatever the caller's normalisation.
     """
     from rigel.second_pass import choose_hypotheses
 
@@ -254,7 +237,7 @@ def test_the_draw_never_leaks_into_the_NEXT_records_run():
         f"summing to less than 1 must still never index another fragment's hypotheses."
     )
 
-    # And the degenerate run: one hypothesis can only ever be index 0, however the draw falls.
+    # The degenerate run: one hypothesis can only ever be index 0.
     single = np.arange(n + 1, dtype=np.int64)
     assert np.array_equal(
         choose_hypotheses(_FakeScores(np.ones(n)), _FakeDeferred(single, n), seed=3),
@@ -263,12 +246,9 @@ def test_the_draw_never_leaks_into_the_NEXT_records_run():
 
 
 def test_an_overshooting_draw_lands_on_a_POSITIVE_hypothesis():
-    """The clamp keeps a choice inside its own run, and it must also keep it off a hypothesis with no mass: a run that
-    ends in zero-score hypotheses would otherwise hand an overshooting uniform to a candidate the score excluded.
-
-    CONSTRUCTED, as the leak gate is: each run holds 0.5 of mass on its first two slots and none on its last, so
-    every uniform above 0.5 overshoots, half of them. PERTURBATION: clamping to the run's end instead of its last
-    positive slot puts about half the choices on the excluded slot.
+    """The clamp keeps a choice inside its own run and also off a hypothesis with no mass: a run ending in zero-score
+    hypotheses would otherwise hand an overshooting uniform to a candidate the score excluded. Constructed like the leak
+    test: each run holds 0.5 of mass on its first two slots and none on its last, so half the uniforms overshoot.
     """
     from rigel.second_pass import choose_hypotheses
 
@@ -283,9 +263,9 @@ def test_an_overshooting_draw_lands_on_a_POSITIVE_hypothesis():
 
 @dataclasses.dataclass
 class _FakeScores:
-    """Just the one field :func:`choose_hypotheses` reads. Deliberately not a real `HeldScores`: the
-    draw must depend on the scores and the offsets and on nothing else, and this makes that
-    checkable."""
+    """Only the field :func:`choose_hypotheses` reads. Not a real ``HeldScores``, so the test shows the draw depends on
+    the scores and the offsets and nothing else.
+    """
 
     score: np.ndarray
 
@@ -304,8 +284,8 @@ class _FakeDeferred:
 
 
 def test_the_fixture_reaches_all_three_hypotheses_and_they_differ():
-    """If the three hypotheses gave the same ``L`` and touched the same objects, every gate above would
-    pass over a distinction that does not exist."""
+    """If the three hypotheses gave the same ``L`` and touched the same objects, every test above would pass over a
+    distinction that does not exist."""
     lengths = set()
     for choice in range(3):
         accumulator = _fresh()
@@ -321,9 +301,9 @@ def test_the_fixture_reaches_all_three_hypotheses_and_they_differ():
 
 
 def test_every_additive_channel_is_named_in_ADDITIVE_AXES():
-    """The drain adds only what ``ADDITIVE_AXES`` names. A channel the accumulator fills but the table
-    omits would go quietly short by exactly the drained fragments — and `pool_lengths` has no
-    externally-checkable sum, so nothing else would notice."""
+    """The drain adds only what ``ADDITIVE_AXES`` names. A channel the accumulator fills but the table omits would go
+    short by exactly the drained fragments, and ``pool_lengths`` has no externally checkable sum to show it.
+    """
     named = {name for name, _axis in ADDITIVE_AXES}
     array_fields = {
         f.name
@@ -336,12 +316,12 @@ def test_every_additive_channel_is_named_in_ADDITIVE_AXES():
     )
 
 
-# ══ THE PAYLOAD PATH — score, draw, drain, on a real scan across TWO contigs ════════════════════════
+# ══ The payload path: score, draw, drain, on a real scan across two contigs ════════════════════════
 #
-# TWO CONTIGS ON PURPOSE. A constant `ref` stamp and a constant `AccumulatorSet` id each pass the whole
-# suite when every fixture is single-contig or defers only on reference 0. The drain rebuilds one
-# accumulator per reference from the payload and slices the sj CSR per reference — so reference 0's slot
-# base is 0 and every arithmetic error there is invisible. chr2's is not.
+# Two contigs on purpose. A constant `ref` stamp or a constant `AccumulatorSet` id passes any fixture that is
+# single-contig or defers only on reference 0. The drain rebuilds one accumulator per reference from the payload and
+# slices the sj CSR per reference; reference 0's slot base is 0, so an arithmetic error there is invisible, while chr2's
+# is not.
 
 DRAIN_GENOME = 6_000
 _M, _N = 0, 3
@@ -423,15 +403,15 @@ def scanned_two_contigs(tmp_path_factory):
                         False,
                     ),
                 ]
-        # the ambiguous fragments — three per contig, so both banks are non-empty
+        # the ambiguous fragments: three per contig, so both banks are non-empty
         for k in range(3):
             reads += [
                 read(f"amb_{ref_id}_{k}", ref_id, 1500, [(_M, 100)], 2000, True),
                 read(f"amb_{ref_id}_{k}", ref_id, 2000, [(_M, 100)], 1500, False),
             ]
 
-    # four MULTIMAPPING fragments, each with one hit per contig (NH = 2, the second hit secondary and
-    # numbered HI = 2), contained in the first exon on both: held on their placements, not their gap
+    # four multimapping fragments, each with one hit per contig (NH = 2, the second hit secondary and numbered HI = 2),
+    # contained in the first exon on both: held on their placements, not their gap
     for k in range(4):
         for ref_id, hi in ((0, 1), (1, 2)):
             for is_r1, pos, mate in ((True, 1100, 1300), (False, 1300, 1100)):
@@ -480,8 +460,8 @@ def _drained(scanned_two_contigs, seed=11):
 
 
 def test_the_fixture_holds_fragments_on_BOTH_contigs(scanned_two_contigs):
-    """Non-vacuity, and it is the whole reason this fixture exists. If everything deferred on reference
-    0, every per-reference slice below would be exercised only where its base offset is 0."""
+    """If everything deferred on reference 0, every per-reference slice would be exercised only where its base offset is
+    0."""
     payload = scanned_two_contigs[0]
     refs = set(payload.deferred.ref.tolist())
     assert refs == {0, 1}, f"both contigs must hold fragments; got {refs}"
@@ -493,8 +473,7 @@ def test_the_fixture_holds_fragments_on_BOTH_contigs(scanned_two_contigs):
 
 
 def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs):
-    """The same conservation at the payload: the identity, the emptied bank, and both
-    externally-checkable sums."""
+    """The same conservation at the payload: the identity, the emptied bank, and both externally checkable sums."""
     before, after, _choices = _drained(scanned_two_contigs)
 
     assert after.drain is not None and after.drain.conserved
@@ -510,19 +489,17 @@ def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs
     # The two invariants that survive the per-reference placement arithmetic in `_gather_delta`.
     assert int(after.region_start_count.sum()) == after.qc.deposited
     assert int(after.deposited_lengths.sum()) == after.qc.deposited
-    # Pass one's payload must be untouched — the delta is a separate object, which is what makes the
-    # drain's contribution to every channel a subtraction rather than a rerun.
+    # Pass one's payload must be untouched: the delta is a separate object, so the drain's contribution to every channel
+    # is a subtraction rather than a rerun.
     assert before.deferred.n_fragments == 10
     assert before.drain is None
 
 
 def test_the_drain_credits_the_sj_on_the_RIGHT_CONTIG(scanned_two_contigs):
-    """The gate for the per-reference sj slice. A drained spliced choice must credit a sj slot ON ITS
-    OWN CONTIG, and chr2's slots are not zero-based — which is what makes the arithmetic visible.
-
-    Two failures this catches, both silent: sj never installed (every slot stays at pass one's value,
-    because an observed intron with no table reads as unannotated), and a slot base taken as 0 for
-    every reference (chr2's traffic lands on chr1's sj).
+    """A drained spliced choice must credit a sj slot on its own contig, and chr2's slots are not zero-based, which
+    makes the arithmetic visible. It catches two silent failures: sj never installed (every slot stays at pass one's
+    value, because an observed intron with no table reads as unannotated), and a slot base of 0 for every reference
+    (chr2's traffic landing on chr1's sj).
     """
     before, after, choices = _drained(scanned_two_contigs)
     delta = after.sj_count.astype(np.int64) - before.sj_count.astype(np.int64)
@@ -557,9 +534,8 @@ def test_the_drain_credits_the_sj_on_the_RIGHT_CONTIG(scanned_two_contigs):
 
 
 def test_the_drain_is_REPRODUCIBLE_and_the_seed_is_what_moves_it(scanned_two_contigs):
-    """Same payload, same seed → byte-identical on every channel. The drain never sees a thread — it
-    runs after the worker merge, over a canonically sorted bank — so this is structural; the gate
-    exists to keep it that way."""
+    """Same payload, same seed: byte-identical on every channel. The drain runs after the worker merge over a
+    canonically sorted bank and never sees a thread; this keeps it so."""
     _b, first, choices_a = _drained(scanned_two_contigs, seed=11)
     _b, again, choices_b = _drained(scanned_two_contigs, seed=11)
     assert np.array_equal(choices_a, choices_b)
@@ -571,8 +547,7 @@ def test_the_drain_is_REPRODUCIBLE_and_the_seed_is_what_moves_it(scanned_two_con
 
 
 def test_a_payload_cannot_be_drained_TWICE(scanned_two_contigs):
-    """The drain consumes the bank, so a second one would deposit nothing and double the
-    bookkeeping."""
+    """The drain consumes the bank, so a second drain would deposit nothing and double the bookkeeping."""
     from rigel.second_pass import drain
 
     _before, after, choices = _drained(scanned_two_contigs)
@@ -583,19 +558,13 @@ def test_a_payload_cannot_be_drained_TWICE(scanned_two_contigs):
 
 
 def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_factory):
-    """Worker-independence, composed through the drain.
+    """Worker independence, composed through the drain.
 
-    The deferred bank is already worker-independent, and the drain runs after the worker merge over
-    that bank's canonical order, so this holds structurally rather than by luck. The gate exists
-    because "structurally" is a property of the current shape: the moment anything drains per-worker,
-    or consumes the queue in append order, this is the test that says so.
-
-    Compared on every additive channel AND on the choice vector, because identical tallies from
-    different choices would mean the draw had stopped depending on the queue order.
-
-    Where the teeth are, stated honestly: the canonical sort itself is gated upstream, in the parity
-    and worker-determinism modules. This gate adds only the composition — that scoring, drawing and
-    draining on top of that bank introduce no order dependence of their own.
+    The deferred bank is worker-independent and the drain runs after the worker merge over its canonical order, so this
+    holds by structure; the test catches any change that drains per worker or consumes the queue in append order. It
+    compares every additive channel and the choice vector, since identical tallies from different choices would mean the
+    draw stopped depending on queue order. The canonical sort itself is tested upstream in the parity and
+    worker-determinism modules; this adds only the composition.
     """
     import pysam
 
@@ -633,7 +602,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
         a.set_tags([("NH", 1, "i")])
         return a
 
-    # Enough fragments that several chunks and several workers really are in play.
+    # Enough fragments that several chunks and several workers are in play.
     reads = []
     for ref_id in (0, 1):
         for k in range(60):
@@ -680,8 +649,8 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
         _s, strand_model, _b, payload = scan_and_buffer(
             bam,
             index,
-            # A SMALL chunk so several chunks and several workers really are in flight. At the default
-            # 1 M the whole fixture is one chunk and the gate would pass whatever the worker count said.
+            # A small chunk so several chunks and workers are in flight; at the default 1 M the whole fixture is one
+            # chunk.
             BamScanConfig(sj_strand_tag="XS", total_threads=threads, fragments_per_chunk=32),
         )
         scores = score_held_fragments(
@@ -715,31 +684,24 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
         assert drained.qc == reference_payload.qc
 
 
-# ══ THE COMBINATION RULE — a factor that is zero for EVERY candidate must not annihilate the others ══
+# ══ The combination rule: a factor that is zero for every candidate must not annihilate the others ══
 #
-# THE BUG THIS GATES. The score is a PRODUCT of three factors, normalised within each fragment's
-# candidate set. If one factor is zero for EVERY candidate the product is zero everywhere, the
-# normalisation cannot run, and the whole record falls back to a uniform coin toss — discarding the other
-# two factors, which usually DO decide. Scored against per-fragment truth, the length term alone would
-# have decided nearly every record that fell back this way.
+# The score is a product of three factors, normalised within each fragment's candidate set. If one factor were zero for
+# every candidate, the product would be zero everywhere, normalisation could not run, and the record would fall back to
+# a uniform coin toss, discarding the other two factors.
 #
-# THE RULE, AND WHY IT NEEDS NO CONSTANT. The score is normalised within the candidate set, so a factor
-# that takes the SAME value for every candidate cancels and cannot affect the answer. Zero is the one
-# value where the arithmetic loses that property: instead of cancelling it destroys the product. So an
-# all-zero factor is treated as what it is — uninformative — and dropped from the product for that
-# fragment.
+# Because the score is normalised within the candidate set, a factor with the same value for every candidate cancels.
+# Zero is the one value where the arithmetic loses that property, so an all-zero factor is treated as uninformative and
+# dropped from that fragment's product; no constant is needed.
 #
-# IT DOES NOT TOUCH THE PARTIAL-ZERO CASE, and that is the point. A factor that is zero for SOME
-# candidates and positive for others is highly informative: the zero says "no evidence for this path",
-# and it stays decisive.
+# A factor that is zero for some candidates and positive for others is informative ("no evidence for this path") and
+# stays decisive.
 
 
 def _score_one(rho, f, s):
-    """Score ONE synthetic record with the given per-candidate factors. Returns the normalised scores.
-
-    Drives the real ``score_held_fragments`` combination step through a payload whose factors are
-    forced, rather than reimplementing the arithmetic — a second copy of the rule would be a second
-    rule.
+    """Score one synthetic record with the given per-candidate factors and return the normalised scores. Drives the real
+    ``score_held_fragments`` combination step through a payload with forced factors, so the test has no second copy of
+    the rule.
     """
     from rigel.second_pass import combine_factors
 
@@ -749,8 +711,8 @@ def _score_one(rho, f, s):
 
 
 def test_an_ALL_ZERO_factor_is_UNINFORMATIVE_and_does_not_annihilate_the_others():
-    """Every candidate has zero local traffic, but the length term separates them cleanly, so an
-    all-zero factor must be read as no evidence rather than as evidence against everything."""
+    """Every candidate has zero local traffic but the length term separates them, so an all-zero factor must read as no
+    evidence rather than as evidence against everything."""
     scores, undecided = _score_one(rho=[0.0, 0.0], f=[0.0001, 0.0], s=[0.99, 1.0])
     assert not undecided, "the length term decides this record; it is not undecided"
     assert scores[0] > scores[1], (
@@ -761,19 +723,17 @@ def test_an_ALL_ZERO_factor_is_UNINFORMATIVE_and_does_not_annihilate_the_others(
 
 
 def test_a_PARTIAL_zero_stays_DECISIVE():
-    """The other half, and it must not change. A zero for SOME candidates is evidence, not an absence
-    of evidence — it says that path has no support — so a partial zero stays decisive."""
+    """A zero for some candidates is evidence (that path has no support), so a partial zero stays decisive."""
     scores, undecided = _score_one(rho=[1.0, 0.0], f=[0.5, 0.5], s=[1.0, 1.0])
     assert not undecided
     assert scores[0] == 1.0 and scores[1] == 0.0, (
-        f"a partial zero must remain decisive; got {scores}. Softening it would reopen D-3, which the "
-        f"owner ruled needs no fallback."
+        f"a partial zero must remain decisive; got {scores}."
     )
 
 
 def test_a_factor_that_is_CONSTANT_and_positive_already_cancels():
-    """The premise the rule rests on, checked rather than assumed: normalisation makes any constant
-    factor irrelevant, so dropping an all-zero one is consistent rather than special-cased."""
+    """Normalisation makes any constant factor irrelevant, so dropping an all-zero one is consistent with it rather than
+    a special case."""
     with_it, _ = _score_one(rho=[2.0, 6.0], f=[0.3, 0.3], s=[1.0, 1.0])
     without, _ = _score_one(rho=[2.0, 6.0], f=[1.0, 1.0], s=[1.0, 1.0])
     assert np.allclose(with_it, without), (
@@ -782,16 +742,12 @@ def test_a_factor_that_is_CONSTANT_and_positive_already_cancels():
 
 
 def test_a_WEAKER_factor_cannot_VETO_what_a_STRONGER_one_left_standing():
-    """Factors are applied strongest-evidence first, and a weaker one only refines within the
-    survivors.
+    """Factors are applied strongest evidence first, and a weaker one only refines within the survivors.
 
-    Traffic favours candidate 0 and the strand term candidate 1, with the length term allowing both.
-    Under a blind product these zero each other out and the record becomes a coin toss. Under the
-    ordered rule the strand term — which rests on the library's whole spliced population — narrows to
-    candidate 1, and traffic is then flat-zero AMONG THE SURVIVORS, so it says nothing.
-
-    This is what removes the irreducible-contradiction case entirely: each factor either narrows a
-    non-empty set or is skipped, so the product can never collapse to zero everywhere.
+    Traffic favours candidate 0 and the strand term candidate 1, with the length term allowing both. A blind product
+    would zero both and toss a coin. The ordered rule lets the strand term, which rests on the library's whole spliced
+    population, narrow to candidate 1; traffic is then flat zero among the survivors and says nothing. Each factor
+    either narrows a non-empty set or is skipped, so the product never collapses to zero everywhere.
     """
     scores, undecided = _score_one(rho=[1.0, 0.0], f=[0.5, 0.5], s=[0.0, 1.0])
     assert not undecided
@@ -802,21 +758,18 @@ def test_a_WEAKER_factor_cannot_VETO_what_a_STRONGER_one_left_standing():
 
 
 def test_ALL_THREE_factors_absent_is_a_genuine_coin_toss():
-    """And the floor: no evidence of any kind means uniform."""
+    """No evidence of any kind means uniform."""
     scores, undecided = _score_one(rho=[0.0, 0.0, 0.0], f=[0.0, 0.0, 0.0], s=[0.0, 0.0, 0.0])
     assert undecided
     assert np.allclose(scores, [1 / 3, 1 / 3, 1 / 3])
 
 
 def test_an_IMPOSSIBLE_LENGTH_cannot_be_CHOSEN_however_much_traffic_favours_it():
-    """A length the library never produced cannot be chosen, however much traffic favours it.
-
-    No cutoff and no constant: ``f = 0`` already means "no fragment of this length was observed
-    anywhere in the library" — the same statement ``max_fragment_length`` makes, read off the measured
-    distribution instead of a round number. So a candidate beyond the pmf's support is excluded by
-    evidence rather than by a threshold anybody chose, and traffic orders of magnitude larger does not
-    buy a molecule the library does not contain. The case is real on cfRNA, where a held record can
-    carry heavy traffic behind two impossible lengths and the length term alone behind the true one.
+    """A length the library never produced cannot be chosen, however much traffic favours it. ``f = 0`` means no
+    fragment of this length was observed anywhere in the library, the statement ``max_fragment_length`` makes, read off
+    the measured distribution; so a candidate beyond the pmf's support is excluded by evidence, not by a chosen
+    threshold. A held record can carry heavy traffic behind two impossible lengths and only the length term behind the
+    true one.
     """
     from rigel.second_pass import combine_factors
 
@@ -835,7 +788,7 @@ def test_an_IMPOSSIBLE_LENGTH_cannot_be_CHOSEN_however_much_traffic_favours_it()
         f"got {scores}"
     )
 
-    # And when the length term rules out EVERYTHING it cannot narrow anything: uniform over all.
+    # When the length term rules out everything it cannot narrow anything: uniform over all.
     scores, undecided = combine_factors(
         np.array([0.0, 0.0]), np.array([0.0, 0.0]), np.array([1.0, 1.0])
     )
@@ -844,10 +797,8 @@ def test_an_IMPOSSIBLE_LENGTH_cannot_be_CHOSEN_however_much_traffic_favours_it()
 
 def test_factors_that_UNDERFLOW_for_every_candidate_still_decide():
     """The factors are combined in logs. A product of probabilities and densities can underflow to zero for every
-    candidate of a record (a sequence price at many mismatches does), and the zero rule then reads the whole record
-    as uninformative, a fair coin, though the factors separate its candidates two to one.
-
-    PERTURBATION: the product form returns [0.5, 0.5] here.
+    candidate of a record (a sequence price at many mismatches does), and the zero rule would then read the record as
+    uninformative though the factors separate its candidates two to one.
     """
     scores, undecided = _score_one(rho=[1e-150, 2e-150], f=[1e-200, 1e-200], s=[1.0, 1.0])
     assert not undecided
@@ -855,12 +806,9 @@ def test_factors_that_UNDERFLOW_for_every_candidate_still_decide():
 
 
 def test_SURVIVORS_are_weighted_by_LIKELIHOOD_not_tossed_for():
-    """Why "restrict, then toss a fair coin" is not good enough.
-
-    The length term leaves two candidates possible and prefers one of them by two orders of magnitude,
-    while traffic is zero for both and so says nothing between them. Restricting the draw to the
-    survivors and then drawing uniformly picks the far less likely candidate half the time: narrowing
-    a draw and WEIGHTING it are different things, and only the second uses the likelihood.
+    """The length term leaves two candidates possible and prefers one by two orders of magnitude, while traffic is zero
+    for both. Restricting to the survivors and drawing uniformly would pick the far less likely candidate half the time;
+    the draw must be weighted by the likelihood, not only narrowed.
     """
     scores, undecided = _score_one(
         rho=[11.247, 11.247, 0.0, 0.0, 0.010],
@@ -875,32 +823,30 @@ def test_SURVIVORS_are_weighted_by_LIKELIHOOD_not_tossed_for():
     assert scores[0] == 0.0 and scores[1] == 0.0 and scores[4] == 0.0
 
 
-# ══ THE ∅ STRAND TERM — gDNA is biologically 50/50 ════════════════════════════════════════════════
+# ══ The ∅ strand term: gDNA is 50/50 ═════════════════════════════════════════════════════════════
 #
-# THE GAP THIS CLOSES. A genomic candidate carrying `s = 1.0` in both orientations is not a probability
-# at all — under a hypothesis the two orientations must sum to 1, and 1.0 twice sums to 2.
+# Under a hypothesis the two orientations' likelihoods sum to 1, so a genomic candidate cannot carry
+# `s = 1.0` in both.
 #
-# THE DERIVATION. Let `t` be the strand a candidate implies, `a` the strand the fragment aligned to, and
+# Let `t` be the strand a candidate implies, `a` the strand the fragment aligned to, and
 # `p = P(a == t | RNA)` the library's directional sense fraction (≈ 0.01 on dUTP).
 #
 #     H_spliced   used a sj; gDNA cannot splice, so RNA on strand t:   p  or  1 - p
-#     H_genomic   crossed contiguously; the discriminating component is gDNA, which is DOUBLE-STRANDED
-#                 and therefore has no sense direction at all:              0.5, either orientation
+#     H_genomic   crossed contiguously; the discriminating component is gDNA, which is double-stranded
+#                 and has no sense direction:                               0.5, either orientation
 #
-# ∅ also covers unspliced RNA — but unspliced RNA would give the same p / (1-p) as the spliced candidate
-# and cancel, contributing nothing. The only part of ∅ that can separate it is its gDNA component, whose
-# orientation likelihood is a biological constant rather than anything to be fitted.
+# ∅ also covers unspliced RNA, but that gives the same p / (1-p) as the spliced candidate and cancels;
+# only ∅'s gDNA component separates it, and its orientation likelihood is a constant, not a fit.
 #
-# AND A GLOBAL MIXTURE MARGINAL IS WORSE THAN USELESS, which the algebra shows. The orientation
-# discrimination with ANY constant c for ∅ is [c/p] / [c/(1-p)] = (1-p)/p — c cancels — so 0.5 and 1.0
-# discriminate identically and 0.5 is simply the one that is a probability. But an orientation-DEPENDENT
-# ∅ term q/(1-q) taken from a library-wide genic marginal gives q(1-p)/p(1-q), which moves ∅ in the SAME
-# direction as the spliced term and destroys most of the signal. A global value says nothing about one
-# fragment, whose gene may be silent (pure gDNA) or highly expressed.
+# With any constant c for ∅ the orientation discrimination is [c/p] / [c/(1-p)] = (1-p)/p, so c cancels
+# and 0.5 is the value that is a probability. An orientation-dependent ∅ term q/(1-q) from a
+# library-wide genic marginal would give q(1-p)/p(1-q), moving ∅ in the same direction as the spliced
+# term and destroying most of the signal; a global value says nothing about one fragment, whose gene may
+# be silent (pure gDNA) or highly expressed.
 
 
 def test_gDNA_is_STRAND_SYMMETRIC_in_both_orientations():
-    """The biological fact the ∅ term rests on: double-stranded DNA has no sense direction."""
+    """Double-stranded DNA has no sense direction."""
     from rigel.second_pass import strand_terms
 
     for align in (int(Strand.POS), int(Strand.NEG)):
@@ -914,11 +860,10 @@ def test_gDNA_is_STRAND_SYMMETRIC_in_both_orientations():
 
 
 def test_the_RNA_UNLIKELY_orientation_favours_the_GENOMIC_candidate():
-    """The orientation term, with the direction protocol-dependent so that nothing here hard-codes it.
-
-    On a dUTP library ``p = 0.01``, so a fragment aligned CO-oriented with the candidate's strand is
-    the RNA-unlikely case: RNA would produce that orientation only 1 % of the time while DNA produces
-    it half the time, so ∅ is favoured 50:1. Counter-oriented, RNA is favoured — but only about 2:1.
+    """The orientation term, with the direction protocol-dependent so nothing here hard-codes it. On a dUTP library ``p
+    = 0.01``, so a fragment co-oriented with the candidate's strand is the RNA-unlikely case: RNA produces that
+    orientation 1 % of the time and DNA half the time, so ∅ is favoured 50:1. Counter-oriented, RNA is favoured only
+    about 2:1.
     """
     from rigel.second_pass import strand_terms
 
@@ -940,12 +885,9 @@ def test_the_RNA_UNLIKELY_orientation_favours_the_GENOMIC_candidate():
 
 
 def test_the_ORIENTATION_DISCRIMINATION_is_exactly_the_LIBRARY_SPECIFICITY_ODDS():
-    """The gate against reintroducing a fitted marginal.
-
-    The whole information content of this term is the odds ratio between the two orientations, and it
-    must equal ``(1 - p) / p`` — the library's own strand-specificity odds — exactly. That is what
-    makes ∅'s constant irrelevant to the discrimination, and it is what a global mixture marginal
-    destroys, collapsing the odds by several fold.
+    """The term's information is the odds ratio between the two orientations, which must equal ``(1 - p) / p``, the
+    library's strand-specificity odds, exactly. That makes ∅'s constant irrelevant to the discrimination; a fitted
+    global marginal would collapse the odds several fold.
     """
     from rigel.second_pass import strand_terms
 
@@ -965,8 +907,8 @@ def test_the_ORIENTATION_DISCRIMINATION_is_exactly_the_LIBRARY_SPECIFICITY_ODDS(
 
 
 def test_an_UNSTRANDED_library_gives_a_NEUTRAL_strand_term():
-    """At ``p = 0.5`` there is no strand information, so every candidate scores 0.5 and the factor
-    cancels — which `combine_factors` then skips as uninformative."""
+    """At ``p = 0.5`` there is no strand information, so every candidate scores 0.5 and the factor cancels, which
+    ``combine_factors`` then skips as uninformative."""
     from rigel.second_pass import strand_terms
 
     for align in (int(Strand.POS), int(Strand.NEG)):
@@ -977,8 +919,8 @@ def test_an_UNSTRANDED_library_gives_a_NEUTRAL_strand_term():
 
 
 def test_an_AMBIGUOUS_implied_strand_says_NOTHING():
-    """One path claimed by both strands names no orientation to compare against, so the spliced
-    candidate cannot be scored on strand either and must fall back to symmetric."""
+    """One path claimed by both strands names no orientation to compare against, so the spliced candidate cannot be
+    scored on strand either and falls back to symmetric."""
     from rigel.second_pass import strand_terms
 
     spliced, genomic = strand_terms(

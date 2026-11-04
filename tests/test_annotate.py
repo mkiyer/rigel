@@ -45,9 +45,8 @@ VALID_ZF_VALUES = {
     AF_MULTIMAPPER_DROP,
 }
 
-#: Bits 3 and 6, retired: bit 3 marked a single-exon winner (0x09) or a synthetic span's (0x19) under an
-#: earlier layout, and bit 6 the resolver's chimera call (0x40), deleted; a value carrying either can only
-#: be read with that layout's meaning.
+#: Bits 3 and 6, retired: another ZF layout gave them meanings (a single-exon or synthetic-span winner, a
+#: chimera call), so a value carrying either reads only under that layout, and none is written.
 RETIRED_BITS = 0x08 | 0x40
 
 #: Every bit the table names; a ZF value carries no other.
@@ -311,7 +310,7 @@ class TestAnnotatedBamIntegration:
         assert isinstance(rec.get_tag("ZS"), str)
 
         # ZF values must be one of the canonical outputs, and every
-        # value must satisfy the redesign invariants.
+        # value must satisfy the invariants.
         for rec in records:
             zf = rec.get_tag("ZF")
             assert zf in VALID_ZF_VALUES, f"Invalid ZF: {zf:#x}"
@@ -394,8 +393,8 @@ class TestAnnotatedBamIntegration:
         )
 
     def test_annotated_bam_preserves_records_and_collation(self, scenario, tmp_path):
-        """Annotated BAM MUST contain exactly the same records as input
-        and MUST remain collated (qnames grouped contiguously).
+        """Annotated BAM must contain exactly the same records as input
+        and must remain collated (qnames grouped contiguously).
 
         This is a contract for downstream tools: rigel accepts collated
         BAM in and produces collated BAM out with no record drops or
@@ -770,7 +769,7 @@ class TestAnnotatedBamIntegration:
             assert tag not in tags, f"Filtered pass-through record carries {tag}; should not"
 
     # =================================================================
-    # ZF redesign — outcome-specific stamping tests
+    # ZF: outcome-specific stamping
     # =================================================================
 
     def test_zf_invariants_and_zc_domain_hold_over_fixture(self, scenario, tmp_path):
@@ -992,9 +991,9 @@ class TestAnnotatedBamIntegration:
 
     def test_zf_names_the_category_of_the_winning_transcript(self, winner_kinds_scenario, tmp_path):
         """ZF names a transcript's win as the output tables report its RNA: every reference transcript's
-        fragments read annotated (0x03), single-exon included — alone, or covering its sibling's span, both
-        0x09 before — and a synthetic span's read nascent (0x11, 0x19 before); no record sets the retired
-        bit. The single-exon and span fragments are unspliced, so the EM decides them; the multi-exon
+        fragments read annotated (0x03), single-exon included, alone or covering its sibling's span, and a
+        synthetic span's read nascent (0x11); no record sets a retired bit. The single-exon and span
+        fragments are unspliced, so the EM decides them; the multi-exon
         transcripts' spliced ones are also decided on the deterministic path, so both stamp sites are read.
         """
         import pysam
@@ -1117,8 +1116,8 @@ class TestAnnotatedBamWriterRobustness:
 
     def test_a_gene_without_a_name_is_annotated_with_a_dot(self, scenario, tmp_path):
         """A GTF need not name its genes (Ensembl leaves an unnamed gene without ``gene_name``; NCBI never writes it),
-        so the index holds NaN there. The writer takes strings: it raised a TypeError after scan, calibration and EM,
-        and the run was lost."""
+        so the index holds NaN there. The writer takes strings, so it writes a dot rather than raising a TypeError
+        after scan, calibration and EM."""
         import pysam
 
         result = self._sim(scenario)
@@ -1137,8 +1136,8 @@ class TestAnnotatedBamWriterRobustness:
 
     def test_a_read_name_whose_first_record_is_filtered_stays_one_run(self, scenario, tmp_path):
         """A filtered record (here unmapped) is written through as it is read. When it opens a new read name while
-        the previous read name's records are still held, writing it first split its own read name around the held
-        group, and the output was no longer collated."""
+        the previous read name's records are still held, writing it first would split its own read name around the
+        held group and break the collation."""
         import pysam
 
         result = self._sim(scenario)
@@ -1157,8 +1156,8 @@ class TestAnnotatedBamWriterRobustness:
         assert runs == len(set(names))
 
     def test_an_aligners_tag_of_another_type_is_replaced(self, scenario, tmp_path):
-        """HISAT2 writes ``ZS:i`` (its second-best alignment score). Rigel's ``ZS`` is a string, htslib will not
-        update a tag in place across types, and the return was ignored, so the record kept HISAT2's integer."""
+        """HISAT2 writes ``ZS:i`` (its second-best alignment score). Rigel's ``ZS`` is a string and htslib will not
+        update a tag in place across types, so the writer replaces the tag rather than leaving HISAT2's integer."""
         import pysam
 
         result = self._sim(scenario)

@@ -1,10 +1,10 @@
 """The whole quantification pipeline runs, and its output is internally consistent.
 
-``run_pipeline`` end to end on a minimal oracle scenario: the transcript, gene and locus frames have
-the expected schema and are non-empty, the annotated transcripts' counts are positive, the fragment count agrees
-with the scan, and TPM sums to a million. Also that the scan's read-name batch size does not change
-the answer at its boundaries, and that the scan spills into a ``spill_dir`` given as a ``str``. None of this is a precision claim — it is the gate that catches
-import and interface breakage between components that each pass their own unit tests.
+``run_pipeline`` end to end on a minimal oracle scenario: the transcript, gene and locus frames have the expected
+schema and are non-empty, the annotated transcripts' counts are positive, the fragment count agrees with the scan, and
+TPM sums to a million. Also that the scan's read-name batch size does not change the answer at its boundaries, and
+that the scan spills into a ``spill_dir`` given as a ``str``. None of this is a precision claim: it catches import
+and interface breakage between components that each pass their own unit tests.
 """
 
 import pandas as pd
@@ -91,14 +91,9 @@ def test_scan_read_name_batch_size_boundaries_match(tmp_path):
     finally:
         sc.cleanup()
 
-    # The read-name batch size must not change which fragments are processed
-    # (asserted below via the fragment/read-name totals). It may, however,
-    # perturb the *order* in which the calibration accumulator adds into its
-    # float64 fraction and mass banks; float addition is not associative, and
-    # that last-bit difference propagates through calibration and the EM into
-    # the final counts — scientifically negligible. Bit-exactness across batch
-    # size would require order-independent accumulator summation (an accumulator-level concern, not
-    # the integration this test guards), so we assert close agreement, not bits.
+    # The read-name batch size must not change which fragments are processed (the totals below). It may change
+    # the order in which the calibration accumulator adds into its float64 banks, and float addition is not
+    # associative, so the last-bit difference that reaches the counts is tolerated: close agreement, not bits.
     pd.testing.assert_frame_equal(
         _sorted_counts(batch_one, index),
         _sorted_counts(batch_huge, index),

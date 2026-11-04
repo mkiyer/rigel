@@ -1,26 +1,19 @@
-"""The calibrator-facing view of the accumulator payload.
+"""The calibrator-facing view of the accumulator payload (layer 1).
 
-Gate: ``tests/calibration/test_substrate.py``.
-
-The substrate is the only object that knows the payload's encoding. It widens the integer banks,
-folds the strand axis where the contract says one column, and hands the calibrator four populations
-on three axes.
-
-The four populations sit on axes that are off by one from each other per reference, and they do NOT
-all carry the same channels, because a channel is stored only where a named consumer reads it::
+The substrate is the only object that knows the payload's encoding: it widens the integer banks, folds the strand axis
+where a channel is strand-agnostic, and hands the calibrator four populations on three axes. A channel is stored only
+where a named consumer reads it::
 
     regions                contained   count
     contiguous boundaries  unspliced   count  mass   the mixture being deconvolved
                            spliced     count  mass   certified RNA: gDNA cannot splice
     sj boundaries          (one)       count  mass   pure RNA by construction
 
-The columns are GENOME strand without exception. Sense/antisense is transcript-relative, is derived
-by a consumer from an sj's own strand, and is never stored — storing some banks by genome strand and
-others by sense puts spliced and unspliced deposits at the same boundary in opposite columns.
+Count columns are genome strand without exception, and the counts keep both because the strand likelihood is binomial
+in them. Sense is transcript-relative and derived by a consumer from an sj's own strand; it is never stored, because
+mixing genome-strand and sense banks would put spliced and unspliced deposits at one boundary in opposite columns.
 
-The counts carry both columns; the mass carries one. The counts keep both columns because the
-strand model is a Beta-Binomial over them, per strand. The sj mass arrives per strand and is folded
-here, since :attr:`PopulationView.mass` is strand-agnostic by contract.
+Gate: ``tests/calibration/test_substrate.py``.
 """
 
 from __future__ import annotations
@@ -33,8 +26,8 @@ from ..scan_payload import AccumulatorPayload
 from .errors import CalibrationSubstrateError
 from .region_arrays import RegionArrays
 
-#: A geometry/payload mismatch surfaces as a shape error deep in the solver, which points nowhere near
-#: its cause. Name it at the door instead.
+#: The hint every geometry/payload mismatch raises with, so the error names its cause rather than surfacing as a
+#: shape error deep in the solver.
 PARTITION_MISMATCH_HINT = (
     "Build the geometry with RegionArrays.from_index(index), and re-scan if the payload was cached "
     "against a different index (a cache is keyed by graph_hash, reach_digest and the payload schema)."
@@ -45,18 +38,16 @@ PARTITION_MISMATCH_HINT = (
 class PopulationView:
     """One population's sums. ``count`` is per genome strand; ``mass`` is not.
 
-    A population carries only the channels a named consumer reads; the absent ones are ``None``
-    rather than zeros — see :meth:`_require`.
+    A population carries only the channels a named consumer reads; the absent ones are ``None``, not zeros
+    (:meth:`_require`).
     """
 
-    #: What this population is called, for the error a missing channel raises. A view that cannot say
-    #: which population it is turns "no mass here" into a traceback nobody can place.
+    #: The population's name, for the error a missing channel raises.
     name: str
     count: np.ndarray  # int64[n, 2] — genome strand: POS then NEG
-    #: float64[n] — the conserved mass, strand-agnostic. It sums to ONE per fragment across the objects
-    #: that fragment touched, where ``count`` is ``+1`` on each of them. ``None`` on the region
-    #: population, which needs no such channel: ``region_contained_count`` is already 1 per contained
-    #: fragment, i.e. already the conserved region mass.
+    #: float64[n]: the conserved mass, strand-agnostic. It sums to one per fragment across the objects the fragment
+    #: touched, where ``count`` is +1 on each. ``None`` on the region population, whose count is already one per
+    #: contained fragment.
     mass: np.ndarray | None = None
 
     @property
@@ -67,10 +58,8 @@ class PopulationView:
     def _require(self, channel: str) -> np.ndarray:
         """The channel, or an error that names the population.
 
-        A missing channel is None, never an array of zeros. Zeros would be a lie in the type: a
-        consumer cannot tell "this population does not measure that" from "it measured it and got
-        nothing", and the second is an ordinary, meaningful state. :meth:`mass_per_crossing` keeps
-        the same contract for a boundary nothing crossed.
+        A missing channel is ``None``, never zeros: zeros could not be told apart from "measured and got nothing",
+        which is an ordinary state.
         """
         value = getattr(self, channel)
         if value is None:
@@ -79,18 +68,12 @@ class PopulationView:
 
     @property
     def mass_per_crossing(self) -> np.ndarray:
-        """float64[n] — ``mass / count``: the mean conserved fragment-mass one crossing here carries.
+        """float64[n]: ``mass / count``, the mean conserved fragment mass one crossing here carries.
 
-        This is what converts an object-INCIDENCE total into a FRAGMENT count. It is 1.0 at a
-        boundary whose flanking regions both exceed every fragment length, because a crossing
-        fragment can then cross only that one boundary and its whole 1.0 lands there; it falls
-        toward the region spacing where they do not, and that gap is the per-boundary inflation of
-        the incidence count over the fragment count.
-
-        Where nothing crossed the value is 1.0, the identity, not 0. There is no mass at such a
-        boundary to rescale, and a 0 would delete whatever mass the deconvolution placed on a
-        boundary the accumulator never saw; the identity is the only value that can neither invent
-        nor destroy mass.
+        It converts an object-incidence total into a fragment count. It is 1.0 at a boundary whose flanking regions
+        both exceed every fragment length (a crossing fragment can then cross only that boundary) and falls toward the
+        region spacing where they do not. Where nothing crossed it is 1.0, the identity: the only value that neither
+        invents nor destroys mass the deconvolution placed there.
         """
         mass = self._require("mass")
         count = self.total_count.astype(np.float64)
@@ -107,16 +90,8 @@ class CalibrationSubstrate:
     n_boundaries: int
     n_sj: int
 
-    #: Four populations, and they do NOT carry the same channels. A channel is stored where a named
-    #: consumer reads it and nowhere else::
-    #:
-    #:     region_contained     count
-    #:     boundary_unspliced   count  mass   the mixture being deconvolved
-    #:     boundary_spliced     count  mass   certified RNA, not deconvolved
-    #:     sj                   count  mass   certified RNA
-    #:
-    #: No spliced fragment touches the region axis at all: a spliced fragment can never be *contained*,
-    #: because both endpoints of an annotated intron are region bounds.
+    #: The four populations of the module docstring's table. No spliced fragment touches the region axis: both
+    #: endpoints of an annotated intron are region bounds, so a spliced fragment is never contained.
     region_contained: PopulationView
     boundary_unspliced: PopulationView
     boundary_spliced: PopulationView
@@ -129,9 +104,8 @@ class CalibrationSubstrate:
         cls._check_alignment(payload, region_arrays)
 
         def view(name, count, mass=None) -> PopulationView:
-            # `mass` arrives one-column on two axes and two-column on the sj axis, and is folded to one
-            # here. `PopulationView.mass` is strand-agnostic by contract: the mass exists to turn an
-            # object-incidence total into a fragment count, a question with no strand in it.
+            # the sj mass arrives per strand and is folded to one column: it turns an incidence total into a
+            # fragment count, a question with no strand in it
             m = None
             if mass is not None:
                 m = np.asarray(mass, dtype=np.float64)
@@ -140,8 +114,7 @@ class CalibrationSubstrate:
             return PopulationView(
                 name=name,
                 count=np.asarray(count, dtype=np.int64),
-                # No decode: the accumulator deposits fractions as float64 directly, so there is one
-                # numeric convention end to end and nothing here to convert.
+                # the accumulator deposits float64 fractions directly, so there is nothing to decode
                 mass=m,
             )
 
@@ -165,16 +138,11 @@ class CalibrationSubstrate:
 
     @staticmethod
     def _check_alignment(payload: AccumulatorPayload, region_arrays: RegionArrays) -> None:
-        """Enforce that the geometry addresses the payload 1:1 — the one copy of this invariant.
+        """Enforce that the geometry addresses the payload 1:1.
 
-        Matching totals are not sufficient evidence, so the per-reference offsets are checked too: a
-        geometry can have the right object COUNT while slicing it differently across references, and
-        that mismatch silently discards deposits rather than raising.
+        Matching totals are not enough: a geometry can have the right object count but slice it differently across
+        references, which would silently discard deposits, so the per-reference offsets are checked too.
         """
-        if payload is None:
-            raise CalibrationSubstrateError(
-                "calibration payload is None; BamScanner.set_regions was not called."
-            )
         if region_arrays.n_regions != payload.n_regions:
             raise CalibrationSubstrateError(
                 f"region geometry has {region_arrays.n_regions} objects but the payload has "

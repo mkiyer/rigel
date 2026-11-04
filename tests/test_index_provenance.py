@@ -1,16 +1,11 @@
-"""An index must be rebuildable from its own manifest — sources, their hashes, and the build flags.
+"""An index is rebuildable from its own manifest: its sources, their content digests, and the build flags.
 
-A manifest recording only a format and a tool version leaves the source to be INFERRED, by matching
-region counts and by discovering a build flag from a failure. This is not
-`TRAPS: a-hash-that-misses-its-artifact`, which forbids storing a hash BESIDE the artifact it
-describes: these hashes are of external inputs the index cannot recompute from itself, so they are
-provenance rather than a cache key, and `partition_hash` and `graph_hash` stay computed on demand.
-The teeth are in three places. The expected flag set is read off
-`inspect.signature(TranscriptIndex.build)` and never written out here, so a new build parameter that
-does not reach the manifest fails this file rather than escaping it. The digests are re-derived by a
-DIFFERENT algorithm — whole file here, streamed chunks in the implementation — so a chunking bug
-cannot be reproduced by the check. And a one-byte edit to the GTF must move its recorded digest,
-which is what separates hashing the CONTENT from recording the PATH.
+The digests are of external inputs the index cannot recompute from itself, so they are provenance, not a cache key
+(`partition_hash` and `graph_hash` stay computed on demand). The expected flag set is read off
+`inspect.signature(TranscriptIndex.build)`, so a new build parameter that does not reach the manifest fails here; the
+digests are re-derived by a different algorithm (the whole file here, streamed chunks in the implementation), so a
+chunking bug cannot be reproduced by the check; and a one-byte edit to the GTF must move its digest, which separates
+hashing the content from recording the path.
 """
 
 from __future__ import annotations
@@ -28,12 +23,12 @@ from rigel.config import CONSTANTS
 from rigel.index import MANIFEST_JSON, INDEX_FORMAT_VERSION, TranscriptIndex, source_record
 
 #: `build()` parameters that name a source file rather than tune the build. They are recorded under
-#: `sources` with a content digest, so they must NOT also appear under `build_flags`.
+#: `sources` with a content digest, so they must not also appear under `build_flags`.
 SOURCE_PARAMETERS = frozenset({"fasta_file", "gtf_file", "output_dir", "alignable_zarr_path"})
 
 
 def sha256_of(path: Path) -> str:
-    """Digest by reading the whole file at once — deliberately NOT the implementation's chunked loop."""
+    """Digest by reading the whole file at once, deliberately not the implementation's chunked loop."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -91,7 +86,7 @@ class TestSources:
     def test_a_one_byte_edit_to_the_gtf_moves_its_recorded_digest(
         self, sources: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """The digest is of the CONTENT. Recording the path alone would pass every other test here."""
+        """The digest is of the content: recording the path alone would pass every other test here."""
         fasta, gtf = sources
         first = build_and_read_manifest(fasta, gtf, tmp_path / "a")
 
@@ -112,16 +107,16 @@ class TestSources:
 
 
 class TestTheDigestItself:
-    """PERTURBATION: the build-level tests above cannot see either of these defects.
+    """The digest's own defects, which the build-level tests above cannot see.
 
-    Every fixture here is ~2 KB against a 1 MB read chunk, and every fixture path is already
-    absolute — so a digest loop that reads only the first chunk, and a record that stores the raw
-    input string, both pass every test above. On a real multi-gigabyte GTF the first hashes one
-    megabyte of it and the second records a relative path that means nothing later.
+    Every fixture there is ~2 KB against a 1 MB read chunk, and every fixture path is already
+    absolute, so a digest loop that reads only the first chunk, and a record that stores the raw
+    input string, both pass them. On a real multi-gigabyte GTF the first hashes one megabyte of it
+    and the second records a relative path that means nothing later.
     """
 
     def test_the_digest_covers_a_file_larger_than_one_read_chunk(self, tmp_path: Path) -> None:
-        """Two files with an IDENTICAL first chunk must still get different digests."""
+        """Two files with an identical first chunk still get different digests."""
         head = b"A" * (CONSTANTS.resources.digest_chunk_bytes + 100)
         first = tmp_path / "first.bin"
         second = tmp_path / "second.bin"
@@ -192,10 +187,9 @@ class TestBuildFlags:
     def test_every_build_parameter_that_is_not_a_source_reaches_the_manifest(
         self, sources: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """The expected set is read off the signature, so a NEW parameter fails here by construction.
-
-        A hand-written list in this file would drift the moment someone adds a build knob, which is
-        exactly how a manifest ends up recording less than the build used.
+        """The expected set is read off the signature, so a new parameter fails here by construction; a
+        hand-written list would drift as build knobs are added, and the manifest would record less than
+        the build used.
         """
         fasta, gtf = sources
         manifest = build_and_read_manifest(fasta, gtf, tmp_path / "idx")

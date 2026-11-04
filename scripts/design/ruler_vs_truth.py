@@ -1,33 +1,23 @@
 #!/usr/bin/env python
-"""IS THE RULER'S FORMULA RIGHT? — the EM's effective length under capture, scored per transcript against
-the simulator's own capture-aware effective length.
+"""Is the ruler's formula right? The EM's effective length under capture, scored per transcript against the
+simulator's own capture-aware effective length.
 
-The truth is what generated the reads: ``CaptureSampler.partition_array`` is the sampler's count of
-admissible starts weighted by capture, so a transcript's true effective length under capture is
-``Σ_w f_pre(w) · partition_t(w)`` over the pre-capture fragment-length pmf, and its plain length is
-``Σ_w f_pre(w) · off_target_weight · (L_t − w + 1)+``. The truth FACTOR is their ratio; an arm's factor is
-its effective length over the same plain lengths (``transcript_capture_eff_lengths(...) / fl``). The two
-are compared in the log, ANCHORED on the fully probed transcripts (a global scale is free, so they are made
-the unit on both sides), and summarised per class — the probed fraction of the transcript's
-bases, read off the sampler itself — and per kind (mRNA / annotated single-exon / synthetic nascent
-entity). A factor of exactly 0 is an infinite abundance: counted, and dropped from the quantiles.
+The truth is what generated the reads: a transcript's true captured length is ``Σ_w f_pre(w) · partition_t(w)``
+(``CaptureSampler.partition_array``) and its plain length ``Σ_w f_pre(w) · off_target_weight · (L_t − w + 1)+``.
+The truth factor is their ratio; an arm's factor is its effective length over the same plain lengths. The two are
+compared in the log, anchored on the fully probed transcripts (a global scale is free), and summarised per probed
+class and per kind (mRNA, annotated single-exon, synthetic span). A factor of exactly 0 is counted and dropped from
+the quantiles.
 
-Arms: ``shipped`` is the ruler in ``src/`` on the shipped calibration; ``oracle_gdna`` is the same ruler
-fed the CERTIFIED true gDNA counts per object (``slot_truth.npz``), read by the shipped reader under a landscape
-fitted on the truth — the ideal witness, so the gap between the two is the calibration's and what
-remains under ``oracle_gdna`` is the ruler's (or the witness geometry's,
-`ISSUES: ruler-witness-geometry-on-transcript-panels`); ``--module`` names a prototype file defining
-``ARMS = {name: ruler}`` with ``ruler(calibration, region_arrays, index, fl, **inputs)`` returning the
-effective lengths — ``inputs`` is ``calibrate``'s debug bundle (the last refit's landscape under
-``gdna_hyperprior``, the chain, the belief) plus ``gdna_fl_pmf`` / ``rna_fl_pmf`` — run beside the
-shipped one on the same calibration — the harness every ruler mechanism
-is developed on before ``src/``; ``--set SECTION.FIELD=VALUE`` prices a config value on every arm.
+Arms: ``shipped`` is the ruler in ``src/``; ``oracle_gdna`` feeds it the certified true gDNA counts per object
+(``slot_truth.npz``) under a landscape fitted on the truth, so the gap between the two is calibration's and what
+remains is the ruler's. ``--module FILE`` adds prototype rulers, ``ARMS = {name: ruler}`` with
+``ruler(calibration, region_arrays, index, fl, **inputs)`` returning effective lengths, where ``inputs`` is
+``calibrate_condition``'s debug bundle. ``--set SECTION.FIELD=VALUE`` prices a config value on every arm.
 
-⛔ Read the classes apart: the probed class is where the formula is exact when its witness is, the
-unprobed class is where the bulk bites, and the partial classes are where the junction price lives.
-The junction price reads a junction's capture from the gDNA objects beside it, by conservation of bases,
-right on average and noisy per junction (`ISSUES: the-junction-price-is-noisy-within-a-gene`); what no gDNA
-object sees is declared, not repaired (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
+Read the classes apart: the probed class is exact when its witness is, the unprobed class is where the bulk bites,
+and the partial classes carry the junction price, which reads a junction's capture from the gDNA objects beside it
+(right on average, noisy per junction).
 
 Usage::
 
@@ -36,22 +26,18 @@ Usage::
     python scripts/design/ruler_vs_truth.py --panel test --panel-dir $RIGEL_RUNS/test_reference/scenarios_depth_d10
     python scripts/design/ruler_vs_truth.py --panel ladder --condition C --module proto.py --out table.tsv
     python scripts/design/ruler_vs_truth.py --panel test --condition C --set calibration.message_policy=silent
-    python scripts/design/ruler_vs_truth.py --panel ladder --condition C --scale        # THE ONE-SCALE READ-OUT
+    python scripts/design/ruler_vs_truth.py --panel ladder --condition C --scale        # the one-scale read-out
     python scripts/design/ruler_vs_truth.py --self-test
 
-⛔ ``--panel-dir`` names a directory of conditions, never the index: pass ``--panel ladder`` with it for a ladder-derived
-panel, or the test chromosome's index is loaded against the ladder's BAM and no fragment deposits.
+``--panel-dir`` names a directory of conditions, never the index: pass ``--panel ladder`` with it for a
+ladder-derived panel, or the test chromosome's index is loaded against the ladder's BAM and nothing deposits.
 
-``--scale`` — ARE EVERY HYPOTHESIS CLASS'S OPPORTUNITIES ON ONE SCALE? The E-step balances two hypotheses at a
-fragment only if their opportunities are the same multiple of the yield the simulator actually drew them with, so
-the quantity that decides the gDNA-versus-RNA split under capture is L / Y per hypothesis class, UNANCHORED: L the
-length the EM divides by, Y the simulator's own expected captured yield per unit abundance — in mRNA space for a
-transcript or a synthetic span (``partition_array``), in gDNA space for the locus gDNA component (the same weight
-over the locus's footprint, ``_extra_landscape``). The read-out prints L / Y for the locus gDNA component
-(``LocusPriors.gdna_eff_len``), the synthetic spans and the annotated transcripts on the shipped lengths, by probed
-class with the JUNCTION-PROBED transcripts apart, then the pairwise class-mean ratios. ⛔ The tolerance is the
-converged elasticity's: class means must agree to about 1 % (the synthetic pool moves ~20 % per 1 % of its own
-opportunity at ``g50 ss.99 ON``). The pipeline is run to the prior assembly and stopped there — no EM.
+``--scale`` asks whether every hypothesis class's opportunities are on one scale: the E-step balances two hypotheses
+only if their opportunities are the same multiple of the yield the simulator drew them with. It prints L / Y,
+unanchored, for the locus gDNA component (``LocusPriors.gdna_eff_len`` against the gDNA-space yield over its
+footprint), the synthetic spans and the annotated transcripts (the shipped lengths against ``partition_array``), by
+probed class with the junction-probed transcripts apart, then the pairwise class-mean ratios, which must agree to
+``ONE_SCALE_TOL``. The pipeline runs to the prior assembly and stops there: no EM.
 """
 
 from __future__ import annotations
@@ -78,7 +64,7 @@ if importlib.util.find_spec("rigel") is None:
     sys.path.insert(0, str(_REPO / "src"))
 sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
-from _shared import set_field, sibling  # noqa: E402
+from _shared import PANELS, set_field  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
 from rigel.calibration.capture_efficiency import capture_efficiencies  # noqa: E402
@@ -98,8 +84,6 @@ from rigel.sim.capture import CaptureConfig, CaptureSampler  # noqa: E402
 from rigel.sim.whole_genome import fl_pmf, load_transcripts_from_index  # noqa: E402
 from rigel.sim.wgs_config import GDNASimConfig  # noqa: E402
 
-PB = sibling("policy_benchmark.py")
-PANELS = PB.PANELS
 
 #: the transcript classes, by the probed fraction of the transcript's bases
 CLASSES = (
@@ -138,12 +122,12 @@ class Truth:
 
 
 def sampler_truth(sampler: CaptureSampler, lengths, widths, pmf, off_target: float) -> tuple:
-    """``(L_plain, factor_true, probed_frac)`` from the sampler's own partition. ``L_plain`` counts the starts the
-    simulator could draw without capture, so a transcript's unknown bases (masked by the sampler, never drawn)
-    leave its factor the capture's alone. The probed fraction is read off the partition at a one-base fragment:
-    every start then carries exactly its own base, so ``(partition(1) − off·n) / binding`` over its ``n`` known
-    bases is the count of probed ones (a split probe's pieces at their penalty), and no private probe map is
-    consulted."""
+    """``(L_plain, factor_true, probed_frac)`` from the sampler's own partition.
+
+    ``L_plain`` counts the starts the simulator could draw without capture, so a transcript's unknown bases (masked,
+    never drawn) leave its factor the capture's alone. The probed fraction is read off the partition at a one-base
+    fragment, where every start carries exactly its own base: ``(partition(1) − off·n) / binding`` over its ``n``
+    known bases counts the probed ones (a split probe's pieces at their penalty)."""
     L = np.asarray(lengths, dtype=np.int64)
     n = L.size
     rows = range(n)
@@ -249,9 +233,9 @@ def load_truth(index: TranscriptIndex, index_dir: Path, panel_dir: Path, conditi
 
 
 def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, config):
-    """The shipped calibration on the condition's cached payload; returns the result and the solve's
-    debug bundle — the last refit's landscape under ``gdna_hyperprior`` (``None`` without a refit), the
-    prior an expectation arm reads; the chain and the belief; and the two fragment-length pmfs."""
+    """The shipped calibration on the condition's cached payload. Returns the result and the solve's debug bundle:
+    the last refit's landscape under ``gdna_hyperprior`` (``None`` without a refit), the chain, the belief, the two
+    fragment-length pmfs and the EM's length tables."""
     sj = build_sj_geometry_arrays(index)
     bflags = build_boundary_flags_array(index)
     cache = read_scan_cache(panel_dir / "scan_cache" / condition, index)
@@ -270,14 +254,14 @@ def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, c
     )
     debug["gdna_fl_pmf"] = kw["gdna_fl_pmf"]
     debug["rna_fl_pmf"] = kw["rna_fl_pmf"]
-    # the EM's two length tables, exactly as production decides them on this payload: the shipped ruler reads them
+    # the EM's two length tables as production builds them on this payload: the shipped ruler reads them
     debug["length_tables"] = length_tables(library_fl_models(kw["payload"], index), cal, region_arrays)
     return cal, debug
 
 
 def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, gdna_fl_pmf):
-    """The same result with the ruler's gDNA masses replaced by the CERTIFIED truth per object, read by the
-    shipped reader under a landscape fitted on the truth: the ideal witness, no estimator noise."""
+    """The same result with the ruler's gDNA masses replaced by the certified truth per object, read by the
+    shipped reader under a landscape fitted on the truth: the ideal witness, with no estimator noise."""
     z = np.load(panel_dir / "oracle_cache" / condition / "slot_truth.npz", allow_pickle=True)
     kind, obj, n_g = z["kind"], z["obj"], z["n_gdna"]
     m_reg = np.zeros_like(np.asarray(cal.count_gdna_region, float))
@@ -579,15 +563,14 @@ def main() -> int:
 
 # ── the one-scale read-out ───────────────────────────────────────────────────────────────────────
 
-#: the class-mean tolerance the read-out judges against: the converged elasticity of the synthetic pool to its own
-#: opportunity is about −20 at ``g50 ss.99 ON``, so a 1 % disagreement between two classes' means is a 20 % move
-#: of that pool
+#: the class-mean tolerance the read-out judges against: the synthetic pool is highly elastic to its own
+#: opportunity, so even a 1 % disagreement between two classes' means moves that pool far more than 1 %
 ONE_SCALE_TOL = 0.01
 
 
 def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
-    """The pipeline run to the prior assembly and stopped there: the shipped calibration, the region arrays, the
-    EM's multi-loci, the shipped ``LocusPriors``, and the ruler's inputs and output — no EM."""
+    """Run the pipeline to the prior assembly and stop there, with no EM. Returns the shipped calibration, the
+    region arrays, the EM's multi-loci, the shipped ``LocusPriors``, and the ruler's inputs and output."""
     import rigel.calibration.capture_eff_length as CEL
     import rigel.calibration.fl as FL
     import rigel.calibration.priors as PRIORS
@@ -600,7 +583,7 @@ def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
 
     def fl_hook(*a, **k):
         models = orig_fl(*a, **k)
-        cap["fl_models"] = models  # the last fit is calibration's: its gdna_pmf is the pairing arm's law
+        cap["fl_models"] = models  # the last fit is calibration's
         return models
 
     def ruler_hook(calibration, region_arrays, index_, fl_eff_lengths, tables):
@@ -633,10 +616,11 @@ def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
 
 
 def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, width_step: int = 4) -> np.ndarray:
-    """Per locus, ``Y_g = Σ_w f_g(w) Σ_{starts s whose fragment OVERLAPS a block} (off + bind · best single-part
-    overlap)``, read off the simulator's own gDNA-space landscape — the same computation the reads were drawn
-    with. ``blocks`` is ``int64[n, 4]`` of ``(locus, ref_id, start, end)``. The width grid is thinned by
-    ``width_step`` with each kept width carrying its bin's pmf mass (the landscape is per width per reference)."""
+    """Per locus, ``Y_g = Σ_w f_g(w) Σ_{starts s whose fragment overlaps a block} (off + bind · best single-part
+    overlap)``, read off the simulator's own gDNA-space landscape, the computation the reads were drawn with.
+
+    ``blocks`` is ``int64[n, 4]`` of ``(locus, ref_id, start, end)``. The width grid is thinned by ``width_step``,
+    each kept width carrying its bin's pmf mass (the landscape is per width per reference)."""
     Y = np.zeros(n_loci, dtype=np.float64)
     if blocks.size == 0:
         return Y
@@ -707,7 +691,7 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
         rna_neg_frac_region=z, gdna_frac_boundary=ez, rna_pos_frac_boundary=ez, rna_neg_frac_boundary=ez,
         gdna_density_global=0.0, gdna_bulk_density=None, gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=np.ones(n), gdna_capture_efficiency_boundary=np.ones(ne),
-        rna_sense_frac=0.5, gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0,
+        rna_sense_frac=0.5,
         n_regions=n, n_boundaries=ne, n_sj=0,
     )
     ml = MultiLocus(
@@ -721,9 +705,9 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
 
 
 def footprint_probed_fraction(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict) -> np.ndarray:
-    """Per locus: the fraction of the footprint's bases under a probe part, read off the sampler's own gDNA-space
-    probe map (``_get_intervals("gdna", ref)``, the union of its parts) — the locus gDNA component's analogue of a
-    transcript's probed fraction, so the locus rows can be read by probed class beside the transcript rows."""
+    """Per locus: the fraction of the footprint's bases under a probe part, read off the sampler's gDNA-space probe
+    map (``_get_intervals("gdna", ref)``, the union of its parts). It is the locus gDNA component's analogue of a
+    transcript's probed fraction, so locus rows can be read by probed class beside transcript rows."""
     covered = np.zeros(n_loci, dtype=np.float64)
     length = np.zeros(n_loci, dtype=np.float64)
     if blocks.size == 0:
@@ -752,10 +736,11 @@ def footprint_probed_fraction(sim: Sim, blocks: np.ndarray, n_loci: int, id2name
 
 
 def junction_probed_flags(sim: Sim, index: TranscriptIndex) -> np.ndarray:
-    """Per transcript: does a probe part in the transcript's OWN space strictly span one of its junctions? Read off
-    the sampler's own probe map (``_get_intervals("mrna", row)``) against the junction positions in transcript
-    coordinates, 5′ to 3′ — the panel's junction-probed transcripts, whose junction placements bind a probe no gDNA
-    witness can see."""
+    """Per transcript: does a probe part in the transcript's own space strictly span one of its junctions?
+
+    Read off the sampler's probe map (``_get_intervals("mrna", row)``) against the junction positions in transcript
+    coordinates, 5′ to 3′. These are the junction-probed transcripts, whose junction placements bind a probe no
+    gDNA witness can see."""
     from rigel.types import Strand
 
     t = index.t_df
@@ -809,8 +794,8 @@ def scale_stats(L: np.ndarray, Y: np.ndarray, weight: np.ndarray) -> dict:
 def scale_verdict(means: dict) -> tuple[float, str]:
     """The largest raw class-mean disagreement, as a fraction, and its pair.
 
-    Interpreting this as a likelihood defect requires the component numerators to
-    share a unit: rescaling both K and L for one component leaves K/L unchanged.
+    Reading it as a likelihood defect requires the component numerators to share a unit: rescaling both K and L
+    for one component leaves K/L unchanged.
     """
     names = [k for k, v in means.items() if np.isfinite(v) and v > 0]
     worst, pair = 0.0, ""
@@ -938,9 +923,10 @@ def print_scale(r: dict) -> None:
 
 
 def self_test() -> int:
-    """Perturb every comparator on a synthetic panel with a KNOWN partition — a tiny index with a fully
-    probed, a half-probed and an unprobed gene, a probe file the sampler reads — and require each to
-    fire (`TRAPS: perturb-every-gate`). The truth is the sampler's own; the arms are rulers written here."""
+    """Perturb every comparator on a synthetic panel with a known partition, and require each to fire.
+
+    The panel is a tiny index with a fully probed, a half-probed and an unprobed gene and a probe file the sampler
+    reads. The truth is the sampler's own; the arms are rulers written here."""
     import tempfile
 
     sys.path.insert(0, str(_REPO / "tests"))
@@ -970,9 +956,8 @@ def self_test() -> int:
 
         index = build_test_index(_Factory(), gtf, genome_size=16000, name="ruler_self_test")
         bed = Path(tmp) / "probes.bed"
-        # the probed gene's ONE probe spans both exons as a two-block BED12 line — contiguous in cDNA,
-        # so every start of every fragment lies under it at full scale; the half-probed gene's probe
-        # covers its first exon only
+        # the probed gene's one probe spans both exons as a two-block BED12 line, contiguous in cDNA, so every
+        # start of every fragment lies under it at full scale; the half-probed gene's probe covers its first exon
         bed.write_text(
             "chr1\t1000\t3600\tp\t0\t.\t1000\t3600\t0\t2\t600,600\t0,2000\n"
             "chr1\t6000\t6600\th\t0\t.\t6000\t6600\t0\t1\t600\t0\n"
@@ -992,9 +977,8 @@ def self_test() -> int:
         )
         params = type("Sim", (), dict(frag_mean=200, frag_std=50, frag_min=100, frag_max=300))
         widths, pmf = fl_pmf(params)
-        # Exercise the manifest loader too: a consumer-only check cannot catch it
-        # silently reusing the RNA law or using RNA parameters as gDNA defaults. Its genome is known
-        # sequence but for two assembly gaps: one in the unprobed gene's intron, one in its second exon.
+        # the manifest loader must keep the RNA and gDNA laws distinct; its genome is known sequence but for two
+        # assembly gaps, one in the unprobed gene's intron and one in its second exon
         bases = np.random.default_rng(0).choice(np.frombuffer(b"ACGT", dtype=np.uint8), 16000)
         bases[12200:12300] = ord("N")
         bases[13100:13120] = ord("N")
@@ -1070,7 +1054,7 @@ def self_test() -> int:
         )
         truth = Truth(L_plain, factor, probed, kind, np.full(L.size, 100.0), np.full(L.size, 10.0))
 
-        # ③ a ruler that IS the truth scores 0 on every class, and a global scale on it is free
+        # ③ a ruler equal to the truth scores 0 on every class, and a global scale on it is free
         d, measured, n_zero = score(factor, truth, min_frags=20)
         rows = class_rows(d, measured, truth)
         check("the truth scores exactly 0 on every class", all(abs(r["med"]) < 1e-12 for r in rows))
@@ -1121,9 +1105,8 @@ def self_test() -> int:
         good = Path(tmp) / "good.py"
         good.write_text("def r(cal, ra, index, fl, **inputs):\n    return fl\nARMS = {'plain': r}\n")
         check("a well-formed prototype loads", list(load_arms(good)) == ["plain"])
-        # ⑨ the one-scale read-out: a class priced at its own yield reads 1 and disagrees with nothing; a class
-        #    scaled by 1.185 (the prototype rule's span:isoform ratio) is named as the pair, and a per-mille
-        #    difference is inside the tolerance
+        # ⑨ the one-scale read-out: a class priced at its own yield reads 1; a class scaled by 1.185 is named as
+        #    the pair, and a per-mille difference is inside the tolerance
         Y = L_plain * factor
         w = np.full(L.size, 100.0)
         s_true = scale_stats(Y, Y, w)
@@ -1138,15 +1121,14 @@ def self_test() -> int:
                   np.asarray(widths, dtype=np.int64), np.asarray(pmf, dtype=np.float64))
         jp = junction_probed_flags(sim, index)
         check("a probe spanning a transcript's junction flags it, and only it", bool(jp[p]) and not jp[h] and not jp[u])
-        # ⑪ the gDNA-space yield counts every start whose fragment OVERLAPS the footprint (the locus gDNA component
-        #    takes its outer boundaries), so a block over the unprobed gene reads exactly off · Σ_w f(w)(L + w − 1):
-        #    no probe, every start at the off-target weight; a block over the probed gene reads more
+        # ⑪ the gDNA-space yield counts every start whose fragment overlaps the footprint, so a block over the
+        #    unprobed gene reads exactly off · Σ_w f(w)(L + w − 1); a block over the probed gene reads more
         blocks = np.array([(0, 0, 11000, 13600), (1, 0, 1000, 3600)], dtype=np.int64)
         Yg = gdna_space_yield(sim, blocks, 2, {0: "chr1"}, width_step=1)
         plain = float(sum(pw * off * (2600 + int(wv) - 1) for wv, pw in zip(widths, pmf, strict=True)))
         check("an unprobed footprint's gDNA-space yield is its off-target plain length", abs(Yg[0] / plain - 1.0) < 1e-9)
         check("...and a probed footprint's yield exceeds it", Yg[1] > Yg[0] * 2.0)
-        # Unequal generating laws: gDNA truth must follow its own PMF, independent of RNA.
+        # unequal generating laws: the gDNA truth follows its own pmf, independent of RNA
         gap = dataclasses.replace(sim, gdna_widths=np.array([60, 80, 100]), gdna_pmf=np.array([0.25, 0.5, 0.25]))
         Ygap = gdna_space_yield(gap, blocks, 2, {0: "chr1"}, width_step=1)
         check("a gDNA length gap changes its footprint truth", not np.array_equal(Ygap, Yg))
@@ -1162,13 +1144,12 @@ def self_test() -> int:
                     for start in range(max(0, int(lo-wv+1)), min(int(hi), 16000-int(wv)+1))
                 )
         check("gap gDNA truth agrees with direct captured-start enumeration", np.allclose(Ygap, direct, rtol=1e-12, atol=1e-9))
-        # ⑫ the shipped gDNA component's length (`assemble_priors`) at efficiency 1 counts the SAME overlapping
-        #    starts as the yield, Σ_w f(w)(L + w − 1), on a footprint whose outside neighbours hold every outside
-        #    base: each crossing fragment then starts in a neighbour, so its whole unit lands on the footprint's
-        #    objects
+        # ⑫ the shipped gDNA component's length (`assemble_priors`) at efficiency 1 counts the same overlapping
+        #    starts as the yield, Σ_w f(w)(L + w − 1): the footprint's outside neighbours hold every outside base,
+        #    so each crossing fragment starts in a neighbour and its whole unit lands on the footprint's objects
         from rigel.calibration.region_arrays import RegionArrays
         ra_t = RegionArrays.from_index(index)
-        # the geometry indexes a pmf BY WIDTH (calibration's convention); the simulator's pair is positional
+        # the geometry indexes a pmf by width (calibration's convention); the simulator's pair is positional
         by_width = np.zeros(int(max(widths)) + 1)
         by_width[np.asarray(widths, dtype=np.int64)] = np.asarray(pmf, dtype=np.float64)
         Lfp = footprint_gdna_length(ra_t, (0, 11000, 13600), by_width)

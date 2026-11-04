@@ -1,20 +1,15 @@
 """The locus EM's answer does not depend on where it starts.
 
-SQUAREM jumps ahead along the EM's own path. Where a jump carried a shrinking component below the floor, the
-solver once CLAMPED it there, and a component at the floor takes no responsibility in the E-step and no share of
-the evidence-proportional prior, so it never came back: which of the components sharing fragments survived was
-decided by the warm start. The solver now shortens the jump toward the plain double step instead
-(``em_solver.cpp``'s ``backtracked_squarem_step``), so only the EM's own step can take a component to the floor.
+SQUAREM jumps ahead along the EM's own path. A jump that clamped a shrinking component at the floor would let the
+warm start decide which of the components sharing fragments survives, since a component at the floor takes no
+responsibility in the E-step and no share of the evidence-proportional prior. The solver shortens the jump toward
+the plain double step instead (``em_solver.cpp``'s ``backtracked_squarem_step``), so only the EM's own step can take
+a component to the floor.
 
-The fixtures are three real loci from the ladder's g00 ss.99 capture-ON condition — every array the locus EM
-reads, the locus's transcripts renumbered 0..n-1, and the two pseudocounts ``pipeline.em_pseudocounts`` gave
-them — each of which the clamp forked: the coverage and the uniform start ended 7 to 72 fragments apart, in the
-gDNA component or a transcript. Solved from both starts at 10,000 iterations and δ 1e-9 they now agree to within
-1.3e-5 fragments; the bound below sits between the two by orders of magnitude on each side. Only the (locus,
-mode) pairs the clamp forked are listed, so every case can fire.
-
-The ``prior`` start is left out on purpose: with no per-component weight it starts every RNA component at exactly
-zero, the absorbing state by design (the warm start's own comment in ``em_solver.cpp``).
+The fixtures are three captured loci (every array the locus EM reads, the transcripts renumbered 0..n-1, and the two
+pseudocounts ``pipeline.em_pseudocounts`` gave them). Only the (locus, mode) pairs a clamping jump forks between the
+coverage and the uniform start are listed, so every case can fire. The ``prior`` start is left out: with no
+per-component weight it starts every RNA component at exactly zero, an absorbing state by design.
 """
 
 from pathlib import Path
@@ -35,7 +30,7 @@ PARTITION_KEYS = (
     "is_spliced",
     "gdna_log_liks",
 )
-# The clamp forked these pairs between the coverage and the uniform start (7 to 72 fragments apart).
+# The pairs a clamping jump forks between the coverage and the uniform start, by whole fragments.
 FORKED = [
     ("locus303", "map"),
     ("locus751", "map"),
@@ -43,7 +38,8 @@ FORKED = [
     ("locus803", "map"),
     ("locus803", "vbem"),
 ]
-# Fragments. The repaired solver's two answers agree to 1.3e-5 at most; the clamp's were 7 or more apart.
+# Fragments: orders of magnitude below the whole fragments a clamping jump forks the two starts by, and above the
+# solver's own convergence residue at 10,000 iterations and δ 1e-9.
 AGREE = 1e-3
 
 
@@ -67,7 +63,13 @@ def _solve(locus: str, mode: str, warm_start: str):
     rc = AbundanceEstimator(n_t, geometry=geometry, em_config=config)
     rc.unambig_counts[:] = fx["unambig"]
     gdna, _, _ = rc.run_batch_locus_em_partitioned(
-        [tuple(fx[k] for k in PARTITION_KEYS)],
+        [
+            (
+                *(fx[k] for k in PARTITION_KEYS),
+                # no unit of a fixture locus has an intergenic place
+                np.full(len(fx["offsets"]) - 1, -np.inf, dtype=np.float32),
+            )
+        ],
         [np.arange(n_t, dtype=np.int32)],
         np.array([float(fx["gdna_prior"])]),
         rna_prior_count=np.array([float(fx["rna_prior"])]),
@@ -89,7 +91,7 @@ def test_the_coverage_and_the_uniform_start_reach_one_answer(locus, mode):
 
 @pytest.mark.parametrize("locus", sorted({locus for locus, _ in FORKED}))
 def test_each_captured_locus_exercises_the_backtrack(locus):
-    """The repair's own path runs on every fixture: some extrapolation step was shortened rather than taken."""
+    """The backtrack runs on every fixture: some extrapolation step is shortened rather than taken."""
     halvings = sum(
         _solve(locus, mode, warm)[1]["squarem_backtrack_count"]
         for mode in ("map", "vbem")

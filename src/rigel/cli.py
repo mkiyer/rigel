@@ -1,7 +1,4 @@
-"""
-rigel.cli — Unified command-line interface.
-
-Entry point: ``rigel`` (registered in pyproject.toml).
+"""The ``rigel`` command line (the entry point registered in pyproject.toml).
 
 Subcommands:
     rigel index   — Build reference index from FASTA + GTF
@@ -48,7 +45,7 @@ def index_command(args: argparse.Namespace) -> int:
     if not args.no_mappability and args.alignable_zarr is None:
         sys.exit(
             "Error: --alignable-zarr PATH is required (use --no-mappability to opt out "
-            "explicitly when running on synthetic genomes or stranded-only benchmarks)."
+            "explicitly, e.g. on a synthetic genome)."
         )
 
     try:
@@ -217,7 +214,7 @@ SUMMARY_DECIMALS = 6
 #: summary.json's fragment counts are rounded to this many decimals: a hundredth of a fragment.
 SUMMARY_COUNT_DECIMALS = 2
 
-#: summary.json's strand posterior variance keeps this many SIGNIFICANT digits: it is p(1 − p)/n, of order 1e-8 at a
+#: summary.json's strand posterior variance keeps this many significant digits: it is p(1 − p)/n, of order 1e-8 at a
 #: million fragments, where fixed decimals print 0, and at most 0.25, so 8 significant digits are at least 8 decimals.
 SUMMARY_VARIANCE_DIGITS = 8
 
@@ -227,9 +224,8 @@ def _significant(x: float, digits: int) -> float:
     return float(f"{x:.{digits}g}")
 
 
-#: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. Named here rather
-#: than derived from the enum because these are an OUTPUT CONTRACT — a rename in the enum must not
-#: silently rename a reported category.
+#: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. Named here, not derived from the
+#: enum, because they are an output contract: a rename in the enum must not rename a reported category.
 _POOL_REPORT_NAMES = (
     "pool_gdna_intergenic",
     "pool_gdna_intronic",
@@ -315,21 +311,19 @@ def _fragment_length_report(fl_models):
       1-bp histograms, destined for ``fragment_lengths.feather``, which keeps them out of
       ``summary.json``.
 
-    Every category is ONE measurement of ONE quantity — the accumulator's ``L`` — over a
-    stated population:
+    Every category measures one quantity, the accumulator's ``L``, over a stated population:
 
     ``global``
         the unconditional anchor: every deposited fragment, no purity condition.
     ``gdna`` / ``rna``
         the two modelled pools, the empirical views of what scoring and calibration actually use.
     the five ``pool_*`` rows
-        the five pools **unaggregated** (none is pure). ``gdna`` is the fitted uniform-frame gDNA
+        the five pools unaggregated (none is pure). ``gdna`` is the fitted uniform-frame gDNA
         histogram and ``rna`` the de-tilted ``pool_rna_spliced``; the two ``*_exon`` crossing rows are
         the on-target gDNA, shown on their own so the off-target / on-target comparison is an output.
 
-    There are no per-SpliceType histograms here, deliberately: they would be the scanner's own,
-    measured by rules that are neither each other nor ``L``, over a population gated by a unanimity
-    test. The per-fragment splice COUNTS come from the scanner's census instead.
+    There are no per-splice-type histograms: the scanner measures those by other rules than ``L``. The splice
+    counts come from the scanner's census instead.
     """
     import pandas as pd
 
@@ -539,32 +533,22 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     ci_lo, ci_hi = sm_primary.posterior_95ci()
     strand_fit = _strand_fit_summary(sm)
 
-    # Fragment length: lean per-category summary statistics go into summary.json;
-    # the raw 1-bp histograms are written separately to fragment_lengths.feather, which keeps
-    # thousands of bins out of the summary.
-    #
-    # ONE SOURCE. Every category comes from result.fl_models, which is built from the accumulator
-    # payload alone — the anchor, the two modelled pools and the five pure pools, all binned at the
-    # accumulator's L.
+    # Fragment length: per-category statistics go into summary.json, the raw 1-bp histograms into
+    # fragment_lengths.feather. Every category comes from result.fl_models, built from the accumulator payload
+    # alone, all binned at the accumulator's L.
     fl_models = result.fl_models
     fl_summary, fl_histogram_df = _fragment_length_report(fl_models)
 
-    # Splice-type breakdown — the scanner's own per-fragment census, plus the blacklist tally.
-    # Surfaces the ``spliced_implicit`` and ``splice_artifact`` classes that the scan-level
-    # ``with_*_sj`` counters omit.
-    #
-    # SCANNER QC, read from where it is generated rather than off the fragment-length category
-    # models, which would count only fragments that also yielded a length observation — a population
-    # gated by a transcript-space unanimity test. The census counts every fragment the scanner offers
-    # the accumulator, and its books close against the accumulator's own qc block.
+    # Splice-type breakdown: the scanner's per-fragment census, which counts every fragment it offers the
+    # accumulator (and closes against the accumulator's qc block), plus the blacklist tally. It reports the
+    # ``spliced_implicit`` and ``splice_artifact`` classes the ``with_*_sj`` counters omit.
     from .splice import SpliceType, census_field
 
     def _splice_n(stype) -> int:
         return int(getattr(stats, census_field(stype)))
 
-    # Blacklist provenance: distinguishes "detection off (no blacklist in the
-    # index)" from "detection on, 0 artifacts found". TranscriptIndex.load always
-    # sets the size (0 when the index has no blacklist).
+    # Tells "detection off (no blacklist in the index)" from "detection on, 0 artifacts found";
+    # TranscriptIndex.load always sets the size (0 without a blacklist)
     bl_size = int(index.sj_blacklist_size)
     splice_counts = {
         "unspliced": _splice_n(SpliceType.UNSPLICED),
@@ -741,10 +725,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             # the junction fit reads κ from.
             "sj": sm.sj_table.to_dict(),
             **strand_fit,
-            # All-exonic (RNA+gDNA) diagnostic model, never used for scoring.
-            # A positive ``contamination_gap`` means unstranded gDNA is dragging
-            # the mixed all-exonic estimate toward 0.5 relative to the clean
-            # spliced-only model — a gDNA-contamination fingerprint.
+            # The all-exonic (RNA + gDNA) diagnostic model, never used for scoring. A positive
+            # ``contamination_gap`` means unstranded gDNA pulls the all-exonic estimate toward 0.5 relative to the
+            # spliced-only model: a sign of gDNA contamination.
             "diagnostics": {
                 "exonic_all_specificity": round(sm.exonic.strand_specificity, SUMMARY_DECIMALS),
                 "exonic_all_p_r1_sense": round(sm.exonic.p_r1_sense, SUMMARY_DECIMALS),
@@ -787,8 +770,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         json.dump(summary, f, indent=2)
     logging.info(f"[DONE] Summary written to {summary_path}")
 
-    # Write the raw fragment-length histograms (the bulk kept out of summary.json).
-    # Tidy long form: (category, length, count) — one row per non-empty 1-bp bin.
+    # The raw fragment-length histograms, long form: one (category, length, count) row per 1-bp bin
     fl_histogram_df.to_feather(str(fragment_lengths_path), **feather_kw)
     if getattr(args, "tsv", False):
         fl_histogram_df.to_csv(
@@ -796,8 +778,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         )
     logging.info(f"[DONE] Wrote {fragment_lengths_path} ({len(fl_histogram_df)} rows)")
 
-    # Genome-wide gDNA track: a feather (report substrate) + a bedGraph (genome
-    # browser). Per-region gDNA level solved by calibration.
+    # The genome-wide gDNA track, calibration's per-region gDNA level: a Feather (the report's input) and a
+    # bedGraph (for a genome browser)
     track = getattr(result, "calibration_track", None)
     if track is not None and len(track) > 0:
         from .calibration.track import write_bedgraph
@@ -1300,8 +1282,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=IndexConfig.gtf_parse_mode,
         choices=["strict", "warn-skip"],
         help=(
-            "GTF parse mode: 'strict' fails on malformed boundaries; "
-            "'warn-skip' logs warnings and skips malformed boundaries (default: %(default)s)"
+            "GTF parse mode: 'strict' fails on a malformed record; "
+            "'warn-skip' logs a warning and skips it (default: %(default)s)"
         ),
     )
     idx.add_argument(
@@ -1349,7 +1331,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Explicitly opt out of the alignable store: no splice blacklist, and the "
             "unobservable genome is the FASTA's N runs alone. Use this for synthetic "
-            "genomes, stranded-only benchmarks, or any setting where running "
+            "genomes or any setting where running "
             "'alignable' is unnecessary. Mutually exclusive with --alignable-zarr."
         ),
     )
@@ -1562,9 +1544,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=f"Calibration prior-bootstrap iterations (default {qd['calib_refit_iters']}). Each one re-fits the population gDNA "
-        "landscape on the current solve, resets the belief, and re-solves. The bootstrap converges "
-        "geometrically and iteration 3 captures ~96%% of the available gain; cost is linear (one extra "
-        "full sweep each). 0 = the prior-free pass-0 alone, which fits no gDNA landscape and so applies no "
+        "landscape on the current solve, resets the belief, and re-solves; later iterations change the "
+        "answer little, and each costs one extra full sweep. 0 = the prior-free pass-0 alone, which fits no gDNA landscape and so applies no "
         "capture correction. Advanced calibration knob.",
     )
     adv.add_argument(
@@ -1576,7 +1557,7 @@ def build_parser() -> argparse.ArgumentParser:
         f"intergenic regions merged up to this many slots per block (default {qd['sweep_block_slots']}; 'none' is not "
         "accepted here — the whole chain is a config choice). "
         "Performance only — the answer is the same for every value; it sizes the solver's per-thread "
-        "arena, so smaller blocks use less memory per sweep at no measured cost in time. Advanced "
+        "arena, so smaller blocks use less memory per sweep. Advanced "
         "calibration knob.",
     )
     adv.add_argument(

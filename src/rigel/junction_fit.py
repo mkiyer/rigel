@@ -1,15 +1,13 @@
-"""
-rigel.junction_fit — the genuine junctions' strand rate κ, fitted over the per-junction strand table.
+"""rigel.junction_fit — the genuine junctions' strand rate κ, fitted over the per-junction strand table.
 
-In a stranded library an annotated splice junction is one of three classes: genuine RNA, whose reads fall on the
-minority strand at rate κ; a splice artifact — gDNA the aligner wrote as spliced — at ½; or reversed, at 1 − κ. The
-fit maximises that three-class binomial mixture over κ and the class shares together, then reads κ as the shipped
-``Beta(1, 1)`` posterior mean over the reads the maximum credits to RNA (:func:`genuine_sense_fraction`).
+In a stranded library an annotated junction is genuine RNA, whose reads fall on the minority strand at rate κ; a splice
+artifact (gDNA the aligner wrote as spliced), at ½; or reversed, at 1 − κ. The fit maximises that three-class binomial
+mixture over κ and the class shares together, then reads κ as the ``Beta(1, 1)`` posterior mean over the reads the
+maximum credits to RNA (:func:`genuine_sense_fraction`). Every setting of the search is
+``rigel.config.CONSTANTS.junction_fit``.
 
-Every numerical setting of the search is ``rigel.config.CONSTANTS.junction_fit``; this module holds no constant of
-its own. The consumers are :attr:`rigel.strand_model.StrandModel.genuine_n_same`, and ``summary.json``'s strand
-block, which reads the fit's class shares (:func:`junction_classes`). Gates: ``tests/test_strand_model.py``'s
-``TestGenuineKappa``.
+Read by :attr:`rigel.strand_model.StrandModel.genuine_n_same` and by ``summary.json``'s strand block
+(:func:`junction_classes`). Gate: ``tests/test_strand_model.py``'s ``TestGenuineKappa``.
 """
 
 from dataclasses import dataclass
@@ -22,10 +20,9 @@ from .config import CONSTANTS, JunctionFitConstants
 def genuine_sense_fraction(
     n_sense, n_total, constants: JunctionFitConstants = CONSTANTS.junction_fit
 ) -> float:
-    """The genuine junctions' sense fraction κ: the shipped ``Beta(1, 1)`` posterior mean, ``(minority + 1)/(reads +
-    2)``, over the reads the three-class mixture credits to RNA at its maximum (:func:`_genuine_mixture`). Where every
-    junction is genuine that is exactly ``(n_same + 1)/(n_obs + 2)``; it is never 0. The table is oriented so the
-    genuine class's minority rate lies below ½."""
+    """The genuine junctions' sense fraction κ: the ``Beta(1, 1)`` posterior mean ``(minority + 1) / (reads + 2)`` over
+    the reads the three-class mixture credits to RNA at its maximum (:func:`_genuine_mixture`). Where every junction is
+    genuine that is exactly ``(n_same + 1) / (n_obs + 2)``; it is never 0."""
     k, n, c, flip = _oriented_groups(n_sense, n_total)
     _, _, minority, reads, _ = _genuine_mixture(k, n, c, constants)
     kappa = (minority + 1.0) / (reads + 2.0)
@@ -97,11 +94,11 @@ def _genuine_mixture(
     constants: JunctionFitConstants = CONSTANTS.junction_fit,
 ) -> tuple[float, np.ndarray, float, float, float]:
     """The three-class binomial mixture's maximum likelihood. Junction group g (``c_g`` junctions with ``k_g`` of
-    ``n_g`` reads on the minority side) is genuine RNA (rate κ), a splice artifact — misaligned gDNA (½) — or reversed
-    (1 − κ). The class shares are solved exactly at each κ (:func:`_class_shares`); κ maximises that profile, by a scan
-    over ``u = log(κ/(½ − κ))`` and Brent's method in its best cell — bounded work, where EM crawls without end as κ
-    nears ½ (the classes merge) and can stop at a saddle. Returns ``(κ, shares, minority, reads, log-likelihood)``,
-    ``minority`` and ``reads`` being the RNA classes' expected counts at the maximum."""
+    ``n_g`` reads on the minority side) is genuine RNA (rate κ), a splice artifact (½) or reversed (1 − κ). The class
+    shares are solved exactly at each κ (:func:`_class_shares`), and κ maximises that profile by a scan over
+    ``u = log(κ/(½ − κ))`` and Brent's method in its best cell: bounded work, where EM slows without bound as κ nears ½
+    (the classes merge) and can stop at a saddle. Returns ``(κ, shares, minority, reads, log-likelihood)``, ``minority``
+    and ``reads`` being the RNA classes' expected counts at the maximum."""
     from scipy.optimize import minimize_scalar
 
     def profile(u):
@@ -188,9 +185,8 @@ def _class_shares_unguarded(
         def phi(v, mu=mu):
             return value(v) + mu * float(np.log(v).sum())
 
-        for _ in range(
-            constants.newton_steps
-        ):  # Newton on the barrier objective, kept strictly inside
+        # Newton on the barrier objective, kept strictly inside
+        for _ in range(constants.newton_steps):
             m = w @ f
             q = d / m
             g = q @ c + mu * (1.0 / w[:2] - 1.0 / w[2])

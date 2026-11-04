@@ -1,65 +1,36 @@
-"""The log-density per-slot solver on the ``(λ, θ)`` grid — ONE solve for every slot class, driving
-``sweep.solve_chain``.
+"""The per-slot composition solve ψ on the ``(λ, θ)`` grid, one solve for every slot class; layer 3.
 
-The latent magnitude dof is the gDNA-vs-RNA log-odds ``λ = logit(f_g) = log ρ_g − log ρ_rna``: log-odds
-bounds the 5–6-decade ρ_g range and resolves both the ``f_g→0`` and the ``f_g→1`` vertex, which a uniform
-linear lattice cannot. ``λ`` is gridded on a FIXED ``[−L, L]`` window (no region-adaptivity) and the
-linear fraction is read out as ``f_g = σ(λ)``. ``O(m·K)`` per region, so it is genome-scale tractable.
+The magnitude coordinate is the gDNA-vs-RNA log-odds ``λ = logit(f_g) = log ρ_g − log ρ_rna``, gridded on a fixed
+``[−L, L]`` window and read out as ``f_g = σ(λ)``: log-odds spans the decades of ρ_g and resolves both vertices,
+which a linear lattice cannot. The integrand is ``strand + gDNA arm + RNA arm + the λ-factor rows``. Each arm carries
+the Jeffreys reference ``+½·log f`` on its own fraction (the kernel's ``JEFFREYS_REF``), and the gDNA arm adds the
+fitted landscape's log-rate prior when there is one. The reference is derived two ways: Jeffreys for a Poisson rate
+(``I(ρ) ∝ 1/ρ`` ⇒ ``p(ρ) ∝ ρ^(−½)``, which is ``+½·log f`` as a log-rate density), and the Berger–Bernardo reference
+with ``f_g`` of interest, whose marginal is Beta(½,½). It must always be written: a bare uniform-λ grid is Beta(0,0),
+improper at both vertices. On an unstranded library the strand term is flat and the posterior is this reference.
 
-The ``ψ`` integrand is ``strand + (gDNA arm) + (RNA arm) + the λ-factor rows``. Each arm carries the
-Jeffreys reference ``+½·log f`` on its own fraction (``_JEFFREYS_REF``); the gDNA arm adds the fitted
-landscape's log-rate prior when there is one, and the RNA arm has no fitted prior, so it is the
-reference alone.
+The facts that shape the solve:
 
-Five facts that determine this file's shape:
+1. The composition is a two-group split, gDNA against total RNA, with the per-strand tilt ``τ`` a nuisance. Each
+   ``logP`` is a density in log-rate, so its conversion ``−log ρ`` cancels ``log σ'(λ)`` exactly; no Jacobian is
+   written.
+2. The tilt is gridded as ``θ = arcsin(τ)``. The reference's tilt conditional is ``(1−τ²)^{−½}`` (``f_g`` and ``τ``
+   are information-orthogonal), and ``|dτ/dθ| = cos θ`` cancels it, so the reference is
+   ``½·log f_g + ½·log(1−f_g)`` for every slot class, with no endpoint singularity.
+3. At fixed λ the strand term is Gaussian in τ with a θ peak narrowing as ``n^{−½}``, so ψ places its θ nodes across
+   each ``(slot, λ)``'s own peak and weights them by the trapezoid rule (``tilt_window`` in ``psi_kernel.h``). The
+   marginal is exact at every depth with the derived node count ``_TILT_NODES``.
+4. A both-strand slot's tilt hypotheses are {pure +, pure −, mixed} at equal reference weight (the tilt atom): ψ
+   carries two columns at ``τ = ±1`` beside the continuum, whose weights carry ``−log π``. A held RNA level on one
+   strand (a :class:`CubeRows` profile) witnesses that strand's RNA and rules out the other strand's atom.
 
-1. Omitting a component's term is not "no prior" — the grid's own measure supplies one. A bare
-   uniform-λ grid IS Haldane per component ⇒ Beta(0,0) on the composition: improper at BOTH vertices, a
-   vertex amplifier. There is no third option.
-2. The composition is a TWO-GROUP split on the λ axis — gDNA against RNA-total — which is what
-   calibration models. The per-strand tilt is a nuisance parameter. On the two-group axis the measure
-   residual is exactly zero: each ``logP`` is a density in LOG-rate, so its linear-rate conversion
-   ``−log ρ`` cancels ``log σ'(λ)`` exactly, once per group. No Jacobian is written.
-3. The tilt is gridded as ``θ = arcsin(τ)``, not as ``τ``. The Berger–Bernardo reference prior for this
-   model (``f_g`` of interest, ``τ`` nuisance — the two are information-ORTHOGONAL, ``I_{f_g,τ} = 0``
-   exactly) has a ``(1−τ²)^{−½}`` tilt conditional. Under ``θ = arcsin(τ)`` the Jacobian
-   ``|dτ/dθ| = cos θ = (1−τ²)^{½}`` cancels it identically, so the tilt term is exactly 0 and the
-   reference collapses to ONE expression for both region classes:
-   ``ψ_ref = ½·log f_g + ½·log(1−f_g)``. No class branch, no endpoint singularity, no measure weights.
-   θ is to the tilt what λ is to ``f_g``: the coordinate the geometry asks for. *(The vanishing is a
-   property of this reference specifically — a Dirichlet(½,¼,¼) reference would leave a residual
-   ``−¼·log(1−τ²)``.)*
-4. The θ nodes are not a fixed lattice: at fixed λ the strand term is an exact Gaussian in τ whose θ
-   peak narrows as ``n^{−½}`` (0.005 rad at 50k fragments), so ψ places its nodes across each
-   ``(slot, λ)``'s own peak and weights them as the trapezoid rule (`psi_kernel.h`'s ``tilt_window``) — the
-   marginal is then exact at every depth with a DERIVED node count (``_TILT_NODES``), where a fixed
-   lattice's sum was a comb. The weights written are the quadrature's (``log h``) and, with 5, the
-   continuum's share of the reference mass (``−log π``) — never a tilt density.
-5. The AMBIG tilt's hypothesis space is {pure +, pure −, mixed} at equal reference weight — THE TILT
-   ATOM. Presence per strand is discrete, so beside the continuum's nodes ψ carries two columns at
-   ``τ = ±1`` exactly (a single-strand solve inside the cube, no tilt parameter), and the continuum's
-   weights carry ``−log π`` so the three hypotheses' masses are equal wherever the strand term is flat.
-   At a strand-pure slot the atom explains the split with no parameter and the read-out lands at the
-   cap, where the continuum's median sat below it; a held RNA level on a strand (a `CubeRows` profile) is
-   a certified witness of that strand's RNA and rules the OTHER strand's atom out. Gated in
-   ``tests/calibration/test_vertex_reference.py``; the cost at an unwitnessed both-strand slot is the
-   atom's and is recorded where it was measured.
+ψ never reads the spliced mass: RNA that splices at a sj jumps it rather than crossing it, so the unspliced mass is
+gDNA plus RNA unspliced there, disjoint from the spliced channel. The solver is native (``native.psi_solve``,
+``native/psi_kernel.h``), one slot at a time on its own cube: a single-strand slot is the one-column case, and a
+both-strand slot marginalises the tilt over its θ nodes and the two atoms. Structurally RNA-free slots never reach
+it; ``sweep.solve_chain`` gates them out.
 
-There is NO spliced term: ψ never reads the spliced mass. That
-is correct — RNA that splices at a sj *jumps* it rather than crossing it, so the unspliced crossing mass
-is gDNA plus RNA that has not spliced there, a channel genuinely disjoint from the (directly observed,
-already-pure-RNA) spliced mass.
-
-One solver, native (`native.psi_solve`, ``src/rigel/native/psi_kernel.h``), over the ``(λ, θ)`` cube in
-float64, one slot at a time on the slot's own cube. A single-strand region (exactly one of ``allow_pos`` /
-``allow_neg``) has its tilt fixed by its live strand, so it is the one-column case — a 1-D solve over ``λ``
-at the 1-D cost — and AMBIG regions (both set) marginalise the tilt over the windowed θ nodes and the two
-atoms. :func:`_solve_regions_logodds_all` is the dispatcher: the reference defaults, the signal mask, the
-delivered cube rows packed, one native call, both classes on ONE λ lattice (a finer single-strand
-grid with a regrid between the two measured worse than one lattice). Structurally RNA-free
-regions (neither strand live — intergenic / TSS / TES) have no composition dof and never reach the solver:
-``sweep.solve_chain`` gates them out via ``solvable``, so no reference is applied to a region whose
-composition is known structurally.
+Gate: ``tests/calibration/test_vertex_reference.py``.
 """
 
 from __future__ import annotations
@@ -71,7 +42,6 @@ from scipy.special import expit
 
 from ..config import CONSTANTS
 from ..native import psi_solve
-from ..native import transfer_rows as _rows
 from .region_chain import RegionDeconv
 
 # Public surface consumed by sweep / messages / region_geometry.
@@ -81,25 +51,6 @@ __all__ = [
     "_solve_regions_logodds_all",
 ]
 
-# The reference exponent for an UNFITTED component group, as a density in LOG-rate.
-#
-# DERIVED, not tuned, by two agreeing routes: (a) Jeffreys for a Poisson rate — `g ~ Poisson(ρE)` ⇒
-# `I(ρ) ∝ 1/ρ` ⇒ `p(ρ) ∝ ρ^(−½)`, which as a LOG-rate density is `ρ^(+½)` ⇒ `+½·log f`; (b) the
-# Berger–Bernardo reference prior for the composition with `f_g` of interest and the tilt as nuisance, whose
-# `f_g` marginal is Beta(½,½) — the SAME `+½·log f_g + ½·log(1−f_g)`.
-#
-# Its ONLY job is to make ψ proper (Beta(½,½) integrates; Beta(0,0) does not). The fitted gDNA `logP` (the
-# landscape's; the RNA arm has none) is ADDED to it, never substituted for it — the reference is the
-# MEASURE ψ is written against, not an information claim to be superseded.
-#
-# A declared choice, not forced by the likelihood: the observed-data Fisher information for f_g is
-# `∝ n(½−κ)²`, exactly 0 on an unstranded library, where the strand term is bit-flat and the posterior
-# simply IS this reference. Its known cost is that it forbids the simplex vertices, where some truth
-# genuinely lives.
-_JEFFREYS_REF = float(
-    _rows.JEFFREYS_REF
-)  # the kernel's (``psi_kernel.h``), so the two homes are one
-
 
 def _block_rows(cells_per_row: int, itemsize: int) -> int:
     return max(
@@ -107,21 +58,11 @@ def _block_rows(cells_per_row: int, itemsize: int) -> int:
     )
 
 
-# The window L: f_g ∈ [σ(−L), σ(L)], [4.5e-5, 1−4.5e-5] at L = 10. A pure STATE-SPACE bracket: the widest
-# f_g the grid can represent, NOT an accuracy knob — but that is a property of a PROPER ψ, not of L. It
-# holds because both arms are always written (`_JEFFREYS_REF`): under Beta(½,½) a fraction of a percent of
-# the reference's mass lies outside L=10, and the answer is L-invariant. An improper ψ (either arm omitted)
-# has plateau mass growing linearly in L, and then L silently sets the prior strength.
-# L-invariance is the acceptance test for a prior-free ψ, where it holds to seven digits.
-#
-# ⛔ It is scoped to prior-free ψ, because with a FITTED landscape installed the pipeline fails it:
-# widening only the bracket (at fixed lattice spacing) moves the answer, and a resolution-only control
-# moves it the other way, so the effect is the bracket and not the lattice. The mechanism is the fitted
-# prior — ψ's arm reads the landscape's curve at `log rho = log f_c + log M − log E` and ψ can only offer
-# `f_c ∈ [σ(−L), σ(L)]`, so on a gDNA-poor library σ(−10) sits well ABOVE the density the prior points
-# at and the low end of the bracket is a wall the prior pushes against rather than empty state space.
-# `landscape.required_logodds_window` is the derived demand. Do not read any of this as licence to widen
-# L here: nothing in this file has priced what a wider bracket costs elsewhere.
+# The window L bounds f_g to [σ(−L), σ(L)], [4.5e-5, 1−4.5e-5] at L = 10: the widest f_g the grid can represent.
+# Without a fitted prior ψ is proper (both arms carry JEFFREYS_REF) and the answer does not depend on L; an improper ψ
+# would let L set the prior strength. With a fitted landscape the low end can bind: ψ reads the curve at
+# log rho = log f_c + log M − log E, and on a gDNA-poor library σ(−L) can sit above the density the prior points at.
+# `landscape.required_logodds_window` derives the window that demand needs.
 def _logodds_grid(n_grid: int, L: float):
     """The fixed log-odds lattice: ``λ`` uniform on ``[−L, L]`` (``K = n_grid`` points, ascending) and
     the matching ``f_g = σ(λ)`` (also ascending). Returns ``(lam, fg)``, each length ``K``."""
@@ -131,17 +72,16 @@ def _logodds_grid(n_grid: int, L: float):
 
 @dataclass(frozen=True)
 class CubeRows:
-    """The RNA level lanes' delivery at the AMBIG slots of a block, as a TABLE — one row per delivered slot:
-    per strand the held level profile over ``u = log(ρ/ρ_ref)`` on the solve grid with its presence bit
-    (either may be absent), the slot's total and its RNA opportunity, and the lanes' one reference density
-    (a level is absolute; the coordinate is only its origin, and both strands share it); ``u`` is the one
-    grid every row is on. ψ evaluates a row at its own θ nodes — at each ``(λ, θ)`` the strand's share
-    ``f_s = (1 − f_g)(1 ± τ)/2`` implies the density ``f_s·n/a_r``, and the held profile is read at
-    ``log(ρ_s/ρ_ref)``, the `profile_of_level` map on the λ axis with the tilt inside — so there is no θ
-    lattice for a row to be built on and nothing is interpolated in θ. A one-sided profile stays one-sided
-    through the map (it is monotone in each share), so "at least this much RNA+" arrives as a wall in the
-    cube and no parametric summary is made. Built by the policy's solve (`native.transfer_solve`), read by
-    ψ (`native.psi_solve`); the arrays ARE the kernels' arguments."""
+    """The RNA level lanes' delivery at a block's both-strand slots, one row per delivered slot.
+
+    Each row holds, per strand, the held level profile over ``u = log(ρ/ρ_ref)`` on the solve grid with its presence
+    bit, plus the slot's total, its RNA opportunity and the lanes' reference density (shared by both strands); ``u``
+    is the one grid every row is on. ψ reads a row at its own θ nodes: at each ``(λ, θ)`` the strand share
+    ``f_s = (1 − f_g)(1 ± τ)/2`` implies the density ``f_s·n/a_r``, at which the profile is read, so nothing is
+    interpolated in θ. The map is monotone in each share, so a one-sided profile arrives as a wall in the cube. Built
+    by the policy's solve (``native/transfer_kernel.h``) and read by ``native.psi_solve``; the arrays are the kernels'
+    arguments.
+    """
 
     slot: np.ndarray  # (d,) int64 — the block's slot each row belongs to
     profile_pos: np.ndarray  # (d, K)
@@ -206,17 +146,13 @@ class CubeRows:
         )
 
 
-# The θ quadrature's truncation: the strand term's mass outside a window is below double precision.
-# DERIVED, not tuned — ``erfc(√T) ≈ e^{−T}/√(πT) < ε₆₄`` at ``T = −log ε₆₄`` — so nothing about the window
-# is a choice; a wider one adds nodes where the integrand is zero to the last bit. The kernel carries the
-# same constant (`psi_kernel.h`); this one derives the node count below.
+# The θ window's truncation, in nats: the strand term's mass outside the window is below double precision, since
+# ``erfc(√T) ≈ e^{−T}/√(πT) < ε₆₄`` at ``T = −log ε₆₄``. The kernel carries the same constant (``psi_kernel.h``).
 _T_NATS = -np.log(np.finfo(np.float64).eps)
 
-# The node count that resolves the peak inside its window. The interior window is ``2√(2T)·σ_θ`` wide and
-# the trapezoid rule's error on a Gaussian of width ``σ_θ`` at spacing ``h`` is ``2·e^{−2π²(σ_θ/h)²}``,
-# below ``e^{−T}`` once ``h ≤ σ_θ·π√2/√T`` — so ``K_t − 1 ≥ 2T/π``. At a domain end the window is only
-# ``T^{¼}`` widths per side and this count over-resolves it. DERIVED from ``_T_NATS``; the gate
-# `test_vertex_reference.test_the_derived_node_count_is_converged` reads it out against 60 nodes.
+# The node count that resolves the peak inside its window: the interior window is ``2√(2T)·σ_θ`` wide and the
+# trapezoid rule's error on a Gaussian at spacing ``h`` is ``2·e^{−2π²(σ_θ/h)²}``, below ``e^{−T}`` once
+# ``h ≤ σ_θ·π√2/√T``, so ``K_t − 1 ≥ 2T/π``.
 _TILT_NODES = int(np.ceil(2.0 * _T_NATS / np.pi)) + 1
 
 
@@ -230,10 +166,8 @@ def _cube_args(cube_rows, u) -> dict:
 
 
 def _reference_composition(allow_pos, allow_neg, fg_ref, fpos_ref, fneg_ref):
-    """The count-zero-information variance-freeze reference, per slot: the incoming belief where the sweep
-    supplies one; at init (``None``) the structural-neutral default — ``f_g = ½`` with the remaining ½ split
-    among the live strands (single-strand → ½ on its strand, AMBIG → ¼ each). The location is prior- and
-    likelihood-set; the reference only fixes the variance, hence the precision."""
+    """The per-slot composition the strand variance is frozen at: the incoming belief where the sweep supplies one,
+    else ``f_g = ½`` with the other ½ split among the live strands. It sets the precision, not the location."""
     ap, an = np.asarray(allow_pos, bool), np.asarray(allow_neg, bool)
     if fg_ref is None or fpos_ref is None or fneg_ref is None:
         nlive = ap.astype(np.float64) + an.astype(np.float64)
@@ -247,8 +181,7 @@ def _reference_composition(allow_pos, allow_neg, fg_ref, fpos_ref, fneg_ref):
 
 
 def _prior(rows, K: int):
-    """A per-slot ``(m, K)`` log-prior row array on the solve grid as the kernel reads it — the λ-factor rows or
-    the delivered rows — or ``None`` for none."""
+    """A per-slot ``(m, K)`` log-prior row array on the solve grid as the kernel reads it, or ``None``."""
     if rows is None:
         return None
     rows = np.ascontiguousarray(rows, np.float64)
@@ -260,12 +193,12 @@ def _prior(rows, K: int):
 
 
 def _arm(gdna_prior, gdna_support, m: int):
-    """THE FITTED gDNA ARM as the kernel takes it — ``(log_rho, logP, mass, eff)``: the landscape's curve, a density
-    in log-rate over a natural-log density grid (`landscape.DensityLandscape`), and the per-slot gDNA support it is
-    read on. ψ evaluates the arm at every cell's density ``log ρ_c = log f_g + log M − log E`` itself (numpy's
-    interpolation, the ends held constant off the grid), so no ``(m, K)`` matrix of it ever exists. ``None`` is no
-    fitted arm: the Jeffreys reference alone. Both arrive as tuples of arrays and never as the landscape: this
-    module is layer 3 and imports nothing from layer 5."""
+    """The fitted gDNA arm as the kernel takes it, ``(log_rho, logP, mass, eff)``, or ``None`` for the reference alone.
+
+    ``(log_rho, logP)`` is the landscape's curve, a density in log-rate, and ``(mass, eff)`` the per-slot support it
+    is read on; ψ evaluates it at each cell's ``log ρ_c = log f_g + log M − log E``, ends held constant. Both arrive as
+    arrays, never as the landscape, which sits in a higher layer.
+    """
     if gdna_prior is None:
         if gdna_support is not None:
             raise ValueError(
@@ -292,8 +225,6 @@ def _solve_regions_logodds_all(
     allow_neg,
     *,
     kappa,
-    od_g,
-    od_r,
     n_grid,
     L: float,
     gdna_prior=None,
@@ -306,34 +237,20 @@ def _solve_regions_logodds_all(
     n_tilt: int | None = None,
     n_threads: int = 1,
 ) -> RegionDeconv:
-    """THE per-slot solve for every slot of a block, dispatched: one native call (`native.psi_solve`) over
-    the slots that admit a strand and carry a fragment, each on its own ``(λ, θ)`` cube — ψ built as
-    `native/psi_kernel.h` describes and read out once: ``f_g`` the posterior median over the θ-marginal
-    λ-posterior, ``f_pos`` / ``f_neg`` its image on the admissible strands with the tilt share ``w_pos`` the
-    RNA-mass-weighted posterior share, and ``Var(log f_g)`` a grid moment over the λ-marginal — the one
-    precision the tool reads (the landscape prior's training weight). Every slot is solved on its own, so
-    the read-out is chunk-exact (gate: ``test_sweep.test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number``).
+    """Solve ψ for every slot of a block that admits a strand and carries a fragment, in one native call.
 
-    No Jacobian and no tilt term are written, and that is the point of the θ coordinate: the Berger–Bernardo
-    tilt conditional ``(1−τ²)^{−½}`` is cancelled identically by ``|dτ/dθ| = cos θ``, and on the two-group λ
-    axis the log-rate conversions cancel ``log σ'(λ)``; the only weights in ψ are the θ quadrature's own.
-    Both arms always carry the ``_JEFFREYS_REF`` reference, the fitted gDNA ``logP`` added to it where
-    there is one, because omitting one is not neutral (the module docstring). The strand mixture's variance
-    is frozen at the reference composition (``fg_ref`` / ``fpos_ref`` / ``fneg_ref``, per slot, the
-    incoming belief; the structural-neutral default at init), so the count sets precision and not
-    composition. Zero-count slots report 0.
+    Each slot is solved on its own ``(λ, θ)`` cube (``native/psi_kernel.h``) and read out as ``f_g``, the posterior
+    median of the θ-marginal λ posterior; ``f_pos``/``f_neg``, its image on the admissible strands; and
+    ``Var(log f_g)``, a grid moment over the λ marginal. Slots with no count report 0. Because every slot is solved on
+    its own, the result is the same for any block split and any thread count.
 
-    All array inputs are full length ``m``. ``gdna_prior`` is the landscape's curve ``(log_rho, logP)`` and
-    ``gdna_support`` the per-slot ``(mass, eff)`` it is read on: the kernel evaluates the fitted arm at each
-    cell's density itself, so no ``(m, K)`` arm exists (`_arm`). ``row_logprior`` (the policy's delivered
-    composition rows) is ``(m, K)`` on the σ(λ) grid, added per cell in
-    the kernel; ``cube_rows`` is the RNA level lanes' delivery at the AMBIG slots (:class:`CubeRows`, on this
-    grid), evaluated at each slot's own θ nodes inside its ψ; ``None`` or an absent slot changes nothing. EMPTY
-    slots — no per-strand count — are not solved: at genome scale most
-    slots carry no fragments, and their zeros are the solve's own answer. ``n_tilt`` is the derived
-    ``_TILT_NODES`` unless a gate asks for another count. ``n_threads`` is the kernel's thread budget
-    (``CalibrationConfig.n_threads``; 0 is every core): the slots are pulled one at a time by a pool, and
-    the answer is bit-identical at every count (gate: ``test_sweep.test_the_psi_solve_is_thread_exact…``)."""
+    All arrays are length ``m``. ``gdna_prior`` is the landscape's curve ``(log_rho, logP)`` and ``gdna_support`` the
+    per-slot ``(mass, eff)`` it is read on (:func:`_arm`). ``row_logprior`` is the policy's delivered composition
+    rows, ``(m, K)`` on the λ grid; ``cube_rows`` is the RNA level lanes' delivery (:class:`CubeRows`). The strand
+    variance is frozen at ``fg_ref``/``fpos_ref``/``fneg_ref`` (:func:`_reference_composition`), so the count sets
+    precision, not composition. ``n_tilt`` defaults to ``_TILT_NODES``; ``n_threads`` is the kernel's thread budget
+    (0 is every core).
+    """
     u_pos = np.ascontiguousarray(u_pos, np.float64)
     u_neg = np.ascontiguousarray(u_neg, np.float64)
     m = u_pos.shape[0]
@@ -354,8 +271,6 @@ def _solve_regions_logodds_all(
             fpos_ref=fpos_ref,
             fneg_ref=fneg_ref,
             kappa=float(kappa),
-            od_g=float(od_g),
-            od_r=float(od_r),
             lam=lam,
             gdna=_arm(gdna_prior, gdna_support, m),
             row_logprior=_prior(row_logprior, lam.shape[0]),

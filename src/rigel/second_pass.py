@@ -1,41 +1,19 @@
-"""rigel.second_pass — scoring the side buffer's held fragments, and draining it.
+"""rigel.second_pass — score the side buffer's held fragments, draw one hypothesis each, and drain them.
 
-Pass 1 holds two kinds of fragment WHOLE: one whose unsequenced gap has more than one surviving
-explanation — systematically the long ones, because a longer gap admits more hypotheses — and a
-multimapping fragment more than one of whose placements admits a surviving (placement, hypothesis)
-pair. This module resolves them, in three steps that are three functions::
+Pass 1 holds two kinds of fragment whole: one whose unsequenced gap has more than one surviving explanation, and a
+multimapper more than one of whose placements admits a surviving (placement, hypothesis) pair. Three functions resolve
+them::
 
     score_held_fragments  ->  choose_hypotheses  ->  drain
-        the factors            one multinomial       re-enter deposit with the
-        kept apart             draw per fragment     winner ALONE, and consume the bank
+      the factors, apart       one draw per fragment   re-deposit the winner alone
 
-``drain`` is PURE: payload in, payload out. It rebuilds one accumulator per reference from the payload's
-own region_bound axis, so the whole second pass runs off a cached scan — which is what lets one scan be
-drained repeatedly at different seeds without re-reading the BAM. It also means the drain never sees a
-thread, so reproducibility is structural.
-
-There is exactly ONE tally path. The drain re-enters ``Accumulator.deposit`` with a hypothesis set of
-size one, so arbitration is degenerate and every crossing rule, quantum, pool and ``L`` is the code that
-ran in pass one. ``tests/native/test_accumulator_drain.py`` checks the consequence directly: a drained
-fragment gives byte-identically the tally that offering only that hypothesis would have given.
-
-THE PRIOR IS THE ACCUMULATOR ITSELF. A hypothesis is a path, and a path is a set of accumulator
-objects; pass 1 already counted how many molecules used each of them. So the score needs no transcript
-abundance, no calibration output, and no second pass over the BAM::
-
-    score(h)  =  rho(h)  x  f(L_h)  x  s(h)
-
-and on a multi-placement record two more: ``A_p``, the pass-1 unique traffic at the objects the hypothesis's
-placement deposits on, held at least at gDNA's bulk wherever gDNA can be (:func:`placement_abundance`); and
-``e(p)``, the hit's sequence at the EM's own prices (``scoring.sequence_log_penalties``), so the draw and the EM
-read one emission. On a one-placement record both would be common factors, so neither is applied.
-
-Every input comes from pass 1, which is what lets this run BEFORE calibration and lets calibration then
-run exactly once, on the complete tally.
-
-``L`` is not computed here. It comes from ``Accumulator.length_under`` — the same C++ that will compute
-it again at drain time. The tool has ONE definition of fragment length, and a scorer with its own would
-be a second definition of exactly that quantity.
+The prior is pass 1's own tally: a hypothesis is a path, a path is a set of accumulator objects, and pass 1 counted the
+molecules at each. So ``score(h) = rho(h) x f(L_h) x s(h)``, and on a multi-placement record also ``A_p``
+(:func:`placement_abundance`) and ``e(p)``, the hit's sequence at the EM's prices. Every input comes from pass 1, so the
+second pass runs before calibration, and calibration runs once, on the complete tally. ``L`` comes from
+``Accumulator.length_under``, the C++ the deposit itself uses, so the tool has one definition of fragment length.
+``drain`` is pure: it rebuilds the accumulators from the payload, so a cached scan can be drained at any seed without
+re-reading the BAM.
 """
 
 from __future__ import annotations
@@ -50,7 +28,6 @@ from .calibration.signature import coarse_type_array
 from .native import Accumulator as NativeAccumulator
 from .scoring import sequence_log_penalties
 from .scan_payload import (
-    _DEFERRED_RECORD_FIELDS,
     ADDITIVE_AXES,
     AccumulatorPayload,
     DrainQC,
@@ -67,7 +44,6 @@ __all__ = [
     "choose_hypotheses",
     "combine_factors",
     "drain",
-    "lift_choices",
     "score_held_fragments",
     "strand_terms",
 ]
@@ -75,27 +51,21 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class HypothesisTerms:
-    """The factors — ``rho``, ``f(L_h)``, ``s(h)`` and, on a multi-placement record, ``A_p`` — kept apart:
-    diagnostics, not bookkeeping.
+    """The factors of each hypothesis's score, kept apart so a change in the score can be traced to one of them.
 
-    The umbrella gap census partitions the gap-held records by which question is open, which is the same
-    thing as which factor discriminates. Reporting the terms separately is what lets a regression be
-    attributed to one of them instead of to "the score moved".
-
-    Every array is flat and aligned with ``payload.deferred.hypothesis_offsets`` — one entry per
-    hypothesis, in the bank's own canonical order.
+    Every array is flat and aligned with ``payload.deferred.hypothesis_offsets``: one entry per hypothesis, in the
+    bank's canonical order.
     """
 
     length: np.ndarray  # int64 — L under each hypothesis, from the C++
     density: np.ndarray  # float64 — rho, in fragments per base
     length_likelihood: np.ndarray  # float64 — f(L_h) under the pmf appropriate to the hypothesis
     strand: np.ndarray  # float64 — P(align_strand | hypothesis)
-    #: float64 — A_p, the unique traffic at the objects the hypothesis's PLACEMENT deposits on, at least gDNA's
-    #: bulk where gDNA can be (:func:`placement_abundance`); carried per hypothesis, and 1 on a one-placement
-    #: record, where it is a common factor and is not applied.
+    #: float64 — A_p (:func:`placement_abundance`), carried per hypothesis; 1 on a one-placement record, where it
+    #: would be a common factor and is not applied.
     placement_abundance: np.ndarray
-    #: float64 — log e(p): the PLACEMENT's hit sequence at the EM's prices, ``nm · m + clip · c``; 0 on a
-    #: one-placement record, where it is a common factor and is not applied.
+    #: float64 — log e(p), the placement's hit sequence at the EM's prices, ``nm · m + clip · c``; 0 on a
+    #: one-placement record.
     sequence: np.ndarray
 
 
@@ -112,67 +82,43 @@ class HeldScores:
 def _distinguishing_boundaries(
     region_bounds: np.ndarray, starts: np.ndarray, ends: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """The LOCAL boundary range that separates ∅ from a path splicing ``[start, end)``. Endpoints INCLUDED.
+    """The local boundary range that separates ∅ from a path splicing ``[start, end)``, endpoints included.
 
-    Read off the deposit rule, not chosen (``tests/native/_accumulator_reference.py``, the per-segment
-    crossing loop): a boundary is crossed iff it lies strictly inside a contiguous segment. So over a
-    fragment
-    ``[s, e)``:
+    By the deposit rule (``tests/native/_accumulator_reference.py``) a boundary is crossed iff it lies strictly inside
+    a contiguous segment. Over a fragment ``[s, e)``, ∅ crosses every boundary in ``(s, e)`` and the spliced path those
+    in ``(s, start)`` and ``(end, e)``, so the two differ at the region bounds ``start <= c <= end``. Both endpoints of
+    an annotated intron are region bounds, so the range is never empty.
 
-    * ∅ is one segment and crosses every boundary in ``(s, e)``;
-    * the spliced path is ``[s, start)`` and ``[end, e)`` and crosses those in ``(s, start)`` and
-      ``(end, e)``.
-
-    The difference is the boundaries at region bounds ``start <= c <= end`` — and since both endpoints of
-    an annotated intron are cut by construction, those two boundaries always exist and always
-    discriminate.
-
-    ⛔ The endpoints must stay INCLUDED. Asking for ``start < c < end`` drops exactly the two guaranteed
-    discriminators and returns an EMPTY range whenever the intron spans one region, which hands the
-    unspliced path a structural ``rho`` of 0 on a large share of held fragments.
+    The endpoints must stay included: ``start < c < end`` drops the two guaranteed discriminators and returns an empty
+    range whenever the intron spans one region, giving the unspliced path a ``rho`` of 0.
     """
     first = np.searchsorted(region_bounds, starts, side="left")
     last = np.searchsorted(region_bounds, ends, side="right")
     return first, last
 
 
-#: P(alignment orientation | gDNA) — biologically fixed, not estimated. Double-stranded DNA has no
-#: sense direction, so either orientation is equally likely. Not a tunable and not a fitted marginal.
+#: P(alignment orientation | gDNA): double-stranded DNA has no sense direction, so each orientation has probability
+#: one half. A biological constant, not a tunable.
 P_ORIENTATION_GIVEN_GDNA = 0.5
 
 
 def strand_terms(*, align: int, implied_strand: int, rna_sense_frac: float) -> tuple[float, float]:
-    """``(spliced, genomic)`` — the likelihood of the OBSERVED ALIGNMENT ORIENTATION under each hypothesis.
+    """``(spliced, genomic)``: the likelihood of the observed alignment orientation under each hypothesis.
 
-    Let ``t`` be the strand a candidate implies, ``a`` the strand the fragment aligned to, and
-    ``p = P(a == t | RNA) = rna_sense_frac`` the library's directional sense fraction (≈ 0.01 on a dUTP
-    library, ≈ 0.99 on an R1-sense one; the direction-agnostic specificity is ``max(p, 1 - p)``)::
+    With ``t`` the strand a candidate implies, ``a`` the aligned strand and ``p = P(a == t | RNA) = rna_sense_frac``
+    (≈ 0.01 on a dUTP library, ≈ 0.99 on an R1-sense one)::
 
-        H_spliced   used a sj, and gDNA cannot splice, so the molecule is RNA on strand t
-                    L = p        if a == t
-                      = 1 - p    otherwise
-        H_genomic   crossed the gap contiguously; the component that DISCRIMINATES is gDNA
-                    L = 0.5      either orientation, because DNA is double-stranded
+        H_spliced   uses a junction, so the molecule is RNA on strand t:   L = p if a == t, else 1 - p
+        H_genomic   crosses the gap contiguously; its gDNA component:     L = 0.5 either way
 
-    Why one half and not a fitted mixture: the genomic hypothesis also covers unspliced RNA, but
-    unspliced RNA would give the same ``p`` / ``1 - p`` as the spliced candidate and therefore cancel,
-    contributing nothing. The only part of the genomic hypothesis that can separate it from a spliced
-    path is its gDNA component, and that component's orientation likelihood is a biological constant.
-
-    Any orientation-INDEPENDENT constant ``c`` for the genomic hypothesis discriminates identically,
-    because ``[c / p] / [c / (1 - p)] = (1 - p) / p`` and ``c`` cancels; one half is simply the value
-    that makes it a probability, since the two orientations must sum to 1 under gDNA.
-
-    ⛔ Do not substitute a fitted, orientation-DEPENDENT marginal ``q / (1 - q)`` taken from the
-    library-wide genic strand fraction. It moves the genomic hypothesis in the SAME direction as the
-    spliced term, which cancels most of the discrimination and costs accuracy; and a global value says
-    nothing about an individual fragment, whose gene may be silent (pure gDNA) or highly expressed.
+    The genomic hypothesis's unspliced-RNA part would give the same ``p`` / ``1 - p`` as the spliced candidate and
+    cancel, so only its gDNA component discriminates. That term must stay orientation-independent: a fitted
+    library-wide strand marginal would move it with the spliced term and cancel most of the discrimination.
     """
     if implied_strand in (int(Strand.POS), int(Strand.NEG)):
         spliced = rna_sense_frac if implied_strand == align else 1.0 - rna_sense_frac
     else:
-        # An AMBIGUOUS or absent implied strand — one path claimed by both strands — names no
-        # orientation to compare against, so it says nothing either way.
+        # An ambiguous or absent implied strand names no orientation to compare against.
         spliced = P_ORIENTATION_GIVEN_GDNA
     return spliced, P_ORIENTATION_GIVEN_GDNA
 
@@ -186,42 +132,21 @@ def combine_factors(
 ) -> tuple[np.ndarray, bool]:
     """Combine one fragment's factors into a normalised posterior over its candidates.
 
-    Returns ``(scores, undecided)``. The scores sum to 1 across the candidate set; ``undecided`` is true
-    when more than one candidate is tied for the lead.
+    Returns ``(scores, undecided)``: the scores sum to 1, and ``undecided`` is true when more than one candidate ties
+    for the lead::
 
         score(h)  =  rho(h)  x  f(L_h)  x  s(h),   normalised over the candidate set
 
-    and for a fragment held on its PLACEMENTS two more factors: ``e(p)``, the placement's hit sequence at the
-    EM's prices, given in logs as *sequence*; and ``A_p``, the unique traffic at the objects the candidate's
-    placement deposits on (:func:`placement_abundance`). Both are ``None`` on a one-placement record, where
-    they would be common factors: the record's scores are then exactly the three-factor ones.
+    A fragment held on its placements adds ``e(p)`` (*sequence*, in logs) and ``A_p`` (*placement_abundance*); both
+    are ``None`` on a one-placement record, where they would be common factors. The product is compared only within
+    one fragment, so it needs no common scale, and it is formed in logs with the maximum subtracted, so it cannot
+    underflow.
 
-    The factors are only ever compared WITHIN one fragment. The product is not a rate and not a
-    calibrated likelihood — ``rho`` carries units of fragments per base while ``f`` and ``s`` are
-    probabilities — and it does not need to be, because the normalisation makes any common scale cancel.
-    It is formed in logs, the record's maximum subtracted before it is exponentiated: a product of
-    probabilities, densities and sequence prices can underflow for every candidate of a record, and the
-    rule below would then read the whole record as uninformative.
-
-    An all-zero factor is UNINFORMATIVE, not decisive, and that normalisation is why: a factor taking the
-    same value for every candidate cancels and cannot affect the answer. Zero is the one value where the
-    arithmetic loses that property — instead of cancelling it destroys the product, the normalisation
-    cannot run, and the record collapses to a coin toss that discards the other factors. So a factor
-    that is zero for every candidate is dropped for that fragment.
-
-    The PARTIAL-zero case is untouched, and that is the point. A factor that is zero for some
-    candidates and positive for others is highly informative — the zero says "no evidence for this path" —
-    and it stays decisive: no fallback, a hard zero stays hard. No constant is introduced here; nothing
-    is floored, softened or smoothed.
-
-    "Uninformative" is judged among the SURVIVORS, not globally. Factors are applied in order of how much
-    evidence stands behind them — the length pmf is fitted from the whole library, the strand fraction
-    from its whole spliced population, the sequence price from its whole unique unspliced population, a
-    single object's traffic from however many fragments happened to touch it — and each is skipped when it
-    is flat-zero across the candidates still standing. Judging it globally is not enough: a record where the
-    length term separates two candidates by orders of magnitude but traffic is zero for both would otherwise
-    fall through to a fair coin, discarding that difference. Weighting by the surviving factor is the same
-    statement as dropping an uninformative one, applied one level down.
+    A factor that is zero for every surviving candidate is uninformative and skipped, since zero would destroy the
+    product rather than cancel; a factor zero for only some candidates stays decisive, and nothing is floored. Factors
+    are applied from the most evidence behind them to the least (length pmf, strand fraction, sequence price, then
+    ``A_p`` and ``rho``), so a record whose traffic is zero for every candidate falls to its length term, not to a
+    coin toss.
     """
     n = density.shape[0]
     if n == 0:
@@ -238,41 +163,30 @@ def combine_factors(
     for factor in logs:
         live = np.isfinite(factor)
         if not live[alive].any():
-            continue  # flat zero among the survivors: uninformative here, so it says nothing
+            continue  # zero for every survivor: uninformative
         alive &= live
         total += np.where(live, factor, 0.0)
     weight = np.where(alive, np.exp(total - total[alive].max()), 0.0)
     scores = weight / weight.sum()
-    # `undecided` says what it means: more than one candidate is tied for the lead, so the draw between
-    # them is a coin toss. Stated as a property of the ANSWER rather than of which factors contributed,
-    # because that is what the diagnostics want and it cannot drift from the arithmetic above. Exact
-    # equality is right: identical inputs give bit-identical outputs, and a 0.50001/0.49999 split is
-    # decided, barely.
+    # Exact equality: identical inputs give bit-identical scores, and a 0.50001 / 0.49999 split is decided.
     return scores, bool(int((scores == scores.max()).sum()) > 1)
 
 
 def _bottleneck(values: list[float]) -> float:
-    """Combine the densities of the several objects one path needs; the scarcest one bounds the path.
-
-    A molecule that took this path was present at every object on it, so the path's rate is not the
-    sum — it is bounded by the object that saw the least traffic. A geometric mean was measured against
-    this and picks a different winner on well under 1 % of held records with a bit-identical zero mask,
-    so the derivation decides rather than the measurement: the minimum has an argument behind it.
-    """
+    """The density of a path that needs several objects: the scarcest one's, since a molecule on the path was present
+    at every object on it."""
     return float(min(values)) if values else 0.0
 
 
 def _resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Every question the scoring loop will ask of the region-bound axis, answered per reference.
+    """Answer, one reference at a time, the two questions the scoring loop asks of each hypothesis intron.
 
-    The loop asks two things about each hypothesis intron: which annotated sj it is, if any — the
-    kernel's own `Accumulator.sj_edge_ids`, so the rule has ONE home — and the local boundary range that
-    separates the genomic path from a path splicing it (:func:`_distinguishing_boundaries`). Asked one intron at a time each was a numpy call,
-    2.7 M of them on a deep library; asked per reference they are two.
+    Which annotated junction it is, if any (the kernel's own ``Accumulator.sj_edge_ids``), and the local boundary
+    range that separates the genomic path from a path splicing it (:func:`_distinguishing_boundaries`). Batched per
+    reference rather than per intron, which on a deep library is millions of numpy calls.
 
-    Returns three arrays over the FLAT hypothesis-intron axis (`hypothesis_intron_offsets` indexes it):
-    the payload's sj id or -1, and the range's two ends, which are LOCAL to the reference exactly as the
-    loop consumes them.
+    Returns three arrays over the flat hypothesis-intron axis (``hypothesis_intron_offsets`` indexes it): the
+    payload's sj id or -1, and the range's two ends, local to the reference.
     """
     d = payload.deferred
     n_intron = int(d.hypothesis_introns.shape[0]) // 2
@@ -284,15 +198,14 @@ def _resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarr
 
     starts = np.ascontiguousarray(d.hypothesis_introns[0::2], dtype=np.int64)
     ends = np.ascontiguousarray(d.hypothesis_introns[1::2], dtype=np.int64)
-    # which hypothesis each intron belongs to, and which fragment each hypothesis belongs to
+    # the hypothesis each intron belongs to, and the placement each hypothesis belongs to
     hyp_of = np.repeat(
         np.arange(d.n_hypotheses, dtype=np.int64), np.diff(d.hypothesis_intron_offsets)
     )
     placement_of = np.repeat(
         np.arange(d.n_placements, dtype=np.int64), np.diff(d.hypothesis_offsets)
     )[hyp_of]
-    # the motif the lookup filters on: the OBSERVED one when the aligner wrote it, else the hypothesis's
-    # own implied strand
+    # the motif the lookup filters on: the observed one when the aligner wrote it, else the implied strand
     observed = np.asarray(d.sj_strand, dtype=np.int64)[placement_of]
     implied = np.asarray(d.hypothesis_sj_strand, dtype=np.int64)[hyp_of]
     motif = np.where(observed != int(Strand.NONE), observed, implied).astype(np.int32)
@@ -306,8 +219,7 @@ def _resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarr
         hi = int(payload.ref_region_bound_offsets[ref + 1])
         s_here, e_here = starts[here], ends[here]
         first_of[here], last_of[here] = _distinguishing_boundaries(bounds[lo:hi], s_here, e_here)
-        # the accumulator answers in its own ref-local slots, and `_Accumulators` has already pinned
-        # that base to the payload's own `ref_sj_offsets`
+        # the accumulator answers in ref-local slots, whose base `_Accumulators` checked against `ref_sj_offsets`
         local = np.asarray(
             accumulators[ref].sj_edge_ids(
                 starts=s_here, ends=e_here, sj_strand=np.ascontiguousarray(motif[here])
@@ -320,22 +232,17 @@ def _resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarr
 
 
 class _Accumulators:
-    """A lazy ``ref -> Accumulator`` map built from the PAYLOAD's own region_bound axis, sj installed.
+    """A lazy ``ref -> Accumulator`` map built from the payload's own region-bound axis, junctions installed.
 
-    This is what lets the second pass run off a payload rather than off a live scanner. The accumulator
-    is described by its region-bound positions, and the payload carries them — so a cached scan can be
-    scored and drained without re-reading the BAM.
+    This lets the second pass score and drain a cached scan without re-reading the BAM. ``region_types`` comes from
+    the index: the payload carries the region bounds but not their typing, and the typing assigns a deposit to a
+    length pool.
 
-    ⛔ `set_sj` is not optional here and the failure is invisible. With no sj table every observed intron
-    reads as unannotated, so the sj banks stay at zero and the tally still looks well-formed — the C++
-    refuses the same omission on the scan path for exactly this reason. The scorer only needs
-    ``length_under`` and would survive without it; the drain would silently credit no sj boundary at all.
+    ``set_sj`` must always be called. Without a junction table every observed intron reads as unannotated, the
+    junction banks stay zero, and the tally still looks well-formed.
 
-    ``region_types`` comes from the INDEX. The payload echoes the region-bound axis but not the typing,
-    and the typing is what assigns a deposit to a length pool.
-
-    Lazy, and :attr:`built` is the set that actually exists — which is exactly the delta's support, so
-    :func:`_gather_delta` iterates it instead of every reference in the genome.
+    :attr:`built` holds the references actually built, which is the drain delta's support, so :func:`_gather_delta`
+    iterates it instead of every reference.
     """
 
     def __init__(self, payload: AccumulatorPayload, region_types: np.ndarray, sj) -> None:
@@ -362,9 +269,8 @@ class _Accumulators:
             max_length=payload.max_length,
             ref=ref,
         )
-        # The sj CSR sliced to THIS reference. A sj id IS its rank, so the slot base must
-        # agree with the payload's own `ref_sj_offsets[ref]` — checked rather than assumed, because a
-        # silent disagreement would write one reference's sj traffic onto another's slots.
+        # The junction CSR sliced to this reference. A junction id is its rank, so the slot base must equal the
+        # payload's `ref_sj_offsets[ref]`; a mismatch would write one reference's traffic onto another's slots.
         empty = region_bound_hi <= region_bound_lo
         slot_lo = 0 if empty else int(sj.offsets[region_bound_lo])
         slot_hi = 0 if empty else int(sj.offsets[region_bound_hi])
@@ -390,8 +296,8 @@ class _Accumulators:
 
 
 def _covered_segments(start: int, end: int, observed: np.ndarray) -> list[tuple[int, int]]:
-    """The contiguous segments of the path that cuts exactly the OBSERVED introns out of ``[start, end)``:
-    the introns clipped into the extent, merged where they overlap or abut, in order."""
+    """The contiguous segments of ``[start, end)`` with the observed introns cut out, in order; the introns are
+    clipped to the extent and merged where they overlap or abut."""
     cuts = []
     for a, b in sorted((max(int(a), start), min(int(b), end)) for a, b in observed.tolist()):
         if b <= a:
@@ -413,10 +319,9 @@ def _covered_segments(start: int, end: int, observed: np.ndarray) -> list[tuple[
 def _annotated_junctions(
     payload: AccumulatorPayload, p: int, accumulator: NativeAccumulator
 ) -> np.ndarray:
-    """The payload's sj ids of the annotated junctions placement ``p``'s OBSERVED introns resolve to — the
-    deposit's own rule (``Accumulator::sj_edge_id``); empty when none resolves, and when the motif is AMBIGUOUS,
-    which trusts no splice. Non-empty means the deposit books the placement spliced: certified RNA under every
-    one of its paths."""
+    """The payload's sj ids of the annotated junctions that placement ``p``'s observed introns resolve to, by the
+    deposit's own rule (``Accumulator::sj_edge_id``). Empty when none resolves or the motif is ambiguous. Non-empty
+    means the deposit books the placement spliced: certified RNA under every one of its paths."""
     d = payload.deferred
     observed = d.observed_introns_of(p)
     motif = int(d.sj_strand[p])
@@ -436,9 +341,8 @@ def _annotated_junctions(
 def pass_one_bulk(
     payload: AccumulatorPayload, region_types: np.ndarray, region_support: np.ndarray
 ) -> float:
-    """gDNA's bulk on pass one: the unique contained fragments per observable start over the intergenic regions —
-    the unit :func:`placement_abundance` reads a contained placement in, the pooled rate of one uniform template.
-    0 when the library holds no intergenic support."""
+    """gDNA's bulk density on pass one: unique contained fragments per observable start over the intergenic regions,
+    the unit :func:`placement_abundance` reads a contained placement in. 0 when there is no intergenic support."""
     intergenic = region_types == 0
     support = float(region_support[intergenic].sum())
     if support <= 0.0:
@@ -454,35 +358,24 @@ def placement_abundance(
     region_support: np.ndarray,
     bulk: float,
 ) -> float:
-    """``A_p``: the pass-one UNIQUE traffic at the objects the placement's own path deposits on — the
-    owner's "abundance of uniquely aligned fragments" at a placement, read through the deposit rule's own
-    geometry — held at least at gDNA's *bulk* wherever gDNA can be.
+    """``A_p``: the pass-one unique traffic at the objects the placement's own path deposits on, held at least at
+    gDNA's *bulk* wherever gDNA can be.
 
-    The path is the placement's extent with its OBSERVED introns cut out (the hypothesis that implies no
-    intron: what the placement is before the gap question). By the deposit rule that path deposits on
+    The path is the placement's extent with its observed introns cut out. By the deposit rule it deposits on:
 
-    * the annotated sj it uses, when its observed introns resolve to one (*junctions*,
-      :func:`_annotated_junctions`) — then the bottleneck of their ``sj_inv_length_sum`` (the spliced
-      hypothesis's own rule);
-    * else the contiguous boundaries it crosses — the bottleneck of their ``boundary_unspliced_inv_length_sum``;
-    * else, contained in one region, that region — its ``region_contained_count`` per OBSERVABLE start:
-      *region_support*, each region's contained support over its observable pieces under the
-      unconditional anchor (`effective_length.observable_contained_eff_length`; the component is unknown,
-      as for the genomic hypothesis's ``f``). No fragment is observed on a masked base, so a region's count
-      is over its observable starts alone, and its density read over the whole region understated it by
-      the masked share — which drew a multimapper away from a copy beside a gap;
-    * and a path contained in no object (an unannotated intron that swallowed every boundary between
-      two regions) deposits on nothing and reads 0, as an empty bottleneck does.
+    * the annotated junctions it uses (*junctions*, :func:`_annotated_junctions`): the bottleneck of their
+      ``sj_inv_length_sum``;
+    * else the contiguous boundaries it crosses: the bottleneck of their ``boundary_unspliced_inv_length_sum``;
+    * else the one region that contains it: its ``region_contained_count`` per observable start. *region_support* is
+      each region's contained support over its observable pieces under the unconditional anchor
+      (``effective_length.observable_contained_eff_length``), since no fragment is observed on a masked base;
+    * else nothing (an unannotated intron swallowed every boundary between two regions), which reads 0.
 
-    The bottleneck, not a mean, for the reason the existing rule gives: a molecule that took this
-    placement was present at every object on it. Every form is a start density per base, which is what
-    lets one bound serve all three.
+    Every form is a start density per base, so one bound serves all three.
 
-    gDNA's floor. Pass one counts only the fragments it deposited, so a copy every fragment of which
-    multimaps reads no traffic, however much gDNA it holds. gDNA is one template at a uniform rate before
-    capture, and capture only enriches, so a place gDNA can be holds at least the bulk: a placement the deposit
-    books spliced holds none and keeps its own term; every other reads ``max(A_p, bulk)`` — the bound, not a
-    sum, because ``A_p`` already holds gDNA's share wherever pass one saw it.
+    gDNA's floor: pass one counts only what it deposited, so a copy whose every fragment multimaps reads no traffic
+    however much gDNA it holds. gDNA is one template at a uniform rate and capture only enriches, so a placement not
+    booked spliced reads ``max(A_p, bulk)``: a max, because ``A_p`` already holds gDNA's share where pass one saw it.
     """
     if junctions.size:
         return _bottleneck([float(payload.sj_inv_length_sum[int(j)]) for j in junctions])
@@ -540,21 +433,16 @@ def score_held_fragments(
     Parameters
     ----------
     payload
-        Pass 1's tally **and** its side buffer.
+        Pass 1's tally and its side buffer.
     fl_models
-        ``pipeline.library_fl_models(payload, index)``. ``rna_pmf`` scores a spliced hypothesis, which
-        is certified RNA; ``global_pmf`` — the unconditional anchor — scores the genomic one, whose
-        component is unknown and must therefore be marginalised over the library's own composition.
+        ``pipeline.library_fl_models(payload, index)``. ``rna_pmf`` scores a spliced hypothesis (certified RNA);
+        ``global_pmf``, the unconditional anchor, scores the genomic one, whose component is unknown.
     rna_sense_frac
-        ``P(align_strand == the transcript's strand | RNA)`` — ``StrandModels.exonic_spliced``, which is
-        certified RNA because an annotated splice proves it. On an R1-antisense (dUTP) library it is
-        near 0, so disagreement is the likely case; it is used as the probability of agreement it is,
-        never inverted.
+        ``P(align_strand == transcript strand | RNA)``, from ``StrandModels.exonic_spliced``. Near 0 on a dUTP
+        library; used as the probability of agreement, never inverted.
     regions, sj
-        From the index: ``RegionArrays.from_index`` — the partition the scanner deposits into, with the
-        index's unobservable mask, from which the region types and each region's observable support come —
-        and ``build_sj_arrays``. Neither is on the payload, so this dependency is real rather than an
-        oversight.
+        From the index, since neither is on the payload: ``RegionArrays.from_index`` (the scanner's partition with
+        the unobservable mask, giving region types and observable support) and ``build_sj_arrays``.
     """
     deferred = payload.deferred
     n_hyp = deferred.n_hypotheses
@@ -576,10 +464,10 @@ def score_held_fragments(
             "they address different partitions. Pass RegionArrays.from_index of the index the scan used."
         )
     region_types = coarse_type_array(regions.signature)
-    # the placement term's divisor, once per region: the unconditional anchor over each region's observable pieces
+    # A_p's divisor per region: the unconditional anchor over the region's observable pieces
     region_support = observable_contained_eff_length(regions, global_pmf)
     bulk = pass_one_bulk(payload, region_types, region_support)
-    # the EM's own prices, at the library's own rate (`scoring.sequence_log_penalties`)
+    # the EM's sequence prices at the library's mismatch rate
     mismatch_price, clip_price = sequence_log_penalties(payload.mismatch_rate)
     junction_strands = np.asarray(sj.strand, dtype=np.int64)
     accumulators = _Accumulators(payload, region_types, sj)
@@ -610,19 +498,15 @@ def score_held_fragments(
             # A placement the deposit books spliced is certified RNA under every one of its paths.
             junctions = _annotated_junctions(payload, p, acc)
             if multi:
-                # ⭐ The placement's own terms, once per placement, carried per hypothesis; a one-placement
-                # record never has them applied (they would be common factors).
+                # The placement's own terms, carried per hypothesis; applied only on a multi-placement record.
                 abundance[h0:h1] = placement_abundance(payload, p, junctions, region_support, bulk)
                 nm, clip = int(deferred.nm[p]), int(deferred.clip[p])
                 sequence[h0:h1] = (nm * mismatch_price if nm else 0.0) + (
                     clip * clip_price if clip else 0.0
                 )
-            # The region the GENOMIC hypothesis claims is contiguous and every spliced one jumps: the union
-            # of the competing implied introns. Scoring `∅` over exactly this — rather than over its whole
-            # path — is what keeps the comparison symmetric, since otherwise `∅` is penalised simply for
-            # touching more objects than a path that jumps them.
-            # The fragment's hypothesis introns are one contiguous run of the flat axis, and that run IS
-            # `contested`: the union of what the competing paths jump, in the order they declared it.
+            # ∅ is scored only over the union of the competing implied introns, the stretch it claims contiguous
+            # and every spliced path jumps, so it is not penalised for touching more objects than they do. That
+            # union is the placement's contiguous run of the flat hypothesis-intron axis.
             contested_lo, contested_hi = int(intron_offsets[h0]), int(intron_offsets[h1])
 
             # `length_under` needs the hypothesis objects back in the shape the binding reads.
@@ -645,9 +529,8 @@ def score_held_fragments(
 
                 # -- rho ------------------------------------------------------------------------------
                 if introns:
-                    # A spliced path's evidence is the sj it uses. `sj_inv_length_sum` is deposited
-                    # by the SAME rule as a contiguous boundary, so the two are the same quantity on the same
-                    # scale — that is what makes this comparable to `∅`'s number at all.
+                    # A spliced path's evidence is its junctions' `sj_inv_length_sum`, deposited by the same
+                    # rule as a contiguous boundary's, so it is on ∅'s scale.
                     observed_densities = []
                     for t in range(int(intron_offsets[slot]), int(intron_offsets[slot + 1])):
                         jid = int(sj_of[t])
@@ -674,10 +557,10 @@ def score_held_fragments(
                 length_likelihood[slot] = float(pmf[L]) if 0 <= L <= max_size else 0.0
 
                 # -- strand ---------------------------------------------------------------------------
-                # Every placement's factor is the probability of its observed orientation under its own
-                # reading. An OBSERVED motif makes every hypothesis of the placement RNA on that motif's
-                # strand, since its intron is cut under all of them: constant within the placement, but not
-                # across a multimapper's placements, where an unspliced hit carries gDNA's ½.
+                # The probability of the observed orientation under the placement's own reading. An observed
+                # motif makes every hypothesis RNA on the motif's strand, since its intron is cut under all of
+                # them: constant within the placement, not across a multimapper's, where an unspliced hit
+                # carries gDNA's ½.
                 if observed_motif != int(Strand.NONE):
                     strand[slot], _ = strand_terms(
                         align=align,
@@ -700,9 +583,7 @@ def score_held_fragments(
                     )
                     strand[slot] = spliced_term if introns else genomic_term
 
-        # The factors are combined in ONE place, over the RECORD's run — every placement's hypotheses at
-        # once — so the rule that an all-zero factor is uninformative cannot be stated differently
-        # anywhere else. See :func:`combine_factors`.
+        # Combined over the record's whole run, every placement's hypotheses at once.
         r0, r1 = int(record_runs[i]), int(record_runs[i + 1])
         score[r0:r1], undecided = combine_factors(
             density[r0:r1],
@@ -727,125 +608,14 @@ def score_held_fragments(
     )
 
 
-def lift_choices(whole: AccumulatorPayload, parts, choices: np.ndarray):
-    """Carry hypothesis choices made on the WHOLE library onto its origin PARTITIONS.
-
-    This is an identity, not a convenience. Splitting a BAM by fragment origin and re-scanning
-    reconstructs the pass-one payload exactly, because pass one deposits each fragment independently —
-    that identity is what makes an origin-split oracle a valid truth source. The second pass breaks it:
-    its multinomial is scored against the whole payload's densities, so draining three partitions
-    separately is a different operation from draining the whole and ``Sum(partitions) != whole``.
-
-    The constraint is on WHERE the choice is made, not on whether it can be made at all. Score and
-    draw ONCE on the whole library, then replay each fragment's already-chosen hypothesis inside whichever
-    partition holds it. Every fragment then deposits independently *given its choice*, the identity is
-    restored, and each partition's drained tally is comparable with the whole's::
-
-        scores  = score_held_fragments(whole, ...)
-        choices = choose_hypotheses(scores, whole, seed=...)      # <- ONCE, on the whole
-        drained = drain(whole, choices, ...)                      # the tally the solver reads
-        lifted, ambiguous = lift_choices(whole, partitions, choices)     # the truth, per origin
-        for p, ch in zip(partitions, lifted):
-            drain(p, ch, ...)
-
-    ⛔ Every partition must be lifted in ONE call, which is why the signature takes a sequence. A
-    record's choice is consumed from a per-key queue, so the queue's state has to be shared across the
-    partitions or two of them can take the SAME entry and leave another unused — ``Sum(partitions) !=
-    whole`` again, by a different route. Taking a sequence makes the identity a property of this
-    function rather than of a caller's discipline. A one-partition caller
-    passes ``[p]``.
-
-    The key is the bank's own canonical sort key — a record's sequence of placements, each the
-    ``_DEFERRED_RECORD_FIELDS`` tuple the C++ sorts on before the bank crosses the ABI, imported rather
-    than restated so there is one definition of record identity. :class:`DeferredFragments` guarantees the property
-    this rests on: two records that tie on that key are identical records, so no tie-break is needed or
-    possible. Identical records have identical hypothesis SETS — enumeration reads the span and the
-    annotation, never the origin — so a LOCAL hypothesis index transfers between them unchanged.
-
-    The one ambiguity is counted rather than hidden. When several whole-library records share a key and
-    are split across origins, no partition can know which of them it holds; the assignment is greedy in
-    canonical order. The deposits are interchangeable (identical records, identical hypothesis sets) but
-    the ORIGIN attribution is not — swapping a choice between a gDNA and an RNA fragment of the same span
-    would credit one origin's mass to the other. So the count is RETURNED, never swallowed: a caller must
-    report it, and it bounds the truth error exactly. On distinct-span substrates it is 0 and the lift is
-    exact.
-
-    Returns ``(lifted, n_ambiguous)`` — ``lifted`` is one ``int64`` array per partition, each aligned with
-    that partition's ``deferred.hypothesis_offsets``.
-
-    :raises ValueError: if a partition holds a record ``whole`` does not, or holds more copies of one key
-        than ``whole`` does. Either means the payloads are not a partition of one scan, and nothing
-        downstream is meaningful.
-    """
-    w = whole.deferred
-    parts = list(parts)
-    choices = np.asarray(choices, np.int64)
-    if choices.shape[0] != w.n_fragments:
-        raise ValueError(
-            f"lift_choices got {choices.shape[0]} choices for {w.n_fragments} whole-library held "
-            "records. One choice per held record, in the bank's canonical order."
-        )
-
-    def _keys(d):
-        per_placement = list(
-            zip(*(np.asarray(getattr(d, f), np.int64).tolist() for f in _DEFERRED_RECORD_FIELDS))
-        )
-        offsets = np.asarray(d.placement_offsets, np.int64)
-        return [
-            tuple(per_placement[int(offsets[i]) : int(offsets[i + 1])])
-            for i in range(d.n_fragments)
-        ]
-
-    # key -> the whole's choices for that key, in canonical order. Consumed left to right ACROSS all
-    # partitions, so each entry is handed out exactly once.
-    pool: dict[tuple, list[int]] = {}
-    for i, k in enumerate(_keys(w)):
-        pool.setdefault(k, []).append(int(choices[i]))
-    taken: dict[tuple, int] = {}
-
-    out, ambiguous = [], 0
-    for p in parts:
-        d = p.deferred
-        lifted = np.zeros(d.n_fragments, np.int64)
-        for j, k in enumerate(_keys(d)):
-            run = pool.get(k)
-            if run is None:
-                raise ValueError(
-                    f"lift_choices: a partition holds record {j} with key {k}, which is not in the whole "
-                    "library's held bank. The payloads are not a partition of one scan — check they came "
-                    "from the same BAM."
-                )
-            at = taken.get(k, 0)
-            if at >= len(run):
-                raise ValueError(
-                    f"lift_choices: the partitions hold more records with key {k} ({at + 1}) than the "
-                    f"whole library does ({len(run)}). They are not a partition of one scan."
-                )
-            if len(run) > 1:
-                ambiguous += 1
-            lifted[j] = run[at]
-            taken[k] = at + 1
-        out.append(lifted)
-    return out, ambiguous
-
-
 def choose_hypotheses(scores: HeldScores, payload: AccumulatorPayload, *, seed: int) -> np.ndarray:
-    """One multinomial draw per held fragment. Returns a LOCAL hypothesis index per record.
+    """One multinomial draw per held fragment; returns a local hypothesis index per record.
 
-    One hypothesis wins the whole fragment. No fractional deposit — integers stay integers and no
-    transcript is fractionated.
+    One hypothesis wins the whole fragment, so counts stay integers. The bank's canonical order is identical at any
+    worker count, and one ``rng.random(n)`` call draws once per record in that order, so the draw is reproducible.
 
-    Seeding: order by identity, then ONE stream. The deferred bank carries a canonical sort that is
-    bit-identical at any worker count, so "the i-th record" is well defined and a single stream consumed
-    in that order is reproducible by construction.
-
-    ⛔ Never key the draw on the fragment's CONTENT. A content hash ties on exactly the duplicates it
-    would harm: identical fragments would draw identically, and a 60/40 posterior over a hundred of them
-    would collapse to 100/0 instead of splitting.
-
-    Vectorised rather than a loop, and that is not only for speed: one ``rng.random(n)`` call is one
-    draw per record in queue order, which makes the correspondence between stream position and queue index
-    a property of the code rather than of a loop body that could accidentally consume twice.
+    The draw must never be keyed on the fragment's content: identical fragments would then draw identically, and a
+    60/40 posterior over a hundred duplicates would collapse to 100/0.
     """
     offsets = payload.deferred.record_hypothesis_offsets
     starts, ends = offsets[:-1], offsets[1:]
@@ -858,9 +628,8 @@ def choose_hypotheses(scores: HeldScores, payload: AccumulatorPayload, *, seed: 
     base = cumulative[starts] - scores.score[starts]
     draws = np.random.default_rng(seed).random(n)
     picked = np.searchsorted(cumulative, base + draws, side="right")
-    # Clamped onto the run's last POSITIVE slot. A uniform arbitrarily close to 1 can exceed a run's final
-    # cumulative value by one float rounding and land past it: on the next run's first slot, which would be
-    # another fragment's hypothesis, silently, or on a trailing hypothesis the score excluded.
+    # Clamp onto the run's last positive slot: a uniform near 1 can overshoot the run's final cumulative value by one
+    # rounding and land on the next record's hypothesis, or on a trailing hypothesis the score excluded.
     record = np.repeat(np.arange(n, dtype=np.int64), ends - starts)
     slot = np.arange(scores.score.shape[0], dtype=np.int64)
     positive = scores.score > 0.0
@@ -876,20 +645,14 @@ def drain(
     region_types: np.ndarray,
     sj,
 ) -> AccumulatorPayload:
-    """THE DRAIN: replay every held fragment with its chosen hypothesis; return the drained payload.
+    """Replay every held fragment with its chosen hypothesis; return the drained payload.
 
-    ``choices[i]`` is a local hypothesis index for the ``i``-th record of the bank's canonical order —
-    :func:`choose_hypotheses` produces exactly that.
+    ``choices[i]`` is a local hypothesis index for the ``i``-th record in the bank's canonical order, as
+    :func:`choose_hypotheses` produces. Each fragment re-enters ``Accumulator.deposit`` with that hypothesis alone, so
+    arbitration is degenerate and the ordinary deposit rules apply: there is one tally path.
 
-    ONE TALLY PATH. Each fragment re-enters ``Accumulator.deposit`` with its chosen hypothesis alone: a
-    set of size one, so arbitration is degenerate and the ordinary rules decide whether it deposits or
-    is rejected. There is no second deposit implementation and no duplicated crossing logic, so
-    byte-identity with ``tests/native/_accumulator_reference.py`` holds for free rather than by argument.
-
-    Pure: payload in, payload out. The delta is accumulated into fresh per-reference accumulators
-    and added to pass one's arrays, so both tallies exist afterwards and the drain's contribution to every
-    channel is a subtraction. It also means the drain never sees a thread — the bank is already merged and
-    canonically ordered — so reproducibility is structural rather than something a gate has to establish.
+    Pure: the delta accumulates into fresh per-reference accumulators and is added to pass one's arrays, so both
+    tallies exist afterwards. The bank is already merged and ordered, so the drain is single-threaded and reproducible.
     """
     deferred = payload.deferred
     n = deferred.n_fragments
@@ -912,8 +675,8 @@ def drain(
     record_runs = deferred.record_hypothesis_offsets
 
     for i in range(n):
-        # The choice is a LOCAL index into the record's run of hypotheses over its placements, so it
-        # names a placement and a hypothesis at once; the replay goes onto THAT placement's reference.
+        # The choice indexes the record's run of hypotheses over all its placements, so it names a placement and a
+        # hypothesis at once; the replay goes onto that placement's reference.
         h = int(record_runs[i]) + int(choices[i])
         if not (int(record_runs[i]) <= h < int(record_runs[i + 1])):
             raise ValueError(f"choice {choices[i]} is outside record {i}'s hypothesis set")
@@ -953,11 +716,8 @@ def drain(
 def _gather_delta(
     payload: AccumulatorPayload, accumulators: _Accumulators
 ) -> dict[str, np.ndarray]:
-    """The drained accumulators' channels, placed into globally-shaped arrays.
-
-    Only references the drain actually touched were built, so everything else stays zero — which is the
-    correct delta and also the cheap path when a library's held fragments sit on a few contigs.
-    """
+    """The drained accumulators' channels, placed into globally shaped arrays. Only the references the drain touched
+    were built; the rest stay zero."""
     axis_offsets = {
         "region": payload.ref_region_offsets,
         "boundary": payload.ref_boundary_offsets,
@@ -979,12 +739,10 @@ def _gather_delta(
 
 @dataclass(frozen=True, slots=True)
 class _Span:
-    """The shape ``Accumulator.length_under`` reads a hypothesis in.
+    """A hypothesis in the shape ``Accumulator.length_under`` and ``deposit`` read.
 
-    Duck-typed on purpose, matching the specification's ``GapHypothesis`` attribute names: the binding
-    reads ``introns`` / ``sj_strand`` off whatever it is handed, so the parity gate can pass the
-    reference's own objects. A second tuple convention here would be a second representation to keep in
-    step.
+    The binding reads ``introns`` and ``sj_strand`` off whatever it is handed (the specification's ``GapHypothesis``
+    names), so a test can pass the reference's own objects.
     """
 
     introns: list

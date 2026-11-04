@@ -1,579 +1,293 @@
 # TESTING — the panels, the gates, and what the suite can judge
 
-**What this file is.** The manual for Rigel's test substrates: the simulated panels and what each can
-judge (§0), how the test chromosome is built, swept and read (§0a), the simulator's backbone and its
-gaps (§1), the build commands (§2), how results are evaluated (§4), the test suite (§5) and the profiling
-substrate (§6). Not here: the 0.8.0 scope, the equal-fragment-length ruling
-and the nascent scope ruling (`DESIGN.md` §0b); how performance is judged and the instruments' run order
-(`SUCCESS.md`); the suite's standing pass count (`CLAUDE.md`); lessons (`TRAPS.md`, cited by name); open
-problems and refusals (`ISSUES.md`). The panels' history is git.
+The manual for Rigel's test substrates: the panels (§0), the test chromosome (§0a), the length-truth and STAR panels
+(§0c, §0d), the simulator (§1), the build commands (§2), the test suite (§5), and profiling and identity checks
+(§6). Not here: the scope and its rulings (`DESIGN.md` §0b), how performance is judged and the
+instruments' run order (`SUCCESS.md`), the standing pass count (`CLAUDE.md`), lessons (`TRAPS.md`).
 
-Two rules govern the whole file (`TRAPS: prove-the-substrate`, `TRAPS: can-the-benchmark-resolve-it`):
-
-> ⛔ Prove the substrate before you prove the code: when a simulated axis is the axis you are judging,
-> gate the simulator on it. And prove the suite can resolve the axis you are changing before quoting a
-> number from it.
-
----
+Two rules govern the file: when a simulated axis is the axis being judged, gate the simulator on it
+(`TRAPS: prove-the-substrate`); and prove a suite resolves the axis being changed before quoting a number from it
+(`TRAPS: can-the-benchmark-resolve-it`).
 
 ## 0. The panels — one ladder and its side panels
 
-`$RIGEL_RUNS` names the benchmark data root, which lives outside the repository: the instruments read it from
-the environment, and the shell lines below need it exported (`export RIGEL_RUNS=<the data root>`). Everything
-simulated lives under `$RIGEL_RUNS/suite/` (the ladder, the two side panels, the carved reference and the index)
-and `$RIGEL_RUNS/test_reference/` (the test chromosome, §0a). No panel keeps FASTQs (owner, 2026-10-22): every
-scorer reads the simulator's BAM, which holds every read as it was written, and `panel.py align` rebuilds a pair from
-it byte for byte (`samtools fastq -N`) and deletes it once aligned.
-The panel says how much error there is and where.
+`$RIGEL_RUNS` is the benchmark data root, outside the repository. Everything simulated lives under `$RIGEL_RUNS/suite/`
+(the ladder, the fl-gap panels, the carved reference and its index) and `$RIGEL_RUNS/test_reference/` (§0a). No panel
+keeps FASTQs: every scorer reads the simulator's BAM, and `panel.py align` rebuilds the reads from it.
 
-**The ladder** (`scripts/sim/configs/gdna_ladder.yaml`, `ladder/`) is the only panel the tool is ranked on.
+**The ladder** (`scripts/sim/configs/gdna_ladder.yaml`) is the only panel the tool is ranked on.
 
 | | |
 |---|---|
-| judges | the tool, on its two primary numbers: the transcript table against per-transcript truth and the calibration result against an oracle calibration (`SUCCESS.md`) |
 | conditions | 16: gDNA `g00 / g05 / g50 / g98` × strand specificity `0.50 / 0.99` × capture off / on |
-| depth | 10 M fragments total per condition, fixed; the gDNA rate decides only the split |
-| fragment lengths | identical for both origins (206 ± 98, truncated to [50, 500], read 100) — a forcing function, `DESIGN.md` §0b |
-| sequence | known bases only: no fragment covers an `N` run of the suite genome (18.8 % of it), with capture or without; substitution errors at 0.002 per base, each oracle record's NM their count (owner, 2026-10-21) |
-| nascent RNA | sparse on every row: `mode: sparse`, `on_fraction 0.50` of gene spans on, level logU(1, 100) independent of the mature level. 0.50 is a development stress level, not real data (`DESIGN.md` §0b) |
-
-Wiped and re-simulated 2026-10-21 on that simulator, with both fl-gap panels, so a number measured on the panel before
-is not comparable; its text receipts, arms included, are in `$RIGEL_RUNS/archive/suite_before_resim_2026-10-21/`. The
-panel before drew gDNA over the `N` runs, where the region lengths count bases too, and read the gDNA fraction
-exactly. On this one, the oracle's gDNA-field gate failed on every gDNA capture-OFF row and Rigel under-called gDNA
-until the tool read the observable genome (`ISSUES: region-lengths-count-unobservable-bases`). Since calibration's
-geometry read it (2026-10-26), the gate passes on every row of the ladder and both fl-gap panels.
-
-The 0.8.0 scope — three strata in scope, unstranded × capture-ON deferred but reported on every table,
-fragment length back in scope, and why the ladder still gives gDNA and RNA equal fragment lengths —
-is ruled in `DESIGN.md` §0b. Report per stratum, never pooled (`TRAPS: never-pool-the-strata`); the
-`g00` rung is the false-positive check on every stratum, and a control is never tuned on.
-
-### The gDNA rungs
-
-`f_gdna = rate/(1+rate)`, and the RNA share thins as gDNA rises because the total is held:
+| depth | 10 M fragments per condition, fixed; the gDNA rate decides only the split |
+| fragment lengths | identical for both origins (206 ± 98, truncated to [50, 500], reads of 100) — a forcing function, `DESIGN.md` §0b |
+| sequence | known bases only (no fragment covers an `N` run); substitution errors at 0.002 per base, each oracle record's NM their count |
+| nascent RNA | `mode: sparse`, `on_fraction 0.50` of spans on, level logU(1, 100) independent of the annotated level — a stress level, not real data |
 
 | rung | g00 | g05 | g50 | g98 |
 |---|---|---|---|---|
-| rate | 0.0 | 0.052632 | 1.0 | 49.0 |
+| rate (`f_gdna = rate/(1+rate)`) | 0.0 | 0.052632 | 1.0 | 49.0 |
 | f_gdna | 0 | 0.05 | 0.50 | 0.98 |
-| n_rna | 10.0 M | 9.50 M | 5.00 M | 0.20 M |
+| n_rna (the total is held) | 10.0 M | 9.50 M | 5.00 M | 0.20 M |
 
-`g00` is the required zero-gDNA control, `g98` the top of the range, and `g05` exists because
-real libraries live at 1–10 % gDNA and that corner needs a rung with capture on (`0 < rate ≤ 0.10`). Three
-levels is a floor (`TRAPS: a-single-level-panel-cannot-see-a-constant`). Real libraries run from almost
-zero gDNA to over 98 %, and the RNA-side accuracy that thins at the top rungs is a property of such
-libraries, not an artefact.
+`g00` is the zero control on every stratum, never tuned on; `g05` is the 1–10 % corner real libraries live in. Three
+levels is a floor (`TRAPS: a-single-level-panel-cannot-see-a-constant`). Report per stratum, never pooled.
 
-### The fl-gap side panels — two arms of opposite sign
+**The fl-gap side panels** are never a ladder rung: the ladder equalises lengths, so it is a null for any mechanism
+that reads a gDNA-vs-RNA length difference. The two arms have opposite sign (RNA is not reliably longer than gDNA), so
+a real repair moves them in opposite directions; they share everything else with the ladder.
 
-A side panel, never a ladder rung: the ladder equalises fragment lengths, so it is a null for anything
-whose mechanism is a gDNA-vs-RNA length difference, and these two arms exert exactly that. RNA is not
-reliably longer than gDNA (true for cfRNA, false elsewhere), and `E_r/E_g − 1` flips sign between the
-arms, so a real repair must move them in opposite directions.
-
-| | `flgap_rna_long/` | `flgap_rna_short/` |
+| | `suite/flgap_rna_long/` | `suite/flgap_rna_short/` |
 |---|---|---|
 | config | `scripts/sim/configs/flgap_rna_long.yaml` | `scripts/sim/configs/flgap_rna_short.yaml` |
 | gDNA / RNA fl configured | 75 ± 20 / 250 ± 60 | 250 ± 60 / 75 ± 20 |
-| gDNA / RNA fl measured, capture OFF | 78.94 / 248.13 (gap +169.2 bp) | 250.08 / 78.78 (gap −171.3 bp) |
-| gDNA / RNA fl measured, capture ON | 82.11 / 253.15 (gap +171.0 bp) | 259.32 / 81.91 (gap −177.4 bp) |
 | conditions | `g50` × ss {0.50, 0.99} × capture {off, on} | the same 4 |
-| nascent RNA | the ladder's `sparse` block, verbatim | the same |
 
-Re-simulated 2026-10-21 with the ladder, on the same simulator — the one-contiguous-part capture physics, the
-ladder's sparse nascent model, no fragment over an `N` run, errors at 0.002 per base, no FASTQs — so the
-fragment-length gap is the ONLY difference from the ladder and a claim may be carried across them. The panels
-simulated before 2026-10-03 carried the retired uniform nascent model and the old capture physics, and every number
-measured on them is void. The configured lengths are a configuration and the gap is a measurement (the sampler
-rounds a Normal draw and keeps it within `[frag_min, frag_max]`): the table reads it count-weighted off each condition's
-`truth_fragment_lengths.tsv`. A calibration mechanism is RANKED here only by what stops before the EM
-(`calibration_vs_oracle.py`) and the library gDNA fraction: a length gap hands the EM part of the answer,
-so the transcript table never ranks calibration. It is still read, per stratum, as the tool's end-to-end
-accuracy on a library with this gap, and a length mechanism is judged on BOTH arms beside the ladder.
+Read the realised gap count-weighted off each condition's `truth_fragment_lengths.tsv`, never the config
+(`TRAPS: configured-lengths-are-not-realised`). A calibration mechanism is ranked here only on what stops before the
+EM, because a length gap hands the EM part of the answer (`TRAPS: a-length-gap-bypasses-calibration`).
 
-### The third fl panel — on the test chromosome, on the current nascent model
+**The test chromosome's fl arms** (`scripts/sim/configs/test_reference_fl_{rna_long,gdna_long,equal200}.yaml`, the 30
+conditions of §0a each) set gDNA / RNA to 100 ± 50 / 250 ± 150, 250 ± 150 / 100 ± 50, and 200 ± 100 for both. The
+equal arm is the control: an fl-gap result that also moves there is an artefact.
 
-| | `scenarios_fl_rna_long/` | `scenarios_fl_gdna_long/` | `scenarios_fl_equal200/` |
-|---|---|---|---|
-| config (`scripts/sim/configs/`) | `test_reference_fl_rna_long.yaml` | `test_reference_fl_gdna_long.yaml` | `test_reference_fl_equal200.yaml` |
-| gDNA / RNA fl configured | 100 / 250 | 250 / 100 | 200 / 200 — the control |
-| conditions | the full 30 of §0a | the same 30 | the same 30 |
+### Every scenario is cached
 
-These carry the current nascent model structurally: the test reference is `abundance.mode: file`, so
-nascent comes from `test_abundances.tsv`. The equal-200 arm is the control:
-an fl-gap result that also moves on the equal-length arm is an artefact.
-
-### Every scenario must be cached — a requirement of the 0.8.0 loop
-
-The loop is *change calibration → re-run calibration → score it against oracle calibration*, and nothing
-in it may re-scan a BAM. Two caches carry it and `panel.py cache` builds both:
+Nothing in the loop *change calibration → re-run calibration → score against oracle calibration* re-scans a BAM.
+`panel.py cache` builds both caches, and neither is invalidated by a calibration change:
 
 | cache | holds | invalidated by |
 |---|---|---|
-| scan (`build_scan_cache.py`) | the accumulator payload — scan once, calibrate many times | any accumulator change (`payload_schema_digest`), the index (`graph_hash`, `reach_digest`), a tally setting of the scan (`sj_strand_tag` among them, never a thread count) |
-| oracle (`<panel>/oracle_cache/`) | the origin-split truth every scorer reads: five partitions per condition (`gdna` / `mrna` / `nrna` and the per-strand `rna_pos` / `rna_neg`), checked sum-to-full against the scan cache, and the certified `slot_truth.npz` | the accumulator, the index or a tally setting of the scan, and nothing else |
+| scan (`build_scan_cache.py`) | the accumulator payload | an accumulator change (`payload_schema_digest`), the index (`graph_hash`, `reach_digest`), a tally setting of the scan (`sj_strand_tag` among them, never a thread count) |
+| oracle (`<panel>/oracle_cache/`) | five origin partitions per condition (`gdna`, `mrna`, `nrna`, `rna_pos`, `rna_neg`), checked sum-to-full against the scan cache, and the certified `slot_truth.npz` | the same, and nothing else |
 
-Neither is invalidated by a calibration change. A scenario without both caches is not usable for
-development: `panel.py status` names what is missing, and an instrument fed a stale cache refuses it
-(the oracle cache is keyed by the scan cache's own key).
+`panel.py status` names what is missing, and an instrument fed a stale cache refuses it. ⛔ The scan cache's key
+hashes the deposit rule, not `resolve.cpp`: after a change to which fragments are offered, rebuild with `--force`.
 
----
+## 0a. The test chromosome — where the message policy is developed
 
-## 0a. The method-development test chromosome — where the message policy is developed
-
-A synthetic chromosome the owner designs one structure at a time, described in one YAML file, swept over
-30 conditions, cached, and scored in seconds — so a policy change is scored on every condition between
-edits, and the ladder is kept for the shipping judgement.
-
-### The sweep — 30 conditions
-
-`scripts/sim/configs/test_reference.yaml` sweeps three axes; two more requirements are carried by the
-substrate rather than the config, so that no condition is uniform in either:
+A synthetic chromosome designed one structure at a time in one YAML file, swept over 30 conditions and scored in
+seconds, so a policy change is scored on every condition between edits; the ladder makes the shipping judgement.
 
 | axis | values | where it lives |
 |---|---|---|
-| gDNA fraction | `g00` `g05` `g25` `g50` `g98` | the config (`rate = f/(1−f)`) |
-| strand specificity | `0.50` unstranded · `0.70` · `0.99` strand-specific | the config |
-| capture | off · on | the config |
-| which transcripts are captured | about half probed, half with no probe | `test_probes.bed` |
-| nascent RNA | sparse — ten transcripts carry it (the twin block's `nasc` and `capnasc` types), the rest exactly none, at levels below, near and above mature | the `nrna_abundance` column |
+| gDNA fraction | `g00` `g05` `g25` `g50` `g98` | `scripts/sim/configs/test_reference.yaml` |
+| strand specificity | `0.50` · `0.70` (the transition) · `0.99` | the config |
+| capture | off · on; about half the genes probed, half with no probe | the config, `test_probes.bed` |
+| nascent RNA | ten transcripts (the twin block's `nasc`, `capnasc`), hand-authored below, near and above the annotated level | the `nrna_abundance` column |
 
-`g00` is the zero control (every reported gDNA fragment is a false positive) and `ss 0.70` is the
-transition rung between the two regimes the bars below are written for. The nascent pattern is
-hand-authored, not drawn: on a chromosome this small a draw is mostly sampling noise, and the point of a
-debug substrate is knowing which structure carries nascent RNA before reading a number. Depth is
-`n_total_fragments: 1170000` per condition, raised with each block so per-transcript depth holds. The
-config has no `nrna:` block: `abundance.mode: file` makes the rendered TSV the one source.
-
-### The commands — from the YAML to a scored benchmark
-
-Everything derived is rebuilt from the one YAML. Run in order; each stage is resumable and
-`panel.py status` names the next one. The `cache` stage builds both caches, then certifies
-(`calibration_oracle.py` writes `slot_truth.npz`; a failed FIELD gate is reported, not fatal — the row is
-COMPOSITION-certified). One row by hand is a §2 gotcha.
+Depth is 1.17 M fragments per condition. Five more configs differ from `test_reference.yaml` in one thing each: two
+adversarial probe panels (`test_reference_probes_{junction,sparse}.yaml`) and the three fl arms (§0); three more are the
+gDNA-depth ladder (§0c).
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 T=$RIGEL_RUNS/test_reference
-
-# 1. renders (GTFs, abundances, probe panels — into the repo AND the runs dir) + the two-contig FASTA;
-#    `--check` alone says whether the checked-in renders still match the YAML
+# 1. render the GTFs, abundances and probe BEDs (repo and runs dir) and the FASTA; `--check` only compares
 python scripts/sim/build_test_reference.py
 rigel index --fasta $T/test_chr.fa --gtf $T/test_chr.gtf --collapse-duplicate-transcripts --no-mappability --no-tsv -o $T/idx
-
-# 2. per panel (seven configs: the benign panel, the two adversarial probe panels, odg05, three fl arms)
-#    ⛔ ONE panel's `cache` at a time, or give each its own RIGEL_SCRATCH: the origin split writes
-#    $RIGEL_SCRATCH/rigel_oracle_build/w_<condition>/<condition>.<origin>.bam, and six of the seven configs share their
-#    condition names, so two caching side by side corrupt each other's partition (sum-to-full fails).
+# 2. per panel. ⛔ one panel's `cache` at a time, or a RIGEL_SCRATCH each: the panels share condition names
 CFG=scripts/sim/configs/test_reference.yaml
 python scripts/sim/panel.py simulate --config $CFG
-python scripts/sim/panel.py cache    --config $CFG
-
+python scripts/sim/panel.py cache    --config $CFG     # both caches, then certifies slot_truth.npz
 # 3. score every policy on every condition — seconds
 python scripts/design/policy_benchmark.py --panel test
 ```
 
-⛔ **Rebuild after every edit to the YAML.** The FASTA, index, reads, caches and `slot_truth.npz` all
-describe the annotation they were built from; a benchmark against stale caches answers a different
-question (`TRAPS: a-green-suite-hid-five-dead-instruments` in another dress). Move a superseded derived
-set out of the way the same day.
+A failed FIELD gate at certification is reported, not fatal: the row is then COMPOSITION-certified. ⛔ **Rebuild after
+every edit to the YAML**: the FASTA, index, reads, caches and `slot_truth.npz` all describe the annotation they were
+built from, and a benchmark on stale caches answers a different question.
 
-### How to read the benchmark — two halves, two bars
-
-The bar is not "beat silent". `SilentPolicy` is the measured floor, and on strand-specific data a
-sighted exon's own strand solve is excellent, so a message can mostly only disturb it. Message
-propagation exists for unstranded data, where the strand channel is dead and the local answer is a
-default rather than a measurement.
+**How to read the benchmark — two halves, two bars.** `silent` is the measured floor. On strand-specific data a sighted
+exon's own strand solve is excellent and a message can mostly only disturb it; message passing exists for unstranded
+data, where the strand channel is dead and the local answer is a default.
 
 | rows | the bar |
 |---|---|
 | unstranded (`ss 0.50`) | the policy must win — this is what the message layer is for |
 | stranded (`ss 0.99`) | the policy must do as little harm as possible — near 1.00× of silence is a pass |
 
-⛔ Never pool the two halves, and never pool conditions within them: a total hides a sign flip between
-strata, and the halves are judged against different bars. A toy and the panel can disagree in rank
-(`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`): develop on the test chromosome, confirm on the ladder.
+`ss 0.70` rows count against neither bar. Never pool the halves, nor conditions within them; confirm on the ladder,
+since a toy and the panel have inverted a ranking before (`TRAPS: panel-before-src`).
 
 ### The substrate — one hand-edited file, thirteen blocks
 
-`scripts/sim/test_reference/test_chr.yaml` is the one hand-edited file: the `rigel sim` scenario schema
-(`genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}`, exons 0-based
-half-open) plus `probed` per gene and a `shadow_genes` list. Its header is the design record of every
-block; this table says only what each one stresses.
+`scripts/sim/test_reference/test_chr.yaml` is the `rigel sim` scenario schema
+(`genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}`, exons 0-based half-open) plus
+`probed` per gene and a `shadow_genes` list. Its header is the design record of every block.
 
 | block | what it stresses | gene types |
 |---|---|---|
-| anchored twin | the message layer's five controls on one shape (exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb), each type varying one bit — probed, nascent, silent — × five abundance blocks; plus 8 shadow transcripts the index never sees | `clean` `nasc` `cap` `capnasc` `silent` |
-| mono | single-exon: no sj, the gene edge is the only message source | `mono` `capmono` + two silent controls |
-| isoform | host + one second isoform, grown one structure at a time, every structure replicated across A ≫ B, A ≪ B, A ≈ B | `altstart` `altss` (`nest` queued, `ISSUES: message-layer-open-cases`) |
-| walled | exon pieces with no licensed face — the scan's stress test, the four classes the ladder's walled-exon census found | `chain` `tssalt` `tandem` `altlast` |
-| terminus-cluster | ten transcript ends 126–147 bp into a shared last exon (mirrored from MIR99AHG) — the empty exon pieces the level lane crosses | `cluster` `capcluster` |
-| both-stranded | two genes per locus on opposite strands, the host and its antisense (mirrored from TTC28-AS1, PPM1F-AS1, and a convergent pair) — the AMBIG nodes' substrate | `asin` `asinrev` `span` `conv` |
-| sj+terminus | one boundary carrying a junction and a terminus of the same strand (mirrored from RUNX1 and LARGE1) | `sjterm` `capsjterm` |
-| encompassing | a 20 kb single-exon antisense over the whole twin-shape host (mirrored from ENSG00000280007 over TUBA8): every host slot admits both strands, every boundary carries only the host's bits, the antisense's level lives in its two 1.5 kb single-strand flanks — the owner's encompassing locus on the panel | `enc` `capenc` |
-| in-exon | a 500 bp single-exon antisense wholly inside the host's 3 kb last exon (mirrored from ENSG00000273300 in UFD1's 3' UTR): no junction and no single-strand piece of its own, the tilt atom's accepted limit | `inexon` `capinexon` |
-| shared-exon | two spliced genes sharing one exact 10 kb last exon (the W12 deep stress; the tail-to-tail class of SMARCB1 × DERL3): a level on each strand into one walled AMBIG exon whose faces each pair a junction with a terminus | `shared` `capshared` |
-| in-intron | a 600 bp single-exon gene centred in the opposite strand's first intron (mirrored from the ladder's 203 intronic pseudogenes and lncRNAs): the majority AMBIG class, walled, its only message source its own termini | `inintron` `capinintron` |
-| head-to-head | `conv` with the strands swapped and nothing else: two 5' ends overlap in a 2 kb exon∩exon piece (mirrored from TRMT2A ⟷ RANBP1), a TSS and a donor of different strands on one boundary | `div` `capdiv` |
-| tiny-exon | exons shorter than a fragment — ten 40 bp exons at 1,040 bp pitch, and the same run between two 1 kb exons: no piece holds a contained fragment, so a piece is seen only through its boundaries: the crossing counts at its edges price the conserved shares of the cuts around it (`EQUATIONS.md` §11) | `tiny` `captiny` `mixed` `capmixed` |
+| anchored twin | the message layer's five controls on one shape (exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb), each varying one bit — probed, nascent, silent — × five abundance blocks | `clean` `nasc` `cap` `capnasc` `silent` |
+| mono | single-exon: no junction, the gene edge the only message source | `mono` `capmono` + two silent controls |
+| isoform | a host and a second isoform, replicated across A ≫ B, A ≪ B, A ≈ B | `altstart` `altss` |
+| walled | exon pieces with no licensed face | `chain` `tssalt` `tandem` `altlast` |
+| terminus-cluster | ten transcript ends 126–147 bp into a shared last exon (after MIR99AHG) | `cluster` `capcluster` |
+| both-stranded | a host and its antisense in one locus (after TTC28-AS1, PPM1F-AS1, a convergent pair) — the AMBIG substrate | `asin` `asinrev` `span` `conv` |
+| sj+terminus | one boundary carrying a junction and a same-strand terminus (after RUNX1, LARGE1) | `sjterm` `capsjterm` |
+| encompassing | a 20 kb single-exon antisense over a whole twin-shape host (after ENSG00000280007 over TUBA8) | `enc` `capenc` |
+| in-exon | a 500 bp single-exon antisense inside the host's last exon (after ENSG00000273300 in UFD1's 3' UTR) | `inexon` `capinexon` |
+| shared-exon | two spliced genes sharing one exact 10 kb last exon (after SMARCB1 × DERL3): one walled AMBIG exon | `shared` `capshared` |
+| in-intron | a 600 bp single-exon gene in the opposite strand's first intron: walled, its only source its own termini | `inintron` `capinintron` |
+| head-to-head | `conv` with the strands swapped: two 5' ends overlap (after TRMT2A ⟷ RANBP1) | `div` `capdiv` |
+| tiny-exon | exons shorter than a fragment, seen only through their boundaries | `tiny` `captiny` `mixed` `capmixed` |
 
-273 genes on a 7.930 Mb chromosome (`genome_length` in the YAML). Every gene carries an explicit strand
-and the chromosome keeps equal + / − representation — a sign error is invisible on one strand, and the
-builder refuses an imbalance. Abundances are molar ladders in half-decade steps with mature up the
-blocks and nascent down (10/30/100/300/1000 against 100/30/10/3/1), independent levels, as the ladder
-draws them.
+273 genes on a 7.93 Mb chromosome, equal + / − representation (a sign error is invisible on one strand; the builder
+refuses an imbalance), abundances in half-decade molar ladders, annotated up the blocks and nascent down. The
+`shadow_genes` on the blank contig `test_blank` are transcription the simulator draws and the index never sees: the
+control for anything that trusts the annotation's notion of "pure gDNA". The scan withholds the spliced reads of the
+two spliced shadows (U5, U6); their unspliced reads, and the single-exon shadows', are the control.
 
-`shadow_genes` sit on the blank contig `test_blank`: unannotated transcription the simulator draws from
-and the index never sees — the control for anything that trusts the annotation's notion of "pure gDNA".
-The scan withholds the spliced reads of the two spliced ones (U5, U6), whose junctions no annotated
-transcript holds; their unspliced reads, and the single-exon shadows', are the control.
-The GTFs, `test_abundances.tsv` and the three probe BEDs are rendered by `build_test_reference.py` and
-versioned beside the YAML (`--check` and `tests/test_test_reference_renders.py` refuse a drifted render);
-the benign panel tiles each probed gene's exon union 8 × 125 bp, never spanning an sj (a union piece shorter
-than one probe gets a single probe centred on it, spilling into its flanks as a real panel's does), the sparse panel
-centres one probe per exon, the junction panel places one two-block probe per sj. The FASTA
-(`test_chr.fa`, both contigs), the index, the reads and the caches are derived, never hand-edited: a
-spliced transcript needs a GT..AG at every intron or the aligner and the simulator disagree with the
-annotation, and generating the chromosome from a fixed seed with a motif injected at every declared
-intron makes that impossible to get wrong. The builder refuses a reference it cannot simulate and reports
-every problem at once (an exon off the end, overlapping exons, an intron under 4 bp, a duplicate id, an
-abundance row without a transcript or the reverse, the wrong reference name); `--self-test` perturbs each.
+The GTFs, `test_abundances.tsv` and the probe BEDs are rendered by `build_test_reference.py` and versioned beside the
+YAML (`tests/test_test_reference_renders.py` refuses a drifted render): the benign panel tiles each probed gene's exon
+union 8 × 125 bp, the sparse panel centres one probe per exon, the junction panel places a two-block probe per
+junction. The FASTA is generated from a fixed seed with a GT..AG motif at every declared intron, so the aligner, the
+simulator and the annotation agree; the builder reports every problem at once, and `--self-test` perturbs each check.
 
 ⚠ κ is fitted from spliced reads, so a transcriptome of only single-exon transcripts calibrates as unstranded,
-silently — κ = ½ and the strand channel dead (`tests/calibration/test_calibrate.py`'s
-`test_an_empty_spliced_census_calibrates_as_unstranded`): at least one multi-exon transcript with real depth is
-needed before a stranded number means anything. Nascent RNA needs no declaration: `rigel index` creates a single-exon nascent entity
-over each multi-exon transcript, fed from the contributor's `nrna_abundance` column.
+silently (`tests/calibration/test_calibrate.py::test_an_empty_spliced_census_calibrates_as_unstranded`): a stranded
+number needs a multi-exon transcript with real depth. `rigel index` makes the synthetic nascent spans itself.
 
-## 0c. The ruler's truth instrument and the gDNA-depth ladder
+## 0c. The length's truth instrument and the gDNA-depth ladder
 
-`scripts/design/ruler_vs_truth.py` scores the EM's effective length under capture — the ruler,
-`capture_eff_length.transcript_capture_eff_lengths`, each object a transcript's fragments deposit on at its
-capture efficiency (`EQUATIONS.md` §11) — against the simulator's own capture-aware effective
-length, per transcript: `CaptureSampler.partition_array` is what drew the reads, so the truth is
-`Σ_w f_pre(w) · partition_t(w)` over the pre-capture fragment-length pmf and the plain length is
-`Σ_w f_pre(w) · off_target_weight · (L_t − w + 1)+`; their ratio is the truth factor, an arm's factor is
-its effective length over the same plain lengths, and the two are compared in the log anchored on the
-fully probed transcripts (a global scale is free) per class — the probed fraction of the transcript's
-bases, read off the sampler's partition at a one-base fragment — and per kind (mRNA / annotated single-exon
-/ synthetic nascent entity). It reads the same caches as every other instrument and calibrates in
-seconds; `--condition` prints the per-class table, without it every capture-ON condition prints one line
-(the probed class's share within ±0.1 nat, the unprobed and partial classes' median error, per arm).
+`scripts/design/ruler_vs_truth.py` scores the EM's capture-contracted length
+(`capture_eff_length.transcript_capture_eff_lengths`) against the simulator's own: `CaptureSampler.partition_array` drew
+the reads, so the truth is `Σ_w f_pre(w) · partition_t(w)`. Ratios are compared in the log, anchored on the fully
+probed transcripts, per probed class and per kind (annotated multi-exon, single-exon, synthetic span).
 
 ```bash
 python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.99_nrna_file_capture_on
-python scripts/design/ruler_vs_truth.py --panel ladder                       # one line per capture-ON row
-python scripts/design/ruler_vs_truth.py --panel test --condition C --module proto.py --out table.tsv
-python scripts/design/ruler_vs_truth.py --panel test --panel-dir $RIGEL_RUNS/test_reference/scenarios_depth_d10
+python scripts/design/ruler_vs_truth.py --panel ladder                     # one line per capture-ON row
 python scripts/design/ruler_vs_truth.py --panel ladder --condition gdna_g50_ss_0.99_nrna_mid_capture_on --scale
+python scripts/design/ruler_vs_truth.py --panel test --condition C --module proto.py --out table.tsv
 ```
 
-The arms: `shipped` is the ruler in `src/` on the shipped calibration; `oracle_gdna` feeds the same ruler
-the certified true gDNA counts per object (`slot_truth.npz`) with the reference read off a landscape
-fitted on the truth — the ideal witness, so the gap between the two is the calibration's and what remains
-under `oracle_gdna` is the ruler's own or the panel's geometry; `--module proto.py` names a file defining
-`ARMS = {name: ruler}` with `ruler(calibration, region_arrays, index, fl, **inputs)` — `inputs` is
-`calibrate`'s debug bundle (the last refit's `DensityLandscape` under `gdna_hyperprior`, the prior an
-expectation arm reads; the chain and the belief) plus the two fragment-length pmfs — run beside the shipped
-one on the same calibration
-— DERIVE → PROTOTYPE happens there, and nothing in `src/` moves to price an arm; `--set SECTION.FIELD=VALUE`
-prices a config value on every arm. Read the classes apart: the probed class is where the formula is exact
-when its witness is; the unprobed class is where a floor or the reference bites; the partial classes are
-where the junction price lives. A probe spanning a junction or centred on an exon shorter than a fragment
-is captured on gDNA at a fraction of the cDNA's overlap. The junction price reads that extra capture from
-the gDNA objects beside the junction by conservation of bases — close on average, too noisy per junction to
-split isoforms (`ISSUES: the-junction-price-is-noisy-within-a-gene`) — and what no gDNA object sees is
-declared, not repaired (`ISSUES: ruler-witness-geometry-on-transcript-panels`). `--scale` reads the
-shipped lengths: every hypothesis class's L / Y unanchored and the within-gene spread of the
-multi-exon transcripts, so a prototype length is scored on it from a worktree, and a class-scale repair is
-judged by the spread as well as the means (`TRAPS: judge-a-ruler-by-its-within-gene-spread`).
+`shipped` is the length in `src/`; `oracle_gdna` feeds the same code the certified true gDNA per object, so the gap is
+calibration's and the rest the length rule's or the geometry's. `--module` runs prototype rulers beside the shipped
+one on the same calibration, and `--set` prices a config value on every arm. Read the classes apart: the probed class
+is where the formula is exact when its witness is, the unprobed where the bulk bites, the partial where the junction
+price lives. `--scale` is the one-scale read-out of `SUCCESS.md`.
 
-**The gDNA-depth ladder** is three side configs of the test chromosome, everything but the fragment
-budget and the gDNA rungs identical to `test_reference.yaml`, stranded only, built the same way (§0a's
-commands with `--config` pointing at each; one `cache` at a time or a `RIGEL_SCRATCH` each):
+**The gDNA-depth ladder**: `test_reference_depth_d10.yaml` (117 k fragments) and `test_reference_depth_d100.yaml`
+(11.7 k), each at `g00 g001 g01 g05 g25 g50`, and `test_reference_depth_full_lowg.yaml` (1.17 M at `g001 g01`),
+stranded only, otherwise `test_reference.yaml`. They locate where the length's reference holds as gDNA fragments per
+probed piece fall; `ruler_vs_truth.py --panel-dir` scores each set. Its transcript number is not a calibration result.
 
-| config | depth | gDNA rungs | what it answers |
-|---|---|---|---|
-| `test_reference_depth_d10.yaml` | 117 k fragments | `g00 g001 g01 g05 g25 g50` | where the reference is `None` and where the probed class reads within ±0.1 nat, at a tenth of the depth |
-| `test_reference_depth_d100.yaml` | 11.7 k | the same six | the same curve at a hundredth — the axis is gDNA fragments per probed piece, not the fraction |
-| `test_reference_depth_full_lowg.yaml` | 1.17 M | `g001 g01` | the two rungs the panel lacks at full depth |
+## 0d. The STAR rung — aligned input, where a scan change is decided
 
-`ruler_vs_truth.py --panel-dir` scores each set; the curve is one line per condition. It is a side panel
-in the sense of §0 — its transcript-level number is not a calibration result — and never a ladder rung.
+Every ladder condition is also read from `<condition>/rustar_recommended.bam`: its reads aligned by `rustar` (STAR's
+Rust port) with the MANUAL's recommended settings (`scripts/sim/configs/star_recommended.params.txt`). `panel.py align`
+writes it once; a condition counts as aligned when its `rustar_recommended.align.json` records the aligner, its version
+and the parameters, after the BAM was checked to hold every template drawn. `panel.py score --bam rustar_recommended`
+scores the base arm against the same truth, adding what the aligner left unplaced by true origin (`unaligned_*`) and
+the gDNA fraction's truth over what it placed (`gdna_frac_true_aligned`).
 
-## 0d. The STAR panel — aligned input, where the scan is decided
+A scan change is decided here, pinned, fractional and per stratum, because these settings report the ambiguity the
+simulator's own alignments hide; the simulator's alignments stay the regression check, which a scan change that should
+not touch them leaves identical. The rung holds one realisation per condition.
 
-**The ladder's STAR rung** reads every one of the 16 conditions from an aligner's input: each condition's reads
-aligned by `rustar`, STAR's Rust port, which runs locally where STAR does not, with the MANUAL's recommended settings
-(`scripts/sim/configs/star_recommended.params.txt`) into `<condition>/rustar_recommended.bam`, beside the simulator's
-own BAM. Every read name carries its molecule's true source and coordinates, so a pair, a placement or an origin is
-scored against truth template by template. `panel.py align` writes it once (about 50 s and 1 GB per condition, the
-reads rebuilt from the simulator's BAM; a condition counts aligned once its `rustar_recommended.align.json` records the aligner, its version and the parameter
-file, after the BAM was checked to hold every template the simulator drew), and `panel.py score --bam
-rustar_recommended` scores it after every change, through `quant_accuracy.py --bam`: the base arm only, against the
-same truth as the simulator's alignments, so the two inputs compare directly. Every row records its input, and the
-library row adds what the aligner left unplaced, by true origin (`unaligned_*`: on the panel of 2026-10-21, 1.4 % of
-the gDNA off capture and 0.07 % on, under 0.02 % of the RNA) and the gDNA fraction's truth over what it placed
-(`gdna_frac_true_aligned`). The report card shows both inputs.
+## 1. The simulated backbone
 
-Since 2026-10-18 every scan change is decided on STAR alignments at the recommended settings (owner: they stay,
-because they report the ambiguity the simulator's own alignments hide): pinned and fractional, per stratum, and with
-every capture efficiency at 1 beside the shipped run while `ISSUES: the-reader-reads-false-gdna-as-capture` stands,
-since the reader amplifies every scan change. Until 2026-10-21 that was five conditions aligned by STAR 2.7.11b on the
-cluster, at the production and the recommended settings; their reads were re-simulated, so their BAMs were deleted and
-their text receipts stay in `$RIGEL_RUNS/star_panel/`. `rustar` matches STAR on 99.9 % of the templates of a 100
-k-pair sample, and on those five conditions Rigel's transcript error on the two agreed within 0.6 % except at g05
-κ0.50 capture OFF (κ the strand specificity), where the capture reader amplified a 0.1 % alignment difference (−0.08 %
-with every efficiency at 1), so the rung's BAMs decide until the cluster aligns the new reads. The ladder's simulator
-alignments stay the regression check: a scan change that should not touch them must leave them identical. What the
-rung cannot judge: more than one realization per condition.
+`chr21` + `chr22` + the 92 ERCC spike-ins, carved from the GRCh38 + GENCODE v46 sources of the production index. Two
+genomic chromosomes and the spike-ins make the reference-id space non-trivial on the RNA and gDNA paths
+(`TRAPS: one-reference-hides-refid-bugs`); every config states `gdna.genomic_refs: [chr21, chr22]`, since the engine
+infers nothing (`TRAPS: annotated-is-not-genomic`). The lengths, 206 ± 98, are a real library's RNA pool, pre-capture;
+capture selects for length (`f_post(w) ∝ f_pre(w) · total_eff(w)`), so ⛔ score against `truth_fragment_lengths.tsv`.
 
----
-
-## 1. The simulated panel (shared backbone)
-
-A real human backbone, not a generated mini-genome: `chr21` + `chr22` + the 92 ERCC spike-in references,
-carved from the same GRCh38 + GENCODE v46 sources the production index is built from. Neither is filler:
-a single-reference synthetic index once hid a reference-id-space mismatch that silently dropped nearly
-every fragment inside `deposit()` while every golden test passed
-(`TRAPS: one-reference-hides-refid-bugs`); the spike-ins make the id space non-trivial for RNA, two
-genomic chromosomes make it non-trivial on the gDNA path too.
-
-Every fragment-length parameter is measured — the count-weighted mean and sd of a real cfRNA library's
-own RNA pool, 206.1 ± 98.3, handed to both origins (`DESIGN.md` §0b). Those are pre-capture parameters
-and the truth files are post-capture: hybrid capture selects for length, so the simulator draws the
-length marginal as `f_post(w) ∝ f_pre(w) · total_eff(w)`. ⛔ Score against `truth_fragment_lengths.tsv`,
-never against `frag_mean` (`TRAPS: capture-selects-for-length`).
-
-### The simulator's transcriptome is a Rigel index — including the nascent entities
-
-`rigel sim` builds (or is given, config key `index:`) a rigel index and simulates its transcript list, so
-what is simulated is exactly what `rigel quant` reads: annotated transcripts plus the synthetic nascent
-entities `index.create_nrna_transcripts` makes (one single-exon transcript over each multi-exon span,
-TSS/TES clustered within `IndexConfig.nascent_tolerance`, an annotated single-exon transcript adopted where one
-covers the span). `transcript_filter` is refused — filter the GTF before building the index.
+`rigel sim` builds (or is given, `index:`) a rigel index and simulates its transcript list, so what is simulated is
+what `rigel quant` reads: the annotated transcripts plus the synthetic spans `index.create_nrna_transcripts` makes.
 
 | | |
 |---|---|
-| nascent RNA is a transcript, not a parallel space | its molecules are `entity.nrna_abundance`, sampled on its own template, its reads keep the `nrna_` origin tag. Under `sparse` the level is drawn per entity — off with probability `1 − on_fraction`, else log-uniform over `abundance_ranges`, independent of the mature level; under `additive_ratio` it is `Σ abundance × nrna_ratio` over contributors |
-| one multinomial over every RNA row | mature and entity rows together, `prob ∝ abundance × capture-aware effective length`; the mature/nascent split follows from molecules and lengths, so a nascent-on condition and its nascent-off twin do not share a bit-identical mature stream |
-| capture binds by genomic overlap | every probe → genomic blocks → gDNA, projected onto every transcript whose exons it touches, either strand (ds-cDNA at capture). A fragment binds through ONE contiguous part of a probe: a transcript holding the junction a probe spans holds it whole, while gDNA, a nascent span and an isoform without the junction hold its parts apart and bind the better one — never the sum, and with no other penalty, since the part a molecule holds binds alike whatever the molecule (owner, 2026-09-19; it replaced a `gdna_split_penalty` of 0.2 that bound a gDNA half-match at a fifth of the identical cDNA one). gDNA and nascent are enriched at the same rate under one probe, which is the physics |
+| nascent RNA is a transcript | a span's molecules are its `nrna_abundance`, on its own template, reads tagged `nrna_`. Under `sparse` a span is off with probability `1 − on_fraction`, else log-uniform over `abundance_ranges` |
+| one multinomial over every RNA row | `prob ∝ abundance × capture-aware effective length`, annotated and span rows together |
+| capture binds by genomic overlap | a fragment binds through ONE contiguous part of a probe, never the sum: a transcript holding a probed junction holds the probe whole, while gDNA, a span and an isoform without the junction bind the better part; gDNA and nascent RNA enrich alike |
 
-Two consequences ruled correct (owner, 2026-08-19): capture depletes nascent RNA about 8× (roughly 20 %
-of RNA fragments off capture, under 3 % on — read a condition's `truth_summary.json`), because probes
-tile exons and a pre-mRNA is mostly intron, and adding nascent after the capture simulation is wrong —
-molecules exist first; and the post-capture fl distribution and abundances are the ground truth
-(`truth_kind: post_capture_empirical`), which is why a length claim about the simulated reads is stated per RNA
-population.
-
-### What the simulator still does not do
-
-| | consequence |
-|---|---|
-| counts are Poisson by construction, save the gDNA strand overdispersion the `odg05` panel plants | nothing else dispersion-dependent validates here |
-| the panel is all R1-antisense | the engine can emit either (`ReadSimConfig.r1_sense`, gated in `test_strand_sense_convention.py`) but `orchestrator.run_condition_grid` does not expose it. Real cfRNA is dUTP, so this is not urgent |
-| the tool's gDNA reach assumption (`taper_g = 1`) is untested | latent: gDNA is not simulated on the spike-ins |
-
----
+Capture depletes nascent RNA, and the post-capture lengths and abundances are the truth (`truth_summary.json`). The
+simulator does not do: dispersion beyond Poisson (it can plant a gDNA strand overdispersion, which no panel uses); R1-sense panels
+(`ReadSimConfig.r1_sense` exists, gated in `tests/calibration/test_strand_sense_convention.py`, but
+`orchestrator.run_condition_grid` does not expose it); gDNA on the spike-ins, so `taper_g = 1` is untested.
 
 ## 2. Building it — `panel.py`, one command per stage
 
-`scripts/sim/panel.py` is the whole loop: every path derived from one panel YAML, every stage resumable,
-each stage shelling out to the instrument that owns it. It adds no measurement code.
+`scripts/sim/panel.py` derives every path from one panel YAML; each stage is resumable and shells out to the
+instrument that owns it.
 
 ```bash
-source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
-export OMP_NUM_THREADS=1
-CFG=scripts/sim/configs/gdna_ladder.yaml       # the panel the tool is ranked on
-
+export OMP_NUM_THREADS=1 RIGEL_SCRATCH=<scratch>   # else the instruments write tens of GB under /tmp
+CFG=scripts/sim/configs/gdna_ladder.yaml
 python scripts/sim/panel.py status   --config $CFG              # always first
 python scripts/sim/panel.py build    --config $CFG              # index + capture probes
-python scripts/sim/panel.py simulate --config $CFG --jobs 8     # ~21 min, ~16 GB
+python scripts/sim/panel.py simulate --config $CFG --jobs 8
 python scripts/sim/panel.py cache    --config $CFG --jobs 8     # BOTH caches — mandatory, §0
-python scripts/sim/panel.py score    --config $CFG --jobs 2 --arms base oracle noop   # ~8.5 GB per condition
+python scripts/sim/panel.py align    --config $CFG --aligner <rustar> --aligner-index <its index>
+python scripts/sim/panel.py score    --config $CFG --jobs 2 --arms base oracle noop
 python scripts/sim/panel.py report   --config $CFG --arms base oracle
 ```
 
-`status` prints what exists, what is missing, and which stage to run next. `build` cannot carve the
-reference — that needs the source genome/GTF, which the config does not name — so it prints the exact
-command and stops:
-
-```bash
-REFS=$RIGEL_RUNS/refs SUITE=$RIGEL_RUNS/suite
-python scripts/sim/build_suite_reference.py \
-    --fasta $REFS/genome_controls.fasta.bgz --gtf $REFS/genes_controls.sorted.gtf \
-    --refs chr21 chr22 --ercc -o $SUITE/reference
-```
-
-### Workflow gotchas
-
-* ⛔ **`--force` does not reach the `simulate` stage.** `cmd_cache` passes it to `build_scan_cache.py`
-  and `cmd_build` honours it for the index and probes, but `cmd_simulate` shells out to
-  `simulate_reads.py` with no such flag, and the simulator skips a condition whose oracle BAM already
-  exists. So editing a config and re-running `panel.py simulate --force` reports
-  success and reproduces the old reads. Delete the condition directories first.
-* `calibration_oracle.py --build` builds every row's oracle cache alike, and `status` counts an oracle condition
-  complete only when `gdna`, `mrna`, `nrna` and the two strand partitions are all present. One row by hand:
-
-  ```bash
-  python scripts/design/calibration_oracle.py --suite $SUITE/ladder --index $SUITE/rigel_index --build \
-      --condition gdna_g00_ss_0.50_nrna_mid_capture_off
-  ```
-* Every panel config states `gdna.genomic_refs: [chr21, chr22]` explicitly; the engine does not infer
-  which references carry genomic DNA (`TRAPS: annotated-is-not-genomic`).
-* Export `RIGEL_SCRATCH` before a sweep, or the instruments write their per-condition work under `/tmp`
-  (tens of GB after a ladder rebuild).
-
----
-
-## 4. How results are evaluated
-
-Two numbers are primary and neither stands in for the other (`DESIGN.md` §0b; the judging rules are
-`SUCCESS.md`): the transcript table against per-transcript truth is what the release ships on, and the
-calibration result against an oracle calibration ranks a calibration mechanism. Two questions, two
-instruments:
-
-| question | instrument |
-|---|---|
-| how wrong is calibration, against oracle calibration? — what ranks a calibration mechanism | `calibration_vs_oracle.py` · `prior_vs_oracle.py` (the `LocusPriors` the EM reads) |
-| how wrong is the end-to-end answer? — per transcript, per pool, against per-fragment truth; what the release ships on | `panel.py score` / `report`, i.e. `quant_accuracy.py`, the only end-to-end scorer |
-
-⛔ A ceiling only prices what its arm can reach: the effective-length shrinkage is built before
-`assemble_priors`, which every measurement arm patches (`SUCCESS.md`, the ruler). Say which call your
-arm patches and check it sits downstream of everything you mean to price.
-
-Hard per-fragment label recovery is the wrong target: an unspliced RNA fragment and a gDNA fragment from
-the same locus can be sequence-identical. A net-flow reduction, `net(a→b) = flow[a][b] − flow[b][a]`, cancels
-the unrecoverable part and keeps only systematic bias; the module that computed it per locus was retired
-2026-09-13 for want of an entry point (in git), and the absolute per-transcript error stays the report. Hard-label
-metrics are nearly blind to a
-calibration-prior change (`TRAPS: hard-labels-miss-soft-change`); the soft 3-pool surplus is not built.
-
----
+`build` cannot carve the reference (it needs the source genome and GTF), so it prints the command and stops:
+`build_suite_reference.py --fasta $REFS/genome_controls.fasta.bgz --gtf $REFS/genes_controls.sorted.gtf --refs chr21
+chr22 --ercc -o $SUITE/reference`. ⛔ **`--force` does not reach `simulate`**: the simulator skips a condition whose
+oracle BAM exists, so delete the condition directories before re-simulating. `status` counts an oracle condition
+complete only with all five partitions; one row by hand is
+`calibration_oracle.py --suite $SUITE/ladder --index $SUITE/rigel_index --build --condition <name>`.
 
 ## 5. The test suite
 
 ```bash
 python -m pytest tests/ -q
-python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
+python -m pytest tests/ --update-golden        # regenerate tests/golden/ after an intended output change
 ```
 
-`CLAUDE.md` is the home of the standing pass count: re-derive it, never adjust it. Any failure is a
-regression.
-`tests/scenarios_aligned/test_multimap_counting.py::TestParalogMultimapping::test_gdna_sweep[gdna_100]`
-is a real EM unidentifiability (`TRAPS: identical-paralogs-are-bimodal`); if it fails again, do not fix
-it by moving a seed.
+`CLAUDE.md` holds the standing pass count; any failure is a regression. The goldens run fractional with the EM on one
+thread and a pinned seed (`tests/test_golden_output.py`), but the scan's float sums vary in the last bits at its
+default thread budget (`TRAPS: the-deliverable-is-not-reproducible-by-default`): regenerate twice and diff.
+`tests/scenarios_aligned/test_multimap_counting.py` holds identical paralogs to the total and the shape
+(`assert_identical_paralogs`: even, or a vertex, never between) with the EM run to convergence (`CONVERGED_EM`); never
+fix it by moving a seed (`TRAPS: identical-paralogs-are-bimodal`).
 
-The goldens run fractional with the EM on one thread and a pinned seed (`tests/test_golden_output.py`), but the
-scan runs at its default thread budget, and its fraction sums vary in the last bits from run to run
-(`TRAPS: the-deliverable-is-not-reproducible-by-default`): regenerate the goldens twice and diff before trusting a
-change, and in any instrument that must compare two end-to-end runs bit for bit pin `scan.total_threads=1`
-(`rename_identity.py` does, and so does every A/B pair).
+**The accumulator's identities**, a closed stage kept as a regression check after any accumulator or native change:
 
-**A multimapping fragment is gated as one fragment with several placements** (`DESIGN.md` §4.2). The rule
-is stated once, in the specification's `Accumulator.offer`, and held three ways: `tests/native/test_multimapper_offer.py`
-is the rule case by case (one placement is `deposit` bit for bit; identical placements are one; a strand-undefined
-placement excludes itself alone; every pair over the limit means all stand; one survivor across placements
-deposits at its placement and leaves the gap census alone; two contained placements are held whole in canonical
-order whatever the hit order; a record-local choice names a placement and a hypothesis; a drained choice equals the
-direct deposit); `tests/native/test_multimapper_native_parity.py` holds `AccumulatorSet::offer` to it array by
-array, every reference's banks, the counters, the census and the ONE canonical bank, on those cases and on two
-thousand random fragments; `tests/test_second_pass_placements.py` holds the placement term: unique contained depth
-in a 3:1 ratio scores the placements exactly 0.75 / 0.25 and the draw follows within the binomial's own four
-standard deviations, no unique evidence anywhere is undecided and even, unique evidence on one side only is a hard
-zero, and the drain deposits exactly where it drew. The two-contig drain fixture carries four `NH = 2` fragments,
-so the worker-identity gate covers multi-placement records, and `tests/scenarios_aligned/test_multimap_counting.py`
-is the only panel with real multimappers: identical paralogs are held to the TOTAL and the SHAPE
-(`assert_identical_paralogs` — even, or a vertex, never between), because their split is the EM's own degeneracy;
-the EM runs to convergence there (`CONVERGED_EM`), since the shipped budget can stop the drift toward a vertex on
-the way.
+| identity | holds | gate |
+|---|---|---|
+| C++ against the executable specification | byte-identical | `tests/native/test_accumulator_spec.py` |
+| one BAM at 1/2/4/8 workers | count banks bit-identical, float64 mass banks within n·ε | `tests/test_scan_order_independence.py` |
+| `Σ region_start_count == deposited`; `deposited + deferred + dropped_* == offered` | exact | the same |
+| the origin partitions sum to the full payload | exact on counts, within the representation on float64 | `tests/calibration/_oracle.py` |
 
-**The capture-contracted length is gated per object against the deposit rule.** Three gates run every
-placement of every fragment width through the reference accumulator (`tests/native/_accumulator_reference.py`)
-and hold each piece's contained share and each boundary's and junction's conserved share to 1e-12:
-`tests/calibration/test_effective_length.py::test_each_share_is_what_the_deposit_rule_gives_the_object` (a
-spliced template cut into 1–3 bp pieces, one fragment crossing up to six cuts),
-`::test_the_gdna_shares_are_what_the_deposit_rule_gives_each_boundary` (gDNA, every start on the chromosome)
-and `tests/calibration/test_capture_eff_length.py::test_each_share_is_what_the_deposit_rule_gives_the_object`
-(the index's own partition). Per object, never on the total (`TRAPS: conservation-misses-mis-attribution`),
-and on pieces shorter than a fragment (`TRAPS: perturb-every-gate`). Two more stand beside them:
-`test_capture_eff_length.py::test_a_junction_reads_the_objects_beside_it_on_a_multi_region_intron` puts
-every region and boundary at its own efficiency and finds the junction's objects by coordinate, never by the
-module's index arithmetic, and `::test_a_zero_length_fragment_places_nowhere` holds a length model's mass at
-`w = 0` out of every share. `test_priors.py` holds the gDNA component's length to gDNA's own conserved share
-and never the count's `q`; `test_capture_efficiency.py` holds each region and boundary to its own count.
+**A multimapping fragment is one fragment with several placements** (`DESIGN.md` §4), the rule stated once in the
+specification's `Accumulator.offer` and held three ways: `tests/native/test_multimapper_offer.py` case by case,
+`tests/native/test_multimapper_native_parity.py` array by array against `AccumulatorSet::offer`, and
+`tests/test_second_pass_placements.py` for the placement term and the draw.
 
-**The EM's two length tables are gated on the design's own argument** (`DESIGN.md` §3.6b).
-`tests/calibration/test_shared_length_law.py` holds that equal chemistry under capture is one table bit for bit at every
-captured fraction up to `κ` and under saturating responses, and that sampling noise alone stays one table; that a real
-gap in either direction is never partly shrunk (`w = 1`, the table the capture mixture exactly); that an RNA census no
-longer than gDNA's law moves nothing; that the mixture is the maximum-likelihood fraction within `[0, κ]` and more capture
-never widens what is left; that the bound is the worst case over 300 random responses rewarding length at most
-proportionally, in Hellinger, KL and χ² alike, and that a response outside that class breaks it; and that the weight and
-the mixture are continuous in every input. Nine deliberate breaks each fire a gate: the James–Stein weight, no capture
-read as one law, the mixture without its sign or always at `κ`, half the bound, no noise, the decision on the tilted
-contrast, the path's ends through a logarithm, a squared-length family. `test_capture_eff_length.py` holds the carried
-factor against brute force and at its null form `Σ_o c_o share_o(g)`, and `κ`'s weighting; `test_fl.py` holds each pmf's
-variance — its EB weight squared, none where there is no count, a tenth of it for ten times the evidence, and the
-contrast's through its own coefficients.
+**The capture-contracted length is gated per object against the deposit rule**: every placement of every fragment
+width runs through the reference accumulator (`tests/native/_accumulator_reference.py`), holding each piece's contained
+share and each boundary's and junction's conserved share to 1e-12 (`test_effective_length.py` and
+`test_capture_eff_length.py`, `test_each_share_is_what_the_deposit_rule_gives_the_object` and its gDNA twin) — per
+object, never on the total (`TRAPS: conservation-misses-mis-attribution`), on pieces shorter than a fragment.
 
----
+**The EM's two length tables** are gated on the design's argument (`DESIGN.md` §8.3) in
+`tests/calibration/test_shared_length_law.py` — equal chemistry under capture is one table, a real gap in either
+direction is never partly shrunk, the bound is the worst case over admissible capture responses, the weight is
+continuous — with a deliberate break behind each gate; `tests/calibration/test_fl.py` holds each pmf's variance.
 
-## 6. Development discipline for test substrates
+## 6. Profiling, timing and numeric identity
 
-Develop on controlled toys, validate on real data — both, in that order: a big suite has confounds that
-hide mechanisms, and a toy ranks hotspots backwards (`TRAPS: toys-rank-hotspots-backwards`).
+**Profile on a deep, real, high-complexity library**, never a panel condition or a toy; the cfRNA libraries on disk
+are sparse smoke tests (`TRAPS: a-profile-share-is-a-ranking`). **Read a timing only from a back-to-back A/B pair**:
+untouched stages drift between sittings, so alternate the arms in one sitting and check the untouched stages read
+1.00. `scripts/profiling/profiler.py` runs the pipeline as a tree of named stages with per-stage peak and held RSS
+(`--set`, `--scan-only`, `--compare`). A native port inside the sweep is held to the transfer gates
+(`tests/calibration/_transfer_harness.py`, against `native.transfer_prepare` and `native.transfer_pass`).
 
-**Profiling is judged on a deep, real, high-complexity RNA-seq library** (owner, 2026-08-17) — never a
-panel condition and never a toy. The cfRNA libraries on disk are sparse and small, so they under-fill
-exactly the structures whose cost the performance work is about (the grid solve, the per-slot arrays, the
-fragment buffer); they are smoke tests that find a defect cheaply, and the deep library decides. This
-leaves `TRAPS: real-data-is-a-test-input` and the accuracy panel (the ladder) untouched.
-
-**Read a timing only from back-to-back A/B pairs.** Stages nobody touched drift 25–40 % between runs
-taken at different times — page cache, concurrent work — so a before-and-after taken hours apart credits
-the machine's mood to the change. Alternate the two arms in one sitting (stash `src/` only) and check
-that the untouched stages read 1.00. **Every speed-up is proven a numeric no-op** before it is believed:
-`design/rename_identity.py --bam` end to end on a real library and on both ladder references, and
-`profiling/sweep_replay.py` for anything inside the sweep.
-
-The instruments are `scripts/profiling/profiler.py` (the whole pipeline as a tree of named stages, with
-per-stage peak and held RSS; `--set` for any config field, `--scan-only` for the scan alone, `--compare`
-for two reports) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared
-bit for bit; `--block-slots N|none` replays it at another locus-block size, which must move nothing —
-the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. A reference is frozen
-once, from the tree a stage starts on, and every `--check` of that stage reads against it; a reference from an older
-tree reads MOVED whatever the change, since the tool's output has moved since (the `arms/review_identity_*.json` of
-2026-09-21 are such). The current references were frozen at 81fc67b6 (2026-10-29, the second pass's draw), on the
-GRCh38 index built with the `alignable` store — the ladder's `gdna_g05_ss_0.99_nrna_mid_capture_off` and the VCaP mix:
-`$RIGEL_RUNS/arms/2026-10-29_identity/identity_head_{g05off,vcap}.json`. The instrument's default
-`--reference` does not exist and it prints ⛔ rather than failing, so pass each one and read the log, never the exit
-code:
+**Every speed-up, rename or refactor is a proven numeric no-op** (`scripts/design/rename_identity.py`): `--freeze` a
+reference once from the tree a stage starts on, then `--check` each step against it, on a ladder condition and on a
+real library (`--bam`). The default `--reference` does not exist and prints ⛔ rather than failing, so pass it and read
+the log. The current references, frozen on the second pass's draw:
 
     P=$RIGEL_RUNS/arms/2026-10-29_identity S=$RIGEL_RUNS/suite
     python scripts/design/rename_identity.py --check --suite $S/ladder --index $S/rigel_index \
       --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference $P/identity_head_g05off.json
     python scripts/design/rename_identity.py --check --index $RIGEL_RUNS/refs/rigel_index \
-      --bam $RIGEL_RUNS/cfrna/vcap_mix/bam/star.srt.rmdup.collate.bam \
-      --reference $P/identity_head_vcap.json
-
-The replay target is a captured set of the deep library's (VCaP's) sweeps, re-captured by
-`sweep_replay.py capture` whenever a step moves numbers, the superseded set deleted (`DESIGN.md` §6b.15); none is
-on disk now (`$RIGEL_RUNS/perf/` is empty), so capture one before a sweep change is replayed. A port is
-held to the replay's `--tolerance` budget and to the transfer gates, which hold the kernel's tables — returned by
-`native.transfer_prepare` — to independent recomputes and drive single hops of the native pass through
-`native.transfer_pass` (`tests/calibration/_transfer_harness.py`, where the tables' containers live; the row constructors
-and flag predicates the gates recompute with are the native ones, `native.transfer_rows`). The sweep itself is one native
-call (`native.solve_blocks`): `sweep_replay.py replay --threads N` and `--block-slots N` hold it to a capture at any thread
-count and block size. The deep library's timing baseline is an
-interleaved pair of the landed tree at 8 threads on VCaP; the 2026-09-19 pair is gone, so re-time one before a speed
-claim (the drift between two runs of one arm, 0.98–1.07 per stage then, is the noise floor a pair is read against). ⛔ Read a stage row from a PAIR,
-never a wall from two sittings, and never a profiler's share as a saving (`TRAPS: a-profile-share-is-a-ranking`). Every
-captured sweep replays the whole message layer at its own bracket (the refit sweeps at K = 233 against the first
-sweep's 101). `ISSUES: performance-memory-bounded-solve` carries the work.
-
-A both-strand stress test needs ample single-stranded regions (the population prior trains on them).
-How to A/B honestly: in-process, opposite extremes, never on a saturated condition, one thing varied,
-both arms sharing their random input — a byte-identical hard-label result is no evidence
-(`TRAPS: perturb-every-gate`).
+      --bam $RIGEL_RUNS/cfrna/vcap_mix/bam/star.srt.rmdup.collate.bam --reference $P/identity_head_vcap.json

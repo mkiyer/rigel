@@ -1,14 +1,14 @@
 """The test chromosome has one source — `scripts/sim/test_reference/test_chr.yaml` — and the
 checked-in renders must match it.
 
-`test_chr.gtf`, `test_shadow.gtf`, `test_abundances.tsv` and the three probe panels are DERIVED by
+`test_chr.gtf`, `test_shadow.gtf`, `test_abundances.tsv` and the three probe panels are derived by
 `scripts/sim/build_test_reference.py` from the YAML and versioned beside it, so a reader sees the
 annotation without running anything. A hand edit to a render, or a YAML edit without re-running the
 builder, leaves the benchmark describing two different chromosomes, and this refuses both. The
 substrate's own rules are gated here too: every gene carries an explicit strand, the two strands are
 equally represented, and no block type sits on one strand only.
 
-PERTURBATION: a hand-edited render is caught by the builder's own self-test, and the strand-balance
+Perturbation: a hand-edited render is caught by the builder's own self-test, and the strand-balance
 rule is watched firing on an all-plus chromosome.
 """
 
@@ -61,7 +61,7 @@ def test_both_strands_are_equally_represented(builder):
 
 def test_every_type_sits_on_both_strands(builder):
     """A block type that only ever appears on one strand is the one-strand substrate in disguise.
-    A both-stranded locus is TWO genes on opposite strands sharing one type: their ids carry a role
+    A both-stranded locus is two genes on opposite strands sharing one type: their ids carry a role
     suffix, ``_H`` the host and ``_A`` the antisense, which is not part of the type."""
     spec = builder.load_spec(SPEC)
     by_type: dict[str, set[str]] = {}

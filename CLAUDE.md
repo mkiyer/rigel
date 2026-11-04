@@ -1,148 +1,114 @@
 # CLAUDE.md
 
-A session primer: what Rigel is, what 0.8.0 is about, where a change goes, the working rules, and which
-instrument answers which question. It is not a history (git is) and not a manual (the nine docs below are).
-A rule earns its place here by changing what the next session does.
+A session primer: what Rigel is, where it stands, where a change goes, and how work is done here. Git holds the history
+and the nine docs below hold the detail.
 
 ## What Rigel is
 
-A Bayesian RNA-seq transcript quantifier that separates RNA from genomic-DNA contamination. A single-pass
-C++ BAM scanner tallies fragments, a **calibration** stage deconvolves the library into gDNA vs RNA, and a
-per-locus EM assigns RNA to transcripts. PyPI package `rigel-rnaseq`; the import and CLI are `rigel`. The
-version on disk is 0.7.1 (`pyproject.toml`); the target is **0.8.0**.
+Rigel is a Bayesian RNA-seq transcript quantifier that separates RNA from genomic-DNA contamination. The pipeline:
+1. A single-pass C++ BAM scanner tallies fragments per genomic region.
+2. A **calibration** stage splits each region's unspliced count into gDNA and RNA.
+3. A per-locus EM assigns RNA to transcripts.
 
-## Axiom 0 — RNA is RNA
+The PyPI package is `rigel-rnaseq`; the import and the CLI are `rigel`. The version on disk is 0.7.1
+(`pyproject.toml`); the target is **0.8.0**.
 
-There are three populations and no fourth: `gDNA`, `RNA+`, `RNA−`. "Mature" and "nascent" are not
-populations and not a degree of freedom: RNA inside an intron is RNA that has not spliced at that
-position. The only distinction is whether a fragment **is spliced** (certified RNA, needing no
-deconvolution) or **is not** (the whole deconvolution problem). The population set at a slot is a function
-of two bits:
+## Axiom 0: RNA is RNA
+
+There are three populations: `gDNA`, `RNA+` and `RNA−`. "Mature" and "nascent" are not populations. The only
+distinction is whether a fragment **is spliced** (certified RNA) or **is not**, and the unspliced ones are the whole
+deconvolution problem. The population set at a slot follows from the annotation:
 
 ```
-T(slot) = {gDNA}                                  # always — gDNA is genomically continuous
-        ∪ {RNA+ if statics.free_pos[slot]}        # iff the annotation admits that strand here
-        ∪ {RNA− if statics.free_neg[slot]}
+T(slot) = {gDNA} ∪ {RNA+ if statics.free_pos[slot]} ∪ {RNA− if statics.free_neg[slot]}
 ```
 
-so `|T| ∈ {1,2,3}`. The tell that you have violated this: a population set with more than three members,
-or the words "mature", "nascent" or "a third component" in a solver or composition question. Re-ask it as
-"what is this channel's OPPORTUNITY for RNA at this object?" — a geometry, derivable from the index. The
-words survive only as simulator inputs (`nrna_abundance`) and in what a user reads: an output reports RNA as
-**annotated** (every reference transcript, single-exon included) or **nascent** (Rigel's synthetic spans), never as
-a solver population (owner, 2026-10-17; `docs/DESIGN.md` §0). Nascent RNA is sparse in real data and is
-modelled for robustness, so a number measured at the panel's nascent share is a stress reading, never a
-design driver (`docs/DESIGN.md` §0b, the nascent scope ruling).
+A population set with more than three members, or "mature/nascent" in a solver question, violates the axiom. An output
+reports RNA as **annotated** (reference transcripts) or **nascent** (Rigel's synthetic spans). Nascent RNA is modelled
+for robustness, so a number measured at the panel's nascent share is a stress reading, never a design driver
+(`docs/DESIGN.md` §0).
+
+## Where things stand
+
+- `src/` has not changed since 81fc67b6. ec996bba is a frozen **preview candidate**.
+- Its validation beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
+  (`docs/ROADMAP.md`).
+- The next work is the **capture reader**, developed together with the owner. Its working memory is
+  `docs/dev/CAPTURE_IDEAS.md`.
+- Everything retired at the 2026-11-03 reset is in `$RIGEL_RUNS/archive/cleanup_2026-11-03/`.
 
 ## The 0.8.0 scope
 
-0.8.0 is a release of the TOOL; the ruling is `docs/DESIGN.md` §0b. Two numbers are primary and neither
-stands in for the other: the transcript table against per-transcript truth is what the release ships on
-(`quant_accuracy.py`), and the calibration result against an oracle calibration ranks a CALIBRATION
-mechanism (`calibration_vs_oracle.py`, `prior_vs_oracle.py`). Ranking a calibration mechanism on the
-transcript number stays refused: the table is downstream of both calibration and the EM, so one figure
-cannot say which moved.
-
-**The pinned A/B.** An end-to-end A/B pair runs with the scan pinned (`--set scan.total_threads=1`;
-`OMP_NUM_THREADS=1` does not pin it) and under `--set em.assignment_mode=fractional` (the shipped assignment
-is a sampled draw), so it is exactly reproducible; an effect is judged by its size, with genes and pools read
-beside the transcript table.
-
-Three strata are in scope — unstranded × capture-OFF, stranded × capture-OFF, stranded × capture-ON — and
-**unstranded × capture-ON is DEFERRED**: reported on every benchmark, not a 0.8.0 release requirement.
-The owner explicitly authorizes investigating the factory-removal regression in this stratum for
-robustness (2026-10-07); it does not replace the three in-scope release targets. The normal debug loop
-takes the worst IN-SCOPE scenario. Every score is read per stratum, never pooled.
-
-Fragment length is back in scope for 0.8.0 (owner, 2026-10-02): the composition channel, the capture-length
-frame and every other length item that waited for the release (`docs/DESIGN.md` §0b), and the EM's two length tables
-are one shared law unless the data show a difference capture cannot make (owner, 2026-10-26; `docs/DESIGN.md` §3.6b,
-closing `ISSUES: the-scorer-reads-a-census-length-law`). The ladder still gives
-gDNA and RNA EQUAL fragment lengths on purpose: a gap would let the EM split origins on length alone and mask
-calibration bugs. So a length mechanism is judged on the gap panels beside it, in both directions, against the
-equal-length control.
+The ruling is in `docs/DESIGN.md` §0b.
+- **Two primary numbers.** Neither stands in for the other:
+  - the transcript table against per-transcript truth (`quant_accuracy.py`);
+  - the calibration result against an oracle calibration (`calibration_vs_oracle.py`, `prior_vs_oracle.py`).
+- **The pinned A/B.** Run with `--set scan.total_threads=1` and `--set em.assignment_mode=fractional`, so the pair is
+  exactly reproducible. Read genes and pools beside the transcript table.
+- **Strata.**
+  - In scope: unstranded × capture-OFF, stranded × capture-OFF, stranded × capture-ON.
+  - unstranded × capture-ON is **deferred**: reported on every benchmark, but not a release requirement.
+  - Every score is read per stratum, never pooled.
+- **Fragment length.** The EM's two length tables are one shared law unless the data show a difference capture cannot
+  make. The ladder gives gDNA and RNA equal lengths on purpose; length mechanisms are judged on the fl-gap panels, in
+  both directions.
 
 ## The docs
-
-Nine permanent docs, none of them a changelog; each one's preamble says what it holds and what it does not.
 
 | | |
 |---|---|
 | `docs/SUCCESS.md` | **Start here.** How performance is judged, and the instruments in run order |
-| `docs/ROADMAP.md` | The ranked view: one line per state claim naming its instrument, and the ordered next steps |
-| `docs/ISSUES.md` | Every open problem as a named entry, and the CLOSED / REFUSED record with each killing number |
+| `docs/ROADMAP.md` | The state, and the ordered next steps |
+| `docs/ISSUES.md` | Every open problem as a named entry |
 | `docs/TRAPS.md` | Mistakes already made, as named rules |
 | `docs/EQUATIONS.md` | The derivations the code depends on |
-| `docs/DESIGN.md` | What is built and the rulings behind it: settled, not re-litigated. §0 is the binding vocabulary |
-| `docs/TESTING.md` | The panels, the test chromosome (§0a), the gates, and what the suite can judge |
-| `docs/MANUAL.md`, `docs/PUBLISHING.md` | The user's manual; the release procedure |
+| `docs/DESIGN.md` | What is built and the rulings behind it. §0 is the binding vocabulary |
+| `docs/TESTING.md` | The panels, the test chromosome (§0a), and the gates |
+| `docs/MANUAL.md`, `docs/PUBLISHING.md` | The user's manual and the release procedure |
 
-- **The move rule.** When a finding settles, MOVE it to its one home (an open problem or refusal to ISSUES, a
-  lesson to TRAPS, a ruling to DESIGN, a derivation to EQUATIONS) and delete it where it was, in the same
-  edit. Never copy: two homes diverge.
-- **Cite a rule by its name** — `TRAPS: off-grid-message-mode`, `ISSUES: two-sided-exon-row` — never by a number.
-- **`docs/dev/` is the sandbox**: nothing there is authoritative and nothing may cite into it. **The source
-  cites no doc**: a docstring may cite a test or `tests/native/_accumulator_reference.py`, never a doc.
-  `tests/test_docs_boundary.py` gates the naming, sandbox and source rules.
+- **One home per finding.** When a finding settles, move it to its home and delete it where it was: an open problem to
+  ISSUES, a lesson to TRAPS, a ruling to DESIGN, a derivation to EQUATIONS.
+- **Cite an entry by its name**, e.g. `ISSUES: name`, never by a number.
+- **`docs/dev/` is the sandbox.** Nothing there is authoritative and nothing may cite into it.
+- **The source cites no doc.** `tests/test_docs_boundary.py` gates these rules.
 
-## Where does a change go? — the calibration layering
+## Where a change goes: the calibration layering
 
-An import may point DOWN a layer or SIDEWAYS within one, never UP; a module reaching up is telling you the
-thing belongs lower. `src/rigel/calibration/_layers.py` is authoritative, `tests/calibration/test_layering.py`
-enforces it.
+An import may point down a layer or sideways, never up. `src/rigel/calibration/_layers.py` is authoritative and
+`tests/calibration/test_layering.py` enforces it.
 
 | if the change is about… | it goes in |
 |---|---|
-| what a fragment tally MEANS | **1 · the payload view** — `splice_graph` `substrate` `region_arrays` |
-| how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `gdna_density` `fl` |
-| one slot's own numbers and ψ | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` |
-| which strand a fragment came from | **4 · strand** — `strand_balance` |
-| how dense a component is, and the priors | **5 · density and prior** — `density_model` `landscape` `capture_efficiency` |
-| what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` + `messages/` (the policy) + `region_init` |
-| turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `track` |
+| what a fragment tally means | **1 · payload view**: `splice_graph` `substrate` `region_arrays` |
+| how many places a fragment could have sat | **2 · opportunity**: `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `gdna_density` `fl` |
+| one slot's own numbers and ψ | **3 · geometry + the per-slot solve**: `region_geometry` `simplex_logodds` |
+| which strand a fragment came from | **4 · strand**: `strand_balance` |
+| how dense a component is, and the priors | **5 · density and prior**: `landscape` `capture_efficiency` |
+| what one neighbour tells another | **6 · the solve**: `sweep` + `blocks` + `messages/` + `region_init` |
+| turning the solve into a result | **7 · assemble**: `calibrate` `priors` `result` `derive` `track` |
 
-**The message layer**: `CalibrationConfig.message_policy = "transfer"` ships and `"silent"` is the measured
-floor; the sweep is one native call (`native.solve_blocks`). The backbone, the policies and their rulings are
-`docs/DESIGN.md` §6.1 and §6b; read `ISSUES: the-message-policy-campaign` before re-proposing a mechanism.
-
-**The benchmarks**: develop on the test chromosome (`policy_benchmark.py --panel test`, seconds), decide on
-the ladder (`--panel ladder`). Unstranded rows must WIN against silent, stranded rows must do minimal HARM;
-the halves are never pooled. `docs/TESTING.md` §0a has the recipe and the bars, `docs/SUCCESS.md` the run order.
+The sweep is one native call (`native.solve_blocks`). `message_policy = "transfer"` ships; `"silent"` is the measured
+floor.
 
 ## Working rules
 
-- **DERIVE → DESIGN → PLAN → PROTOTYPE → A/B → only then `src/`.** Nothing enters the production source
-  before it has been derived on paper, prototyped OUTSIDE THE MAIN TREE and A/B'd against what ships, on
-  the same conditions. Anything inside the native block — a builder, a rule, a row constructor, ψ — is
-  prototyped in C++ in a worktree and the two trees are scored against each other
-  (`policy_benchmark.py --by-class`, `calibration_vs_oracle.py`); what is still Python is prototyped in
-  Python the same way. One mechanism at a time: a change that cannot be A/B'd alone cannot be judged alone.
-- **No magic numbers.** Stop and discuss before adding any constant, heuristic or tunable. Every divisor is
-  derived from the deposit rule and unit-tested against brute-force enumeration. A fixed number lives in
-  `config.CONSTANTS`, documented with why it has its value (a run setting in `PipelineConfig` or `IndexConfig`);
-  `tests/test_constants.py` refuses a bare module constant.
-- **A falsification test first, verified failing — then break the fixed code and watch each gate fire.**
-  The second half is not optional; it has found holes in already-green gates repeatedly.
-- **The debug loop is the default method**: run the panel → take the worst IN-SCOPE scenario → dissect it
-  to the highest-error node class (`policy_benchmark.py --by-class`) → find the mechanism → fix → re-run
-  the panel. A ceiling (`quant_accuracy.py`'s injection arms) prices what may be unreachable, so it is not
-  the default (`TRAPS: measure-the-ceiling-first`; which arm reaches which length is `docs/SUCCESS.md`'s).
-- **One thing varied per experiment**, a baseline re-recorded from the current tree in the same session,
-  and **scored against truth** (the oracle BAM's read names), never against the previous run.
-- **No legacy, no backwards compatibility, no speculative code.** Converge and delete. No version suffixes
-  in file names; no Greek letters in identifiers.
-- **Real data is a test input, never a design input** (`TRAPS: real-data-is-a-test-input`). Profile on a
-  deep real library, read a timing only from back-to-back A/B pairs, and prove every speed-up a numeric
-  no-op (`docs/TESTING.md` §6).
-- **Renames**: grep every sense of a token first, and run `rename_identity.py --check` after each stage.
-  `arm` has three senses (an experiment arm, a component arm, `__ARM_NEON` in `native/simd_detect.h`) and needs a
-  pass per sense, never a tail-end sweep.
+- **Prototype outside `src/`, A/B against what ships, then land.** Derive first. Prototype outside the main tree (C++
+  in a worktree, Python beside it). A/B against what ships on the same conditions. Change one mechanism at a time.
+- **No magic numbers.** A fixed number lives in `config.CONSTANTS` with the reason for its value. A run setting lives
+  in `PipelineConfig` or `IndexConfig`. `tests/test_constants.py` refuses a bare module constant.
+- **A falsification test first**, verified failing. Then break the fixed code and watch each gate fire.
+- **Score against truth.** Vary one thing per experiment. Re-record the baseline from the current tree in the same
+  session, and score against the oracle BAM's read names, never against the previous run.
+- **No legacy, no backwards compatibility, no speculative code.** No version suffixes in file names, and no Greek
+  letters in identifiers.
+- **Real data is a test input, never a design input.** Read a timing only from back-to-back A/B pairs. Prove every
+  speed-up is a numeric no-op.
+- **Renames and refactors:** run `rename_identity.py --check` after each stage.
 - **The owner drives commits.** Do not commit unless asked.
 
 ## Build, test, lint
 
-Everything runs inside the `rigel` conda env, which holds htslib and the compilers (the C++ build finds
-htslib via `$CONDA_PREFIX`).
+Everything runs in the `rigel` conda env, which holds htslib and the compilers.
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
@@ -151,74 +117,37 @@ export OMP_NUM_THREADS=1                        # always, when benchmarking or c
 pip install --no-build-isolation -e ".[dev]"    # rebuild after ANY src/rigel/native/ change
 python -m pytest tests/ -q
 python -m pytest tests/ -q 2>&1 | grep '^FAILED' | sed 's/::.*//' | sort | uniq -c   # the failure set
-python -m pytest tests/ --update-golden         # regenerate tests/golden/ after an intended output change
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
-python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
+python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The standing baseline: 0 failed / 3,548 passed / 0 skipped / 0 xfail, 3,548 collected** — re-derived
-2026-10-29 on the second pass's draw (ten gates added: the score in logs and the clamp, the sequence's two, the floor,
-certified RNA's law and strand, a spliced placement never floored, and the bank's order and collapse against the
-specification); 3,538 on a hit's sequence (18 gates added in `tests/test_hit_sequence.py`, one deleted: the hard-gate
-test's mismatch case, gone with `--mismatch-alpha`); 3,521 on a multimapper's places and the intergenic background (74 gates added, one deleted: 72 in
-`tests/test_multimapper_places.py` and two for the place weights' sum, the deleted one a duplicate of two identical
-places); 3,448 on `summary.json`'s observable genome (two gates added); 3,446 on the templates' RNA lengths over the
-observable genome (four gates added); 3,442 on the RNA law's normalised variance and the decision's reading of an RNA law no count measured (ten gates
-added, one deleted: four for the variance in place of a one-curve coverage gate, six for the decision, five of them on built laws);
-3,433 on RNA's own-count length law (nine gates added: eight for the law, one for its refusal of a pool count the
-anchor does not hold); 3,424 on calibration's geometry over the observable genome (two gates added); 3,422 on deleting the coupled
-gDNA law (its seventeen gates deleted with the realized estimator and the coupling; 3,439 on the shared length law, 35 gates added, four deleted: 23 for the decision, seven for the length laws'
-variances and the contrast's Monte Carlo, five for the carried normaliser and κ, the realized field's four gone; 3,408 on one
-contained-support formula in place of two, three gates deleted with the duplicate, one added for
-the length law's partition refusal; 3,410 after deleting the two index wrappers production no longer calls, four
-gates deleted; 3,414 after the
-observable genome's first four steps, 39 gates added: the index's mask, the geometry, the second pass and the length
-law; 3,375 after `panel.py align` rebuilding a missing pair from the simulator's BAM, one gate
-added; 3,374 after the
-simulator's fixes, 235 gates added, 216 of them one parametrized enumeration; 3,139 after the
-ladder's STAR rung, eight gates added; 3,131 after making a record with no aligned
-base no location, three gates added, two deleted; 3,130
-after checking the annotation pass against the scan, three gates added; 3,127 after stamping each
-record's status, six gates added; 3,121 after counting one outcome per read
-pair, fourteen gates added; 3,107 after recording the
-tolerance K's two sites, fourteen gates added; 3,093 after deleting the
-resolver's chimera call, its twenty gates deleted and one added; 3,112 after the
-overrun rule, four gates added; 3,108 after withholding chimeric alignments, nine
-gates added and three deleted with the gluing of a supplementary record's pieces; 3,102 after counting the record tags
-and widening `num_hits`, 3,096 after dropping hits
-off the index, 3,092 after the one length rule, 3,087 after deleting `SPLICED_UNANNOT`, 3,091 after the search, HI
-not read; 3,086 after the shared-transcript witness, 3,083 after the annotated-path
-rule, 3,068 after one junction set per hit, 3,067 after a template's valid hits as its multiplicity, 3,063 after one-mate
-hits, 3,060 after the pair validator, 3,052 after the index's transcript strands, 3,050 after the junction-strand tag
-read per record). **Any failure at all is a regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
-the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
-never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets
-laundered into "intended": read the diff, record its magnitude and check the truth-scored instruments
-before `--update-golden`. After a `src/` deletion, a rename or a shipped-default flip, run the instruments
-and not only the suite — `preflight.py --full` (`TRAPS: a-green-suite-hid-five-dead-instruments`).
+**The baseline: 0 failed / 3,440 passed / 0 skipped, 3,440 collected** (re-derived 2026-11-04, after the cleanup). Any failure is a regression.
+- Re-derive the count; never edit it by hand. Only adding or removing a test moves it.
+- A golden update (`--update-golden`) is where a regression gets laundered into "intended". Read the diff and check the
+  truth-scored instruments first.
+- After a deletion, a rename or a default flip, run `preflight.py --full` as well as the suite.
 
 ## Tooling under `scripts/`
 
-One row per instrument; its module docstring and `--help` are its manual, and `docs/SUCCESS.md` has the run
-order. `tests/test_scripts_index.py` holds the `design/` rows against the disk in both directions;
-`scripts/profiling/` is indexed in `scripts/README.md`.
+Each instrument's module docstring and `--help` are its manual. `docs/SUCCESS.md` gives the run order.
+`tests/test_scripts_index.py` holds the `design/` rows below against the disk, and `scripts/README.md` indexes
+`scripts/profiling/`.
 
 | | the question it answers |
 |---|---|
-| `design/preflight.py` | START HERE: can this session run and regenerate everything? Reads and imports only; `--full` adds every `--self-test` |
-| `design/policy_benchmark.py` | How does each message policy score per condition against certified truth? `--by-class`: where the error sits. ⛔ Never pooled: unstranded must win, stranded must do minimal harm |
-| `design/calibration_vs_oracle.py` | Is the calibration result right against an oracle calibration? 0.8.0's calibration metric; `--set` prices a config value on both arms. ⛔ It cannot see the capture-contracted length (`O` keeps `P`'s efficiencies): read `ruler_vs_truth.py` beside every capture-ON arm |
-| `design/ruler_vs_truth.py` | Is the EM's capture-contracted length right against the simulator's own yield? `--scale`: every class on one scale, and the within-gene spread; `--module` runs prototype rulers. ⛔ Read the probed and unprobed classes apart |
-| `design/calibration_oracle.py` | What is the certified per-object truth? Refused unless its named gates pass; `--build` makes the oracle caches |
-| `design/prior_vs_oracle.py` | Is `LocusPriors`' gDNA count right? `P − O` is calibration's error, `O − S` the pooled share's (`ISSUES: the-pooled-q-in-the-gdna-count`) |
-| `design/quant_accuracy.py` | How accurate is the tool end to end, and what is a perfect prior worth? Read in a pinned A/B pair; `--report … --markdown` renders the per-scenario release report; `--bam`: on an aligner's input (the STAR rung) |
-| `design/build_scan_cache.py` | Scan once, calibrate many times. ⛔ The key hashes the deposit rule, not `resolve.cpp`: after a change to which fragments are offered, `--force` |
-| `design/rename_identity.py` | Is a rename, refactor or speed-up numerically a no-op? `--freeze` once, `--check` after every stage, `--bam` on a real library; the reference is frozen, never rolling |
-| `sim/panel.py` | Build, simulate, cache, score and report a panel from one YAML; `status` names the next stage. `align` + `score --bam`: the ladder's STAR rung. ⛔ `cache` builds both caches; the oracle one is the truth every scorer reads |
-| `sim/build_test_reference.py` | Renders the test chromosome from its one hand-edited YAML, `test_chr.yaml` (`docs/TESTING.md` §0a) |
-| `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | The panel's substrate; `panel.py build` drives the probe design, `panel.py simulate` the reads, and the reference carve is manual |
-| `sim/configs/gdna_ladder.yaml` | The 16-condition panel the tool is ranked on (`docs/TESTING.md` §0) |
-| `sim/configs/flgap_rna_long.yaml` · `flgap_rna_short.yaml` | The fl-gap side panel, re-simulated with the ladder on 2026-10-21, so the length gap is its only difference from the ladder. ⛔ Never a ladder rung; read both arms, per stratum, beside the ladder |
+| `design/preflight.py` | Can this session run and regenerate everything? `--full` adds every `--self-test` |
+| `design/quant_accuracy.py` | How accurate is the tool end to end, against truth? Read in a pinned A/B pair. `--report … --markdown` renders the release report; `--bam` runs on an aligner's input (the STAR rung) |
+| `design/calibration_vs_oracle.py` | Is the calibration result right against an oracle calibration? `--set` prices a config value on both arms. It cannot see the capture-contracted length: read `ruler_vs_truth.py` beside every capture-ON arm |
+| `design/ruler_vs_truth.py` | Is the EM's capture-contracted length right against the simulator's own yield? `--scale` puts every class on one scale; `--module` runs prototype rulers |
+| `design/prior_vs_oracle.py` | Is the locus prior's gDNA count right? `P − O` is calibration's error, `O − S` the pooled share's |
+| `design/policy_benchmark.py` | How does each message policy score per condition? `--by-class` shows where the error sits. Per stratum, never pooled |
+| `design/calibration_oracle.py` | What is the certified per-object truth? `--build` makes the oracle caches |
+| `design/build_scan_cache.py` | Scan once, calibrate many times. After a change to which fragments are offered, `--force` |
+| `design/rename_identity.py` | Is a refactor numerically a no-op? Checked against frozen references in `$RIGEL_RUNS/arms/` |
+| `sim/panel.py` | Build, simulate, cache, align (the STAR rung), score and report a panel from one YAML. `status` names the next stage |
+| `sim/build_test_reference.py` | Renders the test chromosome from `test_chr.yaml` (`docs/TESTING.md` §0a) |
+| `sim/configs/gdna_ladder.yaml` | The 16-condition panel the tool is ranked on |
+| `sim/configs/flgap_rna_long.yaml`, `flgap_rna_short.yaml` | The fl-gap side panels; read both, per stratum, beside the ladder |
 
 ## CLI
 
@@ -230,6 +159,5 @@ rigel export results/ -f tsv
 rigel report results/ -o report.html
 ```
 
-Input BAM must be paired-end and name-sorted or collated; a read pair's multiplicity is its usable alignments (`NH` is
-read only to find a truncated output). STAR input is aligned with `--sjdbScore 0 --outFilterMultimapScoreRange 2`
-(`docs/MANUAL.md`, input requirements).
+The input BAM must be paired-end and name-sorted or collated. A read pair's multiplicity is its usable alignments. Align
+STAR input with `--sjdbScore 0 --outFilterMultimapScoreRange 2` (`docs/MANUAL.md`, input requirements).

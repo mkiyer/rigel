@@ -1,16 +1,15 @@
-"""Effective lengths: ONE placement formula, per component, per frame.
+"""Effective lengths: one placement formula, per component, per frame.
 
-An effective length is the expected number of admissible fragment START POSITIONS — the divisor that
-turns an observed count into a start density — and there is one formula per frame and nothing else::
+An effective length is the expected number of admissible fragment start positions, the divisor that turns an observed
+count into a start density, and there is one formula per frame::
 
     contained   E_f[ (region_len − w + 1)+ ]
     crossing    E_f[ max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)) ]
 
-The crossing formula covers BOTH boundary kinds and both components: mean fragment length is its
-large-reach limit rather than a separate case, since gDNA's template is the chromosome and its
-reaches are unbounded, while RNA's template ends where its transcript ends. Every test here
-ENUMERATES integer start positions instead of restating the closed form, because a "brute force"
-written from the same algebra as the implementation agrees with it while both are off by one.
+The crossing formula covers both boundary kinds and both components: mean fragment length is its large-reach limit
+rather than a separate case, since gDNA's template is the chromosome and its reaches are unbounded, while RNA's template
+ends where its transcript ends. Every test here enumerates integer start positions instead of restating the closed form,
+since a brute force written from the same algebra would share an off-by-one.
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ def _mean_length(pmf: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------
-# enumeration — the ground truth, independent of the closed form
+# enumeration: the ground truth, independent of the closed form
 # ---------------------------------------------------------------------------
 
 
@@ -63,10 +62,9 @@ def _enumerate_contained(region_len: int, w: int) -> int:
 
 
 def _enumerate_crossing(w: int, reach_lo: int, reach_hi: int) -> int:
-    """Integer placements of a length-``w`` molecule across a point with ``reach`` bases either side.
-
-    The molecule occupies ``a`` bases to the left of the point and ``w − a`` to the right; it crosses iff
-    both are ≥ 1, and it must FIT in what remains of its own template on each side.
+    """Integer placements of a length-``w`` molecule across a point with ``reach`` bases either side. The molecule
+    occupies ``a`` bases left of the point and ``w − a`` right; it crosses iff both are ≥ 1, and it must fit in what
+    remains of its own template on each side.
     """
     return int(sum(1 for a in range(1, w) if a <= reach_lo and (w - a) <= reach_hi))
 
@@ -84,11 +82,9 @@ def test_contained_is_the_enumerated_start_count(region_len, w):
 
 
 def test_contained_at_a_region_exactly_one_fragment_long_is_ONE_not_zero():
-    """The ``+1`` is the discrete count of start positions, not a correction factor.
-
-    Dropping it makes the divisor exactly 0 when a region is one fragment long — a division by zero
-    that a floor turns into an absurd density on every short region of a fine partition, and short
-    regions are a large share of one.
+    """The ``+1`` is the discrete count of start positions, not a correction factor. Without it the divisor is 0 when a
+    region is one fragment long, and a floor would turn that into an absurd density on every such region of a fine
+    partition, where short regions are common.
     """
     assert contained_eff_length(np.array([100.0]), _spike(100))[0] == pytest.approx(1.0)
 
@@ -104,7 +100,7 @@ def test_contained_is_never_negative():
 
 
 # ---------------------------------------------------------------------------
-# crossing — the one formula, both boundary kinds, both components
+# crossing: the one formula, both boundary kinds, both components
 # ---------------------------------------------------------------------------
 
 
@@ -130,11 +126,10 @@ def _crossing_matrix(fl_pmf, reach_lo, reach_hi):
 
 
 def test_crossing_closed_form_equals_the_matrix_brute_force_on_real_valued_reaches():
-    """The closed form over the pmf's cumulative sums against the materialised ``(objects × lengths)``
-    brute force, on real-valued reaches spanning below one base, inside the support, across its end and
-    UNBOUNDED, on a pmf with mass at every length. PERTURBATION: any one of the three segment sums
-    dropped, or a segment end off by one length, moves a reach in the middle of the support by more than
-    the tolerance."""
+    """The closed form over the pmf's cumulative sums against the materialised ``(objects × lengths)`` brute force, on
+    real-valued reaches spanning below one base, inside the support, across its end and unbounded, on a pmf with mass at
+    every length, so a dropped segment sum or a segment end off by one length shows.
+    """
     rng = np.random.default_rng(7)
     pmf = _normal_pmf(200.0, 50.0) + 1e-4  # mass at every length, so every segment end matters
     lo = np.concatenate(
@@ -154,10 +149,9 @@ def test_crossing_closed_form_equals_the_matrix_brute_force_on_real_valued_reach
 
 
 def test_crossing_at_UNBOUNDED_reach_is_the_mean_length_minus_one():
-    """gDNA's template is the chromosome, so it never tapers — and then the divisor is just ``mu − 1``.
-
-    This is why mean fragment length is the large-reach LIMIT of the placement formula rather than a
-    separate gDNA case: one formula, one code path, no branch on component.
+    """gDNA's template is the chromosome, so it never tapers, and the divisor is ``mu − 1``. Mean fragment length is the
+    large-reach limit of the placement formula, not a separate gDNA case: one formula, one code path, no branch on
+    component.
     """
     pmf = _normal_pmf(200.0, 50.0)
     got = crossing_eff_length(pmf, np.array([UNBOUNDED]), np.array([UNBOUNDED]))[0]
@@ -173,11 +167,9 @@ def test_crossing_is_SYMMETRIC_in_the_two_reaches():
 
 
 def test_a_ZERO_reach_gives_ZERO_opportunity_not_a_floor():
-    """An object with no opportunity for a component must emit NOTHING, never a floored division.
-
-    A floored divisor turns "this component cannot be here" into a rate, and a slot that then defaults
-    to all-gDNA seeds false gDNA into its neighbours through the messages. Zero is the correct answer
-    here and must survive as zero.
+    """An object with no opportunity for a component must emit nothing, never a floored division. A floored divisor
+    would turn "this component cannot be here" into a rate, and a slot defaulting to all-gDNA would seed false gDNA into
+    its neighbours through the messages.
     """
     pmf = _normal_pmf(200.0, 50.0)
     assert crossing_eff_length(pmf, np.array([0.0]), np.array([500.0]))[0] == 0.0
@@ -185,11 +177,9 @@ def test_a_ZERO_reach_gives_ZERO_opportunity_not_a_floor():
 
 
 def test_crossing_reproduces_the_MEASURED_taper_table():
-    """An independent cross-check of the taper against values derived outside this file, RNA N(200,50).
-
-    They mix two conventions and this test pins both: the first four are SYMMETRIC (both reaches = R),
-    while the last, at a first exon, is ONE-SIDED — a first exon is short on one side and long on the
-    other, and reading it as symmetric gives a different number entirely.
+    """The taper against values derived outside this module, RNA N(200,50), in two conventions: the first four are
+    symmetric (both reaches = R), while the last, at a first exon, is one-sided (short on one side, long on the other);
+    reading it as symmetric gives a different number.
     """
     pmf = _normal_pmf(200.0, 50.0)
 
@@ -205,8 +195,8 @@ def test_crossing_reproduces_the_MEASURED_taper_table():
 
 
 def test_the_taper_is_a_MULTI_FOLD_error_if_ignored():
-    """Not a refinement: at a short reach the correct divisor is a fraction of the mean length, so using
-    the mean blindly over-divides by many fold and under-reads the density by the same factor."""
+    """At a short reach the correct divisor is a fraction of the mean length, so using the mean would over-divide many
+    fold and under-read the density by the same factor."""
     pmf = _normal_pmf(200.0, 50.0)
     unbounded = crossing_eff_length(pmf, np.array([UNBOUNDED]), np.array([UNBOUNDED]))[0]
     tapered = crossing_eff_length(pmf, np.array([100.0]), np.array([100.0]))[0]
@@ -225,46 +215,23 @@ def test_crossing_is_vectorised_over_objects_and_agrees_elementwise():
 
 
 # ---------------------------------------------------------------------------
-# one answer per question: the per-face divisors must stay gone
-# ---------------------------------------------------------------------------
-
-
-def test_the_THREE_OLD_DIVISORS_ARE_GONE():
-    """A divisor for a deposit rule that no longer exists must not survive beside the one that does.
-
-    ``boundary_side_eff_length`` (``E[min(l,R)]/2``), ``spliced_side_eff_length`` (``E[min^2/2l]``)
-    and ``boundary_side_crossing_count_eff_length`` all divided a per-FACE quantity, and a contiguous
-    boundary has no faces — it is a 0-bp boundary with one set of numbers. Two answers for one
-    question is how an exact factor of 2 survives a whole file of assertions.
-    """
-    for dead in (
-        "boundary_side_eff_length",
-        "boundary_side_crossing_count_eff_length",
-        "spliced_side_eff_length",
-        "boundary_eff_length",
-        "region_eff_length",
-    ):
-        assert not hasattr(el, dead), f"{dead} still exists"
-
-
-# ---------------------------------------------------------------------------
 
 
 def _small_pmf() -> np.ndarray:
-    """Uneven mass on widths 2..40: a fragment crosses several of the fixtures' 1–3 bp pieces at once, and the enumeration stays
-    small enough to run every placement through the reference accumulator."""
+    """Uneven mass on widths 2..40: a fragment crosses several of the fixtures' 1–3 bp pieces at once, and the
+    enumeration stays small enough to run every placement through the reference accumulator."""
     w = np.arange(41, dtype=np.float64)
     p = np.where(w >= 2.0, 1.0 + 0.5 * np.sin(w), 0.0)
     return p / p.sum()
 
 
 def _deposit_every_placement(bounds, blocks, pmf, chromosome=False, mask=()):
-    """THE DEPOSIT RULE, per object: every placement of every width through the reference accumulator
-    (`tests/native/_accumulator_reference.py`), weighted by the pmf. A template is its ``blocks`` on one
-    reference cut at ``bounds``, the introns between blocks annotated; ``chromosome`` places every start on
-    the reference instead (gDNA's template), and then a start whose fragment touches a ``mask`` run
-    (``[start, end)``, the unobservable genome) is no placement. Returns the partition and the per-region
-    contained units, per-boundary mass and per-sj mass — nothing of the slice rule is restated here."""
+    """The deposit rule, per object: every placement of every width through the reference accumulator
+    (`tests/native/_accumulator_reference.py`), weighted by the pmf. A template is its ``blocks`` on one reference cut
+    at ``bounds``, the introns between blocks annotated; ``chromosome`` places every start on the reference instead
+    (gDNA's template), and then a start whose fragment touches a ``mask`` run (``[start, end)``, the unobservable
+    genome) is no placement. Returns the partition and the per-region contained units, per-boundary mass and per-sj
+    mass, with nothing of the slice rule restated."""
     from native._accumulator_reference import Accumulator, DepositOutcome, Partition
 
     from rigel.types import Strand
@@ -333,11 +300,12 @@ _BLOCKS = [(10, 40), (100, 150), (180, 230)]
 
 
 def test_each_share_is_what_the_deposit_rule_gives_the_object():
-    """THE GATE, per object. Every placement of a spliced template goes through the reference accumulator;
-    each piece's contained units must be its contained share, and each cut's mass — at a boundary or at a
-    junction — its conserved share (:func:`conserved_cut_shares` at the template's reach), to 1e-12. Per
-    object, because a ``1/K`` split over the cuts a fragment crosses also conserves the total. Every other
-    object holds nothing, and the whole is the fl-marginal length."""
+    """Per object: every placement of a spliced template goes through the reference accumulator; each piece's contained
+    units must be its contained share, and each cut's mass (at a boundary or a junction) its conserved share
+    (:func:`conserved_cut_shares` at the template's reach), to 1e-12. Checked per object because a ``1/K`` split over
+    the cuts a fragment crosses also conserves the total. Every other object holds nothing, and the whole is the
+    fl-marginal length.
+    """
     pmf = _small_pmf()
     part, region, boundary, junction = _deposit_every_placement(_BOUNDS, _BLOCKS, pmf)
     reg, length, lo, hi = _template_objects(_BOUNDS, _BLOCKS)
@@ -359,12 +327,13 @@ def test_each_share_is_what_the_deposit_rule_gives_the_object():
 
 
 def test_the_gdna_shares_are_what_the_deposit_rule_gives_each_boundary():
-    """gDNA's template is the chromosome: every start on it, through the reference accumulator. Away from
-    the chromosome's ends each boundary's mass is :func:`conserved_cut_shares` of its two flanking regions
-    at ``UNBOUNDED_REACH`` — ``½E_f[min(a, w − 1)] + ½E_f[min(b, w − 1)]`` — and each region's contained
-    units its contained share, beside pieces of 1–3 bp where one fragment crosses up to seven boundaries.
-    PERTURBATION: the crossing support ``E_f[w − 1]``, a start once per boundary its fragment crosses,
-    overstates every boundary beside a piece shorter than a fragment."""
+    """gDNA's template is the chromosome: every start on it, through the reference accumulator. Away from the
+    chromosome's ends each boundary's mass is :func:`conserved_cut_shares` of its two flanking regions at
+    ``UNBOUNDED_REACH``, ``½E_f[min(a, w − 1)] + ½E_f[min(b, w − 1)]``, and each region's contained units its contained
+    share, beside pieces of 1–3 bp where one fragment crosses up to seven boundaries. The crossing support ``E_f[w −
+    1]`` (a start counted once per boundary its fragment crosses) would overstate every boundary beside a piece shorter
+    than a fragment.
+    """
     pmf = _small_pmf()
     bounds = [0, 200, 201, 203, 206, 207, 230, 231, 260, 460]
     part, region, boundary, _ = _deposit_every_placement(bounds, [(200, 260)], pmf, chromosome=True)
@@ -419,12 +388,12 @@ def test_gdnas_observable_crossing_support_is_every_observable_placement_across_
 
 
 def test_the_observable_gdna_shares_are_what_the_deposit_rule_gives_each_boundary():
-    """The gate above over the OBSERVABLE genome: every start on the chromosome whose fragment touches no masked
-    base, through the reference accumulator. Each boundary's mass is :func:`observable_cut_shares` — its flanking
-    regions up to the nearest masked base, the template's reach ending there — and each region's contained units
-    :func:`observable_contained_eff_length`, to 1e-12; the whole is every observable start once. PERTURBATION:
-    today's shares at unbounded reach over the whole regions overstate every boundary a masked base lies within a
-    fragment of, and are exact at the one none does."""
+    """The test above over the observable genome: every start on the chromosome whose fragment touches no masked base,
+    through the reference accumulator. Each boundary's mass is :func:`observable_cut_shares` (its flanking regions up to
+    the nearest masked base, the template's reach ending there) and each region's contained units
+    :func:`observable_contained_eff_length`, to 1e-12; the whole is every observable start once. Unmasked shares at
+    unbounded reach would overstate every boundary within a fragment of a masked base, and are exact only where none is.
+    """
     pmf = _small_pmf()
     bounds = _MASKED_BOUNDS
     part, region, boundary, _ = _deposit_every_placement(
@@ -452,10 +421,10 @@ def test_the_observable_gdna_shares_are_what_the_deposit_rule_gives_each_boundar
 
 
 def test_the_conserved_share_at_unbounded_reach_closes():
-    """Where neither reach binds the share is ``½E_f[min(a, w − 1)] + ½E_f[min(b, w − 1)]``, computed here
-    by summing over the pmf, and beside two pieces longer than every fragment it is the crossing support
-    ``E_f[w − 1]`` exactly — no fragment crosses a second cut, so the conserved frame and the incidence
-    frame agree."""
+    """Where neither reach binds, the share is ``½E_f[min(a, w − 1)] + ½E_f[min(b, w − 1)]``, computed here by summing
+    over the pmf; beside two pieces longer than every fragment it is the crossing support ``E_f[w − 1]`` exactly, since
+    no fragment crosses a second cut and the conserved and incidence frames agree.
+    """
     pmf = _normal_pmf(200.0, 60.0, n=501)
     w = np.arange(pmf.shape[0], dtype=np.float64)
     a = np.array([1.0, 7.0, 150.0, 499.0, 5000.0])
@@ -476,9 +445,10 @@ def test_a_reach_that_excludes_its_own_piece_is_refused():
 
 
 def test_a_length_model_with_mass_at_zero_length_shares_without_a_nan():
-    """A smoothed real-library model put mass at ``w = 0`` (cfRNA-B): a zero-length fragment crosses no
-    cut, so the shares are finite and equal those of the same pmf with that mass removed, rescaled by the
-    normalisation."""
+    """A length model with mass at ``w = 0`` (a smoothed real-library model can have it): a zero-length fragment crosses
+    no cut, so the shares are finite and equal those of the same pmf with that mass removed, rescaled by the
+    normalisation.
+    """
     pmf = _normal_pmf(200.0, 60.0, n=501)
     with_zero = pmf.copy()
     with_zero[0] = 0.05

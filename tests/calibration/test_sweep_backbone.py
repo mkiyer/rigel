@@ -1,15 +1,12 @@
 """The backbone's two assertions, and the contract that keeps the shipped policy the shipped policy.
 
-The two: every node ends the two passes holding one message from each neighbour it has; and every
-delivered row is one row per slot on the solve grid and finite. The kernel counts them per block
-(`native/solve_kernel.cpp`) and the backbone judges (`sweep.AssertionCounts`). TRAPS: perturb-every-gate
-is the shape of the whole file — each assertion has a matching perturbation test that hands the backbone
-exactly that defect and asserts it refuses, because a gate with no firing perturbation has not been
-written yet, it has been typed. The pass's order and sides, the two states a node can hold from a side
-and the terminal rule are read off the kernel's received tables on hand-built chains through the gates'
-harness (`_transfer_harness`). Byte-identity against the shipped solver per condition is not gated here:
-it needs a real chain and a BAM, and it is ``scripts/design/rename_identity.py`` with
-``scripts/profiling/sweep_replay.py``.
+The two: every node ends the two passes holding one message from each neighbour it has; and every delivered row is one
+row per slot on the solve grid and finite. The kernel counts them per block (`native/solve_kernel.cpp`) and the backbone
+judges (`sweep.AssertionCounts`). Each assertion has a matching test that hands the backbone exactly that defect and
+asserts it refuses. The pass's order and sides, the two states a node can hold from a side and the terminal rule are
+read off the kernel's received tables on hand-built chains through the test harness (`_transfer_harness`). Byte-identity
+against the shipped solver per condition needs a real chain and a BAM, so it is ``scripts/design/rename_identity.py``'s
+job, not this module's.
 """
 
 from __future__ import annotations
@@ -67,16 +64,16 @@ def _ctx(*, free_pos=None, free_neg=None) -> ChainView:
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# ASSERTION 1 — THE TWO PHASES: every node holds a message from each neighbour it has; a real hop must
-# ARRIVE; a missing neighbour is not silence; the passes run in chain order and read one side each.
+# Assertion 1, the two phases: every node holds a message from each neighbour it has; a real hop must arrive; a missing
+# neighbour is not silence; the passes run in chain order and read one side each.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 def _echo_lane(u):
-    """A gDNA lane on a chain of EMPTY nodes, each holding its own lower-sided level with a flux witness
-    NAMING ITSELF. An empty node forwards what it holds and emits the intersection of its own level and the
-    held one with ITS witness, and an empty recipient does not re-price — so after a pass the count a node
-    holds names the node it received from, and the pass's order and sides are observable."""
+    """A gDNA lane on a chain of empty nodes, each holding its own lower-sided level with a flux witness naming itself.
+    An empty node forwards what it holds and emits the intersection of its own level and the held one with its own
+    witness, and an empty recipient does not re-price, so after a pass the count a node holds names the node it received
+    from, making the pass's order and sides observable."""
     own = RowTable(N, u.shape[0])
     witness = RowTable(N, 2)
     for i in range(N):
@@ -114,9 +111,9 @@ def _echo(ctx, terminal=None):
 
 
 def test_an_empty_table_is_the_two_states_and_nothing_heard():
-    """`Received.empty`: no neighbour anywhere, nothing present, nothing heard; the two states the table
-    expresses — NO NEIGHBOUR and SILENCE — partition the nodes that heard nothing, and a written level
-    is present with or without a witness but is never a composition."""
+    """`Received.empty`: no neighbour anywhere, nothing present, nothing heard. The two states the table expresses, no
+    neighbour and silence, partition the nodes that heard nothing, and a written level is present with or without a
+    witness but is never a composition."""
     t = Received.empty(N, 7)
     assert t.composition.shape == (N, 7) and t.level_gdna.profile.shape == (N, 7)
     assert not t.has_neighbour.any() and not t.has_composition.any() and not t.heard.any()
@@ -137,9 +134,9 @@ def test_an_empty_table_is_the_two_states_and_nothing_heard():
 
 
 def test_every_node_holds_what_each_neighbour_it_has_sent_and_an_open_side_is_no_neighbour():
-    """After the two passes every interior node holds one level naming its low neighbour and one naming
-    its high; ``has_neighbour`` is exactly the chain's links, so the chain's two end nodes read NO
-    NEIGHBOUR on the open side — which is not silence — and a level that arrived is not a composition."""
+    """After the two passes every interior node holds one level naming its low neighbour and one naming its high.
+    ``has_neighbour`` is exactly the chain's links, so the chain's two end nodes read no neighbour on the open side
+    (which is not silence), and a level that arrived is not a composition."""
     ctx = _ctx()
     left, right = np.asarray(ctx.left), np.asarray(ctx.right)
     fl, br = _echo(ctx)
@@ -158,12 +155,12 @@ def test_every_node_holds_what_each_neighbour_it_has_sent_and_an_open_side_is_no
 
 
 def test_the_passes_run_in_chain_order_and_read_one_side_each():
-    """The forward pass visits low→high reading each node's LOW neighbour, the backward pass the mirror,
-    so what a source holds from its far side is written before it is asked to send: on a chain of
-    FORWARD faces with a distinct own claim at every node, the composition a node holds from the left is
-    its low neighbour's claim fused with what THAT neighbour held — the recursion down the chain — and
-    from the right the mirror. PERTURBATION: a pass out of order, or one reading the wrong side, composes
-    the wrong claims and fails the recursion at the first interior node."""
+    """The forward pass visits low→high reading each node's low neighbour, and the backward pass the mirror, so what a
+    source holds from its far side is written before it is asked to send. On a chain of forward faces with a distinct
+    own claim at every node, the composition a node holds from the left is its low neighbour's claim fused with what
+    that neighbour held (the recursion down the chain), and from the right the mirror. A pass out of order, or reading
+    the wrong side, would fail the recursion at the first interior node.
+    """
     ctx = _ctx()
     lam = np.linspace(-10.0, 10.0, K)
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
@@ -193,8 +190,8 @@ def test_the_passes_run_in_chain_order_and_read_one_side_each():
 
 
 def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbour():
-    """A pass through tables that carry no rule and no lane writes nothing, so every node holds SILENCE
-    from that side — a neighbour and nothing present — distinguishable from the open side of the chain."""
+    """A pass through tables carrying no rule and no lane writes nothing, so every node holds silence from that side (a
+    neighbour and nothing present), distinguishable from the open side of the chain."""
     ctx = _ctx()
     lam = np.linspace(-10.0, 10.0, K)
     quiet = Prepared.hand_built(
@@ -207,8 +204,8 @@ def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbo
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# ASSERTION 2 — every delivered ROW is finite (one row per slot on the solve grid is structural now: the
-# kernel's rows are the grid's), counted per block by the kernel and judged by the backbone.
+# Assertion 2: every delivered row is finite (one row per slot on the solve grid is structural: the kernel's rows are
+# the grid's), counted per block by the kernel and judged by the backbone.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 _NAMES = ("lam_rows_finite", "cube_rows_finite")
@@ -229,8 +226,8 @@ def _counts(per_block, rows_delivered, cube_delivered, n_owned):
 
 
 def test_a_non_finite_delivered_row_is_counted_and_refused():
-    """The λ-row channel: finite rows are counted eligible; a non-finite row is COUNTED and, with no
-    waiver, raises — and the check is absent from the report when no block delivered rows at all."""
+    """The λ-row channel: finite rows are counted eligible; a non-finite row is counted and raises; and the check is
+    absent from the report when no block delivered rows."""
     ok = _counts({"lam_rows_finite": [(0, 5), (0, 3)]}, [True, True], [False, False], [5, 3])
     assert ok["lam_rows_finite"] == {"violations": 0, "eligible": 8}
     assert "cube_rows_finite" not in ok
@@ -240,30 +237,22 @@ def test_a_non_finite_delivered_row_is_counted_and_refused():
     assert "lam_rows_finite" not in quiet and "cube_rows_finite" not in quiet
 
 
-def test_a_waiver_is_never_silent():
-    """Every waived assertion carries a written reason, so a reader learns the defect rather than the
-    exemption. An empty reason would be a widened predicate wearing a waiver's clothes."""
-    for name, why in SW._KNOWN_VIOLATIONS.items():
-        assert len(why) > 80, f"{name}'s waiver does not say what the defect is"
-
-
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE CONTRACT — what keeps the shipped policy the shipped policy.
+# The contract: what keeps the shipped policy the shipped policy.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 def test_the_message_policy_is_a_config_decision_and_defaults_to_transfer():
-    """The largest behaviour switch in the tool, and it must be a written decision. Which policy
-    ships can never be inherited from a function default that an edit could silently change: the
-    config names it (``message_policy``, ``"transfer"``), ``calibrate`` reads it, and both the
-    shipped policy and the measured floor (``"silent"``) are reachable from the one call site."""
+    """The message policy is the tool's largest behaviour switch, so it must be an explicit decision, never a function
+    default an edit could change: the config names it (``message_policy``, ``"transfer"``), ``calibrate`` reads it, and
+    both the shipped policy and the silent floor (``"silent"``) are reachable from the one call site."""
     import importlib
     import inspect
 
     from rigel.config import CalibrationConfig  # noqa: PLC0415
 
-    # the package re-exports the function under the module's name, so ``import … as`` would bind the
-    # FUNCTION and this gate would read one function's body; the module is what reads the switch
+    # the package re-exports the function under the module's name, so ``import … as`` would bind the function and this
+    # test would read one function's body; the module is what reads the switch
     _c = importlib.import_module("rigel.calibration.calibrate")
     assert CalibrationConfig().message_policy == "transfer"
     src = inspect.getsource(_c)
@@ -276,34 +265,33 @@ def test_the_message_policy_is_a_config_decision_and_defaults_to_transfer():
     )
 
 
-def test_solve_chains_parameter_default_is_silent_and_sends_nothing(sweep_inputs):
-    """``SilentPolicy`` is ``solve_chain``'s parameter default (the shipped config installs the
-    transfer policy), and it is the MEASURED floor every policy is judged against: win on unstranded
-    data, minimal harm on stranded data, never pooled. The kernel runs no layer for it: the capture of a
-    default sweep names the silent policy and holds no received table and no delivered row."""
+def test_solve_chain_takes_its_policy_by_name_and_silence_sends_nothing(sweep_inputs):
+    """``solve_chain`` has no policy default: silence is chosen by name, like the shipped transfer policy, and
+    ``SilentPolicy`` is the floor every policy is judged against (win on unstranded data, minimal harm on stranded data,
+    never pooled). The kernel runs no layer for it: a silent sweep's capture names the silent policy and holds no
+    received table and no delivered row."""
     import inspect
 
-    assert inspect.signature(SW.solve_chain).parameters["policy"].default is None
+    from rigel.calibration.messages.silent import SilentPolicy
+
+    assert inspect.signature(SW.solve_chain).parameters["policy"].default is inspect.Parameter.empty
     assert SW._POLICY_KERNEL["silent"] == 0
     cap = SweepCapture()
-    out = SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], _capture=cap)
+    out = SW.solve_chain(
+        *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=cap
+    )
     assert cap.policy_name == "silent" and cap.from_left is None and cap.lam_rows is None
     assert out.has_composition is not None and "lam_rows_finite" not in cap.backbone_assertions
 
 
 def test_the_backbone_does_not_know_what_a_message_is_about():
-    """The structural claim of the split, as a test. The backbone owns the shape of the solve and
-    the two assertions; every message-composition choice is a policy. If one of these concepts
-    reappears in ``sweep.py``, an operator has leaked back into the backbone and the next reader can
-    no longer hold the working system in their head.
+    """The backbone owns the shape of the solve and the two assertions; every message-composition choice belongs to a
+    policy. If one of these concepts appeared in ``sweep.py``, an operator would have leaked into the backbone.
 
-    It checks identifiers, from the AST, and not the file's text. Grepping the source would match a
-    docstring naming these very words in order to say they are absent, and a test that passes for
-    that reason is vacuous.
-
-    ``capture`` has one licensed occurrence and it is not the biology: ``_capture`` is the
-    diagnostics hook every instrument passes by keyword. Hybrid capture — the thing the message
-    layer argues about — appears nowhere."""
+    The test checks identifiers from the AST, not the file's text, since a text search would match a docstring naming
+    these words to say they are absent. ``capture`` has one licensed occurrence, ``_capture``, the diagnostics hook
+    every instrument passes by keyword; hybrid capture appears nowhere.
+    """
     import ast
     import inspect
 
@@ -338,15 +326,14 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE CUBE CHANNEL (the both-stranded locus): a row per delivered AMBIG slot, final solve only
+# The cube channel (the both-stranded locus): a row per delivered AMBIG slot, final solve only
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 def test_the_cube_channel_is_counted_where_a_cube_was_delivered():
-    """The cube rows' finiteness is counted over the delivered rows at a block's OWNED slots — absent
-    from the report when no block delivered a cube, a non-finite profile refused — and the kernel's
-    solve writes a cube row only at an AMBIG node (`transfer_kernel.h`), so a cube at a single-strand
-    slot cannot be built."""
+    """The cube rows' finiteness is counted over the delivered rows at a block's owned slots: absent from the report
+    when no block delivered a cube, a non-finite profile refused. The kernel's solve writes a cube row only at an AMBIG
+    node (`transfer_kernel.h`), so a cube at a single-strand slot cannot be built."""
     ok = _counts({"cube_rows_finite": [(0, 2), (0, 0)]}, [True, True], [True, False], [5, 3])
     assert ok["cube_rows_finite"] == {"violations": 0, "eligible": 2}
     with pytest.raises(AssertionError, match="cube_rows_finite"):
@@ -366,7 +353,7 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
     u_neg = np.array([50.0, 50.0, 50.0, 50.0])
     ap = np.ones(m, bool)
     an = np.array([True, True, False, True])
-    kw = dict(kappa=0.99, od_g=0.0, od_r=0.0, n_grid=K_, L=10.0)
+    kw = dict(kappa=0.99, n_grid=K_, L=10.0)
     base = _solve_regions_logodds_all(u_pos, u_neg, ap, an, **kw)
     u = np.linspace(-10.0, 10.0, K_)
     for empty in (None, CubeRows.blank(0, u)):
@@ -386,16 +373,16 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE STRUCTURAL RULE — a TERMINAL receives nothing, so the chain breaks at it.
+# The structural rule: a terminal receives nothing, so the chain breaks at it.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 def test_a_terminal_receives_nothing_and_the_kernel_is_never_asked_for_the_hop_into_it():
-    """The boundary condition the locus solve stands on: a node marked terminal holds SILENCE from a
-    side it has a neighbour on, and the kernel is never asked for the hop into it — so what a policy
-    WOULD deliver there cannot exist. PERTURBATION: the same pass with no terminal marked delivers its
-    level, which is what proves the mask does the work. What the terminal SENDS is untouched: its
-    neighbour still receives from it."""
+    """A node marked terminal holds silence from a side it has a neighbour on, and the kernel is never asked for the hop
+    into it, so nothing a policy would deliver there can exist. The same pass with no terminal marked delivers its
+    level, which shows the mask does the work. What the terminal sends is untouched: its neighbour still receives from
+    it.
+    """
     ctx = _ctx()
     terminal = np.zeros(N, bool)
     terminal[4] = True
@@ -412,12 +399,11 @@ def test_a_terminal_receives_nothing_and_the_kernel_is_never_asked_for_the_hop_i
 
 
 def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
-    """One predicate, one home: the slots the backbone never delivers into are exactly the REGIONS
-    `g1_locked` locks — no admissible RNA strand — defined once, on the view (`ChainView.terminal`), so a
-    reader cannot find a second definition of "terminal". The backbone cuts the chain at them and tells
-    the kernel them, whose builders read the array as their intergenic class, and the transfer library
-    reads its structurally pure gDNA off the same property — read off the source. On a hand-built view a
-    BOUNDARY that admits no strand is no terminal: only a region is."""
+    """The slots the backbone never delivers into are exactly the regions `g1_locked` locks (no admissible RNA strand),
+    defined once on the view (`ChainView.terminal`). The backbone cuts the chain at them and passes them to the kernel,
+    whose builders read the array as their intergenic class, and the transfer library reads its structurally pure gDNA
+    off the same property. On a hand-built view a boundary that admits no strand is not a terminal: only a region is.
+    """
     import inspect
     import re
 
@@ -441,8 +427,7 @@ def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE LOCUS BLOCKS — the sweep solved a block at a time is the sweep, for every block size and every
-# thread count.
+# The locus blocks: the sweep solved a block at a time is the sweep, for every block size and every thread count.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -454,11 +439,11 @@ def _six(belief):
 
 
 def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
-    """The property the whole decomposition stands on, on the real toy chain through the shipped
-    policy: ``solve_chain`` with the chain as one block, one locus per block, and every block size in
-    between gives the same belief to the bit and the same ``has_composition`` predicate — and the diagnostic
-    capture gathers to the same per-slot arrays. Not vacuous: the toy has several terminals, so
-    ``block_slots=1`` makes more than one block."""
+    """On the real toy chain through the shipped policy, ``solve_chain`` with the chain as one block, one locus per
+    block, and every block size between gives the same belief to the bit and the same ``has_composition`` predicate, and
+    the diagnostic capture gathers to the same per-slot arrays. The toy has several terminals, so ``block_slots=1``
+    makes more than one block.
+    """
     from _transfer_harness import _full_policy
     from rigel.calibration.region_chain import REGION, locus_blocks
     from rigel.calibration.region_geometry import g1_locked
@@ -492,8 +477,8 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
         a, b = caps[bs].lam_rows, caps[None].lam_rows
         assert (a is None) == (b is None) and (a is None or np.array_equal(a, b))
         assert caps[bs].backbone_assertions == caps[None].backbone_assertions
-        # what each node HEARD is the same; at a block's first slot — a terminal, which hears nothing
-        # by the structural rule — an open side and SILENCE are the same hearing
+        # what each node heard is the same; at a block's first slot (a terminal, which hears nothing by the structural
+        # rule) an open side and silence are the same hearing
         for side in ("from_left", "from_right"):
             heard = [Received.from_kernel(getattr(caps[k], side)).heard for k in (bs, None)]
             assert np.array_equal(heard[0], heard[1]), (
@@ -504,10 +489,10 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
 
 
 def test_the_block_solve_is_thread_exact_so_the_thread_count_moves_no_number(sweep_inputs):
-    """The blocks are pulled one at a time by a pool of threads, each block solved by the same arithmetic
-    on its own arena and written to its own slots, so the sweep is BIT-IDENTICAL at every thread count —
-    the budget is a resource, not a tunable of the answer. On the toy cut into many blocks, at 1, 2, 3 and
-    every core."""
+    """The blocks are pulled one at a time by a pool of threads, each solved by the same arithmetic on its own arena and
+    written to its own slots, so the sweep is bit-identical at every thread count (1, 2, 3 and every core, on the toy
+    cut into many blocks); the budget is a resource, not a tunable of the answer.
+    """
     from _transfer_harness import _full_policy
 
     policy = _full_policy(sweep_inputs)[0]
@@ -528,9 +513,8 @@ def test_the_block_solve_is_thread_exact_so_the_thread_count_moves_no_number(swe
 
 
 def test_the_checks_count_only_the_owned_slots():
-    """The λ-row check's ELIGIBLE set reads as the chain's: where any block delivered rows, a block that
-    delivered none holds zero rows — finite rows that were checked — so the published count does not
-    depend on how the chain was cut."""
+    """The λ-row check's eligible set reads as the chain's: where any block delivered rows, a block that delivered none
+    holds zero rows, so the published count does not depend on how the chain was cut."""
     two = _counts({"lam_rows_finite": [(0, 5), (0, 0)]}, [True, False], [False, False], [5, 3])
     assert two["lam_rows_finite"] == {"violations": 0, "eligible": 8}
     merged = SW.AssertionCounts()

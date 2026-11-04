@@ -1,12 +1,11 @@
-"""`rigel.locus` — the `Locus` / `MultiLocus` surface, and the reference id a `Locus` carries. The
-first block pins the dataclass invariants: `Locus` is a frozen contiguous interval with a `span`, a
-`MultiLocus` carries one or more of them (a paralog cluster spans two references), and the
-`span_bp` `build_multi_loci` computes is the sum of its loci's spans. The second pins that
-`Locus.ref_id` is the canonical resolver/BAM ref id
-given by `index.ref_lengths` insertion order through `index.ref_name_to_id`, and not the pandas
-categorical code of `index.t_df["ref"]` — the two id spaces coincide only when reference names are
-inserted in lexical order, so the fixture builds an index where they disagree and the wrong one would
-route per-locus gDNA estimation to the wrong contig.
+"""`rigel.locus`: the `Locus` / `MultiLocus` surface, and the reference id a `Locus` carries.
+
+The first block pins the dataclass invariants: `Locus` is a frozen contiguous interval with a `span`, a `MultiLocus`
+carries one or more of them (a paralog cluster spans two references), and `build_multi_loci`'s `span_bp` is the sum
+of its loci's spans. The second pins that `Locus.ref_id` is the canonical resolver/BAM ref id
+(`index.ref_name_to_id`, in `index.ref_lengths` insertion order), not the pandas categorical code of
+`index.t_df["ref"]`: the two coincide only when reference names are inserted in lexical order, so the fixture builds
+an index where they disagree.
 """
 
 import dataclasses
@@ -109,16 +108,15 @@ def test_build_multi_loci_span_bp_matches_sum_of_loci(mini_index):
 
 
 # ---------------------------------------------------------------------------
-# Fixture: 2-ref index where pandas categorical ordering DIFFERS from
+# Fixture: 2-ref index where pandas categorical ordering differs from
 # the canonical (FASTA insertion) ordering.
 #
 # FASTA order: chrZ first (canonical id 0), chrA second (canonical id 1).
 # Pandas ``astype("category")`` alphabetizes → category codes:
-#   chrA → 0, chrZ → 1   (the OPPOSITE of the canonical mapping)
+#   chrA → 0, chrZ → 1   (the opposite of the canonical mapping)
 #
-# The pre-fix code stored the categorical code in ``Locus.ref_id``,
-# which silently routed downstream per-Locus gDNA estimation to the
-# wrong contig.
+# The categorical code in ``Locus.ref_id`` would silently route
+# downstream per-Locus gDNA estimation to the wrong contig.
 # ---------------------------------------------------------------------------
 
 
@@ -139,7 +137,7 @@ def two_ref_index(tmp_path_factory):
 
     idx_dir = base / "index"
     TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-    return TranscriptIndex.load(idx_dir, retain_test_structures=True)
+    return TranscriptIndex.load(idx_dir)
 
 
 def test_two_ref_index_has_id_space_mismatch(two_ref_index):
@@ -159,9 +157,8 @@ def test_locus_ref_id_is_canonical_not_categorical(two_ref_index):
     """``Locus.ref_id`` must equal ``index.ref_name_to_id[Locus.ref]``
     for every Locus produced by ``build_multi_loci``.
 
-    Pre-fix, ``Locus.ref_id`` carried the pandas categorical code,
-    which differed from the canonical id whenever the FASTA was not
-    in lexical reference-name order (as in this fixture).
+    The pandas categorical code differs from the canonical id whenever
+    the FASTA is not in lexical reference-name order (as in this fixture).
     """
     idx = two_ref_index
 
@@ -199,8 +196,8 @@ def test_locus_ref_id_is_canonical_not_categorical(two_ref_index):
 
 
 def test_the_components_of_nothing_have_the_shape_of_any_components():
-    """The native union-find returned (labels, 0) when there was no unit or no transcript, and five CSR arrays
-    otherwise; its one caller unpacks five, so an empty input would fail as an unpacking error far from the cause."""
+    """The native union-find returns five CSR arrays even when there is no unit or no transcript: its one caller
+    unpacks five, so any other shape would fail as an unpacking error far from the cause."""
     from rigel.native import connected_components
 
     out = connected_components(

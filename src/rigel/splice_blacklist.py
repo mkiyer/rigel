@@ -1,36 +1,18 @@
-"""
-rigel.splice_blacklist — Splice-junction artifact blacklist ingestion.
+"""rigel.splice_blacklist — read the splice-artifact blacklist from an alignable store.
 
-The sister tool ``alignable`` tiles the reference genome with synthetic
-gDNA-like fragments, re-aligns them, and records every spliced alignment
-the chosen aligner produces.  By construction these are false-positive
-splice junctions: coordinates where an aligner (minimap2, STAR, ...) is
-known to emit an ``N`` CIGAR op from plain genomic DNA.
+The sister tool ``alignable`` tiles the genome with gDNA-like fragments, re-aligns them, and records every spliced
+alignment the aligner produces: junctions where it emits an ``N`` operation from plain genomic DNA. Each artifact is
+keyed by ``(ref, intron_start, intron_end)``, with the largest left and right anchors (reference-advancing CIGAR bases)
+seen at each read length. The C++ scanner (``bam_scanner.cpp``) rejects a junction as an artifact when either of its
+anchors is at most the blacklist's.
 
-Each artifact is keyed by ``(ref, intron_start, intron_end)`` and
-characterised by the maximum *left* and *right* anchor (in
-reference-advancing CIGAR bases) observed across all false-positive
-alignments at each read length.  At BAM-scan time, a fragment's splice
-junction is rejected as artifactual when **either** anchor in its CIGAR
-is ≤ the blacklist maximum — the sj sits inside the
-"plausible-from-gDNA" envelope.
+This module reads the store (a directory or a packaged ``.zarr.zip``), filters rows by count, and collapses the
+per-read-length rows into one conservative anchor envelope per junction for the index. The store's table has one row
+per ``(chrom, intron, strand, read_length)``::
 
-This module handles only blacklist *ingestion* from an alignable store
-(unpackaged directory or packaged ``.zarr.zip``): filtering by
-per-row count, aggregating per-read-length rows into a single
-conservative anchor envelope, and producing a tidy DataFrame for the
-Rigel index.  The per-fragment anchor check itself lives in the C++
-BAM scanner (``bam_scanner.cpp``).
+    chrom, intron_start, intron_end, strand, read_length, count, max_anchor_left, max_anchor_right
 
-Alignable blacklist table schema (one row per
-``(chrom, intron, strand, read_length)``)::
-
-    chrom, intron_start, intron_end, strand, read_length,
-    count, max_anchor_left, max_anchor_right
-
-The ``strand`` column is always ``'.'`` — splice artifacts are strand
-agnostic by nature of the detection scheme.  We collapse on
-``(ref, start, end)`` only.
+``strand`` is always ``'.'`` (the detection is strand-agnostic), so rows collapse on ``(ref, start, end)``.
 """
 
 from __future__ import annotations
@@ -43,17 +25,6 @@ import pandas as pd
 
 
 logger = logging.getLogger(__name__)
-
-
-#: Canonical columns in the Rigel blacklist representation.
-BLACKLIST_COLUMNS = (
-    "ref",
-    "start",
-    "end",
-    "max_anchor_left",
-    "max_anchor_right",
-    "count",
-)
 
 
 def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int) -> pd.DataFrame:
@@ -72,10 +43,11 @@ def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int) -> pd.Data
     Returns
     -------
     pandas.DataFrame
-        One row per unique ``(ref, start, end)`` sj with columns :data:`BLACKLIST_COLUMNS`, the
-        anchors aggregated across the surviving read-length rows by ``max`` and their counts summed,
-        sorted by ``(ref, start, end)``. The resolver reads the anchors; the count is kept so that a
-        threshold can be read off the index.
+        One row per unique ``(ref, start, end)`` sj with columns ``ref``, ``start``, ``end``,
+        ``max_anchor_left``, ``max_anchor_right`` and ``count``, the anchors aggregated across the
+        surviving read-length rows by ``max`` and their counts summed, sorted by ``(ref, start, end)``.
+        The resolver reads the anchors; the count is kept so that a threshold can be read off the
+        index.
     """
     if min_count < 1:
         raise ValueError(f"min_count must be >= 1, got {min_count}")
@@ -126,11 +98,7 @@ def load_splice_blacklist_from_zarr(
 ) -> pd.DataFrame:
     """Load and aggregate the splice-artifact blacklist from an alignable store.
 
-    Opens the alignable store (unpackaged directory *or* packaged
-    ``.zarr.zip``) via :func:`alignable.open`, pulls the blacklist as a
-    zero-copy :class:`pyarrow.Table`, and aggregates it vectorised.
-    Per the alignable v0.1+ layout the blacklist is a single
-    zstd-compressed Feather v2 file embedded in the Zarr store at
+    Opens the store with :func:`alignable.open` and aggregates its blacklist, a zstd-compressed Feather v2 file at
     ``<store>/mappability.zarr/splice_blacklist.feather``.
 
     Parameters
@@ -156,8 +124,7 @@ def load_splice_blacklist_from_zarr(
 
     logger.info(f"Loading splice blacklist from alignable store: {store_path}")
     store = alignable.open(str(store_path))
-    # Arrow → pandas (dict-encoded strings decode automatically). At ~35 M rows × 8 columns this is
-    # ~1 GB transient, acceptable for an index build.
+    # Arrow → pandas; dict-encoded strings decode automatically.
     return aggregate_splice_blacklist(
         store.splice_blacklist_table().to_pandas(types_mapper=None), min_count=min_count
     )

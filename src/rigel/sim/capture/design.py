@@ -1,11 +1,6 @@
-"""Hybrid-capture probe design: generate a synthetic capture panel for the simulator.
-
-Tiles probes over the captured transcripts and writes the panel twice, as a transcript-coordinate
-TSV and as a genomic BED12, avoiding probes already placed on the same genomic span. This is the
-design side of hybrid capture; the runtime sampler that consumes a panel is
-:mod:`capture.sampler`, and the panel's parameters are :mod:`capture.config`. The panel's own probe
-sets are built by ``scripts/sim/design_suite_probes.py``.
-"""
+"""Synthetic hybrid-capture panel design: tile probes over the captured genes' transcripts, skipping spans an
+earlier probe already covers, and write the panel as a transcript-coordinate TSV and a genomic BED12.
+:mod:`.sampler` consumes the panel."""
 
 from __future__ import annotations
 
@@ -136,12 +131,8 @@ def design_capture_probe_intervals_in_open_regions(
     probe_density: float,
     masked_intervals: list[tuple[int, int]],
 ) -> list[tuple[int, int]]:
-    """Tile probes only in unmasked transcript-space intervals.
-
-    Existing genomic probes are treated as already covering their projected
-    transcript coordinates.  The requested density is therefore a soft target:
-    fragmented open space can make the realized design sparser than requested.
-    """
+    """Tile probes only in the transcript-space intervals ``masked_intervals`` leaves open. The density is a soft
+    target: fragmented open space can make the design sparser than requested."""
     if not masked_intervals:
         return design_capture_probe_intervals(
             transcript_length,
@@ -214,7 +205,8 @@ def write_random_capture_probes(
     seed: int = 42,
     bed_path: Path | None = None,
 ) -> CaptureProbeDesignResult:
-    """Select captured gene groups and write transcript-coordinate TSV plus BED12."""
+    """Capture a random ``capture_fraction`` of genes and write their probes as a transcript-coordinate TSV and a
+    BED12, tiling the most abundant transcripts first."""
     if not 0.0 <= capture_fraction <= 1.0:
         raise ValueError("capture_fraction must be between 0 and 1")
     if probe_length <= 0:

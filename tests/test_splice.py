@@ -24,7 +24,7 @@ from rigel.splice import (
 class TestSpliceType:
     def test_values(self):
         """One spliced type: a spliced fragment always has one annotated transcript holding every junction it observes
-        (the scan's annotated-path rule, `tests/test_hit_verdict.py`), so there is no unannotated splice to name."""
+        (the scan's annotated-path rule), so there is no unannotated splice to name."""
         assert [(t.name, int(t)) for t in SpliceType] == [
             ("UNSPLICED", 0),
             ("SPLICED_ANNOT", 1),

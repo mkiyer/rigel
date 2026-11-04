@@ -1,12 +1,9 @@
-"""The command line is the only interface most runs have, so every flag must reach the config it
-names.
+"""The command line: every flag reaches the config field it names.
 
-`rigel index`'s GTF parse mode defaults to strict and can be switched to warn-and-skip; `rigel
-quant`'s defaults, its boolean flags and the resolution of its arguments into a `PipelineConfig` are
-gated flag by flag, and the config survives a write/read round trip unchanged; an unknown YAML key
-is refused by `rigel quant` and `rigel sim`. A flag parsed into a field nothing reads is invisible
-at runtime, which is why these are checked against the resolved config rather than against the
-parser's namespace.
+Covers `rigel index`'s GTF parse mode and setting refusals, `rigel quant`'s defaults, boolean flags and the
+resolution of its arguments into a `PipelineConfig` (CLI over YAML over defaults), the config's write/read round
+trip, and the refusal of an unknown YAML key by `rigel quant` and `rigel sim`. A flag parsed into a field nothing
+reads is invisible at runtime, so each is checked against the resolved config, not the parser's namespace.
 """
 
 import textwrap
@@ -72,8 +69,8 @@ def test_index_gtf_parse_mode_warn_skip():
 
 
 def test_index_refuses_a_negative_nascent_tolerance_as_an_error_before_writing(tmp_path):
-    """A negative tolerance clustered as 0 does, and the manifest recorded it as given. `build` validates its settings
-    as an `IndexConfig`, so the refusal is an error before the output directory is made."""
+    """A negative nascent tolerance would cluster as 0 does while the manifest records it as given. `build` validates
+    its settings as an `IndexConfig`, so the refusal is an error before the output directory is made."""
     from _index_builder import MINI_GTF, write_fasta
 
     fasta = write_fasta(tmp_path / "genome.fa", {"chr1": 2000})
@@ -120,8 +117,8 @@ _SIM_GENE = """genes:
     ids=["misspelled-transcript-key", "misspelled-gene-key", "no-gene"],
 )
 def test_sim_refuses_a_scenario_it_would_read_wrong(tmp_path, scenario, refusal):
-    """A misspelled gene or transcript key ran on its default (an abundance of 100), and an empty genes section failed
-    as a TypeError; each is refused by name before the output directory is made."""
+    """A misspelled gene or transcript key would run on its default (an abundance of 100), and an empty genes section
+    would fail as a TypeError; each is refused by name before the output directory is made."""
     cfg = tmp_path / "scenario.yaml"
     cfg.write_text(
         "genome_length: 5000\n" + scenario if not scenario.startswith("genome_length") else scenario
@@ -146,8 +143,8 @@ def test_quant_refuses_an_unknown_config_key_with_an_error_not_a_traceback(tmp_p
     [("--overhang-alpha", "nan"), ("--overhang-alpha", "-0.5"), ("--overhang-alpha", "1.5")],
 )
 def test_quant_refuses_an_alpha_outside_zero_to_one_before_loading_the_index(tmp_path, flag, value):
-    """An alpha is the probability kept per base of overhang: NaN gated almost every fragment and wrote NaN into
-    summary.json, and one above 1 rewarded overhang. It is refused as an error, before the index loads."""
+    """An alpha is the probability kept per base of overhang: NaN would gate almost every fragment and write NaN into
+    summary.json, and one above 1 would reward overhang. It is refused as an error, before the index loads."""
     bam = tmp_path / "in.bam"
     bam.write_bytes(b"")
     index = tmp_path / "index"
@@ -187,8 +184,8 @@ def test_quant_refuses_a_pruning_threshold_outside_zero_to_one_before_loading_th
     tmp_path, value
 ):
     """A candidate is pruned when its likelihood falls below this fraction of its fragment's best. At 1 or above, or
-    NaN, the margin became 0 and a fragment kept only its tied-best candidates; below 0 nothing was pruned. 0 keeps
-    every candidate, so the range is [0, 1), refused as an error before the index loads."""
+    NaN, the margin would be 0 and a fragment keep only its tied-best candidates; below 0 nothing would be pruned. 0
+    keeps every candidate, so the range is [0, 1), refused as an error before the index loads."""
     args = _quant_with_empty_inputs(tmp_path, "--pruning-min-posterior", value)
     with pytest.raises(SystemExit) as exited:
         args.func(args)
@@ -199,7 +196,7 @@ def test_quant_refuses_a_pruning_threshold_outside_zero_to_one_before_loading_th
 
 @pytest.mark.parametrize("value", [False, "1e-4"])
 def test_a_pruning_threshold_that_is_not_a_number_is_refused(value):
-    """YAML reads ``1e-4`` as a string, which reached the scorer and failed there as a TypeError, after the scan; a
+    """YAML reads ``1e-4`` as a string, which would reach the scorer and fail there as a TypeError, after the scan; a
     bool is an int to Python but never a threshold (False, as 0, would pass the range check alone)."""
     from rigel.config import FragmentScoringConfig
 
@@ -215,8 +212,8 @@ def test_a_pruning_threshold_in_zero_to_one_is_accepted(value):
 
 
 def test_quant_refuses_an_annotated_bam_it_could_not_write_before_the_run(tmp_path):
-    """The annotated BAM is written by a second pass after the quantification; a directory that does not exist used to
-    fail only then."""
+    """The annotated BAM is written by a second pass after the quantification, so a directory that does not exist is
+    refused before the run rather than failing only then."""
     args = _quant_with_empty_inputs(
         tmp_path, "--annotated-bam", str(tmp_path / "missing" / "annotated.bam")
     )
@@ -236,7 +233,7 @@ def test_quant_reports_an_index_it_cannot_load_as_an_error(tmp_path):
 def test_quant_reports_an_index_missing_a_file_as_an_error_not_a_traceback(
     tmp_path, tmp_path_factory
 ):
-    """`rigel quant` catches the index's load refusal; a missing file used to escape it as another exception."""
+    """`rigel quant` catches the index's load refusal, so a missing file is reported as an error, not a traceback."""
     from pathlib import Path
 
     from _index_builder import MINI_GTF, build_test_index
@@ -265,8 +262,8 @@ def test_quant_refuses_a_config_that_is_not_a_mapping(tmp_path):
 
 
 def test_config_yaml_records_every_path_absolute(tmp_path, monkeypatch):
-    """A config.yaml reruns from any directory: the BAM, index and output were resolved, but the annotated BAM and the
-    spill directory were kept as typed, so a rerun from elsewhere wrote them elsewhere."""
+    """A config.yaml reruns from any directory, so every path it records is absolute: the BAM, index and output, and
+    the annotated BAM and spill directory too, which a rerun from elsewhere would otherwise write elsewhere."""
     import yaml
 
     from rigel.cli import _write_config_yaml
@@ -293,7 +290,7 @@ def test_a_hard_scoring_gate_dumps_as_strict_json():
 
 
 def test_sim_accepts_every_documented_scenario_key(tmp_path):
-    """Every top-level key docs/MANUAL.md lists for a ``rigel sim`` scenario is accepted."""
+    """Every documented top-level key of a ``rigel sim`` scenario is accepted."""
     cfg = tmp_path / "scenario.yaml"
     cfg.write_text(
         textwrap.dedent(
@@ -479,12 +476,12 @@ class TestResolveQuant:
     def test_a_config_another_version_wrote_is_refused_naming_that_version(
         self, tmp_path, monkeypatch
     ):
-        """Every 0.7.1 ``config.yaml`` carries four keys removed since and one renamed since, so rerunning one is
-        refused: say why.
+        """A 0.7.1 ``config.yaml`` carries five keys removed since (``mismatch_alpha`` among them) and one renamed, so
+        rerunning one is refused, and the refusal names the version that wrote it.
 
-        The release reads a 0.7.1 file (the tree on disk says 0.7.1 until the bump). The file is the release's
-        own ``config.yaml`` with 0.7.1 in its header, the four keys added and the renamed one under its 0.7.1
-        name, so a change to the header the writer emits breaks this test, not the hint."""
+        The file is this version's own ``config.yaml`` (the version set to 0.8.0) with 0.7.1 in its header, four of
+        the removed keys added and the renamed one under its 0.7.1 name, so a change to the header the writer emits
+        breaks this test, not the hint."""
         import rigel
         from rigel.cli import _write_config_yaml
 
@@ -648,7 +645,7 @@ class TestConfigRoundTrip:
         assert cfg.scan.read_name_batch_size == 256
 
     def test_scan_performance_flags_flow_to_config(self):
-        """The renamed scan performance flags reach ``BamScanConfig``."""
+        """The scan performance flags reach ``BamScanConfig``."""
         from rigel.cli import _build_pipeline_config
 
         args = _parse_quant(

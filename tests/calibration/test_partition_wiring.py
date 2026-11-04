@@ -1,15 +1,12 @@
-"""What the scanner actually sees: the partition wiring.
+"""What the scanner sees: the partition wiring.
 
-``build_region_partition_arrays`` is the one function that decides which genomic partition the C++
-accumulator deposits into, and :meth:`RegionArrays.from_index` reads the same frame, so the
-calibration geometry and the scanner cannot address different partitions. The case exercised
-throughout is an alternative TSS lying strictly INSIDE another transcript's exon: both flanks carry
-the same ``exon_pos`` signature, so a signature-merged partition deletes that region bound and the
-scanner never learns the terminus is there, and it is a large share of human transcript termini
-rather than a corner case. A benchmark cannot substitute for these gates, because an annotation with
-no mergeable adjacency produces the same partition either way and shows no effect at all — so the
-assertions here are direct: the bound is emitted, the scanner is handed it, the two builders agree,
-and the cache key moves with it.
+``build_region_partition_arrays`` decides which genomic partition the C++ accumulator deposits into, and
+:meth:`RegionArrays.from_index` reads the same frame, so the calibration geometry and the scanner cannot address
+different partitions. The case exercised throughout is an alternative TSS strictly inside another transcript's exon:
+both flanks carry the same ``exon_pos`` signature, so a signature-merged partition would delete that region bound and
+hide the terminus from the scanner, and such termini are a large share of human transcript termini. A benchmark cannot
+replace these tests, since an annotation with no mergeable adjacency gives the same partition either way; so they assert
+directly that the bound is emitted, the scanner is handed it, the two builders agree, and the cache key moves with it.
 """
 
 from __future__ import annotations
@@ -26,8 +23,8 @@ from _index_builder import build_test_index
 
 GENOME = 2000
 
-#: t1's 5' end at 0-based 250 lies strictly INSIDE t0's exon [200, 400). Both sides are exon_pos —
-#: the signature does not change there, which is precisely why a signature merge deletes this bound.
+#: t1's 5' end at 0-based 250 lies strictly inside t0's exon [200, 400). Both sides are exon_pos, so the signature does
+#: not change there, which is why a signature merge would delete this bound.
 GTF_ALT_TSS = """\
 chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
 chr1\ttest\texon\t701\t900\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
@@ -35,9 +32,9 @@ chr1\ttest\texon\t251\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1";
 chr1\ttest\texon\t701\t1000\t.\t+\t.\tgene_id "g1"; transcript_id "t1";
 """
 
-#: The SAME annotation with t1's alternative start removed (it now shares t0's) — one region fewer,
-#: and the ONLY difference is the region bound a signature merge cannot see. Under such a merge the
-#: two annotations produce an identical partition and hash the same.
+#: The same annotation with t1's alternative start removed (it now shares t0's): one region fewer, the only difference
+#: being the region bound a signature merge cannot see. Under such a merge the two annotations would produce an
+#: identical partition and hash the same.
 GTF_NO_ALT_TSS = GTF_ALT_TSS.replace(
     'chr1\ttest\texon\t251\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
     'chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
@@ -57,16 +54,13 @@ def no_alt_tss_index(tmp_path_factory):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
-# The gate: the scanner sees the region bound a signature merge would delete.
+# The scanner sees the region bound a signature merge would delete.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
 def test_the_region_bound_is_signature_invisible(alt_tss_index):
-    """The premise, asserted rather than assumed: this region bound carries NO signature change.
-
-    That is what makes it invisible to a merged partition, and it is the whole reason the fixture is
-    built this way. If this ever fails the fixture has stopped exercising the case and every other
-    test here is vacuous.
+    """This region bound carries no signature change, which is what makes it invisible to a merged partition; if this
+    fails the fixture no longer exercises the case and the other tests here are vacuous.
     """
     regions = alt_tss_index.regions_df
     i = int(np.flatnonzero(regions["start"].to_numpy() == ALT_TSS_POS)[0])
@@ -75,15 +69,15 @@ def test_the_region_bound_is_signature_invisible(alt_tss_index):
 
 
 def test_scanner_partition_carries_the_alternative_tss(alt_tss_index):
-    """The position handed to ``BamScanner.set_regions`` must include the alternative TSS. Against a
-    signature-merged partition this fails, because the merge deleted it."""
+    """The positions handed to ``BamScanner.set_regions`` must include the alternative TSS, which a signature-merged
+    partition would delete."""
     positions, _offsets, _types = build_region_partition_arrays(alt_tss_index)
     assert ALT_TSS_POS in set(positions.tolist())
 
 
 def test_scanner_partition_is_exactly_the_region_region_bound_array(alt_tss_index):
-    """The emitted triple IS the partition frame, per reference, in ``ref_names`` order — not a
-    re-derivation of it that could drift."""
+    """The emitted triple is the partition frame, per reference, in ``ref_names`` order, not a re-derivation that could
+    drift."""
     positions, offsets, types = build_region_partition_arrays(alt_tss_index)
     regions = alt_tss_index.regions_df
 
@@ -102,11 +96,9 @@ def test_scanner_partition_is_exactly_the_region_region_bound_array(alt_tss_inde
 
 
 def test_region_geometry_follows_the_scanner_partition(alt_tss_index):
-    """``RegionArrays.from_index`` and ``build_region_partition_arrays`` must read the SAME frame.
-
-    They are the two halves of one contract — the calibration geometry addresses the payload the
-    scanner produced — and nothing downstream can detect them disagreeing except as a shape error
-    far from the cause.
+    """``RegionArrays.from_index`` and ``build_region_partition_arrays`` must read the same frame: the calibration
+    geometry addresses the payload the scanner produced, and a disagreement would surface only as a shape error far from
+    the cause.
     """
     ra = RegionArrays.from_index(alt_tss_index)
     regions = alt_tss_index.regions_df
@@ -123,11 +115,8 @@ def test_region_geometry_follows_the_scanner_partition(alt_tss_index):
 
 
 def test_adjacent_regions_may_share_a_signature(alt_tss_index):
-    """The invariant that replaces "no two adjacent regions share a signature".
-
-    That was a signature-merged partition's defining property, and it is exactly what has to go: a
-    large share of human transcript termini fall at a region bound where the signature does not
-    change, so the merge deletes the bound that makes them visible.
+    """Adjacent regions may share a signature: a large share of human transcript termini fall at a region bound where
+    the signature does not change, so merging equal-signature neighbours would delete the bounds that make them visible.
     """
     ra = RegionArrays.from_index(alt_tss_index)
     i = int(np.flatnonzero(ra.start == ALT_TSS_POS)[0])
@@ -142,12 +131,8 @@ def test_adjacent_regions_may_share_a_signature(alt_tss_index):
 def test_partition_hash_distinguishes_a_signature_invisible_region_bound(
     alt_tss_index, no_alt_tss_index
 ):
-    """Two annotations differing by exactly one signature-invisible region bound must not share a
-    cache key.
-
-    Under a merged partition they produce identical arrays and hash the same, so a payload scanned
-    against one would load silently against the other. That is the stale-cache failure
-    ``partition_hash`` exists to make impossible.
+    """Two annotations differing by exactly one signature-invisible region bound must not share a cache key; under a
+    merged partition they would hash the same, and a payload scanned against one would load silently against the other.
     """
     assert len(alt_tss_index.regions_df) == len(no_alt_tss_index.regions_df) + 1
     assert alt_tss_index.partition_hash != no_alt_tss_index.partition_hash

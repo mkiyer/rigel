@@ -1,30 +1,20 @@
 /**
- * bam_scanner.cpp — C++ BAM scanner using htslib for rigel.
+ * bam_scanner.cpp — the single-pass BAM scan, module rigel._bam_impl (built against htslib; see CMakeLists.txt).
  *
- * A single C++ scan that:
- *
- *   1. Reads BAM records via htslib
- *   2. Groups records by query name (name-sorted BAM)
- *   3. Parses CIGAR → exon blocks + splice junctions
- *   4. Assembles each hit's mates into one fragment (AssembledFragment)
- *   5. Calls FragmentResolver::_resolve_core() directly
- *   6. Appends results to FragmentAccumulator
- *   7. Offers each read name's placements to the calibration tally at once (AccumulatorSet::offer)
- *   8. Collects model training observations as arrays
- *   9. Streams FragmentAccumulator chunks to Python through `chunk_callback` as they fill, and returns
- *      the stats, the strand observations and the calibration payload once the whole BAM is read
- *
- * Module: rigel._bam_impl
- *
- * Build:
- *   Part of the rigel scikit-build-core build — see CMakeLists.txt.
- *   Requires htslib (linked via -lhts).
+ * The scan reads a name-sorted or collated BAM through htslib and, per query name:
+ *   1. parses each CIGAR into exon blocks and splice junctions;
+ *   2. assembles each hit's mates into one fragment (AssembledFragment) and resolves it
+ *      (FragmentResolver::_resolve_core);
+ *   3. appends the results to FragmentAccumulator and offers all the name's placements to the calibration tally
+ *      together (AccumulatorSet::offer);
+ *   4. collects the strand and model-training observations as arrays.
+ * FragmentAccumulator chunks stream to Python through `chunk_callback` as they fill; the stats, the strand
+ * observations and the calibration payload are returned when the whole BAM is read.
  */
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -34,7 +24,6 @@
 #include <thread>
 #include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -150,8 +139,8 @@ static const char* frag_class_label(int code) {
         case FRAG_AMBIG_SAME_STRAND: return "ambig_same_strand";
         case FRAG_AMBIG_OPP_STRAND:  return "ambig_opp_strand";
         case FRAG_MULTIMAPPER:       return "multimapper";
-        // An intergenic fragment never entered the EM; ZC reports the *input-ambiguity* axis only and is
-        // blanked for it. The outcome is carried entirely by ZF (AF_GDNA_INTERGENIC).
+        // An intergenic fragment does not enter the EM, so its ZC is blank; ZF carries its outcome
+        // (AF_GDNA_INTERGENIC).
         case -1:                     return ".";
         default:                     return "unknown";
     }
@@ -260,12 +249,8 @@ static void build_tid_mapping(
 // Lightweight record for one BAM alignment in a qname group
 // ================================================================
 
-/// CIGAR-derived splice junction with per-read anchor lengths.
-///
-/// The anchor on each side of the sj is the number of
-/// reference-advancing CIGAR bases between that side and the nearest
-/// clip (or the end of the alignment).  Both anchors are required to
-/// test against the artifact blacklist.
+/// A CIGAR splice junction with its anchors: on each side, the reference-advancing CIGAR bases between the junction
+/// and the nearest clip or alignment end. The artifact blacklist tests both.
 struct SJCigarEntry {
     int32_t start;
     int32_t end;
@@ -279,13 +264,9 @@ struct ParsedAlignment {
     int32_t tid = -1;       // the BAM's reference id
     int32_t ref_start;      // pos
     uint16_t flag;
-    // Per-record count of CIGAR sj dropped by the splice-artifact
-    // blacklist.  Populated by filter_blacklisted_sjs in Pass 1 (summed
-    // per fragment for the resolver's SPLICE_ARTIFACT promotion; the
-    // n_sj_blacklisted stat is accumulated through parse_bam_record's
-    // pointer argument, not from here) and Pass 2 (for the ZB:i
-    // annotated-BAM tag).
-    // Fits into the padding after `flag` — zero effective memory growth.
+    // CIGAR junctions the splice-artifact blacklist dropped from this record (filter_blacklisted_sjs): summed per
+    // fragment for the resolver's SPLICE_ARTIFACT promotion, and written as the annotated BAM's ZB tag. The
+    // n_sj_blacklisted stat is counted in parse_bam_record. Sits in the padding after `flag`.
     uint16_t n_sj_blacklisted = 0;
     int32_t nm;             // NM tag (edit distance), 0 if absent
     int32_t nh;             // NH tag, 1 if absent
@@ -310,17 +291,14 @@ struct ParsedAlignment {
     bool is_secondary()     const { return flag & BAM_FSECONDARY; }
     bool is_supplementary() const { return flag & BAM_FSUPPLEMENTARY; }
     bool is_reverse()       const { return flag & BAM_FREVERSE; }
-    bool is_proper_pair()   const { return flag & BAM_FPROPER_PAIR; }
 };
 
 // ================================================================
 // QnameGroup — all BAM alignments for one query name, pre-parsed
 // ================================================================
 //
-// The producer thread reads raw htslib bam1_t records, immediately
-// parses each into a ParsedAlignment, and packages them here.
-// Workers receive fully parsed value types — no raw bam1_t* pointers
-// cross the thread boundary.
+// The reader thread parses each bam1_t into a ParsedAlignment and packages them here, so no raw bam1_t* pointer
+// crosses the thread boundary.
 
 struct QnameGroup {
     std::vector<ParsedAlignment> records;
@@ -336,8 +314,7 @@ struct QnameBatch {
 // Model training observation collectors
 // ================================================================
 
-/// Per-sj sense / antisense counts, sized as counts: uint64 removes the
-/// overflow question permanently at a cost of ~2.4 MB over a human sj set.
+/// Per-junction sense / antisense counts; uint64, so no count can overflow.
 struct SJStrandCounts {
     uint64_t n_sense = 0;
     uint64_t n_antisense = 0;
@@ -370,18 +347,10 @@ struct StrandObservations {
     // transcripts share one strand
     StrandContingency exonic;
 
-    // ⭐ The per-sj strand table.
-    // A sj is uniquely specified by (ref, start, end, motif strand); each
-    // strand-qualified fragment credits its leftmost ANNOTATED sj with one
-    // sense (align_strand == sj_strand) or antisense observation.
-    //
-    // ⭐ This is a strict REFINEMENT of the spliced strand model's 2×2 (Python's
-    // `exonic_spliced`), which is exactly its marginal: summing n_sense over
-    // motif-POS sj gives pos_pos, n_antisense over motif-POS gives neg_pos, and
-    // symmetrically for motif-NEG.  Populated from the SAME
-    // `get_is_strand_qualified()` branch, one observation per fragment, so the
-    // identity is unconditional.  It exists because a dispersion ACROSS sj cannot
-    // be recovered from the 2×2.
+    // The per-junction strand table, keyed by (ref, start, end, motif strand): each strand-qualified fragment
+    // credits its leftmost annotated junction with one sense (align_strand == sj_strand) or antisense observation.
+    // Its marginal over motif strand is the spliced strand model's 2×2 (Python's `exonic_spliced`); the table also
+    // keeps the dispersion across junctions.
     std::unordered_map<SJKey, SJStrandCounts, SJKeyHash> sj_strand_table;
 };
 
@@ -455,33 +424,11 @@ struct BamScanStats {
     // Templates whose NH exceeds the records reported for either mate: the aligner truncated its output
     int64_t n_nh_above_reported = 0;
 
-    // ── the per-fragment splice census ────────────────────────────────────────────────────────────
-    //
-    // ⭐ ONE observation per HIT the scanner offers the accumulator (a multimapper's hits one by one), filed
-    // under the resolver's own classification. This IS `rigel report`'s splice breakdown, which used to be
-    // read off the fragment-length CATEGORY MODELS — so it counted only the fragments that also yielded a
-    // length observation, a population nobody had stated. The scanner classifies, so the scanner counts.
-    //
-    // ⚠ An ARRAY and not five named fields, deliberately: `census[st]++` is one statement, the merge
-    // is one loop, the export is one loop, and a category added to `SpliceType` cannot slip past any
-    // of the three. The five names exist once, in `splice_type_label`.
+    // The splice census, `rigel report`'s splice breakdown: one observation per hit the scanner offers the
+    // accumulator (a multimapper's hits one by one), under the resolver's classification. Indexed by `SpliceType`,
+    // so the increment, the merge and the export cannot miss a category; the names live in `splice_type_label`.
     std::array<int64_t, NUM_SPLICE_TYPES> splice_census{};
 
-    // Censused, then never offered to `deposit()`: no accumulator was installed. ⭐ It exists to close the
-    // books — without it that `return` is a silent loss, which is the pattern this accumulator was rewritten to
-    // delete. With it:
-    //
-    //   Σ census − census[SPLICE_ARTIFACT] == qc.deposited + qc.deferred_undetermined_gap
-    //       + qc.deferred_multiple_placements + Σ qc.dropped_* + n_deposit_not_offered
-    //
-    // ⚠ Exact while no read name offers more than one placement. The census and this counter count
-    // assembled hits and the qc counts one offer per read name, so a multimapper offering k placements
-    // adds k on the left and 1 on the right.
-    //
-    // ⚠ Artifacts are subtracted rather than counted here because holding them out is a POSITIVE
-    // scanner decision about the data, not a failure to represent it — and `census[SPLICE_ARTIFACT]`
-    // already reports it exactly.
-    int64_t n_deposit_not_offered = 0;
 
     /// Add all counters from another stats struct (for merge).
     void merge_from(const BamScanStats& o) {
@@ -528,7 +475,6 @@ struct BamScanStats {
         n_nh_above_reported += o.n_nh_above_reported;
         for (size_t i = 0; i < splice_census.size(); i++)
             splice_census[i] += o.splice_census[i];
-        n_deposit_not_offered += o.n_deposit_not_offered;
     }
 };
 
@@ -554,8 +500,6 @@ struct AssembledFragment {
         }
         return max_end - min_start;
     }
-
-    bool has_introns() const { return !introns.empty(); }
 };
 
 // ================================================================
@@ -572,27 +516,14 @@ struct WorkerState {
     BamScanStats stats;
     StrandObservations strand_obs;
     std::vector<char> record_used;  // `records_used`, per template
-    // Per-worker accumulator set (one Accumulator per ref). Owned
-    // here so worker threads never touch the shared template. Null when no
-    // region partition was provided.
+    // Per-worker accumulator set (one Accumulator per ref), owned here so workers never touch the shared
+    // template. Null when no region partition was provided.
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set;
 
-    // Reusable scratch so the deposit path allocates no per-fragment memory. ⭐ Measured on the shipped
-    // accumulator: one per-fragment std::vector cost 22.8 ns, 18 % of the deposit, and was invisible to a
-    // sampling profiler because the time is attributed to `malloc`. Capacity amortizes to the high-water
-    // mark and is never released.
-    //
-    // `offer_scratch` is the accumulator set's (its `deposit` member holds the accumulator's normalised
-    // introns, path segments, sj ids) and is opaque here. The placement arenas below are the ADAPTER's: a
-    // fragment's introns restricted to the reference of the hit being collected and de-duplicated, which is
-    // what `OfferedFragment::observed_introns` points at.
-
-    // ⭐ ONE OFFER PER FRAGMENT. Every resolved hit of a fragment is collected as a placement — its
-    // observed introns and its gap hypotheses' implied introns COPIED into these arenas, because the
-    // resolver's result dies with the hit — and after the last hit the whole set is offered to the
-    // accumulator set at once (`AccumulatorSet::offer`), which is `deposit` for a unique mapper and the
-    // multimapper rule for the rest. Spans point into the arenas, so they are resolved from offsets only
-    // once nothing more will grow.
+    // Reusable scratch, so the deposit path allocates no per-fragment memory (capacity is never released). Each
+    // resolved hit is collected as a pending placement, its observed and implied introns copied into the arenas
+    // because the resolver's result dies with the hit; after the last hit the whole set is offered at once
+    // (`AccumulatorSet::offer`). Spans are resolved from offsets only once nothing more will grow.
     struct PendingPlacement {
         int32_t ref_id;
         int64_t start, end;
@@ -615,7 +546,6 @@ struct WorkerState {
         : scratch(n_transcripts) {}
 };
 
-// Merge observations
 static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
     dst.exonic.merge_from(src.exonic);
     for (const auto& [key, counts] : src.sj_strand_table) {
@@ -630,11 +560,9 @@ static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
 // CIGAR parsing
 // ================================================================
 //
-// In addition to emitting exon blocks and splice junctions, we compute
-// per-sj anchor lengths (left, right).  An "anchor" is the count
-// of reference-advancing CIGAR bases on one side of the N op, bounded
-// by clips/ends.  Insertions never contribute; deletions do (they
-// occupy reference positions in the aligner's evidence for the anchor).
+// Besides exon blocks and splice junctions, parse_cigar computes each junction's anchors (left, right): the
+// reference-advancing CIGAR bases on one side of the N op, bounded by clips or ends. Insertions do not count;
+// deletions do, since they occupy reference positions.
 //
 // Example: CIGAR 10M 500N 15M 1000N 125M
 //   sj 1 (500N):  anchor_left = 10,  anchor_right = 15 + 125 = 140
@@ -666,8 +594,7 @@ static void parse_cigar(
     int32_t start = pos;           // current exon start
     int32_t ref_advanced = 0;      // ref-advancing bases seen so far
 
-    // First pass: build exons, record each sj's left anchor and
-    // its CIGAR intron length so the right anchor can be back-filled.
+    // Build exons and record each junction's left anchor; the right anchor is back-filled below.
     for (int32_t i = 0; i < n_cigar; i++) {
         int op = bam_cigar_op(cigar[i]);
         int len = bam_cigar_oplen(cigar[i]);
@@ -687,13 +614,11 @@ static void parse_cigar(
             pos += len;
             ref_advanced += len;
         }
-        // INS, SOFT_CLIP, HARD_CLIP, PAD: do not advance the reference
-        // and therefore do not contribute to anchor lengths.
+        // INS, SOFT_CLIP, HARD_CLIP, PAD do not advance the reference, so add nothing to an anchor.
     }
     if (pos > start) exons.push_back({start, pos});
 
-    // Back-fill right anchors: right = total - left.  ``ref_advanced`` is
-    // the grand total of ref-advancing bases across the whole CIGAR.
+    // right = total - left, with ``ref_advanced`` the reference-advancing bases of the whole CIGAR.
     for (auto& sj : sjs) {
         sj.anchor_right = ref_advanced - sj.anchor_left;
     }
@@ -703,12 +628,9 @@ static void parse_cigar(
 // Splice-junction artifact filtering
 // ================================================================
 //
-// Drop each CIGAR splice junction whose (left, right) anchors sit
-// inside the blacklist's observed artifact envelope.  Rejection rule:
-// either anchor <= max → sj is indistinguishable from known
-// gDNA-derived artifacts and is treated as unspliced.
-//
-// Returns the number of sj dropped (for scanner statistics).
+// Drop each CIGAR splice junction with either anchor inside the blacklist's artifact envelope (anchor <= its max):
+// such a junction is indistinguishable from known gDNA-derived artifacts and is treated as unspliced. Returns the
+// number dropped.
 static inline int32_t filter_blacklisted_sjs(
     std::vector<SJCigarEntry>& sjs,
     const FragmentResolver& resolver,
@@ -740,9 +662,8 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode, SJTagCounts* coun
     auto try_tag = [&](const char* tag, bool is_ts) -> int32_t {  // a strand, or -1 when absent or unreadable
         uint8_t* aux = bam_aux_get(b, tag);
         if (!aux) return -1;  // tag not present
-        // Dispatch on the htslib type code (*aux) to call the correct
-        // accessor.  Type 'A' = single char, type 'Z'/'H' = string
-        // (take first character).  Any other type or value reads as absent, counted.
+        // Type 'A' is a char, 'Z'/'H' a string (its first character is read). Any other type or value reads as
+        // absent, counted.
         char val = 0;
         if (*aux == 'A') {
             val = bam_aux2A(aux);
@@ -846,10 +767,8 @@ static int32_t read_int_tag(const bam1_t* b, const char* tag, int32_t absent, In
 // ================================================================
 // Parse a raw htslib bam1_t into a ParsedAlignment value type
 // ================================================================
-// Extracts all fields the pipeline needs (scalars, tags, CIGAR-derived
-// exon blocks and splice junctions) so that downstream code never
-// touches bam1_t directly. ``counts`` takes the per-record counts (the
-// scan's); the annotation pass, which reads the same records again, passes null.
+// Extracts every field the pipeline needs (scalars, tags, CIGAR exon blocks and splice junctions), so downstream
+// code never touches bam1_t. ``counts`` takes the scan's per-record counts; the annotation pass passes null.
 
 static ParsedAlignment parse_bam_record(
     const bam1_t* b,
@@ -878,10 +797,8 @@ static ParsedAlignment parse_bam_record(
         for (auto& sj : rec.sjs) sj.strand = sj_strand;
     }
 
-    // Splice-junction artifact filtering.  Per-read, immediately after
-    // CIGAR parsing.  Downstream fragment assembly unions across mates,
-    // so this is the permissive rule: a sj survives as long as at
-    // least one read supports it with anchors above the blacklist envelope.
+    // Splice-artifact filtering, per read: fragment assembly unions junctions across mates, so a junction survives
+    // when at least one read supports it with anchors above the blacklist envelope.
     if (counts) counts->n_sj_observed += static_cast<int64_t>(rec.sjs.size());
     if (resolver && resolver->has_sj_blacklist() && !rec.sjs.empty()) {
         const int32_t n_dropped = filter_blacklisted_sjs(rec.sjs, *resolver, rec.ref_id);
@@ -1012,19 +929,14 @@ static bool five_prime_hard_clipped(const ParsedAlignment& r)
     return bam_cigar_op(r.is_reverse() ? r.cigar.back() : r.cigar.front()) == BAM_CHARD_CLIP;
 }
 
-/// A template's candidate hits, found by geometry alone, for any aligner: the aligner's own pairing (STAR's HI) is not
-/// read. The records are merged into mate locations, one per alignment (`same_alignment`): a primary record represents
-/// its location, the others are its aliases. A location is chimeric, one piece of an alignment in pieces, when a record
-/// of it carries SA or its 5' end is hard-clipped, or when that mate has a supplementary record and none of the mate's
-/// records carries SA: which alignment the piece belongs to is then unknown, so every location of the mate is. A
-/// supplementary record is no location and joins no hit; it is written with the same mate's primary location (an
-/// alias), or its first location when none is primary. A record with no aligned base has nothing to place and is no
-/// location either; it is written as a supplementary record is. Every R1 location with every R2 location on one BAM
-/// reference with opposite strands is a candidate for the hit verdict (`hit_verdict`).
-/// When one mate has no location, each location of the other is a one-mate hit (`HIT_MISSING_MATE`); when both have
-/// locations and no pair is a candidate, the first location of each is offered, so the verdict counts the template's
-/// reason once. On the STAR panel this finds the correct pair wherever a template's places hold one, where STAR's HI
-/// groups miss it in 0.31 % of the templates with several places.
+/// A template's candidate hits, found by geometry alone (the aligner's own pairing, STAR's HI, is not read). Records
+/// merge into mate locations, one per alignment (`same_alignment`); a primary record represents its location and the
+/// others are aliases. A location is chimeric when a record of it carries SA or is hard-clipped at its 5' end, or when
+/// its mate has a supplementary record and none of the mate's records carries SA, since the piece's alignment is then
+/// unknown. A supplementary record, or one with no aligned base, is no location: it is written with the mate's primary
+/// location, or its first. Each R1 location pairs with each R2 location on the same BAM reference and opposite strand.
+/// With one mate unlocated, each location of the other is a one-mate hit (`HIT_MISSING_MATE`); when no pair qualifies,
+/// the first location of each is offered, so the verdict counts the template's reason once.
 static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
 {
     struct Location {
@@ -1114,14 +1026,12 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
 // The hit verdict: two mates that can be one molecule, explained by one annotated transcript when spliced
 // ================================================================
 
-/// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), otherwise the reason
-/// they cannot; a hit with one mate gives no fragment length at all (`HIT_MISSING_MATE`), one on a
-/// reference the index does not hold has no partition, transcript or length along one (`HIT_OFF_INDEX`), and one with
-/// a mate aligned in pieces is a chimeric alignment, which Rigel does not quantify (`HIT_CHIMERIC`). Mates on two
-/// references are two references, wherever they lie: references are told apart by the BAM's ids, as every reference
-/// outside the index shares the index id -1. A transcript that witnesses a path must overlap both mates and hold every
-/// junction the hit observes (``junctions``). ``f`` and ``r`` are set to the forward and reverse mates when the rule
-/// judged them. Each side of a hit is one mate location's record (`template_hits`).
+/// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), else why not: one mate
+/// gives no fragment length (`HIT_MISSING_MATE`), a reference outside the index has no partition (`HIT_OFF_INDEX`), and
+/// a mate aligned in pieces is chimeric, which Rigel does not quantify (`HIT_CHIMERIC`). References are told apart by
+/// the BAM's ids, since every reference outside the index shares index id -1. A witnessing transcript must overlap both
+/// mates and hold every junction in ``junctions``. ``f`` and ``r`` are set to the forward and reverse mates when the
+/// rule judged them.
 static int32_t pair_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const std::vector<IntronBlock>& junctions,
@@ -1145,10 +1055,10 @@ static int32_t pair_verdict(
     return ctx.validate_pair(f->ref_id, pf, pr, junctions, scratch);
 }
 
-/// Why a hit is not usable, or `HIT_USABLE`. Its two mates must be able to be one molecule (`pair_verdict`), and when
-/// it is spliced, one annotated transcript must explain it: hold every junction it observes (`observed_junctions`) and
-/// overlap both mates (`FragmentResolver::pair_holders`): the annotated-path rule. The molecule is judged first, so a hit
-/// the rule withholds always has a fragment length.
+/// Why a hit is not usable, or `HIT_USABLE`: its mates must be able to be one molecule (`pair_verdict`), and a spliced
+/// hit needs one annotated transcript holding every junction it observes and overlapping both mates
+/// (`FragmentResolver::pair_holders`), the annotated-path rule. The molecule is judged first, so a hit the rule
+/// withholds always has a fragment length.
 static int32_t hit_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const FragmentResolver& ctx,
@@ -1164,12 +1074,9 @@ static int32_t hit_verdict(
                             r->exons.back().second, scratch, scratch.pair_candidates);
 }
 
-/// Every hit's verdict into ``verdicts`` (`hit_verdict`: HIT_USABLE or the reason), and why the template is withheld
-/// when none of its hits is usable: off the index when one of them lies on a reference the index does not hold, else
-/// chimeric when one of them has a mate aligned in pieces, else an unannotated splice when the annotated-path rule
-/// withheld one of them, else unpaired, as a template with no hit at all is (WITHHELD_NONE when one is usable). The
-/// scan and the annotation pass both judge a template here, so the BAM the annotation pass writes says what the scan
-/// counted.
+/// Every hit's verdict into ``verdicts``, and why the template is withheld when none is usable, by precedence: off the
+/// index, else chimeric, else an unannotated splice, else unpaired (as is a template with no hit); WITHHELD_NONE when
+/// one is usable. The scan and the annotation pass both judge here, so the annotated BAM says what the scan counted.
 static int32_t judge_hits(const TemplateHits& th, const FragmentResolver& ctx, ResolverScratch& scratch,
                           std::vector<int32_t>& verdicts)
 {
@@ -1240,15 +1147,9 @@ static int32_t template_nh(const std::vector<ParsedAlignment>& records)
     return 1;
 }
 
-/// One `OfferedFragment` marshalled out of Python, with the storage its spans point into.
-///
-/// ⭐ Shared by `Accumulator.deposit`, `Accumulator.length_under` and `AccumulatorSet.offer` so they cannot
-/// disagree about how a hypothesis set crosses the ABI. ⚠ Reads attributes off whatever it is handed, so the
-/// parity gate can pass the SAME `GapHypothesis` objects to the specification and to the binding; a binding
-/// with its own tuple convention would be a second representation to keep in step.
-///
-/// ⛔ Not copyable: `offered` points into this object's own vectors, so a copy's `offered` would point into
-/// the original's. A move hands the vectors' buffers over unchanged, so the moved-to `offered` stays valid.
+/// One `OfferedFragment` marshalled out of Python, with the storage its spans point into; shared by every binding that
+/// takes a fragment. It reads attributes off whatever it is handed, so the parity gate passes the specification's own
+/// `GapHypothesis` objects. Not copyable, since `offered` points into this object's vectors; a move keeps it valid.
 struct MarshalledFragment {
     std::vector<IntronBlock> observed;
     std::vector<IntronBlock> implied;
@@ -1262,11 +1163,9 @@ struct MarshalledFragment {
             auto pair = nb::cast<nb::tuple>(item);
             observed.push_back({0, nb::cast<int32_t>(pair[0]), nb::cast<int32_t>(pair[1]), 0});
         }
-        // ⚠ ONE pass over `hypotheses`: a second pass over a one-shot iterable (a generator) sees nothing,
-        // and an empty set deposits as the unspliced fragment alone. While `implied` grows, each span holds
-        // an OFFSET into it, turned into a pointer only after the last hypothesis is read, so a
-        // reallocation during the fill invalidates nothing. Pinned by
-        // `test_a_GENERATOR_of_hypotheses_is_the_same_fragment_as_the_tuple`.
+        // One pass over `hypotheses`, which may be a one-shot iterable (a generator). While `implied` grows, each
+        // span holds an offset into it, turned into a pointer only after the last hypothesis is read, so a
+        // reallocation during the fill invalidates nothing.
         for (nb::handle h : hypotheses) {
             const std::size_t i0 = implied.size();
             for (nb::handle item : nb::getattr(h, "introns")) {
@@ -1303,13 +1202,11 @@ struct MarshalledFragment {
 // the three non-array banks, as Python dicts
 // ================================================================
 //
-// ⭐ Written ONCE and used by the bound `Accumulator` and `AccumulatorSet` (the parity surface) and by
-// `build_result` (the payload). The specification's key strings live here and nowhere else on this side of
-// the ABI, so the exports cannot disagree about a name — which is the whole reason the payload, the
-// reference and the parity gate share one vocabulary.
+// Used by the bound `Accumulator` and `AccumulatorSet` and by `build_result`, so the specification's key strings live
+// in one place on this side of the ABI.
 
-/// The deposit counters: the QC denominators. Every conservation statement downstream has to be able to
-/// name what it excluded, and none of these is derivable after the fact.
+/// The deposit counters: the QC denominators, naming what each conservation statement downstream excludes; none is
+/// derivable after the fact.
 static nb::dict qc_dict(const rigel::accumulator::DepositCounters& c) {
     nb::dict out;
     out["deposited"]                    = c.deposited;
@@ -1321,10 +1218,8 @@ static nb::dict qc_dict(const rigel::accumulator::DepositCounters& c) {
     return out;
 }
 
-/// The umbrella census, keyed by the specification's `GapResolution` values.
-///
-/// ⛔ There is no `gap_resolved_unspliced` key. See `GapCensus`: the unspliced hypothesis is always the
-/// longest, so it can never be the sole survivor, and the class it would name is unreachable.
+/// The umbrella census, keyed by the specification's `GapResolution` values. There is no `gap_resolved_unspliced` key:
+/// the unspliced hypothesis is always the longest, so it is never the sole survivor (`GapCensus`).
 static nb::dict gap_census_dict(const rigel::accumulator::GapCensus& census) {
     nb::dict out;
     out["gap_resolved_spliced"]       = census.resolved_spliced;
@@ -1334,12 +1229,8 @@ static nb::dict gap_census_dict(const rigel::accumulator::GapCensus& census) {
     return out;
 }
 
-/// The deferred queue as the CSR `Tally.deferred_arrays()` specifies — same keys, same dtype (int64
-/// throughout), same canonical order.
-///
-/// ⚠ Every array is COPIED out. The caller has just canonicalised, which may have reseated the underlying
-/// vectors, and a later export would reseat them again — a numpy view over them would dangle and read as
-/// plausible coordinates. The queue is 1–3.5 % of a library, so the copy is bounded and one-off.
+/// The deferred queue as the CSR `Tally.deferred_arrays()` specifies: same keys, same dtype (int64 throughout), same
+/// canonical order. Every array is copied out, since a later canonicalise may reseat the vectors under a numpy view.
 static nb::dict deferred_dict(const rigel::accumulator::DeferredFragments& deferred) {
     nb::dict out;
     const auto put = [&out](const char* name, const std::vector<int64_t>& v) {
@@ -1377,23 +1268,19 @@ public:
     // Mapping from htslib tid → internal ref_id (FragmentResolver's numbering)
     std::vector<int32_t> tid_to_ref_id_;
 
-    // Results
     BamScanStats stats_;
     StrandObservations strand_obs_;
 
-    // The accumulator's region partition, installed by set_regions() and the sj CSR by
-    // set_sj(). One Accumulator per BAM reference; deposits go into a per-worker copy during
-    // scan() and are merged back here.
-    //
-    // ⚠ These are MEMBERS because the per-worker sets are built from them inside scan(). Anything
-    // installed after that point is invisible to the workers, which is a silent half-empty tally.
+    // The accumulator's region partition (set_regions) and junction CSR (set_sj). One Accumulator per BAM reference;
+    // deposits go into a per-worker copy during scan() and are merged back here. scan() builds the per-worker sets
+    // from these members, so both must be installed before it runs.
     std::vector<int64_t> region_bounds_;
     std::vector<int64_t> ref_region_bound_offsets_;
     std::vector<uint8_t> region_types_;      // coarse region type, ref-major, one per region
     int                  max_length_ = 0;  // the fragment-length limit AND the pool-histogram width
     std::vector<int64_t> sj_offsets_;       // n_region_bounds + 1, CSR over the flat region_bound axis
     std::vector<int64_t> sj_boundary_right_;  // flat region_bound index of each sj's high end
-    std::vector<int8_t>  sj_strand_;        // each sj's ANNOTATED strand
+    std::vector<int8_t>  sj_strand_;        // each sj's annotated strand
     bool                 sj_set_ = false;
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set_;
 
@@ -1411,9 +1298,8 @@ public:
     // The accumulator's partition
     // ----------------------------------------------------------------
     //
-    // Install the region partition the accumulator deposits onto. Must be called BEFORE scan(); without it
-    // the calibration payload comes back empty. `set_sj` is a SECOND call, because this one
-    // refuses to run twice.
+    // Install the region partition the accumulator deposits onto, before scan(). `set_sj` is a separate call,
+    // because this one refuses to run twice.
     //
     // Inputs:
     //   region_bounds:   flat int64[n_region_bounds_total], the concatenated sorted region_bound positions of every
@@ -1444,9 +1330,8 @@ public:
                 "set_regions: regions already set on this BamScanner; "
                 "create a new instance");
         }
-        // ⚠ Validated HERE, at the boundary, because `BamScanConfig.max_frag_length` has no CLI flag and
-        // no validation anywhere else. It gates L *and* sizes the pool histograms, so at 0 every real
-        // fragment is dropped as too long and the whole tally is silently empty.
+        // Validated here, at the boundary, because `BamScanConfig.max_frag_length` has no CLI flag and is validated
+        // nowhere else. It gates L and sizes the pool histograms, so at 0 every fragment would drop as too long.
         if (max_length < 1) {
             throw std::invalid_argument(
                 "set_regions: max_length must be >= 1, got " + std::to_string(max_length) +
@@ -1470,13 +1355,10 @@ public:
     // The accumulator's sj boundaries
     // ----------------------------------------------------------------
     //
-    // A SECOND method rather than two more arguments to set_regions, because that one throws if called
-    // twice. Takes the flat CSR `build_sj_arrays` emits, keyed by the flat region_bound index;
-    // AccumulatorSet slices it per reference.
-    //
-    // ⚠ Required even when there are none: pass empty arrays to say "this annotation has no sj".
-    // scan() refuses to run without it, because a missing table is not an error anywhere — every observed
-    // intron simply reads as unannotated, and 404,168 annotated sj become zero silently.
+    // A separate method, because set_regions throws if called twice. Takes the flat CSR `build_sj_arrays` emits,
+    // keyed by the flat region_bound index; AccumulatorSet slices it per reference. Required even for an annotation
+    // with no junctions (pass empty arrays): scan() refuses to run without it, because a missing table raises no error
+    // elsewhere and every observed intron would read as unannotated.
     void set_sj(
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> offsets,
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_right,
@@ -1528,13 +1410,9 @@ public:
     // Main scan entry point — streaming chunk architecture
     // ----------------------------------------------------------------
     //
-    // Three-thread architecture:
     //   Reader thread (background): BAM I/O → input_queue
     //   Worker threads (background): input_queue → accumulate → output_queue
-    //   Main thread: output_queue → finalize → chunk_callback
-    //
-    // The main thread holds the GIL while calling the Python callback
-    // and releases it while waiting on the output queue.
+    //   Main thread: output_queue → finalize → chunk_callback, holding the GIL only while it calls back
 
     nb::dict scan(const std::string& bam_path,
                   nb::callable chunk_callback,
@@ -1547,10 +1425,14 @@ public:
         if (chunk_size < 1) chunk_size = 1;
         if (qname_batch_size < 1) qname_batch_size = 1;
 
-        // ⚠ Explicit rather than defaulted, because the failure is invisible: with no sj table every
-        // observed intron reads as unannotated, so the spliced banks and every sj boundary stay at zero
-        // and the tally still looks well-formed. Pass empty arrays to declare an annotation with none.
-        if (acc_set_ && !sj_set_) {
+        // Both calls are required, because the failure is otherwise invisible: with no junction table every observed
+        // intron reads as unannotated, and the tally still looks well-formed.
+        if (!acc_set_) {
+            throw std::runtime_error(
+                "scan: set_regions was not called. The calibration tally is not optional — install the "
+                "index's region partition with set_regions, then its sj with set_sj.");
+        }
+        if (!sj_set_) {
             throw std::runtime_error(
                 "scan: set_regions was called but set_sj was not. The sj table is not "
                 "optional — without it every observed intron reads as unannotated, so the sj boundaries "
@@ -1564,29 +1446,24 @@ public:
         BoundedQueue<FragmentAccumulator> output_queue(
             static_cast<size_t>(n_workers * OUTPUT_CHUNKS_PER_WORKER));
 
-        // Per-worker state (local to scan — not a class member)
+        // Per-worker state, local to scan
         std::vector<std::unique_ptr<WorkerState>> worker_states;
         worker_states.reserve(n_workers);
         for (int i = 0; i < n_workers; i++) {
             int32_t n_transcripts = ctx_->n_transcripts_;
             auto ws = std::make_unique<WorkerState>(n_transcripts);
             reserve_chunk(ws->accumulator, chunk_size);
-            // Per-worker accumulator: the same partition and the same sj CSR as the shared
-            // template, locally writable so workers don't contend.
-            if (acc_set_) {
-                ws->acc_set = make_accumulator_set();
-            }
+            // The same partition and junction CSR as the shared template, locally writable so workers don't contend.
+            ws->acc_set = make_accumulator_set();
             worker_states.push_back(std::move(ws));
         }
 
-        // Capture read-only config
         bool include_multimap = include_multimap_;
         FragmentResolver* ctx = ctx_;
 
         // ---- Launch worker threads ----
-        // Workers pop from input_queue, process groups, accumulate, and
-        // push full chunks to output_queue. A worker that throws keeps the
-        // first worker exception and aborts both queues.
+        // Workers pop from input_queue, process groups, and push full chunks to output_queue. The first worker
+        // exception is kept and aborts both queues.
         std::exception_ptr worker_exception;
         std::mutex worker_exception_mutex;
         std::vector<std::thread> workers;
@@ -1774,9 +1651,7 @@ public:
                     WorkerState& ws = *ws_ptr;
                     stats_.merge_from(ws.stats);
                     merge_strand_obs(strand_obs_, ws.strand_obs);
-                    if (acc_set_ && ws.acc_set) {
-                        acc_set_->merge_from(*ws.acc_set);
-                    }
+                    acc_set_->merge_from(*ws.acc_set);
                 }
 
                 output_queue.close();
@@ -1816,9 +1691,9 @@ public:
         // Wait for reader thread to finish
         reader_thread.join();
 
-        // Propagate exceptions: reader, then worker, then main thread. The reader's comes first because a BAM
-        // it cannot read is the root cause of whatever followed. An abort makes no other thread throw (an
-        // aborted push or pop returns false), so no stored exception is an echo of another's.
+        // Rethrow the reader's exception first (an unreadable BAM is the root cause of what followed), then a
+        // worker's, then the main thread's. An aborted push or pop returns false rather than throwing, so no stored
+        // exception echoes another.
         if (reader_exception) {
             std::rethrow_exception(reader_exception);
         }
@@ -1837,8 +1712,7 @@ private:
     // ----------------------------------------------------------------
     // Process one qname group (worker thread, pre-parsed records)
     // ----------------------------------------------------------------
-    // Static so it doesn't capture 'this' (shares no mutable BamScanner
-    // state — all mutable state is in WorkerState).
+    // Static, so it shares no mutable BamScanner state: all of it is in WorkerState.
 
     static void process_qname_group_threaded(
         QnameGroup& group,
@@ -1857,64 +1731,34 @@ private:
 
         // ── the deposit adapter ───────────────────────────────────────────────────────────────────────
         //
-        // Turn one assembled fragment into the accumulator's `OfferedFragment` and deposit it. The
-        // accumulator owns the whole deposit rule; this function's only job is to say what the fragment IS
-        // — its extent on one reference, the introns cut out of it, and the two independent strands.
-        //
-        // ⭐ THE TWO STRANDS ARE INDEPENDENT.
-        //   align_strand  where the read ALIGNED. Every read has one. It selects the array column.
-        //   sj_strand     the splice junction's strand. Spliced reads only. It resolves an intron against
-        //                 the annotation, and nothing else.
-        // Sense/antisense is DERIVED by a consumer from the fragment strand and the sj's own strand.
-        //
-        // ⚠ No strand gate here. The deposit rejects an undefined `align_strand` itself and COUNTS it.
+        // Turn one assembled fragment into the accumulator's `OfferedFragment`; the accumulator owns the deposit rule.
+        // The two strands are independent: `align_strand` (every read has one) selects the array column, and
+        // `sj_strand` (spliced reads only) resolves an intron against the annotation. There is no strand gate here:
+        // the deposit rejects and counts an undefined `align_strand` itself.
         const auto collect_placement =
             [&ws](const AssembledFragment& f, const RawResolveResult& cr) {
                 const int32_t st = cr.splice_type;
 
-                // ── the splice census ─────────────────────────────────────────────────────────────
-                //
-                // ⭐ FIRST, and before any gate, because this is the count of what the scanner SAW:
-                // one observation per hit reaching this adapter.
-                //
-                // ⚠ It is deliberately NOT gated on `ws.acc_set`: what the scanner classified does
-                // not depend on whether an accumulator happened to be installed.
+                // The splice census counts first, before any gate: one observation per hit reaching this adapter.
                 if (st >= 0 && static_cast<size_t>(st) < ws.stats.splice_census.size())
                     ws.stats.splice_census[st]++;
 
-                // Hold artifact splices (blacklisted CIGAR-N) out of the accumulator entirely — no
-                // deposit, no length pool. Their true span is unrecoverable: a blacklisted sj may be
-                // a real-but-rejected sj OR a wholly incorrect alignment, and the span would be
-                // derived from that suspect alignment, so any reconstruction injects a false assumption.
-                //
-                // ⚠ Counted by the census above and NOT by `n_deposit_not_offered`: this is a
-                // positive decision about the data, not a failure to represent it.
+                // Artifact splices (blacklisted CIGAR N) stay out of the accumulator entirely, with no deposit and no
+                // length pool: a blacklisted junction may be a real one or a wrong alignment, so its true span is
+                // unrecoverable. The census above still counts them.
                 if (st == SPLICE_ARTIFACT) return;
 
-                // A usable hit lies on a reference the index holds (`pair_verdict`), and the accumulator holds
-                // every one.
-                if (!ws.acc_set) { ws.stats.n_deposit_not_offered++; return; }
+                // A usable hit lies on a reference the index, and so the accumulator, holds (`pair_verdict`).
                 const int32_t ref_id = f.exons.front().ref_id;
 
-                // ── the introns the CIGAR actually stated ─────────────────────────────────────
+                // ── the introns the CIGAR stated ──────────────────────────────────────────────────
                 //
-                // ⭐ These are cut under EVERY hypothesis, so they are NOT part of the hypothesis set.
-                // ⚠ The union with a hypothesis's implied introns happens inside `deposit`, where L is
-                // defined — the adapter used to do it here, and doing it in two places is how one
-                // quantity ends up with two formulas.
-                //
-                // ⛔ Every intron lies on `ref_id`, which `OfferedFragment` means and `Accumulator::deposit`, normalising
-                // them by coordinate alone, relies on: a usable hit's two mates lie on one reference, and each has an
-                // aligned base (a record with none is no location, `template_hits`).
-                //
-                // ⚠ The de-duplication is NOT to prevent double-crediting a sj -- `deposit` normalises a
-                // duplicate away either way. `parse_bam_record` reads XS/ts once per RECORD and
-                // `observed_junctions` keys a hit's junctions on (ref, start, end, strand), so a pair where one
-                // mate carries the tag yields the same intron twice; dropping the second keeps it out of a
-                // held record, which stores its observed introns as offered and sorts on them. The junctions
-                // are ordered, so consecutive comparison is enough; ⛔ they must NOT be re-keyed or merged in
-                // `observed_junctions`, which the resolver shares: a merged junction may be one no transcript
-                // holds, and the resolver refuses a fragment with one.
+                // Cut under every hypothesis, so not part of the hypothesis set: `deposit` unions them with each
+                // hypothesis's implied introns. All lie on `ref_id`, as `Accumulator::deposit` assumes when it
+                // normalises by coordinate alone. A pair where only one mate carries the strand tag yields the same
+                // intron twice under `observed_junctions`' (ref, start, end, strand) key; dropping the repeat keeps a
+                // held record's stored introns unique. They must not be merged in `observed_junctions` instead, which
+                // the resolver shares: a merged junction may be one no transcript holds.
                 auto& observed = ws.arena_observed;
                 const std::size_t obs0 = observed.size();
                 for (const auto& intron : f.introns) {
@@ -1927,9 +1771,9 @@ private:
 
                 // ── every explanation of the unsequenced gaps ─────────────────────────────────────
                 //
-                // ⭐ The resolver enumerated them; the ACCUMULATOR arbitrates. This only re-presents the
-                // flat CSR as the span-of-spans the deposit interface takes. There is always at least
-                // one — the unspliced hypothesis — so `deposit` never receives an empty set.
+                // The resolver enumerates them and the accumulator arbitrates; this re-presents the flat CSR as the
+                // span-of-spans `deposit` takes. There is always at least one, the unspliced hypothesis, so `deposit`
+                // never receives an empty set.
                 const std::size_t hyp0 = ws.pending_hypotheses.size();
                 for (std::int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
                     const std::int32_t i0 = cr.gap_intron_offsets[h], i1 = cr.gap_intron_offsets[h + 1];
@@ -1939,27 +1783,23 @@ private:
                     ws.pending_hypotheses.push_back({imp0, ws.arena_implied.size(), cr.gap_sj_strand[h]});
                 }
 
-                // The molecule's extent on this reference: leftmost block start to rightmost block end,
-                // MATE GAP INCLUDED, because the gap is part of the molecule and must count toward L. Every block
-                // lies on `ref_id`: a hit's two mates lie on one reference (`pair_verdict`), a mate with no aligned
-                // base has no block, and a supplementary record joins no hit.
+                // The molecule's extent on `ref_id`: leftmost block start to rightmost block end, mate gap included,
+                // because the gap is part of the molecule and counts toward L.
                 std::int64_t start = f.exons.front().start, end = f.exons.front().end;
                 for (const auto& block : f.exons) {
                     start = std::min<std::int64_t>(start, block.start);
                     end = std::max<std::int64_t>(end, block.end);
                 }
 
-                // ⚠ The OBSERVED motif strand, straight from `cr`. A hypothesis carries the strand its
-                // supporting transcripts imply, and `deposit` falls back to that only when nothing was
-                // sequenced. An observed motif is evidence; an implied strand is an inference from the
-                // annotation.
+                // The observed motif strand, from `cr`; `deposit` falls back to a hypothesis's implied strand only
+                // when nothing was sequenced, since an observed motif is evidence and an implied one an inference.
                 ws.pending.push_back({ref_id, start, end, cr.align_strand, cr.sj_strand,
                                       obs0, observed.size(), hyp0, ws.pending_hypotheses.size(), f.nm, f.clip});
             };
 
         // ── the offer: every placement of this fragment, at once ──────────────────────────────────────
         const auto offer_placements = [&ws]() {
-            if (!ws.acc_set || ws.pending.empty()) return;
+            if (ws.pending.empty()) return;
             // Offsets → pointers, now that nothing more will grow.
             ws.arena_spans.clear();
             ws.arena_spans.reserve(ws.pending_hypotheses.size());
@@ -1987,10 +1827,10 @@ private:
         };
 
         // ── a place's deposit masses: what its capture weight reads ───────────────────────────────────
-        // The deposit rule's mass at every object the hit's observed path deposits on, on the flat axes. The
-        // path is the one `collect_placement` offers: the molecule's extent with the CIGAR's introns cut.
+        // The deposit rule's mass at every object the hit's observed path (the extent `collect_placement` offers,
+        // with the CIGAR's introns cut) deposits on, on the flat axes.
         const auto add_place_masses = [&ws, &accumulator](const AssembledFragment& f, const RawResolveResult& cr) {
-            if (!ws.acc_set || f.exons.empty()) return;
+            if (f.exons.empty()) return;
             auto& observed = ws.mass_observed;
             observed.clear();
             for (const auto& intron : f.introns) {
@@ -2009,7 +1849,7 @@ private:
             for (const auto& m : ws.masses) accumulator.add_place_mass(m.kind, m.index, m.mass);
         };
 
-        // Per-worker state refs
+        // Reset the placement arenas
         ws.pending.clear();
         ws.pending_hypotheses.clear();
         ws.arena_observed.clear();
@@ -2036,7 +1876,7 @@ private:
 
         auto& all_hits = hit_result.hits;
 
-        // ⭐ A hit is usable when its two mates can be one molecule and one annotated transcript holds every junction
+        // A hit is usable when its two mates can be one molecule and one annotated transcript holds every junction
         // it observes (`hit_verdict`). A hit that is not is dropped, counted by its reason; a template left with none
         // is withheld, counted by its outcome (`judge_hits`), and is no fragment.
         auto& verdicts = scratch.hit_verdicts;
@@ -2073,25 +1913,23 @@ private:
         }
         all_hits.resize(kept);
 
-        // ⭐ The template's multiplicity is its valid hits, not the aligner's NH: a hit dropped above is no place the
+        // The template's multiplicity is its valid hits, not the aligner's NH: a hit dropped above is no place the
         // template could be from.
         int32_t num_hits = static_cast<int32_t>(all_hits.size());
         bool is_unique_mapper = (num_hits == 1);
         ++(is_unique_mapper ? stats.n_placed_unique : stats.n_placed_multimapping);
         int32_t n_buffered_mm = 0;
 
-        // Track per-molecule intergenic status across all hits.
-        // For multimappers: count intergenic only if NO hit resolves,
-        // and count it exactly once (not per-hit).
+        // A template is intergenic only when no hit resolves, and is counted once, not per hit.
         bool any_hit_resolved = false;
         bool any_unresolved = false;
 
-        // Count ONE fragment per physical molecule, not per hit.
+        // One fragment per molecule, not per hit.
         stats.n_fragments++;
 
         // A multimapper's intergenic hits wait for the last hit: the EM receives them only beside a hit that
-        // resolves (case 5, a place gDNA can be at outside every locus); a template none of whose hits resolves
-        // stays certified gDNA and reaches no unit (case 3).
+        // resolves (a place its gDNA can be at outside every locus); a template none of whose hits resolves stays
+        // certified gDNA and reaches no unit.
         std::vector<ResolvedFragment> held_intergenic;
 
         for (const auto& hit : all_hits) {
@@ -2108,17 +1946,10 @@ private:
             if (cr.t_inds.empty()) {
                 any_unresolved = true;
 
-                // unique-mapper zero-candidate fragments are
-                // appended to the buffer so that calibration's
-                // geometric categorization can label them INTERGENIC.
-                //
-                // We do NOT set any_hit_resolved here -- the
-                // n_intergenic telemetry counter
-                // (driven by !any_hit_resolved below) must keep firing
-                // so the PipelineStats accountability sum stays
-                // consistent.  The C++ scorer skips empty-t_inds
-                // fragments silently (n_cand <= 0 early skip) so they
-                // don't increment stat_gated either.
+                // A unique mapper's intergenic fragment is appended to the buffer, so calibration's geometric
+                // categorisation labels it INTERGENIC. any_hit_resolved stays false, so the n_intergenic counter
+                // below keeps the PipelineStats accounting sum consistent; the C++ scorer skips a fragment with no
+                // candidates (n_cand <= 0), so it does not count as gated either.
                 ResolvedFragment ig_result = ResolvedFragment::from_core(cr);
                 ig_result.num_hits = num_hits;
                 ig_result.nm = frag.nm;
@@ -2143,8 +1974,7 @@ private:
             result.nm = frag.nm;
             result.clip = frag.clip;
 
-            // For multimappers, count exon/splice/strand stats only
-            // on the first resolved hit to avoid inflation.
+            // A multimapper counts exon/splice/strand stats on its first resolved hit only.
             bool count_stats = is_unique_mapper || (n_buffered_mm == 0);
 
             if (count_stats) {
@@ -2162,17 +1992,8 @@ private:
 
             if (is_unique_mapper) {
                 if (result.get_is_strand_qualified()) {
-                    // ⭐ ONE observation per strand-qualified fragment, keyed by
-                    // SJ. `sj_strand` is qualified to POS/NEG here and is the
-                    // motif strand of every annotated sj the fragment crosses,
-                    // so `sense` is exactly the align==sj bit the 2×2 is built from
-                    // and `sj_key_*` is necessarily set.
-                    //
-                    // The table's marginal IS the 2x2 the strand fit needs, so no
-                    // per-fragment label vector is pushed alongside it.
-                    // `stats.n_strand_trained` below counts the fragments, and Python
-                    // asserts it against the table's total depth — the invariant that
-                    // one fragment credits one sj.
+                    // One observation per strand-qualified fragment, keyed by its junction (`sj_strand` is POS or NEG
+                    // here, so `sj_key_*` is set). Python checks `n_strand_trained` against the table's total depth.
                     SJKey sj_key{result.sj_key_ref, result.sj_key_start,
                                  result.sj_key_end, result.sj_strand};
                     auto& counts = strand_obs.sj_strand_table[sj_key];
@@ -2203,8 +2024,7 @@ private:
 
             }
 
-            // Every resolved hit is a placement for calibration; the fragment is offered
-            // whole after its last hit (`offer_placements`).
+            // Every resolved hit is a placement for calibration, offered with the rest after the last hit.
             collect_placement(frag, cr);
 
             // A multimapper's genic place carries its deposit masses, which its capture weight reads; a unique
@@ -2224,13 +2044,11 @@ private:
             }
         }
 
-        // ⭐ THE OFFER: one per fragment, every placement at once.
+        // The offer: one per fragment, every placement at once.
         offer_placements();
 
-        // Intergenic counting: only if NO hit resolved to transcripts.
-        // For a multimapper, if any hit resolves, the fragment goes
-        // through the EM which handles gDNA allocation — don't also
-        // count it as intergenic (that would double-count the molecule).
+        // Intergenic only when no hit resolved: a multimapper with a resolved hit goes through the EM, which
+        // allocates its gDNA, so counting it here would count the molecule twice.
         if (!any_hit_resolved && any_unresolved) stats.n_intergenic++;
 
         if (n_buffered_mm > 0) {
@@ -2297,14 +2115,12 @@ private:
         for (int32_t v : {HIT_MISSING_MATE, HIT_REFERENCE, HIT_STRAND, HIT_OUTWARD, HIT_LENGTH})
             stats_dict[("n_withheld_unpaired_" + std::string(hit_verdict_label(v))).c_str()] = stats_.unpaired_reason[v];
         stats_dict["n_nh_above_reported"] = stats_.n_nh_above_reported;
-        // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
-        // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same
-        // key on the Python side without a second table to drift from this one.
+        // The splice census, keyed off `splice_type_label`, whose strings are the `SpliceType` member names
+        // lower-cased, so `rigel.splice.census_field` derives the same key in Python without a second table.
         for (size_t i = 0; i < stats_.splice_census.size(); i++) {
             stats_dict[("n_census_" + std::string(splice_type_label(static_cast<int>(i)))).c_str()] =
                 stats_.splice_census[i];
         }
-        stats_dict["n_deposit_not_offered"] = stats_.n_deposit_not_offered;
         result["stats"] = stats_dict;
 
         // Strand observations
@@ -2315,10 +2131,8 @@ private:
         strand_dict["exonic_neg_pos"]       = strand_obs_.exonic.neg_pos;
         strand_dict["exonic_neg_neg"]       = strand_obs_.exonic.neg_neg;
 
-        // The per-sj strand table, as six parallel arrays.  Sorted by
-        // (ref, start, end, motif strand) because the source is an unordered_map
-        // merged across workers, and every downstream number must not depend on
-        // thread scheduling or hash order.
+        // The per-junction strand table as six parallel arrays, sorted by (ref, start, end, motif strand): the source
+        // is an unordered_map merged across workers, and no downstream number may depend on scheduling or hash order.
         {
             std::vector<SJKey> keys;
             keys.reserve(strand_obs_.sj_strand_table.size());
@@ -2354,188 +2168,165 @@ private:
 
         // ── the accumulator payload ───────────────────────────────────────────────────────────────────
         //
-        // ⚠ The keys here are the FIELD NAMES OF THE SPECIFICATION'S `Tally`, character for character
-        // (`tests/native/_accumulator_reference.py`). That is deliberate: the payload, the reference and
-        // the parity gate then all say one name per quantity, and no mapping table can drift.
-        //
-        // ⚠ NOT zero-copy, and the comment that used to claim it was is deleted rather than carried
-        // forward. Each array is a fresh owning vector concatenated across references, so Python gets one
-        // contiguous buffer and does not depend on the AccumulatorSet's internal layout. Arrays are emitted
-        // FLAT; the two-column ones are reshaped Python-side.
-        //
-        // ⚠ And the boundary and sj copies cannot be a memcpy: the accumulator stores AoS — a 40 B `Boundary`
-        // interleaves two uint32 count pairs with three float64 channels, a 32 B `SpliceJunction` one count pair
-        // with three float64s — while the payload is SoA, so their transpose is a strided read by construction.
-        // (The 8 B `Region` is one count pair, already the payload's layout.) That is the price of hot structs
-        // with no padding, which is the right trade — this loop is O(partition) once per scan, the deposit is
-        // O(fragments).
-        if (acc_set_) {
-            using rigel::accumulator::Accumulator;
-            using rigel::accumulator::Boundary;
-            using rigel::accumulator::SpliceJunction;
-            using rigel::accumulator::Region;
-            using rigel::accumulator::kNFragmentPools;
-            using rigel::accumulator::kNStrandColumns;
+        // The keys are the field names of the specification's `Tally` (`tests/native/_accumulator_reference.py`).
+        // Each array is a fresh owning vector concatenated across references, emitted flat (the two-column ones are
+        // reshaped in Python), so Python's buffers are independent of the AccumulatorSet's struct layout.
+        using rigel::accumulator::Accumulator;
+        using rigel::accumulator::Boundary;
+        using rigel::accumulator::SpliceJunction;
+        using rigel::accumulator::Region;
+        using rigel::accumulator::kNFragmentPools;
+        using rigel::accumulator::kNStrandColumns;
 
-            const std::size_t n_refs = acc_set_->n_refs();
+        const std::size_t n_refs = acc_set_->n_refs();
 
-            std::vector<int64_t> ref_region_offsets(n_refs + 1, 0);
-            std::vector<int64_t> ref_boundary_offsets(n_refs + 1, 0);
-            std::vector<int64_t> ref_sj_offsets(n_refs + 1, 0);
-            for (std::size_t f = 0; f < n_refs; ++f) {
-                const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
-                ref_region_offsets[f + 1] =
-                    ref_region_offsets[f] + static_cast<int64_t>(a.n_regions());
-                ref_boundary_offsets[f + 1] =
-                    ref_boundary_offsets[f] + static_cast<int64_t>(a.n_boundaries());
-                ref_sj_offsets[f + 1] =
-                    ref_sj_offsets[f] + static_cast<int64_t>(a.n_sj());
-            }
-            const auto n_regions = static_cast<std::size_t>(ref_region_offsets.back());
-            const auto n_boundaries = static_cast<std::size_t>(ref_boundary_offsets.back());
-            const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
-
-            std::vector<uint32_t> region_contained_count(n_regions * kNStrandColumns, 0u);
-            std::vector<uint32_t> region_start_count(n_regions * kNStrandColumns, 0u);
-            std::vector<uint32_t> boundary_unspliced_count(n_boundaries * kNStrandColumns, 0u);
-            std::vector<double> boundary_unspliced_inv_length_sum(n_boundaries, 0.0);
-            std::vector<uint32_t> boundary_spliced_count(n_boundaries * kNStrandColumns, 0u);
-            // ⚠ NOT multiplied by kNStrandColumns — the conserved mass has ONE value per boundary.
-            std::vector<double> boundary_unspliced_mass(n_boundaries, 0.0);
-            std::vector<double> boundary_spliced_mass(n_boundaries, 0.0);
-            std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
-            std::vector<double> sj_inv_length_sum(n_sj, 0.0);
-            // MULTIPLIED by kNStrandColumns, unlike every other mass here: the sj mass is the
-            // one that carries a strand (premise in `SpliceJunction::mass`).
-            std::vector<double> sj_mass(n_sj * kNStrandColumns, 0.0);
-
-            const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
-            std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
-            // ⭐ The unconditional length histogram, summed over references exactly like the pools.
-            std::vector<uint32_t> deposited_lengths(pool_row, 0u);
-
-            rigel::accumulator::DepositCounters qc;
-            rigel::accumulator::GapCensus      gap_census;
-            // ⭐ The side buffer, concatenated in REFERENCE ORDER — which is already the one canonical
-            // order, and needs no second sort. Each reference's bank is canonicalised on its own, and
-            // every record in it carries that reference's id, so `(ref, start, end, …)` ascends across the
-            // concatenation by construction. `merge_from` is exactly a CSR concatenation.
-            rigel::accumulator::DeferredFragments deferred;
-
-            for (std::size_t f = 0; f < n_refs; ++f) {
-                Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
-                deferred.merge_from(a.deferred_canonical());
-                gap_census.merge_from(a.gap_census());
-                const Region* regions = a.regions_data();
-                const Boundary* boundaries = a.boundaries_data();
-                const SpliceJunction* sj = a.sj_data();
-                const uint32_t* starts = a.region_start_count_data();
-                const auto region_base = static_cast<std::size_t>(ref_region_offsets[f]);
-                const auto boundary_base = static_cast<std::size_t>(ref_boundary_offsets[f]);
-                const auto sj_base   = static_cast<std::size_t>(ref_sj_offsets[f]);
-
-                for (std::size_t i = 0; i < a.n_regions(); ++i) {
-                    for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-                        region_start_count[(region_base + i) * kNStrandColumns + c] = starts[i * kNStrandColumns + c];
-                    }
-                    for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-                        const std::size_t o = (region_base + i) * kNStrandColumns + c;
-                        region_contained_count[o]   = regions[i].contained_count[c];
-                    }
-                }
-                for (std::size_t i = 0; i < a.n_boundaries(); ++i) {
-                    for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-                        const std::size_t o = (boundary_base + i) * kNStrandColumns + c;
-                        boundary_unspliced_count[o]   = boundaries[i].unspliced_count[c];
-                        boundary_spliced_count[o]     = boundaries[i].spliced_count[c];
-                    }
-                    // ⚠ Outside the column loop, and keyed WITHOUT kNStrandColumns: one value per boundary.
-                    boundary_unspliced_inv_length_sum[boundary_base + i] = boundaries[i].unspliced_inv_length_sum;
-                    boundary_unspliced_mass[boundary_base + i] = boundaries[i].unspliced_mass;
-                    boundary_spliced_mass[boundary_base + i]   = boundaries[i].spliced_mass;
-                }
-                for (std::size_t i = 0; i < a.n_sj(); ++i) {
-                    for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-                        const std::size_t o = (sj_base + i) * kNStrandColumns + c;
-                        sj_count[o]   = sj[i].count[c];
-                        sj_mass[o]    = sj[i].mass[c];
-                    }
-                    sj_inv_length_sum[sj_base + i] = sj[i].inv_length_sum;
-                }
-                // The pools are library-wide, so the per-reference histograms are SUMMED, not concatenated.
-                // ⚠ A size mismatch throws instead of being skipped: skipping would drop that reference's
-                // pools with nothing to notice it by, which is the failure mode this rework has already
-                // removed twice.
-                if (a.pool_lengths_size() != pool_lengths.size()) {
-                    throw std::runtime_error(
-                        "build_result: reference " + std::to_string(f) + " has " +
-                        std::to_string(a.pool_lengths_size()) + " pool bins but the payload expects " +
-                        std::to_string(pool_lengths.size()));
-                }
-                const int64_t* pools = a.pool_lengths_data();
-                for (std::size_t i = 0; i < pool_lengths.size(); ++i) pool_lengths[i] += pools[i];
-                // ⭐ The unconditional length histogram takes the same size guard for the same reason: a silently skipped reference would leave the
-                // anchor short by that reference's fragments with nothing to notice it by, and the
-                // sum(deposited_lengths) == deposited invariant is what would fire -- but only if the
-                // array is the right length in the first place.
-                if (a.deposited_lengths_size() != deposited_lengths.size()) {
-                    throw std::runtime_error(
-                        "build_result: reference " + std::to_string(f) + " has " +
-                        std::to_string(a.deposited_lengths_size()) +
-                        " deposited-length bins but the payload expects " +
-                        std::to_string(deposited_lengths.size()));
-                }
-                const uint32_t* dep = a.deposited_lengths_data();
-                for (std::size_t i = 0; i < deposited_lengths.size(); ++i) deposited_lengths[i] += dep[i];
-                qc.merge_from(a.counters());
-            }
-            // ⭐ The multi-placement records live on the SET (a record spans references), so the bank is
-            // the union of every reference's gap bank and the set's own, in ONE canonical order: the
-            // reference-order concatenation above is canonical only among one-placement records.
-            deferred.merge_from(acc_set_->deferred_canonical());
-            deferred.canonicalise();
-            qc.merge_from(acc_set_->counters());
-
-            nb::dict cal;
-            // Echo the partition back, so a consumer can locate every object without reloading the index.
-            cal["region_bounds"]   = vec_to_ndarray(std::vector<int64_t>(region_bounds_));
-            cal["ref_region_bound_offsets"] = vec_to_ndarray(std::vector<int64_t>(ref_region_bound_offsets_));
-            cal["ref_region_offsets"] = vec_to_ndarray(std::move(ref_region_offsets));
-            cal["ref_boundary_offsets"] = vec_to_ndarray(std::move(ref_boundary_offsets));
-            cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
-
-            cal["region_contained_count"]   = vec_to_ndarray(std::move(region_contained_count));
-            cal["region_start_count"]       = vec_to_ndarray(std::move(region_start_count));
-            cal["boundary_unspliced_count"]   = vec_to_ndarray(std::move(boundary_unspliced_count));
-            cal["boundary_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(boundary_unspliced_inv_length_sum));
-            cal["boundary_spliced_count"]     = vec_to_ndarray(std::move(boundary_spliced_count));
-            cal["boundary_unspliced_mass"]    = vec_to_ndarray(std::move(boundary_unspliced_mass));
-            cal["boundary_spliced_mass"]      = vec_to_ndarray(std::move(boundary_spliced_mass));
-            cal["sj_count"]               = vec_to_ndarray(std::move(sj_count));
-            cal["sj_inv_length_sum"]             = vec_to_ndarray(std::move(sj_inv_length_sum));
-            cal["sj_mass"]                = vec_to_ndarray(std::move(sj_mass));
-            cal["pool_lengths"]           = vec_to_ndarray(std::move(pool_lengths));
-            cal["deposited_lengths"]      = vec_to_ndarray(std::move(deposited_lengths));
-
-            // ⭐ The QC denominators, the side buffer and the umbrella census, through the SAME three
-            // exporters the parity surface uses, so the payload and the bound Accumulator cannot disagree
-            // about a key.
-            cal["qc"]             = qc_dict(qc);
-            cal["deferred"]       = deferred_dict(deferred);
-            cal["gap_resolution"] = gap_census_dict(gap_census);
-
-            cal["n_strand_columns"] = static_cast<int>(kNStrandColumns);
-            cal["n_fragment_pools"] = static_cast<int>(kNFragmentPools);
-            cal["max_length"]       = max_length_;
-            cal["n_refs"]           = static_cast<int>(n_refs);
-            // The library's mismatch rate travels with the tally, so a cached scan drains at its own rate.
-            cal["unique_unspliced_mismatches"] = stats_.n_unique_unspliced_mismatches;
-            cal["unique_unspliced_bases"]      = stats_.n_unique_unspliced_bases;
-
-            result["calibration"] = cal;
-        } else {
-            result["calibration"] = nb::none();
+        std::vector<int64_t> ref_region_offsets(n_refs + 1, 0);
+        std::vector<int64_t> ref_boundary_offsets(n_refs + 1, 0);
+        std::vector<int64_t> ref_sj_offsets(n_refs + 1, 0);
+        for (std::size_t f = 0; f < n_refs; ++f) {
+            const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
+            ref_region_offsets[f + 1] =
+                ref_region_offsets[f] + static_cast<int64_t>(a.n_regions());
+            ref_boundary_offsets[f + 1] =
+                ref_boundary_offsets[f] + static_cast<int64_t>(a.n_boundaries());
+            ref_sj_offsets[f + 1] =
+                ref_sj_offsets[f] + static_cast<int64_t>(a.n_sj());
         }
+        const auto n_regions = static_cast<std::size_t>(ref_region_offsets.back());
+        const auto n_boundaries = static_cast<std::size_t>(ref_boundary_offsets.back());
+        const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
+
+        std::vector<uint32_t> region_contained_count(n_regions * kNStrandColumns, 0u);
+        std::vector<uint32_t> region_start_count(n_regions * kNStrandColumns, 0u);
+        std::vector<uint32_t> boundary_unspliced_count(n_boundaries * kNStrandColumns, 0u);
+        std::vector<double> boundary_unspliced_inv_length_sum(n_boundaries, 0.0);
+        std::vector<uint32_t> boundary_spliced_count(n_boundaries * kNStrandColumns, 0u);
+        // Not multiplied by kNStrandColumns: the conserved mass has one value per boundary.
+        std::vector<double> boundary_unspliced_mass(n_boundaries, 0.0);
+        std::vector<double> boundary_spliced_mass(n_boundaries, 0.0);
+        std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
+        std::vector<double> sj_inv_length_sum(n_sj, 0.0);
+        // Multiplied by kNStrandColumns, unlike every other mass here: the junction mass carries a strand
+        // (`SpliceJunction::mass`).
+        std::vector<double> sj_mass(n_sj * kNStrandColumns, 0.0);
+
+        const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
+        std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
+        // The unconditional length histogram, summed over references like the pools.
+        std::vector<uint32_t> deposited_lengths(pool_row, 0u);
+
+        rigel::accumulator::DepositCounters qc;
+        rigel::accumulator::GapCensus      gap_census;
+        // The side buffer, concatenated in reference order, which is canonical: each reference's bank is
+        // canonicalised on its own and carries that reference's id, so `(ref, start, end, …)` ascends across the
+        // concatenation. `merge_from` is a CSR concatenation.
+        rigel::accumulator::DeferredFragments deferred;
+
+        for (std::size_t f = 0; f < n_refs; ++f) {
+            Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
+            deferred.merge_from(a.deferred_canonical());
+            gap_census.merge_from(a.gap_census());
+            const Region* regions = a.regions_data();
+            const Boundary* boundaries = a.boundaries_data();
+            const SpliceJunction* sj = a.sj_data();
+            const uint32_t* starts = a.region_start_count_data();
+            const auto region_base = static_cast<std::size_t>(ref_region_offsets[f]);
+            const auto boundary_base = static_cast<std::size_t>(ref_boundary_offsets[f]);
+            const auto sj_base   = static_cast<std::size_t>(ref_sj_offsets[f]);
+
+            for (std::size_t i = 0; i < a.n_regions(); ++i) {
+                for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+                    region_start_count[(region_base + i) * kNStrandColumns + c] = starts[i * kNStrandColumns + c];
+                }
+                for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+                    const std::size_t o = (region_base + i) * kNStrandColumns + c;
+                    region_contained_count[o]   = regions[i].contained_count[c];
+                }
+            }
+            for (std::size_t i = 0; i < a.n_boundaries(); ++i) {
+                for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+                    const std::size_t o = (boundary_base + i) * kNStrandColumns + c;
+                    boundary_unspliced_count[o]   = boundaries[i].unspliced_count[c];
+                    boundary_spliced_count[o]     = boundaries[i].spliced_count[c];
+                }
+                // Outside the column loop: one value per boundary.
+                boundary_unspliced_inv_length_sum[boundary_base + i] = boundaries[i].unspliced_inv_length_sum;
+                boundary_unspliced_mass[boundary_base + i] = boundaries[i].unspliced_mass;
+                boundary_spliced_mass[boundary_base + i]   = boundaries[i].spliced_mass;
+            }
+            for (std::size_t i = 0; i < a.n_sj(); ++i) {
+                for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+                    const std::size_t o = (sj_base + i) * kNStrandColumns + c;
+                    sj_count[o]   = sj[i].count[c];
+                    sj_mass[o]    = sj[i].mass[c];
+                }
+                sj_inv_length_sum[sj_base + i] = sj[i].inv_length_sum;
+            }
+            // The pools are library-wide, so the per-reference histograms are summed, not concatenated. A size
+            // mismatch throws, since skipping it would drop that reference's pools silently.
+            if (a.pool_lengths_size() != pool_lengths.size()) {
+                throw std::runtime_error(
+                    "build_result: reference " + std::to_string(f) + " has " +
+                    std::to_string(a.pool_lengths_size()) + " pool bins but the payload expects " +
+                    std::to_string(pool_lengths.size()));
+            }
+            const int64_t* pools = a.pool_lengths_data();
+            for (std::size_t i = 0; i < pool_lengths.size(); ++i) pool_lengths[i] += pools[i];
+            // The unconditional length histogram takes the same guard: a skipped reference would leave the anchor
+            // short, and the sum(deposited_lengths) == deposited check needs the array at the right length.
+            if (a.deposited_lengths_size() != deposited_lengths.size()) {
+                throw std::runtime_error(
+                    "build_result: reference " + std::to_string(f) + " has " +
+                    std::to_string(a.deposited_lengths_size()) +
+                    " deposited-length bins but the payload expects " +
+                    std::to_string(deposited_lengths.size()));
+            }
+            const uint32_t* dep = a.deposited_lengths_data();
+            for (std::size_t i = 0; i < deposited_lengths.size(); ++i) deposited_lengths[i] += dep[i];
+            qc.merge_from(a.counters());
+        }
+        // The multi-placement records live on the set (a record spans references), so the bank is the union of
+        // every reference's gap bank and the set's own, re-canonicalised: the reference-order concatenation above
+        // is canonical only among one-placement records.
+        deferred.merge_from(acc_set_->deferred_canonical());
+        deferred.canonicalise();
+        qc.merge_from(acc_set_->counters());
+
+        nb::dict cal;
+        // Echo the partition back, so a consumer can locate every object without reloading the index.
+        cal["region_bounds"]   = vec_to_ndarray(std::vector<int64_t>(region_bounds_));
+        cal["ref_region_bound_offsets"] = vec_to_ndarray(std::vector<int64_t>(ref_region_bound_offsets_));
+        cal["ref_region_offsets"] = vec_to_ndarray(std::move(ref_region_offsets));
+        cal["ref_boundary_offsets"] = vec_to_ndarray(std::move(ref_boundary_offsets));
+        cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
+
+        cal["region_contained_count"]   = vec_to_ndarray(std::move(region_contained_count));
+        cal["region_start_count"]       = vec_to_ndarray(std::move(region_start_count));
+        cal["boundary_unspliced_count"]   = vec_to_ndarray(std::move(boundary_unspliced_count));
+        cal["boundary_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(boundary_unspliced_inv_length_sum));
+        cal["boundary_spliced_count"]     = vec_to_ndarray(std::move(boundary_spliced_count));
+        cal["boundary_unspliced_mass"]    = vec_to_ndarray(std::move(boundary_unspliced_mass));
+        cal["boundary_spliced_mass"]      = vec_to_ndarray(std::move(boundary_spliced_mass));
+        cal["sj_count"]               = vec_to_ndarray(std::move(sj_count));
+        cal["sj_inv_length_sum"]             = vec_to_ndarray(std::move(sj_inv_length_sum));
+        cal["sj_mass"]                = vec_to_ndarray(std::move(sj_mass));
+        cal["pool_lengths"]           = vec_to_ndarray(std::move(pool_lengths));
+        cal["deposited_lengths"]      = vec_to_ndarray(std::move(deposited_lengths));
+
+        // The QC denominators, the side buffer and the umbrella census go through the exporters the parity
+        // surface uses, so the payload and the bound Accumulator share their keys.
+        cal["qc"]             = qc_dict(qc);
+        cal["deferred"]       = deferred_dict(deferred);
+        cal["gap_resolution"] = gap_census_dict(gap_census);
+
+        cal["n_strand_columns"] = static_cast<int>(kNStrandColumns);
+        cal["max_length"]       = max_length_;
+        cal["n_refs"]           = static_cast<int>(n_refs);
+        // The library's mismatch rate travels with the tally, so a cached scan drains at its own rate.
+        cal["unique_unspliced_mismatches"] = stats_.n_unique_unspliced_mismatches;
+        cal["unique_unspliced_bases"]      = stats_.n_unique_unspliced_bases;
+
+        result["calibration"] = cal;
 
         return result;
     }
@@ -2545,16 +2336,10 @@ private:
 // BamAnnotationWriter — the annotated-BAM pass's tag stamping
 // ================================================================
 //
-// Reuses the same BAM reading, hit grouping, fragment building, and
-// multimapper pairing infrastructure as BamScanner, but instead of
-// resolving + buffering, it:
-//   1. Looks up per-fragment annotation by frag_id
-//   2. Stamps Z* BAM tags on every record
-//   3. Writes tagged records to an output BAM
-//
-// The annotation table is passed as sliced NumPy arrays (one entry
-// per annotated fragment).  Unannotated frag_ids (intergenic) are
-// stamped with intergenic defaults.
+// Reuses BamScanner's BAM reading, hit grouping, fragment building and multimapper pairing, but instead of
+// buffering it looks up each fragment's annotation by frag_id, stamps Z* tags on every record and writes them to an
+// output BAM. The annotation table arrives as sliced NumPy arrays, one entry per annotated fragment; an unannotated
+// frag_id (intergenic) gets intergenic defaults.
 
 // ndarray aliases (const, 1-D, C-contiguous)
 using ci64_1d = nb::ndarray<const int64_t,  nb::ndim<1>, nb::c_contig>;
@@ -2633,7 +2418,6 @@ public:
             frag_to_row[fid_ptr[i]] = i;
         }
 
-        // Raw data pointers
         const int32_t* tid_ptr  = ann_best_tid.data();
         const int32_t* gid_ptr  = ann_best_gid.data();
         const uint8_t* flags_ptr = ann_tx_flags.data();
@@ -2642,7 +2426,6 @@ public:
         const int16_t* nc_ptr   = ann_n_candidates.data();
         const int32_t* lid_ptr  = ann_locus_id.data();
 
-        // Open input BAM
         htsFile* fp = hts_open(bam_path.c_str(), "rb");
         if (!fp)
             throw std::runtime_error("Failed to open BAM: " + bam_path);
@@ -2653,10 +2436,8 @@ public:
             throw std::runtime_error("Failed to read header: " + bam_path);
         }
 
-        // Build tid mapping
         build_tid_mapping(hdr, ctx_->ref_to_id_, tid_to_ref_id_);
 
-        // Open output BAM
         htsFile* out = hts_open(output_path.c_str(), "wb");
         if (!out) {
             bam_hdr_destroy(hdr);
@@ -2725,11 +2506,10 @@ public:
                 return;
             }
 
-            // A placed read pair. Each record's status follows from it (`records_used`): a used record is written with
-            // the first usable hit holding its alignment, as the winning placement or not (ZH) and with that hit's own
-            // splice type; every other record is an unused alignment of the fragment. All carry the fragment's
-            // annotation: its row's or, with none, the intergenic fast path's, gDNA by construction (a spliced hit
-            // the scan keeps has a transcript holding its junctions), ZW 1 with no competing hypothesis.
+            // A placed read pair (`records_used`): a used record is written with the first usable hit holding its
+            // alignment, flagged as the winning placement or not (ZH), with that hit's splice type; every other record
+            // is an unused alignment. All carry the fragment's annotation row or, with none, the intergenic default:
+            // gDNA, ZW 1.
             const int32_t num_hits = static_cast<int32_t>(std::count(verdicts.begin(), verdicts.end(), HIT_USABLE));
             if (!include_multimap_ && num_hits > 1) {  // the multimap option, as the scan applies it
                 for (size_t i = 0; i < raw_group.size(); i++)
@@ -2775,7 +2555,7 @@ public:
                 if (best_gid >= 0 && best_gid < static_cast<int32_t>(g_names.size())) zr = g_names[best_gid].c_str();
             }
 
-            // Each input record is written EXACTLY once. An alias of an alignment is written with the record that
+            // Each input record is written exactly once. An alias of an alignment is written with the record that
             // represents it (`TemplateHits::alias_of`).
             std::vector<bool> rec_written(raw_group.size(), false);
             std::vector<std::vector<int32_t>> aliases(raw_group.size());
@@ -2843,14 +2623,12 @@ public:
                 run_kept = false;
             }
 
-            // Filtered reads: write through as-is (no annotation tags)
-            // to preserve every record from the original BAM.  These
-            // records are also skipped by Pass 1, so they never receive
-            // a frag_id and must NOT advance the frag_id counter.
+            // A filtered record is written through as-is, without annotation tags, so the output keeps every input
+            // record. The scan skips it too, so it gets no frag_id and does not advance the counter. (An unpaired
+            // record the scan did not filter stops the scan.)
             bool filtered = (flag & BAM_FQCFAIL)
                          || (flag & BAM_FUNMAP)
-                         || ((flag & BAM_FDUP) && skip_duplicates_)
-                         || !(flag & BAM_FPAIRED);
+                         || ((flag & BAM_FDUP) && skip_duplicates_);
             if (filtered) {
                 // A filtered record that opens a new read name: write the held group first, or this read name
                 // would be split around it and the output would no longer be collated
@@ -2873,7 +2651,6 @@ public:
 
             if (!light_group.empty() && current_qname != qname) {
                 process_and_write();
-                // Free cloned records
                 for (auto* r : raw_group) bam_destroy1(r);
                 raw_group.clear();
                 light_group.clear();
@@ -2906,13 +2683,11 @@ public:
         }
         if (run_open && !run_kept) n_excluded++;
 
-        // Cleanup
         bam_destroy1(b);
         bam_hdr_destroy(hdr);
         hts_close(fp);
         hts_close(out);
 
-        // Build summary dict
         nb::dict summary;
         summary["n_read_pairs"] = n_read_pairs;
         summary["n_excluded"] = n_excluded;
@@ -2987,20 +2762,15 @@ NB_MODULE(_bam_impl, m) {
     m.attr("PLACE_SJ")       = static_cast<int>(rigel::accumulator::kPlaceSj);
 
     // ----------------------------------------------------------------
-    // Accumulator — ONE REFERENCE, bound as the parity surface
+    // Accumulator — one reference
     // ----------------------------------------------------------------
     //
-    // ⚠ THIS BINDING EXISTS TO BE COMPARED. `tests/native/test_accumulator_native_parity.py` drives it and
-    // `tests/native/_accumulator_reference.py` with identical fragments and requires every array, dtype and
-    // QC counter to match. The scan path does not go through here — it calls `deposit` in C++ — so the
-    // property names below are chosen to be the SPECIFICATION'S `Tally` FIELD NAMES, character for
-    // character. The gate reads them off `dataclasses.fields(Tally)`, so a name that drifts fails loudly
-    // instead of quietly dropping out of the comparison.
-    //
-    // ⚠ Every view into a struct bank needs EXPLICIT STRIDES. The storage is AoS with mixed widths — a 40 B
-    // `Boundary` holds two uint32 pairs then three float64s, a 32 B `SpliceJunction` one uint32 pair then three
-    // float64s — so the row stride is `sizeof(struct)/sizeof(element)`, not the column count. The 8 B `Region`
-    // is one uint32 pair, so there the two coincide; the START bank is a flat array and needs none.
+    // The scan deposits in C++ through `AccumulatorSet`. This binding serves the second pass (`second_pass.py`
+    // rebuilds one Accumulator per reference from the payload, reads `length_under` and re-deposits each drained
+    // fragment), the scan cache's key digest, and the parity gate (`tests/native/test_accumulator_native_parity.py`),
+    // which compares it with `tests/native/_accumulator_reference.py` array by array. The property names are the
+    // specification's `Tally` field names. Every view into a struct bank needs explicit strides, since the row stride
+    // is `sizeof(struct)/sizeof(element)`, not the column count.
     {
         using rigel::accumulator::Accumulator;
         using rigel::accumulator::Boundary;
@@ -3093,8 +2863,8 @@ NB_MODULE(_bam_impl, m) {
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.boundaries_data()[0].unspliced_inv_length_sum, {a.n_boundaries()}, h, {row}).cast();
             })
-            // ⭐ The conserved mass — ndim<1>, because it has one value per boundary and not one per
-            // strand. The stride is still the struct row, so this is a view into the same array.
+            // The conserved mass: ndim<1>, one value per boundary rather than per strand. The stride is still the
+            // struct row.
             .def_prop_ro("boundary_unspliced_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(Boundary) / sizeof(double);
@@ -3122,8 +2892,8 @@ NB_MODULE(_bam_impl, m) {
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.sj_data()[0].inv_length_sum, {a.n_sj()}, h, {row}).cast();
             })
-            // ⭐ ndim<2>, unlike every other mass here — the sj mass carries a strand, and its
-            // columns are `sj_count`'s columns. See `SpliceJunction::mass`.
+            // ndim<2>, unlike every other mass here: the junction mass carries a strand, and its columns are
+            // `sj_count`'s (`SpliceJunction::mass`).
             .def_prop_ro("sj_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(SpliceJunction) / sizeof(double);
@@ -3149,18 +2919,15 @@ NB_MODULE(_bam_impl, m) {
                 return qc_dict(a.counters());
             })
 
-            // ⭐ The umbrella census. The keys are the specification's `GapResolution` VALUES, character
-            // for character, so the parity gate compares dicts and no mapping table exists to drift.
+            // The umbrella census, keyed by the specification's `GapResolution` values, so the parity gate compares
+            // dicts directly.
             .def_prop_ro("gap_resolution", [](const Accumulator& a) {
                 return gap_census_dict(a.gap_census());
             })
 
-            // ⭐ The deferred queue, flattened exactly as `Tally.deferred_arrays()` specifies and in the
-            // SAME canonical order — the one bank whose order is observable, so the export sorts it.
-            //
-            // ⚠ Copies rather than viewing the C++ vectors. `canonicalise` may replace them wholesale on
-            // the next call, and a numpy view over a vector that is about to be reseated is a dangling
-            // pointer that reads as plausible numbers.
+            // The deferred queue, flattened as `Tally.deferred_arrays()` specifies and in its canonical order: the
+            // one bank whose order is observable. Copied, not viewed, because `canonicalise` may replace the vectors
+            // on the next call and a view would dangle.
             .def_prop_ro("deferred", [](Accumulator& a) {
                 return deferred_dict(a.deferred_canonical());
             })
@@ -3169,13 +2936,10 @@ NB_MODULE(_bam_impl, m) {
                  [](const Accumulator& a, int64_t pos) { return a.region_of_pos(pos); },
                  nb::arg("pos"))
 
-            // Returns the QC KEY the deposit incremented, which is the specification's
-            // `DepositOutcome.value` — so the parity gate compares outcomes without an enum mapping, and
-            // the string it compares is the name of the counter that moved.
-            //
-            // ⚠ `introns` here are `(start, end)` pairs on THIS reference. The scan-path adapter is what
-            // restricts a fragment's introns to one reference and de-duplicates them; `deposit` itself
-            // normalises by coordinate and never reads `IntronBlock::ref_id`.
+            // Returns the QC key the deposit incremented, the specification's `DepositOutcome.value`, so the parity
+            // gate compares outcomes without an enum mapping. `introns` are `(start, end)` pairs on this reference:
+            // the scan's adapter restricts a fragment's introns to one reference and de-duplicates them, and
+            // `deposit` normalises by coordinate, never reading `IntronBlock::ref_id`.
             .def("deposit",
                  [](Accumulator& a,
                     int64_t start,
@@ -3186,9 +2950,9 @@ NB_MODULE(_bam_impl, m) {
                     nb::object hypotheses,
                     int32_t nm,
                     int32_t clip) {
-                     MarshalledFragment m(start, end, introns, align_strand, sj_strand, hypotheses, nm, clip);
+                     MarshalledFragment frag(start, end, introns, align_strand, sj_strand, hypotheses, nm, clip);
                      return std::string(
-                         rigel::accumulator::outcome_key(a.deposit(m.offered, binding_scratch)));
+                         rigel::accumulator::outcome_key(a.deposit(frag.offered, binding_scratch)));
                  },
                  nb::arg("start"),
                  nb::arg("end"),
@@ -3199,10 +2963,8 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("nm") = 0,
                  nb::arg("clip") = 0)
 
-            // ⭐ L under ONE hypothesis, without depositing — what the second pass scores against.
-            // ⛔ Exposed rather than reimplemented in Python: the pool rules left the tool with ONE definition of
-            // fragment length, and a scorer that computed its own would be a second definition of exactly
-            // the quantity that audit unified — and the one the drain would then disagree with.
+            // L under one hypothesis, without depositing: what the second pass scores against. Exposed rather than
+            // reimplemented in Python, so the scorer and the drain share the deposit's one definition of length.
             .def("length_under",
                  [](const Accumulator& a,
                     int64_t start,
@@ -3212,8 +2974,8 @@ NB_MODULE(_bam_impl, m) {
                     int32_t sj_strand,
                     nb::object hypotheses,
                     std::size_t hypothesis_index) {
-                     MarshalledFragment m(start, end, introns, align_strand, sj_strand, hypotheses);
-                     return a.length_under(m.offered, hypothesis_index, binding_scratch);
+                     MarshalledFragment frag(start, end, introns, align_strand, sj_strand, hypotheses);
+                     return a.length_under(frag.offered, hypothesis_index, binding_scratch);
                  },
                  nb::arg("start"),
                  nb::arg("end"),
@@ -3223,7 +2985,7 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("hypotheses") = nb::tuple(),
                  nb::arg("hypothesis_index") = 0)
 
-            // ⭐ The deposit rule's mass at every object the placement's observed path deposits on, without
+            // The deposit rule's mass at every object the placement's observed path deposits on, without
             // depositing: `(kinds, ids, masses)`, ids ref-local, one entry per object. A multimapper's place weighs
             // its candidates by these masses at the objects' capture efficiencies.
             .def("placement_masses",
@@ -3233,9 +2995,9 @@ NB_MODULE(_bam_impl, m) {
                     nb::iterable introns,
                     int32_t align_strand,
                     int32_t sj_strand) {
-                     MarshalledFragment m(start, end, introns, align_strand, sj_strand, nb::tuple());
+                     MarshalledFragment frag(start, end, introns, align_strand, sj_strand, nb::tuple());
                      std::vector<rigel::accumulator::PlaceMass> out;
-                     a.placement_masses(m.offered, binding_scratch, out);
+                     a.placement_masses(frag.offered, binding_scratch, out);
                      std::vector<int8_t> kinds;
                      std::vector<int64_t> ids;
                      std::vector<double> masses;
@@ -3254,11 +3016,10 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("align_strand") = STRAND_POS,
                  nb::arg("sj_strand") = STRAND_NONE)
 
-            // ⭐ The annotated sj id for MANY introns at once — `sj_edge_id`, the deposit's own lookup,
-            // applied per element. The second pass asks it once per hypothesis intron, which as a numpy
-            // call each was 0.9 M calls on a deep library; per reference it is one call. The ids are
-            // REF-LOCAL slots, the same space `set_sj` above pins to `ref_sj_offsets`, so a caller holding
-            // the payload's flat axis adds that base. -1 where the intron is not annotated.
+            // The annotated junction id for many introns at once: `sj_edge_id`, the deposit's own lookup, per
+            // element, so the second pass makes one call per reference. The ids are ref-local slots, the space
+            // `set_sj` pins to `ref_sj_offsets`, so a caller on the payload's flat axis adds that base. -1 where the
+            // intron is not annotated.
             .def("sj_edge_ids",
                  [](const Accumulator& a,
                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
@@ -3278,20 +3039,19 @@ NB_MODULE(_bam_impl, m) {
                  "The annotated sj id per intron, or -1 — `sj_edge_id` over arrays. Ids are\n"
                  "ref-local slots, as `set_sj` defines them.")
 
-            // Element-wise sum of `other` into this accumulator — the per-worker merge the parallel scan
-            // performs internally, exposed so the DETERMINISM contract can be tested directly: shard one
-            // fragment corpus K ways, merge, and compare with the unsharded run. The count banks are integers
-            // and merge bit for bit; the five float64 banks (the inverse-length sums and the conserved masses)
-            // agree to within the float64 representation, because the merge re-associates their sums.
+            // Element-wise sum of `other` into this accumulator, the parallel scan's per-worker merge, exposed so the
+            // determinism contract can be tested directly: shard one fragment corpus K ways, merge, and compare with
+            // the unsharded run. The integer count banks merge bit for bit; the five float64 banks (the inverse-length
+            // sums and the conserved masses) agree to rounding, because the merge re-associates their sums.
             .def("merge_from",
                  [](Accumulator& a, const Accumulator& other) { a.merge_from(other); },
                  nb::arg("other"));
     }
 
 
-        // ⭐ The accumulator SET — the parity surface for `offer`, the multimapper rule. Built from the
-        // flat partition exactly as the scanner builds its own; `at(ref)` hands out each reference's
-        // accumulator, and `deferred` / `qc` / `gap_resolution` are the union the payload exports.
+        // The accumulator set: the parity surface for `offer`, the multimapper rule. Built from the flat partition
+        // as the scanner builds its own; `at(ref)` hands out each reference's accumulator, and `deferred` / `qc` /
+        // `gap_resolution` are the union the payload exports.
         nb::class_<rigel::accumulator::AccumulatorSet>(m, "AccumulatorSet")
             .def("__init__",
                  [](rigel::accumulator::AccumulatorSet* self,
@@ -3330,9 +3090,9 @@ NB_MODULE(_bam_impl, m) {
             .def("offer",
                  [](rigel::accumulator::AccumulatorSet& s, nb::iterable placements) {
                      static rigel::accumulator::OfferScratch offer_scratch;
-                     // ⚠ ONE pass over `placements`, as over each placement's hypotheses, so a one-shot
-                     // iterable offers the same fragment as a list. The `Placement`s are taken after the
-                     // loop, once `marshalled` has stopped growing.
+                     // One pass over `placements`, as over each placement's hypotheses, so a one-shot iterable
+                     // offers the same fragment as a list. The `Placement`s are taken after the loop, once
+                     // `marshalled` has stopped growing.
                      std::vector<MarshalledFragment> marshalled;
                      std::vector<int32_t> refs;
                      for (nb::handle p : placements) {

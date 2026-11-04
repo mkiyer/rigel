@@ -1,18 +1,17 @@
-// psi_kernel.h — ψ, THE per-slot solve of the calibration sweep, on one slot's own (λ, θ) cube.
+// psi_kernel.h — ψ, the per-slot solve of the calibration sweep, on one slot's own (λ, θ) cube.
 //
-// Every slot with a live strand and a fragment is solved on its own cube in one pass, so the read-out is chunk-exact
-// by construction and the slots are independent — of each other and of the thread that takes them. Per slot: ψ = the
-// strand term (`transfer_rows.h`) + the two Jeffreys arms (½ log f_g + ½ log(1 − f_g)) + the fitted gDNA arm — the
-// landscape's curve read at the density each cell implies (`Arm`; no (n, K) matrix of it ever exists) — + the
-// delivered composition row, added per cell, + the delivered RNA level row + the θ quadrature's
-// log-weights, over K λ cells and — at an AMBIG slot — `n_tilt` θ nodes across the strand term's peak plus the two tilt
-// atoms (τ = ±1), a single-strand slot's one column being its live strand; then the read-out: `f_g` the continuous
-// ½-quantile of the θ-marginal on λ (through σ), `Var(log f_g)` its grid moment, `w_+` the RNA-mass-weighted share of
-// the + strand over every column, the composition their image on the admissible strands. The block pipeline
-// (`solve_kernel.cpp`) calls `solve_slot` for every slot of a block; the bindings for the gates
-// (`psi_cube`, `posterior_median`, `compose`, `gdna_arm`) read the same code. Gates:
-// `tests/calibration/test_vertex_reference.py`, `test_sweep.py` (chunk- and thread-exactness),
-// `profiling/sweep_replay.py replay --tolerance` on a captured sweep.
+// Each slot with a live strand and a fragment is solved on its own cube in one pass, independent of every other slot
+// and of the thread that takes it, so the read-out is chunk- and thread-exact. Over K λ cells (and, at an AMBIG slot,
+// `n_tilt` θ nodes across the strand term's peak plus the two tilt atoms τ = ±1; a single-strand slot has one column,
+// its live strand):
+//   ψ = the strand term (`transfer_rows.h`) + the Jeffreys arms ½ log f_g + ½ log(1 − f_g)
+//     + the fitted gDNA arm (`Arm`, evaluated per cell, never stored as an (n, K) matrix)
+//     + the delivered composition row + the delivered RNA level row + the θ quadrature's log-weights.
+// The read-out: `f_g` is the continuous ½-quantile of the θ-marginal on λ (through σ), `Var(log f_g)` its grid
+// moment, `w_+` the RNA-mass-weighted share of the + strand over every column, and the composition their image on
+// the admissible strands. `solve_kernel.cpp` calls `solve_slot` for every slot of a block; the bindings
+// (`psi_cube`, `posterior_median`, `compose`, `gdna_arm`) run the same code.
+// Gate: tests/calibration/test_vertex_reference.py.
 #pragma once
 
 #include <algorithm>
@@ -39,9 +38,9 @@ constexpr double PI = 3.14159265358979323846;
 const double LOG_PI = std::log(PI), LOG_2 = std::log(2.0);
 const double NEG_INF = -std::numeric_limits<double>::infinity();
 
-// the θ quadrature's truncation: the strand term's mass outside the window is below double precision —
-// erfc(√T) < ε₆₄ at T = −log ε₆₄, with ε₆₄ = 2⁻⁵² (numpy's finfo(float64).eps); the node count that
-// resolves the peak inside that window is derived from it in the dispatcher (simplex_logodds._TILT_NODES)
+// The θ quadrature's truncation: the strand term's mass outside the window is below double precision,
+// erfc(√T) < ε₆₄ at T = −log ε₆₄ with ε₆₄ = 2⁻⁵² (numpy's finfo(float64).eps). The dispatcher derives the node
+// count that resolves the peak inside that window from it (simplex_logodds._TILT_NODES).
 const double T_NATS = -std::log(std::numeric_limits<double>::epsilon());
 
 // a delivered RNA level row (one row of simplex_logodds.CubeRows): the held profile per strand over
@@ -52,14 +51,13 @@ struct Delivered {
     double total, opportunity, rho_ref;
 };
 
-// THE FITTED gDNA ARM: the landscape's curve — `logP` over a natural-log density grid `log_rho`
-// (`landscape.DensityLandscape`) — read at the density every cell implies, log ρ_c = log f_g + log M − log E (the
-// slot's unspliced count on its gDNA opportunity), with numpy's interpolation and its end rules: the ends held
-// constant off the grid ("no more information out here", never a linear extension of the last slope). Bare — no
-// reference, no measure term, no Jacobian: the curve is a density in log-rate, so its conversion to a linear-rate
-// density cancels the change of variable exactly, per component.
-// The clips on the fraction, the mass and the opportunity, exported as `rows.ARM_EPS` and read there by
-// `landscape`, whose fitted prior this arm evaluates.
+// The fitted gDNA arm: the landscape's curve `logP` over a natural-log density grid `log_rho`
+// (`landscape.DensityLandscape`), read at the density each cell implies, log ρ_c = log f_g + log M − log E (the
+// slot's unspliced count on its gDNA opportunity), with numpy's interpolation: constant off the grid's ends, never a
+// linear extension of the last slope. It carries no reference, measure term or Jacobian: the curve is a density in
+// log-rate, so the change of variable to linear rate cancels exactly, per component.
+// ARM_EPS clips the fraction, the mass and the opportunity; it is exported as `rows.ARM_EPS` for `landscape`, whose
+// fitted prior this arm evaluates.
 constexpr double ARM_EPS = 1.0e-12;
 
 inline double arm_abscissa(double fg) { return std::log(std::clamp(fg, ARM_EPS, 1.0 - ARM_EPS)); }
@@ -83,7 +81,7 @@ struct Arm {
 
 // ---- the θ window for one (slot, λ) --------------------------------------------------------------------
 // At fixed λ the strand term is a Gaussian in τ with centre τ̂ = d/a and width σ_τ = σ_p/|a|
-// (a = (1 − f_g)(κ − ½), d = u₊/n − ½); the window is where the term lies within T of its maximum ON the
+// (a = (1 − f_g)(κ − ½), d = u₊/n − ½); the window is where the term lies within T of its maximum on the
 // domain — [τ̂ − ρ, τ̂ + ρ] ∩ [−1, 1] with ρ = √((clip(τ̂) − τ̂)² + 2σ_τ²T) — and the whole domain where the
 // slot has no strand information.
 inline void tilt_window(double u_pos, double n, double var, double fg, double kappa, double& th_lo, double& th_hi) {
@@ -118,12 +116,11 @@ struct Grid {
     const double* lam; int K;
     // σ(λ); the two Jeffreys arms ½ log f_g + ½ log(1 − f_g); log of the clipped σ(λ), the fitted arm's abscissa
     std::vector<double> fg, jeffreys, log_frac;
-    double kappa, od_g, od_r;
+    double kappa;
     int n_tilt;
     const Arm* arm;  // the fitted gDNA arm, built or not
-    explicit Grid(const double* lam_, int K_, double kappa_, double od_g_, double od_r_, int n_tilt_, const Arm* arm_)
-        : lam(lam_), K(K_), fg(K_), jeffreys(K_), log_frac(K_), kappa(kappa_), od_g(od_g_), od_r(od_r_),
-          n_tilt(n_tilt_), arm(arm_) {
+    explicit Grid(const double* lam_, int K_, double kappa_, int n_tilt_, const Arm* arm_)
+        : lam(lam_), K(K_), fg(K_), jeffreys(K_), log_frac(K_), kappa(kappa_), n_tilt(n_tilt_), arm(arm_) {
         for (int k = 0; k < K; ++k) {
             fg[k] = sigmoid(lam[k]);
             jeffreys[k] = JEFFREYS_REF * log_expit(lam[k]) + JEFFREYS_REF * log_expit(-lam[k]);
@@ -140,7 +137,7 @@ inline void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* ps
                       double* tau, std::vector<double>& scratch) {
     const int K = g.K, C = g.columns(ambig);
     const double n = s.u_pos + s.u_neg;
-    const double var = strand_variance(n, s.fg_ref, s.fpos_ref, s.fneg_ref, g.kappa, g.od_g, g.od_r);
+    const double var = strand_variance(n, s.fg_ref, s.fpos_ref, s.fneg_ref, g.kappa);
     const double half_log_var = 0.5 * std::log(var);
     scratch.assign(static_cast<size_t>(K) * C, 0.0);
     double* log_w = scratch.data();
@@ -157,10 +154,9 @@ inline void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* ps
             const double log_h = std::log(h);
             double* tk = tau + static_cast<size_t>(k) * C;
             double* wk = log_w + static_cast<size_t>(k) * C;
-            // τ = sin θ at the nodes by the rotation recurrence from (sin, cos) of θ_lo and of h — two
-            // transcendentals per (slot, λ) instead of one per node, a few ulps over the window; clamped
-            // to the sine's range, which the rounding can leave by an ulp at a domain end (a share
-            // (1 ∓ τ)/2 below zero has no logarithm)
+            // τ = sin θ at the nodes by the rotation recurrence from (sin, cos) of θ_lo and of h: two
+            // transcendentals per (slot, λ) instead of one per node, within a few ulps. Clamped to [−1, 1]
+            // because rounding can leave it by an ulp at a domain end, where (1 ∓ τ)/2 has no logarithm.
             double sn = std::sin(th_lo), cs = std::cos(th_lo);
             const double sh = std::sin(h), ch = std::cos(h);
             for (int t = 0; t < Kt; ++t) {
@@ -215,8 +211,8 @@ inline void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* ps
         }
         for (size_t at = 0; at < rv.size(); ++at) psi[at] += rv[at] - rmax;
     }
-    // the weights, and THE WITNESS: a held level on a strand certifies that strand carries RNA, so the atom
-    // that puts all the RNA on the OTHER strand is out
+    // the weights, and the witness: a held level on a strand certifies that the strand carries RNA, so the atom
+    // that puts all the RNA on the other strand is excluded
     if (ambig) {
         const int Kt = g.n_tilt;
         for (size_t at = 0; at < static_cast<size_t>(K) * C; ++at) psi[at] += log_w[at];

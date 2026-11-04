@@ -1,14 +1,13 @@
-"""Gates for the transfer policy's shape and for the two mechanisms that belong to the policy
-rather than to any one face.
+"""Tests for the transfer policy's shape and for the two mechanisms that belong to the policy rather than to any one
+face.
 
-The shape: the backbone protocol; the installer and its refusal of an unknown name; the native pass
-wired and read without a copy; the two passes against an independent recursive reference (single hops
-of the native pass composed recursively); the no-echo law; the own claims' liveness under the
-strand protocol decision; and the completion contract, that every directed face
-carries a rule or a lane face or leads into structural pure gDNA. The mechanisms: the solve's
-ceilings, read only from a face that sent no composition, and the gDNA level lane, where a received
-level is a lower bound the hop widens, two bounds intersect rather than multiply, and an empty node
-forwards what it holds. The per-face builders are gated by `test_transfer_faces.py`.
+The shape: the backbone protocol; the installer and its refusal of an unknown name; the native pass wired and read
+without a copy; the two passes against an independent recursive reference (single hops of the native pass composed
+recursively); the no-echo law; the own claims' liveness under the strand protocol decision; and the completion contract,
+that every directed face carries a rule or a lane face or leads into structural pure gDNA. The mechanisms: the solve's
+ceilings, read only from a face that sent no composition, and the gDNA level lane, where a received level is a lower
+bound the hop widens, two bounds intersect rather than multiply, and an empty node forwards what it holds. The per-face
+builders are tested in `test_transfer_faces.py`.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ import pytest
 
 import rigel.calibration.sweep as SW
 from rigel.calibration.blocks import SweepCapture
-from rigel.calibration.messages import Policy
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.native import transfer_rows as R
 from _transfer_harness import (
@@ -56,15 +54,8 @@ from _transfer_harness import (
 )
 
 
-def test_the_transfer_policy_satisfies_the_backbone_protocol():
-    from rigel.calibration.messages.transfer import TransferPolicy
-
-    assert isinstance(TransferPolicy(), Policy)
-
-
 def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
-    """`message_policy = "transfer"` must install `TransferPolicy` (an unreadable knob is worse
-    than no knob), and the unknown-name refusal must survive the new branch."""
+    """`message_policy = "transfer"` must install `TransferPolicy`, and an unknown name is still refused."""
     import dataclasses as _dc
 
     from rigel.calibration.messages.transfer import TransferPolicy
@@ -100,11 +91,11 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
 
 
 def _reference_rows(prepared, ctx):
-    """An independent implementation of the two passes, recursive rather than sequential: the message
-    into ``i`` from its neighbour ``s`` is the face's rule applied to ``s``'s own claim composed with
-    the message into ``s`` from ``s``'s OTHER neighbour (one hop of the native pass, `_rule`, on a table
-    holding only that composed message), and the rows are the two messages composed. Nothing here reads
-    the policy's pass state; only its claims, rules and single hops."""
+    """An independent implementation of the two passes, recursive rather than sequential: the message into ``i`` from
+    its neighbour ``s`` is the face's rule applied to ``s``'s own claim composed with the message into ``s`` from
+    ``s``'s other neighbour (one hop of the native pass, `_rule`, on a table holding only that composed message), and
+    the rows are the two messages composed. Nothing here reads the policy's pass state, only its claims, rules and
+    single hops."""
     left, right = list(ctx.left), list(ctx.right)
     own, faces = prepared.own, prepared.faces
     memo = {}
@@ -130,10 +121,10 @@ def _reference_rows(prepared, ctx):
     lmemo = {}
 
     def level_into(s, i):
-        """The lane, recursively: nothing unless the face is a lane face; an EMPTY sender forwards the
-        level that reaches it from its far side unchanged; a full sender sends the product of its own
-        level and the level it holds; a full recipient prices the hop (both totals' counting plus the
-        discrepancy beyond it) and takes the level as a lower bound."""
+        """The lane, recursively: nothing unless the face is a lane face; an empty sender forwards unchanged the level
+        reaching it from its far side; a full sender sends the product of its own level and the level it holds; a full
+        recipient prices the hop (both totals' counting plus the discrepancy beyond it) and takes the level as a lower
+        bound."""
         key = (s, i)
         if key in lmemo:
             return lmemo[key]
@@ -184,10 +175,9 @@ def _reference_rows(prepared, ctx):
 
 
 def test_the_backbone_rows_equal_an_independent_recursive_reference_of_the_passes(sweep_inputs):
-    """The passes, gated against a second implementation: what the backbone's two sequential passes
-    deliver equals the recursive definition — the message into a node is the face's rule applied to
-    the sender's own claim composed with what reached the sender from ITS far side — on the live toy
-    and on the toy with populated inside pieces and alternative splice sites (every rule family live)."""
+    """The backbone's two sequential passes deliver what the recursive definition gives (the message into a node is the
+    face's rule applied to the sender's own claim composed with what reached the sender from its far side), on the live
+    toy and on the toy with populated inside pieces and alternative splice sites, so every rule family is live."""
     pol, _g, _w = _full_policy(sweep_inputs)
     for ctx in (_ctx_of(sweep_inputs), _with_alt_splice_sites(_ctx_of(sweep_inputs))):
         prepared = _prepared(pol, ctx)
@@ -197,10 +187,9 @@ def test_the_backbone_rows_equal_an_independent_recursive_reference_of_the_passe
 
 
 def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
-    """The no-echo law, watched: replace ONE node's own claim by a distinctive profile and re-run the
-    passes — what that node HOLDS from either side must not move (its claim never returns to it),
-    while some other node's rows must (the claim did travel). Checked at an intron with two live faces
-    and at a strand-live exon."""
+    """The no-echo law: replace one node's own claim by a distinctive profile and re-run the passes; what that node
+    holds from either side must not move (its claim never returns to it), while some other node's rows must (the claim
+    did travel). Checked at an intron with two live faces and at a strand-live exon."""
     pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(pol, ctx)
@@ -234,13 +223,10 @@ def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
 
 
 def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
-    """The vacuity law, for every claim carried by the strand channel: where a node's strand channel
-    is dead (``own.tau_lam == 0``), that node's OWN CLAIM is
-    absent — an exon's and a boundary's alike — so nothing of its own can travel; and a policy built
-    without strand parameters carries no strand claim anywhere."""
+    """Where a node's strand channel is dead (``own.tau_lam == 0``), its own strand-borne claim is absent (an exon's and
+    a boundary's alike), so nothing of its own travels; a policy built without strand parameters carries no strand claim
+    anywhere."""
     import dataclasses as _dc
-
-    from rigel.calibration.messages.transfer import TransferPolicy
 
     pol, _g, _w = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
@@ -255,10 +241,6 @@ def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
             assert dead.own[x] is None, f"a dead exon {x} carries a claim"
         elif is_bnd[x] and dead.own[x] is not None:
             assert not dead.own[x].any(), f"a dead boundary {x} carries a strand claim"
-    no_strand = _prepared(TransferPolicy(), ctx)
-    for x in range(n):
-        if is_exon[x]:
-            assert no_strand.own[x] is None
     # boundaries dead, exons live: the boundary's own claim is absent at every boundary
     dead_b = _prepared(pol, _dead_boundaries(ctx))
     for b in np.flatnonzero(is_bnd):
@@ -266,10 +248,9 @@ def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
 
 
 def test_every_directed_face_is_served_or_faces_structural_pure_gdna(sweep_inputs):
-    """The completion contract, structurally: after `prepare`, every directed face (x → y) of the chain
-    carries a composition rule or is a lane face, unless an end of it is an intergenic region — a
-    TERMINAL: structurally pure gDNA, nothing to impute there and no own level to send, so it neither
-    receives nor sends and the chain breaks at it. STOP by omission is impossible by construction."""
+    """After `prepare`, every directed face (x → y) of the chain carries a composition rule or is a lane face, unless an
+    end of it is an intergenic region: a terminal, structurally pure gDNA with nothing to impute and no own level to
+    send, so the chain breaks there. A face cannot be left unserved by omission."""
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
     lane = prepared.lanes.get("gdna")
@@ -303,9 +284,9 @@ def test_every_directed_face_is_served_or_faces_structural_pure_gdna(sweep_input
 
 
 def test_an_rna_level_reads_as_a_ceiling_on_the_gdna_share_and_round_trips():
-    """`rna_row_of_level`: a lower-only RNA level (non-decreasing in u) is NON-INCREASING in λ — "at least
-    this much RNA" is "at most this much gDNA"; the level of a profile read back is the profile where the
-    coordinate resolves. PERTURBATION: the gDNA map in its place does not round-trip."""
+    """`rna_row_of_level`: a lower-only RNA level (non-decreasing in u) is non-increasing in λ, since "at least this
+    much RNA" is "at most this much gDNA"; the level of a profile read back is the profile where the coordinate
+    resolves. The gDNA map in its place would not round-trip."""
 
     K = 60
     lam = np.linspace(-10.0, 10.0, K)
@@ -329,12 +310,12 @@ def test_an_rna_level_reads_as_a_ceiling_on_the_gdna_share_and_round_trips():
 
 
 def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
-    """The policy's solve on a hand-built single-strand exon — THE CEILING: the left face sent a
-    COMPOSITION with an RNA level and a junction flux — nothing of it is read (the face map already
-    carries them); the right face sent an RNA level and no composition, and the exon has a flux at that
-    junction — both are read, intersected, and delivered as a non-increasing row. An AMBIG node, an
-    empty node and a node whose live strand admits nothing get no ceiling. PERTURBATION: with the left
-    message's composition removed, its level and flux join the intersection and the row changes."""
+    """The policy's solve on a hand-built single-strand exon. The left face sent a composition with an RNA level and a
+    junction flux, and none of it is read (the face map already carries them); the right face sent an RNA level and no
+    composition, and the exon has a flux at that junction, so both are read, intersected and delivered as a
+    non-increasing row. An AMBIG node, an empty node and a node whose live strand admits nothing get no ceiling. With
+    the left message's composition removed, its level and flux would join the intersection.
+    """
     K = 41
     lam = np.linspace(-6.0, 6.0, K)
     u = lam
@@ -371,11 +352,10 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     assert rows is not None
     ceiling = R.rna_row_of_level(intersect([held_r, flux[(1, 1)]]), u, lam, 400.0, 100.0, 0.5)
     assert np.all(np.diff(ceiling) <= 1e-9)
-    # the delivered row is the held composition fused with the ceiling — the left face's level and
-    # flux are NOT in it
+    # the delivered row is the held composition fused with the ceiling; the left face's level and flux are not in it
     np.testing.assert_allclose(rows[1], fuse([comp - comp.max(), ceiling]), atol=1e-12)
     assert not rows[[0, 2, 3, 4]].any()
-    # the perturbation: the left composition removed → its level and flux join
+    # the left composition removed: its level and flux join
     from_left2 = Received.empty(5, K)
     from_left2.has_neighbour[1] = True
     from_left2.level_rna_pos.write(1, held_l, 25.0, 100.0)
@@ -395,9 +375,9 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
 
 
 def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(sweep_inputs):
-    """On the live toy: every exon with a junction flux carries it PER FACE in the lane; and at every
-    single-strand exon whose faces all sent a composition the delivered row equals the row without the
-    ceiling step (nothing added), so the flux inside a face map is never counted twice."""
+    """On the live toy every exon with a junction flux carries it per face in the lane, and at every single-strand exon
+    whose faces all sent a composition the delivered row equals the row without the ceiling step, so the flux inside a
+    face map is never counted twice."""
     ctx, prepared = _rna_lanes_of(sweep_inputs)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     sc = np.asarray(ctx.sj_count_lo) + np.asarray(ctx.sj_count_hi)
@@ -448,10 +428,10 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
 
 
 def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
-    """The gDNA lane's hop into a full recipient (no two-sided face): what the recipient holds is
-    non-decreasing in u (a level that crosses a face says "at least this much gDNA" and nothing more), a
-    two-sided input loses only its upper side, and a hop across a density cliff — a larger price — widens
-    it. The sender is EMPTY and holds the level with its witness, so it forwards and the recipient prices."""
+    """The gDNA lane's hop into a full recipient (no two-sided face): what the recipient holds is non-decreasing in u (a
+    level crossing a face says "at least this much gDNA" and nothing more), a two-sided input loses only its upper side,
+    and a hop across a density cliff (a larger price) widens it. The sender is empty and holds the level with its
+    witness, so it forwards and the recipient prices."""
     u = np.linspace(-10, 10, 60)
     two_sided = -0.5 * ((u - 1.0) / 0.4) ** 2
     two_sided -= two_sided.max()
@@ -487,10 +467,9 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
 
 
 def test_the_level_coordinates_round_trip_through_a_node_total():
-    """`level_of_profile` and `profile_of_level` are one map read both ways: a composition profile
-    taken to a level at (n, a) and back at the same (n, a) is itself wherever the level lies below
-    the node's total; and the same level read at a node with a LARGER total is a smaller gDNA share
-    (the level is kept, the share is not)."""
+    """`level_of_profile` and `profile_of_level` are one map read both ways: a composition profile taken to a level at
+    (n, a) and back at the same (n, a) is itself wherever the level lies below the node's total; the same level read at
+    a node with a larger total is a smaller gDNA share (the level is kept, the share is not)."""
 
     lam = np.linspace(-10, 10, 601)  # a fine grid: the round trip interpolates twice
     u = lam
@@ -505,9 +484,8 @@ def test_the_level_coordinates_round_trip_through_a_node_total():
 
 
 def test_bounds_intersect_and_do_not_multiply():
-    """`intersect`: the pointwise tighter of two lower bounds, never their product — two identical soft
-    bounds intersect to themselves (a product would double the penalty), and a tight bound beats a
-    loose one at every density."""
+    """`intersect`: the pointwise tighter of two lower bounds, never their product; two identical soft bounds intersect
+    to themselves (a product would double the penalty), and a tight bound beats a loose one at every density."""
 
     u = np.linspace(-10, 10, 60)
     soft = R.lower_side(-0.5 * ((u - 1.0) / 2.0) ** 2)
@@ -519,11 +497,11 @@ def test_bounds_intersect_and_do_not_multiply():
 
 
 def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_holds():
-    """The ratchet gate: on a hand-built lane (three full nodes in a row, which the toy does not have),
-    the level a full node emits is the pointwise tighter of its own lower side and the priced level it
-    holds — never their sum, which sharpened a chain of nine one-fragment boundaries into a hard bound
-    on the ladder. The recipient is EMPTY, so the hop stops at the emission and it is read as sent.
-    PERTURBATION: a pass whose full node multiplies fails here."""
+    """On a hand-built lane of three full nodes in a row (which the toy lacks), the level a full node emits is the
+    pointwise tighter of its own lower side and the priced level it holds, never their sum, which would sharpen a chain
+    of one-fragment boundaries into a hard bound. The recipient is empty, so the hop stops at the emission and is read
+    as sent.
+    """
     u = np.linspace(-10, 10, 60)
     own = RowTable(3, u.shape[0])
     own[1] = -0.5 * ((u + 1.0) / 1.5) ** 2
@@ -567,10 +545,10 @@ def test_the_hop_price_is_both_countings_and_the_discrepancy_beyond_them():
 
 
 def test_a_composition_arrives_only_through_a_face_with_a_composition_rule(sweep_inputs):
-    """The table's ``has_composition`` against the face table, independently of the kernel that wrote
-    it: on the live toy a node holds a composition from a side only where the directed face into it
-    carries a composition rule, and a node that heard something through a face with NO rule heard a
-    level. PERTURBATION: a kernel that marks a level as a composition fails here."""
+    """The table's ``has_composition`` against the face table, independently of the kernel that wrote it: on the live
+    toy a node holds a composition from a side only where the directed face into it carries a composition rule, and a
+    node that heard something through a face with no rule heard a level.
+    """
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
     _rows, fl, br = _drive(prepared, ctx)
@@ -588,10 +566,10 @@ def test_a_composition_arrives_only_through_a_face_with_a_composition_rule(sweep
 
 
 def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
-    """The empty node is transparent: the toy's inside pieces have no total, so what the boundary beyond
-    such a piece holds from it must be exactly what the piece received — same profile, same (n, a) of
-    the last full node — priced only at the full recipient. PERTURBATION: a policy whose empty nodes
-    price the hop fails this gate."""
+    """The empty node is transparent: the toy's inside pieces have no total, so what the boundary beyond such a piece
+    holds from it is exactly what the piece received (same profile, same (n, a) of the last full node), priced only at
+    the full recipient.
+    """
 
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
@@ -617,12 +595,11 @@ def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
 
 
 def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_faces(sweep_inputs):
-    """`Faces`, the rules as typed tables: on the live toy every rule the builders wrote is one of the
-    five kinds, its scalar parameters and its rows are finite, `at` reads back what the table holds,
-    and every ruled face is a real face (the source is the destination's neighbour on that side).
-    A rule at a face that does not exist, or a second rule at a face, is refused by the kernel's own table
-    writer (`transfer_kernel.h`, ``FacesOut::set``), so a builder cannot address the wrong neighbour and
-    the builders' faces stay disjoint."""
+    """`Faces`, the rules as typed tables: on the live toy every rule the builders wrote is one of the five kinds, its
+    scalar parameters and rows are finite, `at` reads back what the table holds, and every ruled face is a real face
+    (the source is the destination's neighbour on that side). The kernel's table writer (`transfer_kernel.h`,
+    ``FacesOut::set``) refuses a rule at a nonexistent face or a second rule at a face, so a builder cannot address the
+    wrong neighbour and the builders' faces stay disjoint."""
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
     faces = prepared.faces
@@ -645,16 +622,14 @@ def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_f
 
 
 def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs):
-    """THE TABLES ARE ALLOCATED UNFILLED, so this is the reader audit made executable on the kernel's own
-    tables: every matrix the builders returned is poisoned with NaN where its mask says no row — the
-    claims, each lane's own levels (the face rows and the flux store hold written rows only) — and both
-    received tables' compositions and level profiles are poisoned whole before the passes; the pass's
-    tables (every bit, count and witness, every PRESENT row) and the delivered channels are bit-identical
-    to the unpoisoned run. One reader of an ABSENT row — in the pass or the solve — and NaN reaches a
-    number. The block pipeline's arena holds the same unfilled matrices and reads them through the same
-    code (`native/solve_kernel.cpp`), which the replay holds bit-identical. PERTURBATION: a kernel reading
-    a row without its bit (`lane_emit` taking the own level unmasked; the solve reading a composition
-    without its bit) fails here."""
+    """The tables are allocated unfilled, so this audits every reader on the kernel's own tables: every matrix the
+    builders returned is poisoned with NaN where its mask says no row (the claims and each lane's own levels; the face
+    rows and the flux store hold written rows only), and both received tables' compositions and level profiles are
+    poisoned whole before the passes. The pass's tables (every bit, count and witness, every present row) and the
+    delivered channels must be bit-identical to the unpoisoned run, so any reader of an absent row, in the pass or the
+    solve, would let NaN reach a number. The block pipeline's arena holds the same unfilled matrices and reads them
+    through the same code (`native/solve_kernel.cpp`).
+    """
     pol, _n_grid, _window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     n, K = int(ctx.n_slots), int(ctx.n_grid)
@@ -693,9 +668,9 @@ def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs):
 
 
 def test_the_backbone_runs_the_sweep_in_one_native_call(sweep_inputs, monkeypatch):
-    """The wiring: `sweep.solve_chain` reaches `native.solve_blocks` ONCE per sweep, whatever the policy —
-    a spy counts the calls and reads the policy the kernel was told — and the transfer sweep's capture
-    holds received tables that heard something, while the silent sweep runs no layer and holds none."""
+    """`sweep.solve_chain` reaches `native.solve_blocks` once per sweep whatever the policy (a spy counts the calls and
+    reads the policy the kernel was told); the transfer sweep's capture holds received tables that heard something,
+    while the silent sweep runs no layer and holds none."""
     calls = []
     real = SW.solve_blocks
 

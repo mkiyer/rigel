@@ -1,33 +1,17 @@
-"""Sorted region geometry, the region-to-boundary index mapping, and the observable genome over both.
+"""Sorted region geometry, the region-to-boundary index mapping, and the observable genome over both (layer 1).
 
-Three pieces of pure geometry the calibrator builds on:
+:class:`RegionArrays` is a per-reference CSR view of the region table, sorted by ``(ref_id, start)``, carrying each
+region's transcript-strand class and the index's unobservable mask. :func:`region_right_boundary` and
+:func:`boundary_region_indices` map regions to contiguous boundaries. The observable-genome readers cut each region at
+the mask (:func:`observable_pieces`) and give each boundary's bases to the nearest masked base
+(:func:`boundary_reaches`) and each reference's maximal observable runs (:func:`observable_stretches`); with nothing
+masked they are the regions, unbounded reaches and the references themselves.
 
-* :class:`RegionArrays` — a per-reference-CSR view of the region table, sorted by ``(ref_id, start)``
-  so each reference's rows are contiguous and ascending. It carries the structural columns plus the
-  int8 transcript-strand class derived from each region's signature, which is the strand-model input,
-  and the index's unobservable mask in the same reference ids.
-
-* The region-to-contiguous-boundary index mapping — :func:`region_right_boundary` and
-  :func:`boundary_region_indices`.
-
-* The observable genome over the partition (`rigel.observable`): each region cut at the mask into its
-  observable pieces (:func:`observable_pieces`), each boundary's bases to the nearest masked base on either
-  side (:func:`boundary_reaches`), and each reference's maximal observable runs (:func:`observable_stretches`).
-  The opportunity layer reads them. With no masked base they are the regions, unbounded reaches and the
-  references themselves.
-
-A contiguous boundary is the boundary BETWEEN two adjacent regions, so a reference with ``k`` regions
-owns exactly ``k - 1`` of them and a boundary always has a region on both sides. There are no terminal
-boundary slots, and the boundary axis is therefore derivable from ``ref_id`` alone — no stored offsets.
-
-That derivation rests on one fact: boundary ids are assigned per reference in genomic order, in
-reference order, which is exactly the order adjacent same-reference region pairs appear in a
-``(ref_id, start)``-sorted region table. :func:`~rigel.calibration.region_chain.build_region_chain`
-lays out the same numbering by walking the payload's CSR offsets, and
-``test_boundary_numbering_matches_the_chain_built_from_the_payload_offsets`` pins the two against
-each other — a second algorithm, not a second call to the first.
-
-No tunable parameters: this module is index arithmetic only.
+A contiguous boundary lies between two adjacent regions, so a reference with ``k`` regions owns ``k - 1`` of them and
+the boundary axis is derivable from ``ref_id`` alone. That rests on boundary ids being assigned per reference in
+genomic order, the order adjacent same-reference pairs appear in the sorted table;
+:func:`~rigel.calibration.region_chain.build_region_chain` derives the same numbering from the payload's CSR offsets,
+and the two must stay equal.
 """
 
 from __future__ import annotations
@@ -57,10 +41,8 @@ __all__ = [
 class RegionArrays:
     """Per-reference-CSR view of the region table.
 
-    Rows are sorted by ``(ref_id, start)`` so each ref's rows are contiguous
-    and ascending. ``ref_offsets`` is the per-ref CSR boundary array; the
-    slice ``[ref_offsets[r]:ref_offsets[r + 1]]`` is one reference's regions, sorted
-    by ``start`` (and by ``end`` — regions tile a reference).
+    Rows are sorted by ``(ref_id, start)``, so each reference's rows are contiguous and ascending; the slice
+    ``[ref_offsets[r]:ref_offsets[r + 1]]`` is one reference's regions, which tile it.
     """
 
     ref_id: np.ndarray  # int32, (R,)
@@ -92,13 +74,10 @@ class RegionArrays:
 
     @classmethod
     def from_index(cls, index) -> "RegionArrays":
-        """Build the geometry for the partition the scanner actually deposits into.
+        """Build the geometry for the partition the scanner deposits into.
 
-        This and :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` are the two
-        halves of one contract — the calibration geometry must address the payload the scanner
-        produced — so they read the same frame (``index.regions_df``, the splice graph) through
-        one accessor. Passing a frame by hand is how the two drift apart, and nothing downstream
-        detects that except as a shape error far from its cause.
+        It reads the same frame as :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` through one
+        accessor, so the calibration geometry cannot address a different partition than the payload.
         """
         return cls.from_frame(index.regions_df, index.ref_name_to_id, index.unobservable_df)
 
@@ -109,11 +88,10 @@ class RegionArrays:
         ref_name_to_id: Mapping[str, int],
         unobservable: pd.DataFrame | None = None,
     ) -> "RegionArrays":
-        """Build from a partition frame directly — for tests that construct a partition by hand.
+        """Build from a partition frame directly, for tests that construct a partition by hand.
 
-        Production uses :meth:`from_index`, which cannot address a different partition than the
-        scanner did and carries the index's unobservable mask. *unobservable* is that mask's frame
-        (``ref, start, end``); ``None`` is a partition with nothing masked."""
+        *unobservable* is the mask's frame (``ref, start, end``); ``None`` means nothing is masked. Production uses
+        :meth:`from_index`."""
         if "signature" not in region_df.columns:
             raise ValueError(
                 "RegionArrays.from_frame: region_df is missing the 'signature' "
@@ -191,9 +169,8 @@ def region_right_boundary(ref_id: np.ndarray) -> np.ndarray:
     boundary axis is the run of adjacent same-reference pairs, numbered in region order. A reference
     with one region owns no boundary; an empty reference contributes nothing.
 
-    ``ref_id`` must be grouped — all of a reference's regions contiguous — which
-    :class:`RegionArrays` guarantees by sorting on ``(ref_id, start)``. Ungrouped input would
-    manufacture boundaries that straddle references, so it is refused rather than tolerated.
+    ``ref_id`` must be grouped, all of a reference's regions contiguous, which :class:`RegionArrays` guarantees by
+    sorting on ``(ref_id, start)``. Ungrouped input would make boundaries that straddle references, so it raises.
     """
     ref = np.asarray(ref_id)
     n = int(ref.shape[0])
@@ -201,8 +178,7 @@ def region_right_boundary(ref_id: np.ndarray) -> np.ndarray:
     if n < 2:
         return out
     same = ref[:-1] == ref[1:]
-    # grouped ⇔ each reference's rows form ONE run ⇔ the number of runs equals the number of
-    # distinct references. `np.unique` counts distinct values; `same` counts run breaks.
+    # grouped ⇔ each reference's rows form one run ⇔ the number of runs equals the number of distinct references
     if int((~same).sum()) + 1 != int(np.unique(ref).shape[0]):
         raise ValueError(
             "ref_id is not grouped: each reference's regions must be contiguous. Build the geometry "
@@ -332,7 +308,8 @@ def boundary_reaches(region_arrays: RegionArrays) -> tuple[np.ndarray, np.ndarra
         j = np.searchsorted(ms, xr, side="left") - 1
         has = j >= 0
         reach_lo[rows[has]] = xr[has] - np.minimum(me[j[has]], xr[has])
-        # the first run that ends right of the boundary: the boundary's right base is masked iff it starts at or before it
+        # the first run that ends right of the boundary: the boundary's right base is masked iff it starts at or
+        # before it
         k = np.searchsorted(me, xr, side="right")
         has = k < ms.size
         reach_hi[rows[has]] = np.maximum(ms[k[has]], xr[has]) - xr[has]

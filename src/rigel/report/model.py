@@ -1,18 +1,9 @@
-"""Transform a :class:`ReportSubstrate` into the render-ready view model.
+"""Transform a :class:`ReportSubstrate` into the render-ready view model: a JSON-serializable dict the front end
+only lays out, so no logic runs in the browser.
 
-The view model is a plain, JSON-serializable dict consumed by the report's
-front-end. Keeping this transform in Python (not JavaScript) means the HTML
-layer only lays out already-computed values — no business logic in the browser.
-
-Most values are emitted as raw numbers and formatted by the front-end
-(thousands separators, percentages), so the same values drive tooltips, tables,
-and chart data. The exceptions are finished here: the headline tiles' captions
-and a few text KPIs are formatted strings, and some table cells are rounded (the
-fragment-length overflow, as a percentage; the gene table's TPM and counts; the
-per-reference gDNA count and fraction). Every cut a tile draws, the gene table's
-cap, the genome track's reference cap its caption states and every rounding are
-``CONSTANTS.qc``'s. The summary is read only through
-:class:`~rigel.report.substrate.SummaryReader`, so only the keys it lists.
+Most values are raw numbers the front end formats, so tooltips, tables and charts share them. The headline captions
+and a few text KPIs are finished strings, and some table cells are rounded here. Every tile cut, table cap and
+rounding is ``CONSTANTS.qc``'s. The summary is read only through :class:`~rigel.report.substrate.SummaryReader`.
 """
 
 from __future__ import annotations
@@ -21,12 +12,10 @@ from ..config import CONSTANTS
 from .specs import fl_label
 from .substrate import ReportSubstrate, SummaryReader
 
-# Categorical colour slots (indices into the validated data-viz palette). The
-# front-end resolves these to hex per theme; here we only assign roles.
+# Categorical colour slots of the palette; the front end resolves them to colours per theme.
 _C = {i: f"f{i}" for i in range(1, 9)}
 
-#: The ``gene_quant`` columns the gene table shows, in its row order. A column the table lacks reads as empty
-#: cells, so ``tests/test_report.py`` holds each one to what the writer writes.
+#: The ``gene_quant`` columns the gene table shows, in order. A column the table lacks reads as empty cells.
 GENE_COLUMNS = (
     "gene_name",
     "gene_id",
@@ -44,10 +33,9 @@ def _pct(numer: float, denom: float) -> float:
 
 
 def _capture(summary: SummaryReader) -> dict | None:
-    """Calibration's capture answer: the bulk density of its gDNA landscape — the level, in fragments per
-    bp, every capture efficiency is read against — and the landscape's saturated level as a multiple of
-    that bulk (1: no level above it). ``bulk_density`` is ``None`` when no landscape was fitted; the
-    answer is ``None`` when the summary carries none."""
+    """Calibration's capture answer: the gDNA landscape's bulk density (fragments per bp, the level every capture
+    efficiency is read against) and its saturated level as a multiple of the bulk (1: nothing above it).
+    ``bulk_density`` is ``None`` when no landscape was fitted; the answer is ``None`` when the summary has none."""
     if not summary.holds("calibration.gdna_bulk_density"):
         return None
     cal = summary["calibration"]
@@ -136,8 +124,7 @@ def _verdicts(summary: SummaryReader) -> list[dict]:
         }
     )
 
-    # Capture — descriptive only: variable capture performance is expected, so an enriched level is
-    # neither good nor bad. Styled neutral ("info").
+    # Capture is descriptive: an enriched level is neither good nor bad, so the tile is neutral ("info").
     capture = _capture(summary)
     if capture is not None:
         if capture["bulk_density"] is None:
@@ -194,7 +181,7 @@ def _alignment(summary: SummaryReader) -> dict:
         {"l": "Alignment records", "v": total, "fmt": "count"},
         {"l": "Duplicates", "v": _pct(a["duplicate_reads"], total), "fmt": "pct"},
     ]
-    # Table keeps both unit families, each labeled so they are not conflated.
+    # The table shows both units, read pairs and alignment records, each labelled.
     rows = [
         ["Read pairs", n_pairs, 1.0],
         ["  placed, unique", unique, _pct(unique, n_pairs)],
@@ -347,8 +334,7 @@ def _genes(sub: ReportSubstrate) -> dict:
     if gq is None or gq.empty:
         return {"rows": [], "total": 0, "shown": 0, "truncated": False}
     df = gq[[c for c in GENE_COLUMNS if c in gq.columns]]
-    # Embed only expressed genes for lookup; the long tail of zero-count genes
-    # stays in gene_quant.feather. Cap the embed to keep the HTML a sane size.
+    # Embed only expressed genes, capped to bound the HTML size; the rest stay in gene_quant.feather.
     if "count" in df.columns:
         df = df[df["count"] > 0]
     if "tpm" in df.columns:
@@ -357,7 +343,7 @@ def _genes(sub: ReportSubstrate) -> dict:
     truncated = total > qc.gene_table_rows
     df = df.head(qc.gene_table_rows)
 
-    # Build the row arrays column-wise (vectorized) — far faster than iterrows.
+    # Rows are built column-wise, not with iterrows.
     def col(name, cast, default):
         if name not in df.columns:
             return [default] * len(df)
@@ -410,7 +396,7 @@ def _calibration(summary: SummaryReader, track) -> dict:
         "enrichment_kpis": enrichment_kpis,
         "density_kpis": density_kpis,
         "capture": capture,
-        # a summary from before calibration's capture answer (0.7.1, schema 2) has a block but no answer
+        # an older-schema summary can hold a calibration block without a capture answer
         "calibrated": bool(summary[""]["calibration"]),
         "ref_table": ref_table,
         # the genome track's reference cap, which its caption states
@@ -419,16 +405,10 @@ def _calibration(summary: SummaryReader, track) -> dict:
 
 
 def _reference_table(track) -> list:
-    """Per-reference gDNA summary (all references), sorted by gDNA count desc.
+    """Per-reference gDNA summary of every reference, by gDNA count descending (the track facets only the top few).
 
-    Rows: ``[ref, n_regions, count_gdna, mean_density, fraction_gdna]``. This is the
-    complete, compact view of every reference — the track chart only facets the
-    top few by gDNA count, so users never sift through hundreds of panels.
-
-    ``mean_density`` is the reference-wide gDNA count per bp (Σ gDNA count / Σ region
-    length) — NOT a median. On most references the median per-region density is 0
-    (most regions carry no gDNA), which is a useless column; the count-per-bp
-    average discriminates references and is what "density" means at this scale.
+    Rows are ``[ref, n_regions, count_gdna, mean_density, fraction_gdna]``. ``mean_density`` is the reference's gDNA
+    count per bp (Σ gDNA count / Σ region length): a per-region median is 0 on most references.
     """
     qc = CONSTANTS.qc
     length = (track["end"] - track["start"]).clip(lower=1)

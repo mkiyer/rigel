@@ -1,19 +1,8 @@
-"""
-rigel.buffer — Columnar fragment buffer with Arrow IPC disk spill.
+"""rigel.buffer — the columnar fragment buffer, with Arrow IPC spill to disk.
 
-Stores resolved fragment data in memory-efficient columnar NumPy arrays
-using CSR (Compressed Sparse Row) layout for variable-length transcript
-and gene index sets.  When memory usage exceeds a configurable threshold,
-completed chunks are spilled to disk as Arrow IPC (Feather v2) files
-with LZ4 compression.
-
-Architecture
-------------
-- The native scanner hands over finalized chunks of compact NumPy arrays
-  (``inject_chunk``).
-- When total in-memory chunk size exceeds *max_memory_bytes*,
-  the oldest chunk is spilled to disk as Arrow IPC with LZ4.
-- Scoring consumes the chunks once, in order (``iter_chunks_consuming``).
+The native scanner hands over finalized chunks of compact NumPy arrays (``inject_chunk``), variable-length transcript
+sets in CSR layout. When the in-memory chunks exceed *max_memory_bytes*, a background writer spills the oldest to disk
+as Arrow IPC (Feather v2) with LZ4. Scoring consumes the chunks once, in order (``iter_chunks_consuming``).
 """
 
 import logging
@@ -52,25 +41,15 @@ __all__ = ["FragmentBuffer"]
 
 @dataclass(slots=True)
 class _FinalizedChunk:
-    """Immutable chunk of fragment data in compact columnar arrays.
+    """An immutable chunk of fragment data in compact columnar arrays.
 
-    Fixed-width fields are stored as typed NumPy vectors.
-    Variable-width transcript index sets use CSR (Compressed Sparse Row)
-    layout: ``offsets[i]:offsets[i+1]`` indexes the flat ``indices`` array.
+    Fixed-width fields are typed vectors; transcript index sets are CSR (``t_offsets[i]:t_offsets[i+1]`` indexes
+    ``t_indices``). The dtypes are a contract with the native side:
 
-    Per-fragment strand mixing (``ambig_strand``) is cached as a uint8
-    array emitted by the native resolver.
-
-        Buffer dtype contract:
-        * ``frag_id`` stays int64 to accommodate BAM files with more than
-            2 billion fragments.
-        * ``t_offsets`` and ``t_indices`` stay int32, limiting a chunk to
-            ~2.1 billion candidate entries.
-        * Per-candidate exon overlap bases are uint16; native append
-            guards reject values above 65535.
-        * Fragment lengths stay int32 because real transcript-space
-            fragments can exceed 65535 on long intron-spanning candidates.
-        * ``read_length`` is uint16 and guarded at native append.
+    * ``frag_id`` is int64, for BAMs with more than 2 billion fragments;
+    * ``t_offsets`` and ``t_indices`` are int32, so a chunk holds at most ~2.1 billion candidate entries;
+    * per-candidate exon overlap bases and ``read_length`` are uint16, guarded at native append;
+    * fragment lengths are int32: a transcript-space length on a long intron-spanning candidate can exceed 65535.
     """
 
     splice_type: np.ndarray  # uint8[N]
@@ -89,9 +68,9 @@ class _FinalizedChunk:
     clip: np.ndarray  # uint16[N]  the hit's soft-clipped read bases
     size: int
     _fragment_classes: np.ndarray | None = None  # cached uint8[N]
-    # Each row's place masses, CSR over rows: the deposit rule's mass at each object (region, boundary or sj, by
-    # ``rigel.native.PLACE_*``, flat ids) a multimapper's genic place deposits on, which its capture weight reads.
-    # Empty on every other row; ``None`` where a chunk carries none at all.
+    # Each row's place masses, CSR over rows: the deposit rule's mass at each object (region, boundary or sj by
+    # ``rigel.native.PLACE_*``, flat ids) a multimapper's genic place deposits on, read by its capture weight. Empty on
+    # every other row; ``None`` when the chunk carries none.
     place_offsets: np.ndarray | None = None  # int64[N+1]
     place_kind: np.ndarray | None = None  # int8[M_p]
     place_index: np.ndarray | None = None  # int64[M_p]
@@ -99,9 +78,8 @@ class _FinalizedChunk:
 
     @classmethod
     def from_raw(cls, raw: dict) -> "_FinalizedChunk":
-        """Build a chunk from the dict C++ ``FragmentAccumulator.finalize`` returns. The native side
-        hands over its vectors as C-contiguous arrays already carrying the declared dtypes, so nothing
-        is copied or cast."""
+        """Build a chunk from the dict C++ ``FragmentAccumulator.finalize`` returns. The arrays arrive C-contiguous in
+        the declared dtypes, so nothing is copied or cast."""
         return cls(
             splice_type=raw["splice_type"],
             align_strand=raw["align_strand"],
@@ -159,27 +137,21 @@ class _FinalizedChunk:
 
     @property
     def fragment_classes(self) -> np.ndarray:
-        """Vectorized uint8[N] classification of each fragment.
+        """Each fragment's class, uint8[N], computed once:
 
-        Returns
-        -------
-        np.ndarray
-            ``FRAG_UNAMBIG``: same-strand, 1 transcript, NH=1.
-            ``FRAG_AMBIG_SAME_STRAND``: same-strand, >1 transcript, NH=1.
-            ``FRAG_AMBIG_OPP_STRAND``: ambig-strand transcripts, NH=1.
-            ``FRAG_MULTIMAPPER``: NH > 1.
+        * ``FRAG_UNAMBIG``: one strand, one transcript, one hit;
+        * ``FRAG_AMBIG_SAME_STRAND``: one strand, several transcripts, one hit;
+        * ``FRAG_AMBIG_OPP_STRAND``: transcripts on both strands, one hit;
+        * ``FRAG_MULTIMAPPER``: more than one hit, whatever else holds.
         """
         if self._fragment_classes is not None:
             return self._fragment_classes
         n_transcripts = np.diff(self.t_offsets).astype(np.intp)
         classes = np.full(self.size, FRAG_UNAMBIG, dtype=np.uint8)
-        # Same strand, multiple transcripts, single mapper → ambig same-strand
         classes[(self.ambig_strand == 0) & (n_transcripts > 1) & (self.num_hits == 1)] = (
             FRAG_AMBIG_SAME_STRAND
         )
-        # Mixed strand, single mapper → ambig opposite-strand
         classes[(self.ambig_strand > 0) & (self.num_hits == 1)] = FRAG_AMBIG_OPP_STRAND
-        # Multimapper → always FRAG_MULTIMAPPER (highest priority)
         classes[self.num_hits > 1] = FRAG_MULTIMAPPER
         object.__setattr__(self, "_fragment_classes", classes)
         return classes
@@ -187,9 +159,8 @@ class _FinalizedChunk:
     def to_scoring_arrays(self) -> dict:
         """The arrays ``StreamingScorer.score_chunk`` reads, by name.
 
-        ``from_raw`` and ``_load_chunk`` both guarantee that every stored array is C-contiguous in the exact dtype the
-        C++ kernel expects, so these are the chunk's own arrays (the fragment classes are computed once, on first
-        access).
+        ``from_raw`` and ``_load_chunk`` both store every array C-contiguous in the dtype the C++ kernel expects, so
+        these are the chunk's own arrays.
         """
         return {
             "t_offsets": self.t_offsets,
@@ -276,7 +247,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
     t_offsets = t_col.offsets.to_numpy().astype(np.int32)
     t_indices = t_col.values.to_numpy().copy()
 
-    # Per-candidate CSR arrays (parallel to t_indices)
+    # per-candidate arrays, parallel to t_indices
     frag_lengths_col = table.column("frag_lengths").combine_chunks()
     frag_lengths_arr = frag_lengths_col.values.to_numpy().astype(np.int32, copy=False)
 
@@ -414,23 +385,17 @@ class _SpillWriter:
 
 
 class FragmentBuffer:
-    """Columnar buffer for resolved fragments with disk-spill support.
+    """The columnar buffer of resolved fragments, spilling to disk past a memory budget.
 
-    Holds the chunks the native scanner hands over (:meth:`inject_chunk`).
-    When total in-memory size exceeds *max_memory_bytes*, the oldest chunk
-    is spilled to disk as an Arrow IPC (Feather v2) file with LZ4
-    compression. :meth:`iter_chunks_consuming` yields the chunks in order.
-
-    After quantification is complete, call :meth:`cleanup` (or use the
-    context-manager protocol) to remove spilled files.
+    Holds the chunks the native scanner hands over (:meth:`inject_chunk`) and yields them in order
+    (:meth:`iter_chunks_consuming`). Call :meth:`cleanup`, or use it as a context manager, to remove spilled files.
 
     Parameters
     ----------
     max_memory_bytes : int
-        Maximum memory for in-memory chunks before spilling to disk.
-        Default 2 GiB.  Set to 0 to disable spilling.
+        Memory for in-memory chunks before the oldest is spilled; 0 disables spilling.
     spill_dir : Path or None
-        Directory for spilled chunk files.  Default: system temp dir.
+        Directory for spilled chunk files; the system temp dir by default.
     """
 
     def __init__(
@@ -461,11 +426,6 @@ class FragmentBuffer:
         return self._memory_bytes
 
     @property
-    def n_chunks(self) -> int:
-        """Number of finalized chunks (in-memory + spilled)."""
-        return len(self._chunks)
-
-    @property
     def n_spilled(self) -> int:
         """Number of chunks spilled to disk."""
         return self._n_spilled
@@ -479,7 +439,6 @@ class FragmentBuffer:
         self._memory_bytes += chunk.memory_bytes
         self._chunks.append(chunk)
 
-        # Spill if over memory budget
         if self.max_memory_bytes > 0:
             while self._memory_bytes > self.max_memory_bytes:
                 if not self._spill_oldest():
@@ -558,11 +517,8 @@ class FragmentBuffer:
     # -- Iteration ------------------------------------------------------------
 
     def iter_chunks_consuming(self) -> Iterator[_FinalizedChunk]:
-        """Yield chunks one at a time, releasing each after the caller advances.
-
-        After this method returns, the buffer is empty.  Spilled chunk
-        files are deleted as they are consumed.
-        """
+        """Yield the chunks in order, releasing each once the caller advances; spilled files are deleted as they are
+        read, and the buffer is empty afterwards."""
         while self._chunks:
             chunk_ref = self._chunks.popleft()
             if isinstance(chunk_ref, _PendingSpill):
@@ -579,7 +535,7 @@ class FragmentBuffer:
     # -- Cleanup --------------------------------------------------------------
 
     def cleanup(self) -> None:
-        """Remove any spilled chunk files from disk."""
+        """Wait for pending spills, then stop the writer, which removes the spill directory."""
         error: RuntimeError | None = None
         try:
             self._wait_all_pending_spills()

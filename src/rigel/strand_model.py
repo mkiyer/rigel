@@ -1,36 +1,16 @@
-"""
-rigel.strand_model — the library strand model, learned from annotated splice junctions.
+"""rigel.strand_model — the library strand model, learned from annotated splice junctions.
 
-Learns the strand distribution of a paired-end RNA-seq library by observing how fragment
-alignment strands relate to annotated splice junction (SJ) strands.  A spliced fragment's
-genomic GT/AG motif gives its true strand *independently of library prep* (STAR reports it in
-the ``XS``/``ts`` tag), so comparing motif strand to aligner orientation over **annotated**
-spliced fragments measures library-prep strand efficiency — once the junctions that are not genuine
-RNA are separated out: a splice artifact (misaligned gDNA) reads ½ in a stranded library and a
-reversed junction reads the opposite side (:func:`rigel.junction_fit.genuine_sense_fraction`).
+A spliced fragment's genomic splice motif gives its true strand independently of library prep (the aligner reports it
+in ``XS`` / ``ts``), so comparing motif strand with alignment orientation over annotated spliced fragments measures the
+library's strand specificity, once splice artifacts (misaligned gDNA, which reads ½ in a stranded library) and
+reversed junctions are separated out (:func:`rigel.junction_fit.genuine_sense_fraction`). The scanner flips R2, so the
+alignment strand is read 1's genomic orientation and the estimand is ``p_r1_sense = P(align_strand == reference
+strand)``.
 
-After the R2 strand flip in the BAM scanner, the exon alignment strand effectively represents
-read 1's genomic orientation, so the model's estimand is
-
-    p_r1_sense = P(align_strand == reference strand)
-
-Two nested views of ONE population, with one source of truth.
-
-* :class:`SJStrandTable` — sense / antisense counts **per sj**, keyed on
-  ``(ref, start, end, motif strand)``.  This is the primary record.
-* :class:`StrandModel` — the 2×2 contingency table of ``align_strand × reference strand``.
-  For the spliced model it is **exactly the table's marginal** and is built from it
-  (:meth:`StrandModel.from_sj_table`), never accumulated separately.
-
-The per-sj refinement keeps what the 2×2 loses: how the sense split varies ACROSS sj. The
-accumulator's boundary spliced channels are not that population — they also pool unannotated and
-implicit splices.
-
-Models are immutable: built once from the scanner's observations, then read.  There is no
-observe/finalize lifecycle and therefore no way to score against a half-trained model.
-
-This module does not serialize itself.  ``summary.json``'s ``strand_model`` block is hand-built
-in :mod:`rigel.cli` from a handful of properties, plus :meth:`SJStrandTable.to_dict`.
+The primary record is per junction (:class:`SJStrandTable`), which keeps how the sense split varies across junctions.
+The spliced model's 2×2 (:class:`StrandModel`) is that table's marginal and is built from it, never accumulated
+separately. Models are immutable: built once from the scanner's observations, then read. ``summary.json``'s
+``strand_model`` block is built in :mod:`rigel.cli`.
 """
 
 import logging
@@ -48,25 +28,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class SJStrandTable:
-    """Per-sj sense / antisense counts — the primary strand record.
+    """Per-sj sense / antisense counts, the primary strand record.
 
-    Six parallel arrays, one row per splice junction, sorted by
-    ``(ref_id, start, end, motif_strand)`` in C++ so the contents never depend on thread
-    scheduling or hash order.  A sj is uniquely specified by
-    ``(reference, start, end, genomic splice-motif strand)``.
+    Six parallel arrays, one row per junction ``(reference, start, end, motif strand)``, sorted in C++ so the contents
+    never depend on thread scheduling. Sense means the alignment orientation agrees with the motif strand. Each
+    strand-qualified fragment adds one observation, to its leftmost annotated sj: ``sj_strand`` is one value per
+    fragment, so crediting every sj it spans would count one observation K times.
 
-    **sense** means the aligner's fragment orientation agrees with the motif strand;
-    **antisense** means it does not.  Each strand-qualified fragment contributes exactly ONE
-    observation, to its leftmost annotated sj — ``sj_strand`` is read from the BAM
-    ``XS``/``ts`` tag and is one value per *fragment*, so all sj a fragment spans share
-    a single sense bit and crediting them all would count one observation K times.
-
-    Consumers
-    ---------
-    * κ — the junction fit (:mod:`rigel.junction_fit`) over the table, through
-      :attr:`StrandModel.genuine_n_same` and :attr:`StrandModel.p_r1_sense`, then
-      ``calibration.strand_balance.fit_strand_balance``;
-    * ``summary.json``'s strand block: the table itself and the fit's class shares.
+    Read by the junction fit (:mod:`rigel.junction_fit`, through :attr:`StrandModel.genuine_n_same`) and by
+    ``summary.json``'s strand block.
     """
 
     ref_id: np.ndarray  # int32[n_sj]
@@ -92,9 +62,8 @@ class SJStrandTable:
     def from_arrays(cls, d: dict) -> "SJStrandTable":
         """Build from the C++ ``strand_observations`` dict (``sj_*`` keys).
 
-        Counts arrive as ``uint64`` and are narrowed to ``int64``: they are counts of
-        fragments, so ``int64`` cannot overflow before the fragment count itself does, and
-        ``uint64`` silently promotes to float in mixed numpy arithmetic downstream.
+        Counts arrive as ``uint64`` and are narrowed to ``int64``, since ``uint64`` silently promotes to float in mixed
+        numpy arithmetic.
         """
         return cls(
             ref_id=np.asarray(d["sj_ref_id"], dtype=np.int32),
@@ -123,10 +92,9 @@ class SJStrandTable:
     def contingency(self) -> tuple[int, int, int, int]:
         """The 2×2 ``(pos_pos, pos_neg, neg_pos, neg_neg)`` this table marginalizes to.
 
-        Writing ``sense ≡ (align == motif)``: over motif-POS sj sense is ``pos_pos``
-        and antisense is ``neg_pos``; over motif-NEG sj sense is ``neg_neg`` and
-        antisense is ``pos_neg``.  This identity is the correctness argument for the whole
-        refinement and holds exactly — same qualification branch, one observation per fragment.
+        With ``sense ≡ (align == motif)``: over motif-POS sj sense is ``pos_pos`` and antisense ``neg_pos``; over
+        motif-NEG sj sense is ``neg_neg`` and antisense ``pos_neg``. The identity is exact: one qualification rule, one
+        observation per fragment.
         """
         pos = self.motif_strand == int(Strand.POS)
         neg = self.motif_strand == int(Strand.NEG)
@@ -161,17 +129,9 @@ class SJStrandTable:
 class StrandModel:
     """A 2×2 contingency table of alignment strand × reference strand.
 
-    Probabilities are pure MLE from the counts, with a safe fallback to 0.5 when there are no
-    observations.  Immutable: build it from its four counts, or with :meth:`from_sj_table`, and
-    read it.
-
-    ``sj_table`` is present on the **spliced** model only, where the 2×2 is exactly its
-    marginal (:meth:`from_sj_table`) — the four counters are never maintained independently of
-    it.  The all-exonic diagnostic model has no sj and therefore no table.
-
-    The spliced model's qualification is applied in the C++ scanner, not here
-    (``ResolvedFragment::get_is_strand_qualified`` on a unique mapper); :class:`StrandModels`
-    states it.
+    Probabilities are the MLE from the counts, 0.5 when there are none. ``sj_table`` is present on the spliced model
+    only, where the 2×2 is its marginal (:meth:`from_sj_table`); the all-exonic diagnostic model has no table. The
+    spliced model's qualification is applied in the C++ scanner (``ResolvedFragment::get_is_strand_qualified``).
     """
 
     # --- 2×2 raw counts ---
@@ -180,8 +140,7 @@ class StrandModel:
     neg_pos: int = 0  # exon NEG, SJ POS
     neg_neg: int = 0  # exon NEG, SJ NEG
 
-    #: The per-sj refinement this 2×2 marginalizes (spliced model only; ``None``
-    #: on the all-exonic diagnostic model, which has no sj identity).
+    #: The per-sj table this 2×2 marginalizes; ``None`` on the all-exonic diagnostic model.
     sj_table: SJStrandTable | None = None
 
     # ------------------------------------------------------------------
@@ -190,7 +149,7 @@ class StrandModel:
 
     @classmethod
     def from_sj_table(cls, table: SJStrandTable) -> "StrandModel":
-        """Build from the per-sj table — the 2×2 is its marginal (one source of truth)."""
+        """Build from the per-sj table, whose marginal the 2×2 is."""
         pos_pos, pos_neg, neg_pos, neg_neg = table.contingency()
         return cls(
             pos_pos=pos_pos,
@@ -198,22 +157,6 @@ class StrandModel:
             neg_pos=neg_pos,
             neg_neg=neg_neg,
             sj_table=table,
-        )
-
-    def contingency_matches_table(self) -> bool:
-        """The invariant, made executable: the 2×2 IS the sj table's marginal.
-
-        Trivially ``True`` when there is no table (the all-exonic diagnostic model). Nothing in the
-        production path can violate it — :meth:`from_sj_table` is the only way the pair is built —
-        so this exists to be asserted in tests and diagnostics, not defended against at runtime.
-        """
-        if self.sj_table is None:
-            return True
-        return self.sj_table.contingency() == (
-            self.pos_pos,
-            self.pos_neg,
-            self.neg_pos,
-            self.neg_neg,
         )
 
     # ------------------------------------------------------------------
@@ -246,11 +189,12 @@ class StrandModel:
 
     @cached_property
     def genuine_n_same(self) -> float:
-        """The sense count of the genuine junctions: ``n_same`` with the splice artifacts and reversed junctions taken
-        out, scaled so that ``(genuine_n_same + 1)/(n_obs + 2)`` is :func:`genuine_sense_fraction`. ``n_same`` itself
-        where there is no per-sj table, no observation, or no live strand channel — the gate reads the pooled counts
-        (``calibration.region_init.strand_discriminability``), and removing junctions at ½ or at the opposite side
-        only moves κ away from ½, so this can never switch a live channel off."""
+        """The sense count of the genuine junctions: ``n_same`` without the splice artifacts and reversed junctions,
+        scaled so that ``(genuine_n_same + 1) / (n_obs + 2)`` is :func:`genuine_sense_fraction`.
+
+        ``n_same`` itself where there is no per-sj table, no observation, or no live strand channel (judged on the pooled
+        counts by ``calibration.region_init.strand_discriminability``). Removing junctions at ½ or on the opposite side
+        only moves κ away from ½, so this never switches a live channel off."""
         n = self.n_observations
         if self.sj_table is None or n == 0:
             return float(self.n_same)
@@ -303,11 +247,7 @@ class StrandModel:
         return (p * (1.0 - p)) / n
 
     def posterior_95ci(self) -> tuple[float, float]:
-        """95% confidence interval for p_r1_sense (Wald interval).
-
-        QC only. Its one consumer is ``summary.json``'s ``strand_model.ci_95`` (:mod:`rigel.cli`),
-        which the report displays.
-        """
+        """95% Wald interval for p_r1_sense; QC only (``summary.json``'s ``strand_model.ci_95``)."""
         import math
 
         from scipy.special import ndtri
@@ -327,23 +267,17 @@ class StrandModel:
     ) -> float:
         """Upper credible limit on the pooled 2×2's minor-orientation rate ``n_minor / n``.
 
-        The ``confidence`` quantile of the Beta(n_minor + 1, n − n_minor + 1) posterior, clamped
-        to [0, 0.5]; 0.5 when there are no observations. ``n_minor`` comes from the pooled table,
-        splice artifacts and reversed junctions included, while ``strand_specificity`` comes from the
-        genuine junctions (:attr:`genuine_n_same`), so this bounds ``1 − strand_specificity`` only
-        where that fit falls back to the pooled counts.
-
-        QC only. Its one consumer is the ``[CAL] Strand trainer`` log line in
-        :func:`rigel.pipeline.run_pipeline`.
+        The ``confidence`` quantile of the Beta(n_minor + 1, n − n_minor + 1) posterior, clamped to [0, 0.5]; 0.5
+        when there are no observations. ``n_minor`` comes from the pooled table, artifacts included, while
+        ``strand_specificity`` comes from the genuine junctions, so this bounds ``1 − strand_specificity`` only where
+        that fit falls back to the pooled counts. QC only: the strand log line in :func:`rigel.pipeline.run_pipeline`.
         """
         from scipy.special import betaincinv
 
         n = self.n_observations
         if n == 0:
             return 0.5
-        # ``n_minor`` is the observation count that argues *against* perfect strand
-        # specificity.  Whichever side the trainer called "sense" is irrelevant — the
-        # stray-minority rate is what sizes the uncertainty.
+        # n_minor argues against perfect specificity, whichever side is sense.
         alpha = self.n_minor + 1.0
         beta = (n - self.n_minor) + 1.0
         # UCL on the pooled minor-orientation rate r = n_minor / n at the given confidence.
@@ -359,41 +293,31 @@ class StrandModel:
 
 @dataclass(frozen=True)
 class StrandModels:
-    """Container for the single RNA strand model plus one diagnostic sub-model.
+    """The RNA strand model plus one diagnostic sub-model.
 
-    The primary strand model (``exonic_spliced``) is trained from uniquely mapped
-    SPLICED_ANNOT fragments whose candidate transcripts share one strand and whose alignment and
-    SJ strands are each a single strand.  Annotated splice junctions prove RNA origin,
-    making this an uncontaminated measure of library strand specificity.
-    Probabilities are pure MLE from observed counts, and its 2×2 is the marginal of the
-    per-sj :class:`SJStrandTable` it carries.
+    ``exonic_spliced`` is trained from uniquely mapped, annotated spliced fragments whose candidate transcripts share
+    one strand and whose alignment and junction strands are each single. An annotated junction proves RNA, so this
+    measures strand specificity free of gDNA. Its 2×2 is the marginal of the :class:`SJStrandTable` it carries.
 
-    One additional sub-model is retained **for diagnostics only** and
-    is never used for scoring:
-
-    * **exonic** — trained from every unique-mapper, unambiguous-strand fragment
-      that RESOLVES TO A TRANSCRIPT, spliced or not. Comparing its specificity to
-      ``exonic_spliced`` reveals gDNA contamination (``contamination_gap`` in the CLI summary):
-      unspliced genic fragments include gDNA, which is unstranded, so the mixed estimate is
-      dragged toward ½.
-      It is not "all exonic fragments" — intergenic fragments have no transcript and never enter
-      it, so the gap it measures is GENIC contamination only.
+    ``exonic`` is diagnostic only, never used for scoring: every unique-mapper, unambiguous-strand fragment that
+    resolves to a transcript, spliced or not. Its unspliced fragments include unstranded gDNA, so its specificity sits
+    nearer ½, and the gap to ``exonic_spliced`` (``contamination_gap`` in the CLI summary) measures genic
+    contamination; intergenic fragments never enter it.
 
     A fragment's gDNA likelihood uses a fixed strand probability of one half, not this container.
     """
 
     exonic_spliced: StrandModel = field(default_factory=StrandModel)
 
-    # Diagnostic sub-model (not used for scoring)
+    # diagnostic only
     exonic: StrandModel = field(default_factory=StrandModel)
 
     @classmethod
     def from_scan(cls, strand_dict: dict) -> "StrandModels":
         """Build both sub-models from the C++ scanner's ``strand_observations`` dict.
 
-        The spliced model comes from the per-sj table (its 2×2 is the marginal); the
-        all-exonic diagnostic has no sj identity, and the scanner counts its 2×2 cell by cell.
-        Emits the low-evidence warnings once, here, where the counts first exist.
+        The spliced model comes from the per-sj table; the scanner counts the diagnostic's 2×2 cell by cell. Warns
+        here, once, when the evidence is thin.
         """
         models = cls(
             exonic_spliced=StrandModel.from_sj_table(SJStrandTable.from_arrays(strand_dict)),
@@ -457,8 +381,7 @@ class StrandModels:
     def strand_specificity_ci_epsilon(
         self, confidence: float = CONSTANTS.qc.strand_ci_confidence
     ) -> float:
-        """Delegate: the primary (exonic_spliced) model's upper credible limit on its pooled
-        2×2's minor-orientation rate (:meth:`StrandModel.strand_specificity_ci_epsilon`)."""
+        """The RNA model's :meth:`StrandModel.strand_specificity_ci_epsilon`."""
         return self.exonic_spliced.strand_specificity_ci_epsilon(confidence)
 
     def log_summary(self) -> None:

@@ -1,11 +1,10 @@
 """``AccumulatorSet::offer`` against the specification, case by case and on a random battery.
 
-The native set is built from the specification's own two-reference ``Partition`` (the flat partition the
-scanner installs), both sides are offered the SAME ``Placement`` objects, and after every fragment every
-reference's banks, the counters, the umbrella census and the ONE canonical bank (every reference's
-gap-held records and the set's multi-placement records in one order) must be byte-identical. The
-one-placement path is the parity battery's ``deposit`` reached through ``offer``; the multi-placement
-cases are ``test_multimapper_offer.py``'s, stated once there and held here against the C++.
+The native set is built from the specification's own two-reference ``Partition`` (the flat partition the scanner
+installs), and both sides are offered the same ``Placement`` objects. After every fragment, every reference's banks, the
+counters, the umbrella census and the one canonical bank (every reference's gap-held records and the set's
+multi-placement records in one order) must be byte-identical. The multi-placement cases are stated in
+``test_multimapper_offer.py`` and held here against the C++.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ import dataclasses
 
 import numpy as np
 
-from rigel.native import AccumulatorSet as NativeSet
+from rigel._bam_impl import AccumulatorSet as NativeSet
 from rigel.types import Strand
 
 from ._accumulator_reference import (
@@ -193,14 +192,9 @@ def test_every_multi_placement_case_is_byte_identical():
 
 
 def test_a_GENERATOR_of_placements_is_the_same_fragment_as_the_tuple():
-    """``offer`` reads ``placements`` in ONE pass, so a one-shot iterable offers what its tuple does.
-
-    The binding once counted the placements in one pass and marshalled them in a second, which over a
-    generator is empty: the offer then raised for want of a placement. So the specification receives
-    each case's tuple and the native set a generator over it, and the two must stay byte-identical.
-
-    PERTURBATION: restoring the counting pass over ``placements`` raises ``ValueError`` ("offer needs at
-    least one placement") on the first case.
+    """``offer`` reads ``placements`` in one pass, so a one-shot iterable offers what its tuple does. The specification
+    receives each case's tuple and the native set a generator over it, and the two must stay byte-identical; a binding
+    that iterated twice would see an empty generator and raise.
     """
     reference, native = _pair()
     cases = [(label, (placement,)) for label, placement in ONE_PLACEMENT_CASES] + MULTI_CASES
@@ -218,13 +212,10 @@ def _seq(placement, nm, clip=0):
 
 
 def test_a_records_sequence_never_moves_it_past_a_record_its_content_orders():
-    """The bank's order is the order the draw's one stream reaches its records, so it must not depend on anything
-    but the deposit's content wherever the content decides: two records sharing a first placement are ordered by
-    their SECOND placement's content, though the first placement's sequence differs. Only records whose content
-    ties are ordered by their sequence, fewest mismatches first, so the order stays total.
-
-    PERTURBATION: comparing each placement's sequence right after its content puts the record with fewer mismatches
-    on the shared placement first, against its content order.
+    """The bank's order is the order the draw's one stream reaches its records, so wherever the deposit's content
+    decides it, nothing else may: two records sharing a first placement are ordered by their second placement's content,
+    even though the first placement's sequence differs. Only records whose content ties are ordered by sequence, fewest
+    mismatches first, so the order stays total.
     """
     reference, native = _pair()
     _offer_both(
@@ -250,8 +241,8 @@ def test_a_records_sequence_never_moves_it_past_a_record_its_content_orders():
 
 
 def test_identical_placements_keep_the_fewest_mismatches():
-    """Identical placements are one placement, as before; of the group the one kept carries the fewest mismatches,
-    then the fewest clipped bases, whatever order the aligner listed them in."""
+    """Identical placements are one placement; the one kept carries the fewest mismatches, then the fewest clipped
+    bases, whatever order the aligner listed them in."""
     for order in ((3, 1, 2), (1, 2, 3), (2, 3, 1)):
         reference, native = _pair()
         twins = tuple(_seq(_pl(0, 1100, 1400), nm, clip=5 - nm) for nm in order)

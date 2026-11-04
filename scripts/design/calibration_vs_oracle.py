@@ -1,15 +1,12 @@
 """Is the calibration result itself right, scored against an oracle calibration?
 
-The 0.8.0 metric. ``P = calibrate(...)`` off the cached scan is compared with ``O``, the same
-``CalibrationResult`` with only its six deconvolved arrays replaced by the origin-split truth
-(`OracleTruth` in the drained frame, sum-to-full gated), per stratum and never pooled; the 0.8.0
-scope is stamped on every row and the deferred stratum is reported, never dropped. It does not reach the
-capture-contracted length: ``O`` keeps ``P``'s efficiencies, reference density and gDNA region lengths,
-everything `transcript_capture_eff_lengths` reads, so the length's truth is `ruler_vs_truth.py`'s. No
-solver, no EM, no BAM re-scan, and the prior is not re-scored here (`prior_vs_oracle.py` owns
-`LocusPriors`). `--set SECTION.FIELD=VALUE` (any config field, typed from the field, repeatable) applies
-to both arms, so a run prices an estimator swap on this metric rather than comparing two tools — a policy
-or a grid arm is a config value and nothing in the source moves to price it.
+``P = calibrate(...)`` off the cached scan is compared with ``O``, the same ``CalibrationResult`` with only its six
+deconvolved arrays replaced by the origin-split truth (`OracleTruth`, drained frame, sum-to-full gated); no EM and
+no re-scan. ``O`` keeps ``P``'s efficiencies and lengths, so the capture-contracted length is invisible here: read
+`ruler_vs_truth.py` beside a capture-ON arm. ``--set SECTION.FIELD=VALUE`` (repeatable) applies to both arms, so a
+run prices one config value. The report, per stratum and tagged in scope or deferred: the pool ledger in
+fragments, the composition per axis, the library gDNA fraction, the signed per-object error histogram, the
+conditions ranked worst first (take the worst in-scope row), and a per-condition table.
 
 Usage::
 
@@ -28,7 +25,6 @@ import argparse
 import dataclasses
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import time
@@ -39,7 +35,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, pool_ledger, set_field, sibling, strata, stratum  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, pool_ledger, run_shards, set_args, set_field, sibling, strata, stratum  # noqa: E402
 
 
 OA = sibling("_oracle_arms.py")
@@ -51,31 +47,20 @@ from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
-from calibration._oracle import ORIGINS, OracleTruth  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "calibration"))
+from _oracle import ORIGINS, OracleTruth  # noqa: E402
 
 #: The two axes ``CalibrationResult`` deconvolves; the sj axis is certified RNA and is never split.
 AXES = OA.AXES
 
 
-#: Signed per-object error buckets, in fragments. Symmetric about an exact-zero bucket of its own,
-#: because "this object is exactly right" and "this object is out by half a fragment" are different
-#: statements and a histogram that merges them cannot show a solver that is right almost everywhere.
-#: Log-spaced, since per-object errors span several orders of magnitude; linear bins would put nearly
-#: every object in the first bar.
+#: Signed per-object error bucket edges in fragments, log-spaced, mirrored about an exact-zero bucket of its own.
 _HIST_EDGES = (1e-9, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0)
 
 
 def signed_histogram(delta: np.ndarray) -> dict:
-    """The full distribution of per-object signed error, zero at the centre.
-
-    ``delta`` is ``gDNA_arm − gDNA_true`` per object, in fragments. Positive is an over-call (gDNA
-    claimed where the truth was RNA) and negative an under-call.
-
-    Returns counts and the summed |error| carried by each bucket, because they answer different
-    questions: a thousand objects out by one fragment and one object out by a thousand are the same
-    ``Σ|err|`` and completely different defects.
-    """
+    """The count and summed |error| per bucket of ``delta = gDNA_arm − gDNA_true`` (fragments, per object);
+    positive is an over-call."""
     d = np.asarray(delta, np.float64)
     edges = np.asarray(_HIST_EDGES, np.float64)
     out = {"n_objects": int(d.size), "buckets": []}
@@ -99,59 +84,12 @@ def signed_histogram(delta: np.ndarray) -> dict:
     return out
 
 
-#: Buckets on the object's true ``f_g``. The top one is the point: it is where the truth sits at the
-#: simplex vertex, where ψ's Beta(½,½) reference is a fixed repulsion nothing swamps. Coarse away from
-#: the vertex on purpose, so the one column that matters is not hidden among nine.
-_VERTEX_EDGES = (0.0, 0.2, 0.8, 0.99, 0.999, 1.0000001)
-
-
-def vertex_profile(p_arm, o_arm, axis: str) -> list[dict]:
-    """Per-object error and composition closure, bucketed by the object's true ``f_g``.
-
-    Two quantities per bucket: ``mean_shortfall`` = ``mean(f_g_true − f_g_pred)``, positive when the
-    solver under-calls gDNA (at the vertex bucket it is the repulsion, in units of composition); and
-    ``mean_closure`` = ``mean(f_g + f_pos + f_neg)`` read off the predicting arm, which the shipped
-    composition closes identically, kept beside the shortfall because a composition that did not
-    close would confound it. Objects with no true mass are excluded: they have no ``f_g`` to be right
-    or wrong about.
-    """
-    gp = np.asarray(getattr(p_arm, f"count_gdna_{axis}"), np.float64)
-    rp = np.asarray(getattr(p_arm, f"count_rna_{axis}"), np.float64)
-    go = np.asarray(getattr(o_arm, f"count_gdna_{axis}"), np.float64)
-    ro = np.asarray(getattr(o_arm, f"count_rna_{axis}"), np.float64)
-    total = go + ro
-    live = total > 0.0
-    f_true = np.where(live, go / np.maximum(total, 1e-12), np.nan)
-    f_pred = np.where(live, gp / np.maximum(gp + rp, 1e-12), np.nan)
-    closure = (
-        np.asarray(getattr(p_arm, f"gdna_frac_{axis}"), np.float64)
-        + np.asarray(getattr(p_arm, f"rna_pos_frac_{axis}"), np.float64)
-        + np.asarray(getattr(p_arm, f"rna_neg_frac_{axis}"), np.float64)
-    )
-    out = []
-    for lo, hi in zip(_VERTEX_EDGES[:-1], _VERTEX_EDGES[1:], strict=True):
-        sel = live & (f_true >= lo) & (f_true < hi)
-        n = int(sel.sum())
-        out.append(
-            {
-                "lo": float(lo),
-                "hi": float(min(hi, 1.0)),
-                "n": n,
-                "mass": float(total[sel].sum()) if n else 0.0,
-                "abs_err": float(np.abs(gp - go)[sel].sum()) if n else 0.0,
-                "mean_shortfall": float(np.mean(f_true[sel] - f_pred[sel])) if n else 0.0,
-                "mean_closure": float(np.mean(closure[sel])) if n else 0.0,
-            }
-        )
-    return out
-
-
-# ── the gates, which run before any number is printed ────────────────────────────────────────────
+# ── the gates, run before any number is printed ──────────────────────────────────────────────────
 
 
 def check_override_field_set(override: dict) -> None:
-    """``override_masses`` must still write exactly :data:`OVERRIDE_FIELDS`: a seventh field would make
-    ``O`` differ from ``P`` in something other than the deconvolution."""
+    """``override_masses`` must write exactly :data:`OVERRIDE_FIELDS`, so ``O`` differs from ``P`` only in the
+    deconvolution."""
     missing = set(OVERRIDE_FIELDS) - set(override)
     extra = set(override) - set(OVERRIDE_FIELDS)
     if missing or extra:
@@ -167,11 +105,8 @@ def check_override_field_set(override: dict) -> None:
 def load_oracle(oracle_cache: Path, condition: str, index, drained_payload, lift):
     """The origin-split truth for one condition, in the drained frame.
 
-    The full side is the very payload ``P`` calibrated, read from the scan cache. The cached parts are
-    drained by replaying the whole's already-drawn choices (`from_cached_parts`), and sum-to-full then
-    validates the lift end to end on the drained frame. The oracle may carry a nonzero ``gdna_spliced_leak``
-    (production's own drain behaviour, `ISSUES: drain-contaminates-certified-rna`) and ``n_ambiguous``
-    bounds the lift's origin attribution; both are reported on the row, never swallowed.
+    The full side is the payload ``P`` calibrated; the cached parts are drained by replaying the whole's choices,
+    and sum-to-full validates that lift.
     """
     root = Path(oracle_cache) / condition
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
@@ -185,8 +120,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
     lift: dict = {}
     kw = calibration_inputs(cache, index, lift_out=lift)
-    # the drained frame: everything below (P, the substrate, the oracle's full side) reads this
-    # payload, never `cache.payload`, or the same-basis gates would be comparing two frames.
+    # the drained frame: P, the substrate and the oracle's full side all read this payload, never `cache.payload`
     payload = kw["payload"]
     p_arm = calibrate(config=pipeline_config.calibration, **kw)
 
@@ -195,8 +129,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     check_override_field_set(override)
     o_arm = dataclasses.replace(p_arm, **override)
 
-    # both arms must be on the payload's own per-object totals, per axis; without that identity a
-    # mass-weighted mean of fractions is an average over different denominators.
+    # both arms must carry the payload's own per-object totals, per axis
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     OA.check_same_basis("P", p_arm, substrate)
     OA.check_same_basis("O", o_arm, substrate)
@@ -218,32 +151,27 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
             getattr(o_arm, f"count_gdna_{axis}"), getattr(o_arm, f"count_rna_{axis}"),
         )
         row["axes"][axis] = dataclasses.asdict(s)
-        # the full distribution, not just its sum. Objects with no mass at all are excluded: they
-        # have no answer to get right, and folding them in puts most of a genome in the exact-0 bar.
+        # the full distribution; objects with no mass have no answer and are excluded
         gp = np.asarray(getattr(p_arm, f"count_gdna_{axis}"), np.float64)
         go = np.asarray(getattr(o_arm, f"count_gdna_{axis}"), np.float64)
         total = go + np.asarray(getattr(o_arm, f"count_rna_{axis}"), np.float64)
         live = total > 0.0
         row["axes"][axis]["hist"] = signed_histogram(gp[live] - go[live])
-        # Δ_RNA ≡ −Δ_gDNA per object, because `check_same_basis` has just established that the two
-        # arms carry the same per-object total. Recorded as a gate rather than left implicit: two
-        # columns that are the same number would read as two independent measurements.
+        # Δ_RNA ≡ −Δ_gDNA per object, since both arms carry the same per-object total; recorded as a gate
         rp = np.asarray(getattr(p_arm, f"count_rna_{axis}"), np.float64)
         ro = np.asarray(getattr(o_arm, f"count_rna_{axis}"), np.float64)
         row["axes"][axis]["rna_mirrors_gdna_max_dev"] = float(
             np.abs((rp - ro)[live] + (gp - go)[live]).max() if live.any() else 0.0
         )
-        row["axes"][axis]["vertex"] = vertex_profile(p_arm, o_arm, axis)
 
-    # ── the POOL LEDGER, in fragments ──
+    # ── the pool ledger, in fragments ──
     truth = pool_ledger(Path(suite) / condition)
     row["pools"] = {
         "true_gdna": truth["gdna"],
         "true_mrna": truth["mrna"],
         "true_nrna": truth["nrna"],
         "true_rna": truth["mrna"] + truth["nrna"],
-        # the conserved fragment counts: each axis converted by its own population's mass per
-        # crossing, so these are fragments and not object incidences.
+        # conserved fragment counts (each axis converted by its population's mass per crossing), not incidences
         "P_gdna": p_arm.library_gdna_fragments,
         "P_rna": p_arm.library_rna_fragments,
         "O_gdna": o_arm.library_gdna_fragments,
@@ -254,9 +182,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
 
 # ── reporting ────────────────────────────────────────────────────────────────────────────────────
 
-#: The 0.8.0 scope, stamped on the row rather than left to the reader: the deferred stratum carries
-#: most of the error, so a reader who forgets which cell is the target inverts the ranking. Deferred
-#: is reported, never dropped. A stratum in neither strand half is in no scope and reads ``APART``.
+#: The release scope per stratum, stamped on every row; a stratum in neither strand half reads ``APART``.
 _SCOPE = {
     ("stranded", "capture OFF"): "IN SCOPE",
     ("stranded", "capture ON"): "IN SCOPE",
@@ -270,8 +196,7 @@ def _scope(st) -> str:
 
 
 def _selections(rows: list[dict]) -> tuple:
-    """Every selection every table prints, one per stratum, g00 excluded (it is read per condition),
-    so a stratum cannot appear on some tables and not others."""
+    """The selections every table prints: one per stratum, zero-gDNA conditions excluded."""
     return tuple(
         (f"{' x '.join(st)}  [{_scope(st)}]", (lambda c, st=st: stratum(c) == tuple(st)
                                                and not is_zero_gdna(c)))
@@ -280,12 +205,7 @@ def _selections(rows: list[dict]) -> tuple:
 
 
 def _agg_axis(scores: list[dict]) -> dict | None:
-    """Sum a list of ``AxisScore`` dicts into one; ``None`` on an empty list.
-
-    The rate is re-derived from the summed totals, never averaged: a mean of per-condition ``mwae``
-    over conditions of different depth is a number with no consumer. Every other field of
-    ``AxisScore`` is a mass and adds.
-    """
+    """Sum ``AxisScore`` dicts into one (``None`` if empty); ``mwae`` is re-derived from the sums."""
     scores = [s for s in scores if s is not None]
     if not scores:
         return None
@@ -298,9 +218,8 @@ def _agg_axis(scores: list[dict]) -> dict | None:
 
 
 def report(rows: list[dict]) -> None:
-    """The whole report from the per-condition JSON, the only report path there is, so ``--jobs 1``
-    and ``--jobs 4`` print numbers produced by one code path."""
-    # ── the gates first: a table read before its gate is a table nobody checked ──
+    """The whole report, from the per-condition JSON rows; serial and sharded runs share this one path."""
+    # ── the gates first ──
     print()
     print("=" * 118)
     print("  ⭐⭐⭐ CALIBRATION vs ORACLE CALIBRATION — the 0.8.0 metric")
@@ -376,10 +295,10 @@ def report(rows: list[dict]) -> None:
         p, o = (p / w, o / w) if w > 0 else (float("nan"), float("nan"))
         print(f"    {title:<38} {p:>10.4f} {o:>10.4f} {abs(p - o):>10.4f}")
 
-    # ── ⑤ the full signed distribution ──
+    # ── ③ the full signed distribution ──
     for axis in AXES:
         print()
-        print(f"  ⑤ ⭐⭐⭐ THE SIGNED ERROR DISTRIBUTION on the {axis.upper()} axis — zero IS the truth.")
+        print(f"  ③ ⭐⭐⭐ THE SIGNED ERROR DISTRIBUTION on the {axis.upper()} axis — zero IS the truth.")
         print("     Δ = gDNA_shipped − gDNA_true, in FRAGMENTS, per object. + is an OVER-call (gDNA")
         print("     claimed where the truth was RNA). Objects carrying no mass are excluded.")
         labels = [b["label"] for b in rows[0]["axes"][axis]["hist"]["buckets"]]
@@ -406,39 +325,9 @@ def report(rows: list[dict]) -> None:
                   f"{sum(x['n_objects'] for x in h):>13,} "
                   f"{sum(r['axes'][axis]['abs_err'] for r in sub):>15,.0f}")
 
-    # ── ⑦ the vertex profile ──
-    for axis in AXES:
-        print()
-        print(f"  ⑦ ⭐⭐⭐ WHERE THE ERROR SITS ON THE SIMPLEX — {axis.upper()} axis, bucketed by TRUE f_g.")
-        print("     `shortfall` = mean(true − pred): + means the solver UNDER-calls gDNA.")
-        print("     `closure` = mean(f_g + f_pos + f_neg), which the shipped composition closes identically:")
-        print("        it reads 1.0000, and a row that does not is a bug to chase before its shortfall is read.")
-        print(f"    {'stratum':<38} {'true f_g':<15} {'objects':>9} {'mass':>13} "
-              f"{'shortfall':>10} {'Σ|Δ| frags':>12} {'of Σ|Δ|':>8} {'closure':>8}")
-        print("    " + "-" * 128)
-        for title, pred in selections:
-            sub = sel_rows(pred)
-            if not sub:
-                continue
-            n_b = len(sub[0]["axes"][axis]["vertex"])
-            grand = sum(r["axes"][axis]["abs_err"] for r in sub)
-            for b in range(n_b):
-                cells = [r["axes"][axis]["vertex"][b] for r in sub]
-                n = sum(c["n"] for c in cells)
-                if n == 0:
-                    continue
-                mass = sum(c["mass"] for c in cells)
-                ae = sum(c["abs_err"] for c in cells)
-                # weighted by objects, never a mean of per-condition means
-                sf = sum(c["mean_shortfall"] * c["n"] for c in cells) / n
-                cl = sum(c["mean_closure"] * c["n"] for c in cells) / n
-                lab = f"[{cells[0]['lo']:g}, {cells[0]['hi']:g}]"
-                print(f"    {title if b == 0 else '':<38} {lab:<15} {n:>9,} {mass:>13,.0f} "
-                      f"{sf:>+10.4f} {ae:>12,.0f} {ae / max(grand, 1e-9):>7.1%} {cl:>8.4f}")
-
-    # ── ⑥ scenarios ranked worst first ──
+    # ── ④ scenarios ranked worst first ──
     print()
-    print("  ⑥ ⭐⭐⭐ SCENARIOS RANKED BY TOTAL Σ|Δ| IN FRAGMENTS (region + boundary) — worst first.")
+    print("  ④ ⭐⭐⭐ SCENARIOS RANKED BY TOTAL Σ|Δ| IN FRAGMENTS (region + boundary) — worst first.")
     print("     ⛔ The scope tag is the ranking. The worst row overall is the DEFERRED stratum every")
     print("        time; take the worst IN-SCOPE row instead.")
     print(f"    {'#':>3} {'condition':<44} {'scope':<9} {'Σ|Δ| region':>13} {'Σ|Δ| bnd':>13} "
@@ -460,9 +349,9 @@ def report(rows: list[dict]) -> None:
         print(f"    ⭐ WORST IN-SCOPE: {w['condition']}  "
               f"Σ|Δ| = {w['axes']['region']['abs_err'] + w['axes']['boundary']['abs_err']:,.0f} fragments")
 
-    # ── ④ per condition ──
+    # ── ⑤ per condition ──
     print()
-    print("  ④ PER CONDITION — rank within a stratum, never across one")
+    print("  ⑤ PER CONDITION — rank within a stratum, never across one")
     print(f"    {'condition':<44} {'mwae reg':>9} {'mwae bnd':>9} {'lib P':>8} {'lib O':>8} {'s':>6}")
     print("    " + "-" * 89)
     for r in sorted(rows, key=lambda x: (tuple(x["stratum"]), x["condition"])):
@@ -473,7 +362,7 @@ def report(rows: list[dict]) -> None:
     print(f"  total wall clock {sum(r['seconds'] for r in rows):.1f} s over {len(rows)} conditions")
 
 
-# ── the falsification: every comparator perturbed, with no I/O ───────────────────────────────────
+# ── the self-test: every comparator perturbed, with no I/O ───────────────────────────────────────
 
 
 def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4, seed: int = 7):
@@ -509,8 +398,6 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
         gdna_capture_efficiency_region=np.ones(n_regions),
         gdna_capture_efficiency_boundary=np.ones(n_boundaries),
         rna_sense_frac=0.5,
-        gdna_strand_overdispersion=0.0,
-        rna_strand_overdispersion=0.0,
         n_regions=n_regions,
         n_boundaries=n_boundaries,
         n_sj=n_sj,
@@ -518,8 +405,7 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
 
 
 def self_test() -> int:
-    """Perturb every comparator and require it to fire: a green read proves nothing on its own
-    (TRAPS: perturb-every-gate)."""
+    """Perturb every comparator and require it to fire."""
     checks: list[tuple[str, bool]] = []
 
     def check(name: str, ok: bool):
@@ -533,14 +419,13 @@ def self_test() -> int:
     check("score_axis(P, P) is exactly 0", s.abs_err == 0.0 and s.mwae == 0.0)
     nudged = np.array(cal.count_gdna_region, copy=True)
     nudged[3] = np.nextafter(nudged[3], np.inf)
-    # the RNA side moves the opposite way so the per-object total is preserved: score_axis refuses
-    # two arms on different bases, and a basis refusal is not the perturbation under test.
+    # the RNA side moves the opposite way, so the per-object total (the basis) is preserved
     rna_n = np.array(cal.count_rna_region, copy=True)
     rna_n[3] = np.nextafter(rna_n[3], -np.inf)
     s1 = OA.score_axis(nudged, rna_n, cal.count_gdna_region, cal.count_rna_region)
     check("score_axis resolves a ONE-ULP nudge", s1.abs_err > 0.0)
 
-    # ③ the override field-set gate refuses a dropped field and an extra one.
+    # ② the override field-set gate refuses a dropped field and an extra one.
     full = {f: getattr(cal, f) for f in OVERRIDE_FIELDS}
     try:
         check_override_field_set(full)
@@ -557,8 +442,7 @@ def self_test() -> int:
             fired = True
         check(f"field-set gate refuses {label}", fired)
 
-    # ⑥ the aggregate is a ratio of sums, not a mean of ratios. Two scores of very different mass
-    #    make the two answers differ, which is what makes this a test rather than a tautology.
+    # ③ the aggregate is a ratio of sums, not a mean of ratios; two scores of very different mass tell them apart
     a = {"n_scored": 1, "mass": 1.0, "net_err": 0.0, "abs_err": 1.0,
          "over_call": 0.0, "under_call": 0.0, "mwae": 1.0}
     b = {"n_scored": 1, "mass": 999.0, "net_err": 0.0, "abs_err": 0.0,
@@ -568,8 +452,7 @@ def self_test() -> int:
     check("aggregate mwae is NOT the mean of the rates", not np.isclose(agg["mwae"], 0.5))
     check("aggregate returns None on an empty selection", _agg_axis([]) is None)
 
-    # ⑦ the signed histogram: it must place a known vector exactly, keep the sign, and never
-    #    silently drop an object (the bucket counts must sum to the input size).
+    # ④ the signed histogram places a known vector exactly, keeps the sign, and drops no object
     known = np.array([0.0, 0.0, -5.0, -500.0, +2.0, +2000.0, -0.05, +0.05, +20000.0, -20000.0])
     h = signed_histogram(known)
     check("histogram conserves every object", sum(b["n"] for b in h["buckets"]) == known.size)
@@ -577,8 +460,7 @@ def self_test() -> int:
     check("histogram splits under/over correctly", (h["n_under"], h["n_over"]) == (4, 4))
     check("histogram Σ|err| equals Σ|input|",
           np.isclose(sum(b["abs_err"] for b in h["buckets"]), np.abs(known).sum()))
-    # and it must move an object between buckets when the value crosses an edge: a histogram that
-    # bins everything into one bar would pass every check above.
+    # and moves an object between buckets when its value crosses an edge
     lo = signed_histogram(np.array([9.99]))
     hi = signed_histogram(np.array([10.01]))
     check("histogram resolves a bucket EDGE crossing",
@@ -587,7 +469,7 @@ def self_test() -> int:
           [b["n"] for b in signed_histogram(np.array([+7.0]))["buckets"]]
           == [b["n"] for b in signed_histogram(np.array([-7.0]))["buckets"]][::-1])
 
-    # ⑧ the pool ledger reads the file, and a pool it cannot find reads 0.
+    # ⑤ the pool ledger reads the file, and a pool it cannot find reads 0.
     import json as _json
 
     with tempfile.TemporaryDirectory() as td:
@@ -601,57 +483,17 @@ def self_test() -> int:
         check("pool ledger reports a MISSING pool as 0, not as absent",
               pool_ledger(Path(td)) == {"gdna": 7.0, "mrna": 0.0, "nrna": 0.0})
 
-    # ⑨ the vertex profile: it must place objects in the right bucket by true f_g, exclude the
-    #    massless, conserve Σ|Δ| against the axis total, and resolve a shortfall that is planted.
-    # Its own toy, sized to the slices below: the shared one has 24 regions and a [20:30] slice would
-    # silently take four.
-    cal_v = _toy_calibration(n_regions=40, n_boundaries=36, seed=11)
-    n_obj = cal_v.n_regions
-    g_true = np.zeros(n_obj)
-    r_true = np.zeros(n_obj)
-    g_true[:10], r_true[:10] = 0.0, 100.0  # truth f_g = 0.0  -> bottom bucket
-    g_true[10:20], r_true[10:20] = 50.0, 50.0  # truth f_g = 0.5  -> middle bucket
-    g_true[20:30], r_true[20:30] = 100.0, 0.0  # truth f_g = 1.0  -> the vertex bucket
-    # everything else stays massless and must be dropped entirely
-    o_toy = dataclasses.replace(cal_v, count_gdna_region=g_true, count_rna_region=r_true)
-    # a perfect arm: predictions equal to truth
-    prof = vertex_profile(o_toy, o_toy, "region")
-    check("vertex profile drops massless objects",
-          sum(b["n"] for b in prof) == 30)
-    check("vertex profile buckets by TRUE f_g",
-          (prof[0]["n"], prof[1]["n"], prof[-1]["n"]) == (10, 10, 10))
-    check("a perfect arm has zero shortfall in every bucket",
-          all(abs(b["mean_shortfall"]) < 1e-12 for b in prof))
-    # plant a shortfall only at the vertex and require it to appear there and nowhere else
-    g_short = g_true.copy()
-    r_short = r_true.copy()
-    g_short[20:30], r_short[20:30] = 80.0, 20.0  # pred f_g = 0.8 where truth is 1.0
-    p_toy = dataclasses.replace(cal_v, count_gdna_region=g_short, count_rna_region=r_short)
-    prof2 = vertex_profile(p_toy, o_toy, "region")
-    check("a planted vertex shortfall lands in the VERTEX bucket",
-          abs(prof2[-1]["mean_shortfall"] - 0.2) < 1e-9)
-    check("and leaves the other buckets untouched",
-          all(abs(b["mean_shortfall"]) < 1e-12 for b in prof2[:-1]))
-    check("vertex Σ|Δ| conserves the axis total",
-          abs(sum(b["abs_err"] for b in prof2) - float(np.abs(g_short - g_true).sum())) < 1e-9)
-    # closure is read off the predicting arm, and must move when its composition does
-    open_arm = dataclasses.replace(p_toy, rna_pos_frac_region=np.zeros(n_obj))
-    check("closure is read from the arm under test, not from truth",
-          vertex_profile(open_arm, o_toy, "region")[-1]["mean_closure"]
-          != prof2[-1]["mean_closure"])
-
-    # ⑩ every stratum of the panel is covered exactly once by the scope table.
+    # ⑥ every stratum of the panel is covered exactly once by the scope table.
     check("the scope table covers all four strata", len(_SCOPE) == 4)
     check("three strata are IN SCOPE and one is DEFERRED",
           sorted(_SCOPE.values()) == ["DEFERRED", "IN SCOPE", "IN SCOPE", "IN SCOPE"])
 
-    # ⑪ `--set`: the parser types from the field, touches nothing else, and refuses what it cannot spell.
+    # ⑦ `--set`: the parser types from the field, touches nothing else, and refuses what it cannot spell.
     base = PipelineConfig()
     knob = set_field(base, "calibration.sweep_block_slots=90")
     check("--set types an int field from the field",
           knob.calibration.sweep_block_slots == 90 and type(knob.calibration.sweep_block_slots) is int)
-    # two settings in sequence: the first must survive the second (a parser that rebuilt the section
-    # from defaults would pass a single setting against a default config and still lose the first)
+    # two settings in sequence: the first must survive the second
     knob2 = set_field(knob, "calibration.sweep_logodds_step=0.1")
     check("--set leaves every other field identical, and an earlier --set survives a later one",
           knob2.calibration.sweep_block_slots == 90
@@ -674,8 +516,7 @@ def self_test() -> int:
     check("--set refuses an unknown section", refuses("nowhere.sweep_block_slots=1"))
     check("--set refuses a value the field's type cannot take",
           refuses("calibration.sweep_block_slots=sixty"))
-    # a ``Literal`` field is filled by membership — the EM's mode and warm start are such fields, and a
-    # parser that coerced through the literal's own values refused every MAP arm ever asked for
+    # a ``Literal`` field (the EM's mode and warm start) is filled by membership
     check("--set fills a Literal field by membership",
           set_field(base, "em.mode=map").em.mode == "map"
           and set_field(base, "em.warm_start=uniform").em.warm_start == "uniform")
@@ -730,25 +571,16 @@ def main() -> int:
         raise SystemExit("⛔ --oracle-cache is required; this script refuses to invent a truth")
 
     if args.jobs > 1:
-        # shard by subprocess, as prior_vs_oracle.py does, then merge in ``names`` order and write or
-        # print through the same path as a serial run. Each run shards into its own directory, so two
-        # concurrent runs sharing a work dir never read each other's shards.
-        shards = [s for s in (names[i:: args.jobs] for i in range(args.jobs)) if s]
+        # shard by subprocess into a directory of this run's own, merge in ``names`` order, emit as a serial run
         args.work_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=args.work_dir, prefix="shards_") as td:
-            procs = []
-            for i, sh in enumerate(shards):
-                out = Path(td) / f"shard{i}.json"
-                cmd = [sys.executable, str(Path(__file__).resolve()),
-                       "--suite", str(args.suite), "--index", str(args.index),
-                       "--oracle-cache", str(cache), "--json", str(out), "--conditions", *sh]
-                for spec in args.settings:
-                    cmd += ["--set", spec]
-                procs.append((subprocess.Popen(cmd), out))
-            codes = [proc.wait() for proc, _out in procs]  # every shard ends before its dir goes
-            if any(codes):
-                raise SystemExit("⛔ a shard failed; refusing to report a partial panel")
-            merged = [row for _proc, out in procs for row in json.loads(out.read_text())]
+            outs = run_shards(
+                Path(__file__).resolve(), names, args.jobs, Path(td),
+                lambda out, shard: ["--suite", str(args.suite), "--index", str(args.index),
+                                    "--oracle-cache", str(cache), "--json", str(out), "--conditions", *shard,
+                                    *set_args(args.settings)],
+            )
+            merged = [row for out in outs for row in json.loads(out.read_text())]
         order = {name: i for i, name in enumerate(names)}
         merged.sort(key=lambda r: order[r["condition"]])
         return _emit(merged, args.json)
@@ -758,9 +590,7 @@ def main() -> int:
     region_arrays = RegionArrays.from_index(index)
     pipeline_config = PipelineConfig()
     for spec in args.settings:
-        # applied to BOTH arms: P and O share one payload and differ only in the six deconvolved
-        # arrays, so an override on one arm alone would compare two different tools rather than two
-        # estimators
+        # applied to both arms: P and O share one payload and differ only in the six deconvolved arrays
         pipeline_config = set_field(pipeline_config, spec)
         if args.json is None:
             print(f"⭐ --set {spec} on BOTH arms")

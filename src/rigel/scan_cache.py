@@ -2,58 +2,23 @@
 
     Gate: `tests/test_scan_cache.py`
 
-Scanning is the expensive step and calibration is the one under development, so a calibration sweep
-that re-scans every condition costs minutes where a cached one costs seconds. This module writes and
-reads that cache.
+Scanning is the expensive step, so a calibration sweep reads a cached scan instead of re-scanning. The cache stores the
+scan's two outputs, the accumulator payload and the strand model. What the index can derive (``RegionArrays``, the
+boundary flags, the sj geometry) and the fragment-length pmfs are rebuilt on load, so no stored copy can go stale; the
+length histograms are payload fields and are cached with it.
 
-WHAT IS STORED, AND WHAT DELIBERATELY IS NOT
---------------------------------------------
-`calibrate()`'s inputs come from three places, and only one of them is expensive:
+The key has five parts:
 
-==============================  ============================================  ============
-input                           origin                                        cached?
-==============================  ============================================  ============
-``payload``                     the scan                                      yes
-``strand_model``                the scan                                      yes
-``region_arrays``               ``RegionArrays.from_index``                   no
-``boundary_flags``              ``build_boundary_flags_array``                no
-``sj``                          ``build_sj_geometry_arrays``                  no
-``gdna_fl_pmf``/``rna_fl_pmf``  ``pipeline.library_fl_models``                no — derived
-``config``                      the thing you are varying                     no
-==============================  ============================================  ============
+* ``graph_hash``: the region partition plus the sj CSR, carried by the payload;
+* the payload-schema digest (:func:`payload_schema_digest`): the accumulator's and the strand model's fields, and what
+  the deposit rule does;
+* the reach digest: the splice-junction reaches calibration reads, which no other hash covers;
+* the scan settings that can change a tally;
+* the splice blacklist the scan applied, since it strips junctions and holds back fragments.
 
-Anything derivable from the index is rebuilt on load, never stored: it is a fraction of a second
-against an index load that happens anyway, and a stored copy is how a cache goes stale against the
-thing it describes.
-
-There is no separate fragment-length row. Every fragment-length
-histogram — the five length pools and the unconditional anchor the length laws are built against — is a field OF
-the payload, so caching the payload caches them, in one frame, by construction. `build_fl_models`
-remains the single source of truth for the derived pmfs, which are still not cached: freezing its
-output would mean a change to the fl model silently does not reach a cached scan.
-
-THE KEY NEEDS FIVE PARTS, AND THE CACHE NAMES ITS BAM
------------------------------------------------------
-* ``graph_hash`` — the region partition plus the sj CSR. The payload already carries it.
-* a PAYLOAD-SCHEMA digest — the accumulator's own field list, and the strand model's. None of the other
-  keys moves when either changes, so without it a cache written before an accumulator change is accepted
-  and then fails deep inside the loader with a bare ``KeyError``, and one written before a strand-model
-  field existed loads that field at its default.
-* a REACH digest. The splice-junction reaches are consumed by calibration and covered by neither
-  ``partition_hash`` nor ``graph_hash`` — correctly, since neither the scan nor the accumulator reads
-  them — so a reach-blind key would verify clean against an index rebuild that moved the splice-junction
-  reaches while both existing hashes stayed byte-identical.
-* the scan config, because two scans of one BAM under different settings are different tallies.
-* the SPLICE BLACKLIST the scan applied. The scan strips every junction it names and holds back a fragment whose
-  every junction it rejects, so two blacklists make two tallies, and none of the four parts above sees it.
-
-The BAM itself is not a key, because the caller names it, but the cache records its identity: the path, the size,
-the modification time and a digest of its bytes. A BAM re-simulated in place keeps its path, so the path alone
-proves nothing. A cache whose BAM is still at its recorded path is refused when the bytes differ; one carried to a
-machine without its BAM cannot be compared, and is not.
-
-Not pickle. A pickle of numpy-holding dataclasses is fragile exactly across the schema changes this
-cache has to survive; arrays go to ``.npz``, scalars and provenance to JSON.
+The BAM is not part of the key, since the caller names it, but the cache records its path, size, modification time and
+a digest of its bytes, and refuses a BAM at the recorded path whose bytes differ. Arrays go to ``.npz`` and scalars and
+provenance to JSON; a pickle would be fragile across the schema changes the cache must survive.
 """
 
 from __future__ import annotations
@@ -95,8 +60,7 @@ MANIFEST_JSON = "manifest.json"
 PAYLOAD_NPZ = "payload.npz"
 STRAND_NPZ = "strand.npz"
 
-#: The four reach columns the key must cover. Named here rather than globbed so that a NEW reach column
-#: fails loudly instead of quietly escaping the digest.
+#: The four reach columns the key covers; an index missing one is refused.
 REACH_COLUMNS = ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
 
 
@@ -112,16 +76,10 @@ def _digest(*parts: bytes) -> str:
 
 
 def reach_digest(index: "TranscriptIndex") -> str:
-    """Hash the splice-junction rows' reach columns — the part of the index calibration reads and no other
-    key covers.
+    """Hash the splice-junction rows' reach columns, the part of the index calibration reads that no other key covers.
 
-    The sj rows only: `build_sj_geometry_arrays`, the one reader of a reach, reads those. The contiguous rows
-    hold 0 in the reach columns (the index computes no contiguous reach) and nothing reads them, so hashing
-    them would refuse a good cache over values no consumer sees.
-
-    Computed on demand, never stored beside the index. It is stored in the CACHE's manifest, which is a
-    different thing: the cache is describing an external artifact it cannot recompute, exactly as
-    `index.source_record` does for the FASTA and the GTF.
+    Only the sj rows: `build_sj_geometry_arrays`, the one reader of a reach, reads only those, and the contiguous rows
+    hold 0. Computed on demand and stored only in the cache's manifest.
     """
     from .calibration.splice_graph import EDGE_KIND_SJ  # noqa: PLC0415
 
@@ -198,21 +156,15 @@ def check_bam_identity(recorded, bam: str | Path | None) -> None:
 
 
 def _payload_field_types() -> dict[str, type]:
-    """``AccumulatorPayload``'s annotations resolved to real classes.
-
-    ``dataclasses.fields()`` hands back annotation STRINGS under ``from __future__ import annotations``,
-    so the nested banks cannot be reconstructed from them. Resolving the hints is what lets the read path
-    stay generic instead of carrying a name→class table that a new bank could quietly fall out of.
-    """
+    """``AccumulatorPayload``'s annotations resolved to classes. ``dataclasses.fields()`` gives strings under
+    ``from __future__ import annotations``, from which the nested banks cannot be rebuilt."""
     return typing.get_type_hints(AccumulatorPayload)
 
 
 def _nested_dataclass(annotation) -> type | None:
-    """The dataclass an annotation names, looking through ``Optional`` / unions. ``None`` if none.
+    """The dataclass an annotation names, looking through unions; ``None`` if none.
 
-    ⛔ The union is not a corner case: ``AccumulatorPayload.drain`` is ``DrainQC | None``, and
-    ``dataclasses.is_dataclass`` is False for that — so a plain check silently treats the whole bank as a
-    scalar and every field inside it drops out of the schema key.
+    The union case matters: ``AccumulatorPayload.drain`` is ``DrainQC | None``, for which ``is_dataclass`` is False.
     """
     if dataclasses.is_dataclass(annotation):
         return annotation
@@ -223,11 +175,9 @@ def _nested_dataclass(annotation) -> type | None:
 
 
 def _schema_names() -> list[str]:
-    """Every name the cache is keyed by, NESTED BANKS INCLUDED, to any depth, in a stable order.
+    """Every name the cache is keyed by, nested banks included, in a stable order.
 
-    This is what makes the digest below cover what it claims to, and it must stay FULLY recursive rather
-    than one level deep: ``DrainQC`` nests a ``GapCensus`` inside itself, so a one-level walk leaves that
-    census's fields out of the key entirely.
+    The walk must stay fully recursive: ``DrainQC`` nests a ``GapCensus``, whose fields a one-level walk would miss.
     """
 
     def walk(owner: type, prefix: str) -> list[str]:
@@ -244,32 +194,17 @@ def _schema_names() -> list[str]:
 
 
 def payload_schema_digest() -> str:
-    """Hash the schema the cached arrays were written under — ``AccumulatorPayload``'s field list, the
-    fields of every bank nested inside it, and the strand model's layout (:func:`_strand_layout`).
+    """Hash the schema the cached arrays were written under: the payload's fields and those of every bank nested in
+    it (:func:`_schema_names`), each bank's column count, the strand model's layout (:func:`_strand_layout`) and the
+    deposit rule's behaviour (:func:`deposit_digest`).
 
-    No other key covers this. ``graph_hash`` describes the index, ``reach_digest`` the reaches,
-    the recorded ``scan_config`` the scan settings — none of them changes when the ACCUMULATOR changes. Adding
-    a field to a population without this key means a cache written beforehand is accepted and then fails
-    deep inside ``_payload_from_parts`` with a bare ``KeyError``, which reads as a bug in the cache
-    rather than as a stale cache. A strand-model field fails quieter still: every one has a default, so
-    a cache written before it existed would load it at that default.
+    No other key moves when the accumulator or the strand model changes. Without this, a cache written before a new
+    payload field would fail in ``_payload_from_parts`` with a bare ``KeyError``, and one written before a new
+    strand-model field would load it at its default.
 
-    It recurses because the banks nest: ``DeferredFragments`` puts the held-record bank's arrays inside one
-    field and every one of them is an ``.npz`` key, and ``DrainQC`` nests a ``GapCensus`` inside itself. A
-    top-level walk would leave a renamed field inside either one invisible to the key.
-    :func:`_schema_names` is fully recursive and looks through ``Optional``.
-
-    ⛔ It hashes the COLUMN COUNT, not only the name, and the obvious objection — "a dtype or shape
-    change is already caught at load by ``_bank``'s assertions" — is false on the cache path. ``_bank``
-    and ``_single_column_bank`` validate the C++ dict in
-    :meth:`AccumulatorPayload.from_scan_result`; :func:`_payload_from_parts` puts the ``.npz`` arrays
-    straight into the payload with no shape check at all. Collapsing a bank from ``[n, 2]`` to ``[n]``
-    therefore leaves every field name identical, and a name-only digest would ACCEPT a stale cache and
-    fail downstream with a shape error pointing nowhere near its cause.
-
-    The column count is taken from the two axis TABLES rather than from the arrays, because the digest
-    must be computable without a payload in hand. A bank moving between ``BANK_AXES`` and
-    ``SINGLE_COLUMN_AXES`` IS the shape change, so the tables are the honest source.
+    The column count is hashed as well as the name because :func:`_payload_from_parts` applies none of
+    ``from_scan_result``'s shape checks, so a bank collapsed from ``[n, 2]`` to ``[n]`` would otherwise be accepted.
+    It is read from the axis tables, so the digest needs no payload in hand.
     """
     return _digest(
         *(name.encode() for name in _schema_names()),
@@ -280,33 +215,23 @@ def payload_schema_digest() -> str:
 
 
 def deposit_digest() -> str:
-    """The deposit-BEHAVIOUR digest — a hash of what the accumulator DOES, not of what it is called.
-    Scans a fixed tiny partition with a fixed fragment set and hashes the resulting banks.
+    """A hash of what the accumulator does: a fixed fragment set deposited into a fixed tiny partition, its banks
+    hashed.
 
-    :func:`payload_schema_digest` hashes field NAMES and column counts, and a deposit-RULE change moves
-    neither — so without this a cache written under the old rule is accepted by the key and silently
-    serves OLD VALUES to NEW CODE. A rule change that alters
-    no name at all, such as the sj-boundary rule, is caught by nothing else.
+    A deposit-rule change moves no field name or column count, so without this a cache written under the old rule
+    would serve old values to new code. One fragment set goes into one accumulator in one order, so the digest is
+    stable across runs. The fixture is deliberately awkward (two annotated sj, a short region whose far boundary a
+    fragment may or may not reach; contained, crossing, spliced and sj-only fragments) so that a change confined to
+    one case still moves it.
 
-    It needs no version number (the project bans them) and no constant to maintain: it is a MEASUREMENT
-    of the current code. Change any deposit rule and it moves; change none and it is stable across runs
-    and processes, because one fixed fragment set goes into one accumulator in one order.
-
-    The fixture is deliberately awkward rather than minimal — two annotated sj, a short region whose far
-    boundary a fragment may or may not reach, contained / crossing / spliced / sj-only fragments — so
-    that a rule change confined to ONE of those cases still moves it.
-
-    ⛔ It runs the NATIVE accumulator, not the specification. The cache holds what the production
-    scanner deposited, so the key must certify THAT. Reading the reference here would also make `src`
-    depend on `tests`, which is not installed with the package. The two are held byte-identical by
-    ``tests/native/test_accumulator_native_parity.py``, and a test asserts this digest agrees across
-    both — so a drift between them fails loudly rather than certifying the wrong artifact.
+    It runs the native accumulator, not the specification: the cache holds what the production scanner deposited,
+    and ``src`` must not depend on ``tests``.
     """
     from .calibration.signature import RegionType  # noqa: PLC0415
     from .native import Accumulator  # noqa: PLC0415
 
-    #: Region-bound indices, not coordinates: the sj CSR is keyed by the LEFT BOUNDARY. 260 is bound 3
-    #: and 1000 is bound 4; 1120 is bound 6 and 2000 is bound 7.
+    # The sj CSR is keyed by region-bound index, not coordinate: 260 is bound 3, 1000 bound 4, 1120 bound 6 and
+    # 2000 bound 7.
     region_bounds = np.array([0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400], dtype=np.int64)
     accumulator = Accumulator(
         region_bounds=region_bounds,
@@ -337,14 +262,12 @@ def deposit_digest() -> str:
         (10, 50, ()),  # contained in one region, crosses nothing
         (30, 150, ()),  # crosses one boundary
         (30, 280, ()),  # crosses three boundaries
-        (150, 1060, ((260, 1000),)),  # spliced; BOTH blocks cross a boundary
-        (210, 1040, ((260, 1000),)),  # spliced; NEITHER block crosses a boundary
-        (150, 2100, ((260, 1000), (1120, 2000))),  # two sj AND boundaries
+        (150, 1060, ((260, 1000),)),  # spliced; both blocks cross a boundary
+        (210, 1040, ((260, 1000),)),  # spliced; neither block crosses a boundary
+        (150, 2100, ((260, 1000), (1120, 2000))),  # two sj and boundaries
         (1030, 2050, ((1120, 2000),)),  # one sj, one boundary
     ):
-        # ``hypotheses=()`` is REQUIRED — the native binding has no default, unlike the specification,
-        # whose default IS ``UNSPLICED_ONLY``. An empty set means "nothing to arbitrate", which the
-        # accumulator treats as the unspliced-only set.
+        # The native binding has no default for `hypotheses`; an empty set means the unspliced-only set.
         accumulator.deposit(
             start=start, end=end, observed_introns=introns, sj_strand=1, hypotheses=()
         )
@@ -372,10 +295,8 @@ def _schema_shapes() -> list[str]:
     ]
 
 
-#: Settings that divide the scan's WORK and not its tally. ``test_scan_order_independence.py`` holds the tally
-#: identical from one worker to eight, a range that crosses both decompression splits the budget derives, so a
-#: cache scanned under one budget is the tally under any other. Hashing them refused every cache on disk the
-#: day a default moved (``bgzf_threads`` 4 → derived from the budget).
+#: Settings that divide the scan's work, not its tally: the tally is identical at any worker count, so these stay
+#: out of the key.
 _WORK_ONLY_FIELDS = ("total_threads", "bgzf_threads")
 
 
@@ -398,25 +319,17 @@ class ScanCache:
     strand_model: object  # StrandModels, including its per-sj table
     provenance: dict  # the key, the BAM, the scan config, the counts
 
-    # No fragment-length row is stored here. Every fragment-length histogram comes off `payload` — the
-    # five length pools and the unconditional anchor the length laws are built against — so caching the payload
-    # caches them in one frame.
-
 
 # ── strand model round-trip ──────────────────────────────────────────────────────────────────────
-# The 2x2 is the MARGINAL of the per-sj table, and the junction fit reads κ from the table, not the
-# marginal. A cache that kept only the 2x2 would silently fall back to the pooled κ, splice artifacts and all.
+# The per-sj table is stored, not only its 2x2 marginal, because the junction fit reads κ from the table.
 
 
 def _strand_layout() -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
-    """The strand half of the cache, read off the strand model's own dataclasses: the sub-models, the
-    counters each one stores as a single int64 vector (in field order), and the per-sj table's columns.
+    """The strand half of the cache, read off the strand model's dataclasses: the sub-models, the int counters each
+    stores as one int64 vector (in field order), and the per-sj table's columns.
 
-    Derived rather than listed. Every field has a default, so a listed layout that missed a new field
-    would drop it on write and fill in the default on load; a derived one stores it, and moves
-    :func:`payload_schema_digest`, which then refuses a cache written without it. A sub-model field that
-    is neither an int counter nor ``sj_table`` has no place in this layout, and is refused rather than
-    packed into the counter vector and truncated.
+    Derived rather than listed, so a new field is stored and moves :func:`payload_schema_digest` instead of loading
+    at its default. A sub-model field that is neither an int counter nor ``sj_table`` has no place here and is refused.
     """
     from .strand_model import SJStrandTable, StrandModel, StrandModels
 
@@ -436,8 +349,8 @@ def _strand_layout() -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]
 
 
 def _strand_schema() -> list[str]:
-    """The strand half of the schema key: :func:`_strand_layout`, ORDER INCLUDED — a sub-model's
-    counters are one vector read back by position, so a reorder that keeps every name swaps two counts."""
+    """The strand half of the schema key: :func:`_strand_layout`, order included, since a sub-model's counters are
+    read back by position."""
     submodels, counters, columns = _strand_layout()
     return [
         f"strand submodels:{','.join(submodels)}",
@@ -489,22 +402,15 @@ def write_scan_cache(
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # A nested bank's arrays go to the .npz, NOT to the manifest. `dataclasses.asdict` on
-    # `DeferredFragments` yields a dict of ndarrays, and the manifest is written with
-    # `json.dumps(..., default=str)` — which would stringify each array to a TRUNCATED repr, silently, and
-    # read back as text. Nested dataclasses are therefore split by the type of each sub-field: arrays are
-    # prefixed `field__sub` and counters stay scalars.
-    # The cache holds a SCAN, and a drained payload is not one. The second pass runs after the cache is
-    # read, which is what lets one scan be drained repeatedly at different seeds without re-reading the
-    # BAM. Writing a drained payload would bake one draw into the cache, and it would also serialise
-    # `DrainQC.census_before` through `json.dumps(default=str)` as a stringified repr, silently — the
-    # same truncation defect one level down.
+    # The cache holds pass one, so the drain can re-run at any seed after loading.
     if payload.drain is not None:
         raise ValueError(
             "refusing to cache a DRAINED payload. The cache stores pass one so that the drain can be "
             "re-run at any seed; cache the payload `scan_and_buffer` returned and drain after loading."
         )
 
+    # A nested bank's arrays go to the .npz as `field__sub` and its counters to the manifest: the manifest's
+    # `json.dumps(default=str)` would write an array as a truncated repr.
     arrays: dict[str, np.ndarray] = {}
     scalars: dict[str, object] = {}
     for field in dataclasses.fields(AccumulatorPayload):
@@ -530,14 +436,12 @@ def write_scan_cache(
         "graph_hash": payload.graph_hash,
         "reach_digest": reach_digest(index),
         "payload_schema_digest": payload_schema_digest(),
-        # The settings the scan ran under. Their part of the key is DERIVED from this record when the
-        # cache is checked (`check_scan_cache`), never stored beside it: a stored digest is a second home
-        # that goes stale the day the key's definition changes.
+        # The scan settings; their part of the key is derived from this record when the cache is checked.
         "scan_config": dataclasses.asdict(scan_config)
         if dataclasses.is_dataclass(scan_config)
         else dict(scan_config),
         "splice_blacklist_digest": splice_blacklist_digest(index),
-        # ── provenance: what this cache is OF ────────────────────────────────────────────────────
+        # ── provenance: what this cache is of ────────────────────────────────────────────────────
         "bam": bam_identity(bam),
         "payload_scalars": scalars,
     }
@@ -553,15 +457,13 @@ def check_scan_cache(
     bam: str | Path | None = None,
     scan_config=None,
 ) -> None:
-    """Refuse a cache, from its manifest alone, unless it describes this index and this BAM, and, if
-    ``scan_config`` is given, unless it was scanned under those settings.
+    """Refuse a cache, from its manifest alone, unless it describes this index and this BAM and, when *scan_config*
+    is given, was scanned under those settings.
 
-    Everything :func:`read_scan_cache` checks before it reads the arrays: the reach, the payload schema, the
-    splice blacklist, the graph hash, the BAM and the scan settings. ``bam`` names the BAM the caller is about to
-    use; without it the BAM at the recorded path is compared, when it is still there. `build_scan_cache.py` calls
-    this before it skips an existing cache, and `preflight.py` to call one valid, each with the settings the
-    instruments read the caches with: without them a cache scanned under other settings read as valid there and
-    was refused by every reader that holds settings.
+    These are the checks :func:`read_scan_cache` makes before it reads the arrays: the reach, the payload schema, the
+    splice blacklist, the graph hash, the BAM and the scan settings. *bam* names the BAM the caller will use; without
+    it the BAM at the recorded path is compared, if it is still there. A caller that holds settings should pass them,
+    or a cache scanned under other settings reads as valid.
     """
     manifest = json.loads((Path(cache_dir) / MANIFEST_JSON).read_text())
     _check_manifest(manifest, index, bam, scan_config)
@@ -608,9 +510,8 @@ def _check_manifest(
         )
 
     if scan_config is not None:
-        # Two scans of one BAM under different tally settings are different tallies, and nothing else notices.
-        # Both sides are computed here, from the settings the manifest records and the ones the caller holds, so
-        # a thread count on either side decides nothing (``_WORK_ONLY_FIELDS``).
+        # Both digests are computed here, from the recorded settings and the caller's, so a thread count on either
+        # side decides nothing (`_WORK_ONLY_FIELDS`).
         recorded_settings = _scan_config_digest(manifest["scan_config"])
         expected_settings = _scan_config_digest(scan_config)
         if recorded_settings != expected_settings:
@@ -634,11 +535,9 @@ def _check_manifest(
 def read_scan_cache(
     cache_dir: str | Path, index: "TranscriptIndex", scan_config=None, bam: str | Path | None = None
 ) -> ScanCache:
-    """Load a cache and REFUSE it unless it describes this index and its BAM — and, if ``scan_config`` is given,
-    unless it was produced under that configuration.
+    """Load a cache, refusing it as :func:`check_scan_cache` does.
 
-    Pass ``scan_config`` whenever you have one. Without it a cache scanned under different settings is a different
-    tally and will load silently. The checks are :func:`check_scan_cache`'s; ``bam`` is as there.
+    Pass *scan_config* whenever you have one: without it a cache scanned under other settings loads silently.
     """
     cache_dir = Path(cache_dir)
     manifest = json.loads((cache_dir / MANIFEST_JSON).read_text())
@@ -665,10 +564,8 @@ def read_scan_cache(
 def _payload_from_parts(arrays: dict, scalars: dict) -> AccumulatorPayload:
     """Rebuild the payload from the ``.npz`` arrays and the manifest's scalars.
 
-    Generic over the nested banks: each one's sub-fields are taken from the ``.npz`` when they are arrays
-    and from the manifest when they are counters, so a bank that grows an array joins the round trip with
-    no edit here. It grows the ``payload_schema_digest`` at the same time, which is what refuses a cache
-    written before it existed instead of failing here with a bare ``KeyError``.
+    Generic over the nested banks: a sub-field comes from the ``.npz`` when it is an array and from the manifest
+    otherwise, so a bank that grows an array needs no edit here.
     """
     types = _payload_field_types()
     kwargs: dict[str, object] = {}
@@ -692,20 +589,15 @@ def _payload_from_parts(arrays: dict, scalars: dict) -> AccumulatorPayload:
 
 
 def index_derived_inputs(index: "TranscriptIndex") -> dict:
-    """The calibrate() arguments that come from the INDEX, rebuilt every time.
-
-    Deliberately not cached: they rebuild in well under a second, against an index load that happens
-    anyway, and a stored copy is how a cache goes stale against the thing it describes.
-    """
+    """The calibrate() arguments that come from the index, rebuilt every time rather than cached: they rebuild in
+    under a second, and a stored copy could go stale against the index."""
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
 
     return {
         "region_arrays": RegionArrays.from_index(index),
         "boundary_flags": build_boundary_flags_array(index),
-        # The SJ axis is index-derived too, and it is not optional: `calibrate` refuses an axis
-        # whose length disagrees with the payload's `n_sj`, because one addressing a different graph
-        # would place every splice on the wrong boundary.
+        # Required: `calibrate` refuses an sj axis whose length disagrees with the payload's `n_sj`.
         "sj": build_sj_geometry_arrays(index),
     }
 
@@ -717,19 +609,14 @@ def calibration_inputs(
     drain_seed: int | None = None,
     lift_out: dict | None = None,
 ) -> dict:
-    """Exactly the keyword arguments `calibrate` needs, in PRODUCTION'S FRAME.
+    """The keyword arguments `calibrate` needs, in production's frame.
 
-    The payload is DRAINED here. The cache stores pass one so the drain can re-run at any seed;
-    production drains the side buffer before ``build_fl_models``/``calibrate``, so an instrument that
-    calibrated the undrained tally would be measuring a library the solver never sees — the certified
-    spliced channel alone is materially larger once drained. ``drain_seed`` defaults to the production
-    default (``PipelineConfig().second_pass_seed``); pass the run's own when scoring against a
-    specific pipeline invocation. ``lift_out`` (a dict) receives the drain's ``_lift`` box —
-    ``(undrained, choices, region_types, sj)`` — which is what `calibration._oracle.lift_drain_parts`
-    needs to put cached ORACLE PARTITIONS into the same frame; it stays EMPTY when the side buffer
-    held nothing, in which case pass one already IS the drained frame.
-
-    The fl models are production's own (`pipeline.library_fl_models`), built on the DRAINED payload.
+    The payload is drained here, as production drains it before ``build_fl_models`` and ``calibrate``, and the fl
+    models are production's own (`pipeline.library_fl_models`) on the drained payload. *drain_seed* defaults to
+    ``PipelineConfig().second_pass_seed``; pass a run's own seed to score against that run. *lift_out*, a dict,
+    receives the drain's ``_lift`` box ``(undrained, choices, region_types, sj)``, which
+    `calibration._oracle.lift_drain_parts` needs to put cached oracle partitions in the same frame; it stays empty
+    when the side buffer held nothing.
     """
     from .config import PipelineConfig
     from .pipeline import _drain_side_buffer, library_fl_models

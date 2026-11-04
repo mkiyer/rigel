@@ -1,29 +1,17 @@
-"""The region/boundary chain the belief-propagation sweep traverses.
+"""The region/boundary chain the sweep traverses, and its cut into independent locus blocks; layer 0.
 
-Gate: ``tests/calibration/test_region_geometry.py``.
-
-The calibration graph is a linear bipartite chain of REGION and BOUNDARY slots interleaved in
-genomic order. A reference with ``k`` regions owns exactly ``k - 1`` interior boundaries, so its
-slot sequence is::
+The chain interleaves REGION and BOUNDARY slots in genomic order. A reference with ``k`` regions owns exactly
+``k - 1`` interior boundaries::
 
     N0  E0  N1  E1  ...  E(k-2)  N(k-1)          2k - 1 slots
 
-The chain starts and ends with a REGION and has no terminal boundary slots: a contiguous boundary
-is the boundary BETWEEN two adjacent regions, and there is no such boundary before the first region
-or after the last, so the object does not exist rather than existing empty. A boundary therefore
-always has a region on both sides, which is the invariant every consumer relies on.
+It starts and ends with a REGION, so every boundary has a region on both sides: boundary ``i`` lies between regions
+``i`` and ``i + 1``, an implicit relation computed only here. A slot is addressed by ``(kind, obj_idx)``, where
+``obj_idx`` indexes the region axis or the contiguous-boundary axis, so every per-object statistic stays in its own
+payload-shaped array. Splice junctions are not slots: each closes an undirected loop, so a sj is a factor on its
+endpoints, never a message channel.
 
-Boundary endpoints are implicit: boundary ``i`` lies between region ``i`` and region ``i + 1``.
-Nothing stores them, and this module is the one place that arithmetic lives.
-
-A slot is addressed by ``(kind, obj_idx)``: ``kind`` is :data:`REGION` or :data:`BOUNDARY`, and
-``obj_idx`` indexes the region axis or the contiguous-boundary axis respectively. That keeps every
-per-object statistic in its own payload-shaped array; the chain only sequences and links them.
-
-Splice-junction boundaries are NOT chain slots. The graph is a DAG but not a polytree: every sj
-boundary closes an undirected loop, so an sj must be a FACTOR on its endpoint regions and never a
-message channel. Breaking such a cycle by dropping the sj boundary re-isolates the exon the
-boundary exists for.
+Gate: ``tests/calibration/test_region_geometry.py``.
 """
 
 from __future__ import annotations
@@ -71,38 +59,29 @@ class RegionChain:
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
-# ONE SLOT'S DECONVOLUTION RESULT — vocabulary, so it lives at the bottom layer: `region_geometry` and
-# `simplex_logodds` (layer 3) and `sweep` (layer 6) all need the type, and a type more than one layer
-# reaches for belongs below all of them. It is not a strand concept: the composition
-# `(f_pos, f_neg, f_g)` is the tool's central datum and a slot is what carries it.
+# One slot's deconvolution result. It lives in the bottom layer because layers 3 and 6 both use it.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
 class RegionDeconv:
-    """Per-region deconvolution result, with two disjoint uses — hence the optional halves:
+    """Per-slot deconvolution result, with two uses and hence optional fields.
 
-    * the per-region SOLVE (`simplex_logodds._solve_regions_logodds_all`) returns the composition,
-      ``*_frac`` plus ``*_frac_var``, and no mass: a region's mass is a per-FACE quantity and the
-      solve is face-invariant, so a single ``*_mass`` here would be meaningless;
-    * the chain PROJECTION (`sweep.chain_region_deconv` / `chain_boundary_deconv`) returns the mass
-      and the composition the downstream `CalibrationResult` publishes, and no precision.
+    * The per-slot solve (``simplex_logodds._solve_regions_logodds_all``) returns the fractions and ``gdna_frac_var``
+      but no mass, since mass is per face and the solve is face-invariant.
+    * The chain projection (``sweep.chain_region_deconv`` / ``chain_boundary_deconv``) returns the masses and
+      fractions ``CalibrationResult`` publishes, but no variance.
     """
 
-    gdna_frac: (
-        np.ndarray
-    )  # float64[K] — the region's gDNA composition (face-invariant; mass = frac·M_face)
-    # per-strand RNA fractions of the UNSPLICED mass (the image of `(f_g, w_pos)` under
-    # ψ's `compose` in `native/psi_kernel.h`, so f_pos+f_neg+gdna_frac = 1).
+    gdna_frac: np.ndarray  # float64[K] — the gDNA composition (face-invariant; mass = frac·M_face)
+    # per-strand RNA fractions of the unspliced mass, so f_pos + f_neg + gdna_frac = 1
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
-    # the PROJECTION's masses; None on the per-region solve. `calibrate` publishes them as the result's
-    # counts beside the fractions above, and `derive` and the capture efficiencies read the gDNA one.
+    # the projection's masses; None on the per-slot solve. ``derive`` and the capture efficiencies read the gDNA one.
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
-    # `Var(log f_g)`, NOT `Var(f_g)` — a grid moment of `log f_g` over the lambda lattice
-    # (`simplex_logodds._solve_regions_logodds_all`), so NOT bounded by 1/4. Set by the per-region solve and read by
-    # the landscape prior's training rule; None on the chain region/boundary projections.
+    # Var(log f_g), not Var(f_g), so not bounded by ¼; set by the per-slot solve, read by the landscape's training
+    # rule, None on the projections
     gdna_frac_var: "np.ndarray | None" = None  # float64[K]
 
 
@@ -111,12 +90,9 @@ def build_region_chain(
 ) -> RegionChain:
     """Build the chain from the payload's two per-reference CSR offset arrays.
 
-    Reference ``f`` owns regions ``[rno[f], rno[f+1])`` and contiguous boundaries
-    ``[reo[f], reo[f+1])``, with ``boundaries == max(regions - 1, 0)``. A reference with no regions
-    contributes nothing at all, which is legal.
-
-    Both arrays come from ONE accumulator payload, so a mismatch between them is an accumulator or
-    payload inconsistency and not a stale index: rebuilding will not fix it, and the error says so.
+    Reference ``f`` owns regions ``[rno[f], rno[f+1])`` and contiguous boundaries ``[reo[f], reo[f+1])``, with
+    ``boundaries == max(regions - 1, 0)``; a reference with no regions contributes nothing. Both arrays come from one
+    accumulator payload, so a mismatch is a payload inconsistency, not a stale index.
     """
     region_offsets = np.asarray(ref_region_offsets, dtype=np.int64)
     boundary_offsets = np.asarray(ref_boundary_offsets, dtype=np.int64)
@@ -161,8 +137,7 @@ def build_region_chain(
                 kind[slot] = BOUNDARY
                 obj_idx[slot] = boundary_base + i
                 slot += 1
-        # link consecutive slots WITHIN this reference; the two terminals keep -1, so no message can
-        # cross a reference boundary
+        # link consecutive slots within this reference; the two terminals keep -1, so no message crosses references
         ref_slots = np.arange(first_slot, slot, dtype=np.int64)
         left[ref_slots[1:]] = ref_slots[:-1]
         right[ref_slots[:-1]] = ref_slots[1:]
@@ -178,17 +153,17 @@ def build_region_chain(
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
-# THE LOCUS — where the chain breaks. Pure topology: which slots END message passing is the caller's
-# predicate (``terminal``); this module only cuts the chain there.
+# The locus: where the chain breaks. Which slots end message passing is the caller's predicate.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
 class LocusBlock(NamedTuple):
-    """One unit of the sweep's work: the slots ``[start, stop)`` it OWNS (solves and writes back) and
-    the slots ``[start, end)`` it READS. ``end`` is ``stop`` or ``stop + 1``: when the slot at ``stop``
-    is a terminal linked to the block's last slot, that slot is read as a message SOURCE (the block's
-    last node receives from it in the backward pass) but is owned by the next block, which starts on
-    it. A block starts on a terminal or a reference start, never inside a locus."""
+    """One unit of the sweep's work: the slots ``[start, stop)`` it owns and the slots ``[start, end)`` it reads.
+
+    ``end`` is ``stop + 1`` when the slot at ``stop`` is a terminal linked to the block's last slot: it is read as a
+    message source but owned by the next block, which starts on it. A block starts on a terminal or a reference
+    start, never inside a locus.
+    """
 
     start: int
     stop: int
@@ -198,28 +173,17 @@ class LocusBlock(NamedTuple):
 def locus_blocks(
     chain: RegionChain, terminal: np.ndarray, block_slots: int | None = None
 ) -> list[LocusBlock]:
-    """Cut the chain into blocks (:class:`LocusBlock`) at its message terminals, then merge consecutive
-    loci up to ``block_slots`` slots per block.
+    """Cut the chain into blocks (:class:`LocusBlock`) at its message terminals, merging consecutive loci up to
+    ``block_slots`` slots per block.
 
-    A LOCUS is the run of slots between two terminals. A terminal is a slot at which message passing
-    ends in both directions — in the calibration sweep, a REGION that admits no RNA strand, structurally
-    pure gDNA, solved and fixed before any message exists; the backbone never delivers a message INTO
-    one, so what happens on its far side cannot reach this side. ``terminal`` is that predicate as a
-    bool array over the slots; this function knows nothing about why a slot is one. A reference start
-    (``left == -1``) is a cut too, since no message crosses a reference boundary.
+    A locus is the run of slots between two terminals. ``terminal`` flags the slots where message passing ends in
+    both directions (in the sweep, a REGION that admits no RNA strand); a reference start is also a cut. The
+    two-phase solve is not an iteration, so a node's answer depends only on messages that can reach it, and none
+    crosses a terminal: the sweep over the blocks, in any order, is exactly the sweep over the chain.
 
-    Every block is therefore independent given its own slots plus the terminal it reads at ``end``, and
-    the sweep over the blocks — in any order, whole or one at a time — is the sweep over the chain. The
-    two-phase solve makes this exact rather than approximate: it is not an iteration, so a node's
-    answer depends only on the messages that can reach it, and none can reach it across a terminal.
-
-    ``block_slots`` is a PERFORMANCE tunable and nothing else — it sets the working set (a block's
-    ``(slots, K)`` arrays) against the per-block overhead, and moves no number: a chunk-exact solve
-    gives the same answer for every value. ``None`` makes one block of the whole chain. A block never
-    splits a locus, so a locus longer than ``block_slots`` is one block of its own length.
-
-    Every slot is owned by exactly one block, in chain order: ``[b.start for b]`` is ascending,
-    consecutive blocks abut (``prev.stop == next.start``) and the last block stops at ``n_slots``.
+    ``block_slots`` trades a block's working set against per-block overhead and moves no number; ``None`` makes one
+    block. A block never splits a locus, so a longer locus is a block of its own length. Every slot is owned by
+    exactly one block, in chain order: consecutive blocks abut and the last stops at ``n_slots``.
     """
     n = int(chain.n_slots)
     left = np.asarray(chain.left, dtype=np.int64)
@@ -237,8 +201,7 @@ def locus_blocks(
     limit = n if block_slots is None else int(block_slots)
 
     def block(start: int, stop: int) -> LocusBlock:
-        # the slot at ``stop`` is read as a source iff it is linked to the block's last slot: a
-        # terminal that is also a reference start is not, and ``n`` is no slot at all
+        # the slot at ``stop`` is read as a source iff it is linked to the block's last slot
         reads_next = stop < n and left[stop] >= 0
         return LocusBlock(int(start), int(stop), int(stop + 1 if reads_next else stop))
 

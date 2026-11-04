@@ -1,18 +1,11 @@
-"""The condition-grid loop of ``whole_genome.run_simulation``.
+"""The condition-grid loop of ``whole_genome.run_simulation``: nascent x gDNA rate x gDNA strand overdispersion x
+strand specificity x capture.
 
-The grid is nascent x gDNA rate x gDNA strand overdispersion x strand specificity x capture.
-
-Per condition, :func:`run_condition_grid` deep-copies the transcripts back to the base abundances,
-applies the nascent mode, resolves the RNA/gDNA fragment split (:func:`resolve_depths`), runs a
-:class:`~rigel.sim.wgs_engine.WholeGenomeSimulator` on a capture sampler shared by every condition
-using that panel, writes the post-capture truth from the oracle BAM, and appends one manifest entry
-for the caller to write. Conditions are resumable: a condition whose existence key is already on
-disk is skipped, the key being the oracle BAM whenever one is requested, since that is the artifact
-the instruments read.
-
-Every condition draws its seed through :func:`capture_paired_condition_seed`, which keys on
-``(gdna, strand specificity)`` only, so the capture, overdispersion and nascent variants of one base
-condition are paired for controlled comparison while the main axes are decorrelated.
+Per condition, :func:`run_condition_grid` resets the transcripts to the base abundances, applies the nascent mode,
+splits the fragment budget (:func:`resolve_depths`), simulates on the capture sampler its panel shares, writes the
+truth and returns a manifest entry. A condition whose output already exists is skipped. The seed keys on
+``(gdna, strand specificity)`` only (:func:`capture_paired_condition_seed`), so the capture, overdispersion and
+nascent variants of one base condition are paired.
 """
 
 from __future__ import annotations
@@ -41,10 +34,8 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class ConditionDepths:
-    """How one condition's fragment budget splits between RNA and gDNA. The mature/nascent split
-    inside ``n_rna`` is never imposed: nascent entities are transcripts in the same multinomial, so
-    their share follows from molecules and lengths and is read off the realised origin counts
-    afterwards."""
+    """How one condition's fragment budget splits between RNA and gDNA. The nascent share of ``n_rna`` is not
+    imposed: nascent entities are rows of the one RNA multinomial, so it follows from molecules and lengths."""
 
     n_rna: int
     n_gdna: int
@@ -55,41 +46,29 @@ class ConditionDepths:
 
 
 def resolve_depths(sim, *, gdna_rate: float) -> ConditionDepths:
-    """Split one condition's fragment budget between RNA and gDNA. Two modes, by config:
+    """Split one condition's fragment budget between RNA and gDNA:
 
-    * ``n_total_fragments is None`` (the default) — the RNA depth is fixed and gDNA is added on top
-      at ``rate x n_rna``. A ``rate`` of 1.0 is therefore a 50 % gDNA library at *twice* the depth
-      of a ``rate`` of 0.
-    * ``n_total_fragments`` set — the total is fixed and ``rate`` decides only the split:
-      ``n_rna = total/(1+rate)``, ``n_gdna = total − n_rna``.
+    * ``n_total_fragments is None`` (the default): the RNA depth is fixed and gDNA is added at ``rate x n_rna``,
+      so a ``rate`` of 1.0 is a 50 % gDNA library at twice the depth of ``rate`` 0.
+    * ``n_total_fragments`` set: the total is fixed and ``rate`` decides only the split,
+      ``n_rna = total/(1+rate)``, ``n_gdna = total − n_rna``. This mirrors a sequencing run's fixed budget and
+      reaches high gDNA fractions at a bounded depth; the RNA side thins as gDNA rises.
 
-    The second mode is what reaches the high-gDNA end at all: under the first, a 98 % gDNA library
-    is ``rate = 49``, i.e. 490 M fragments against a 10 M RNA depth. It is also the more faithful
-    model, since a sequencing run has a fixed budget and the contamination fraction decides how that
-    budget is split rather than how much extra is generated. The accepted trade-off is that the RNA
-    side thins as gDNA rises, so per-transcript accuracy degrades at high contamination — a property
-    of such libraries rather than an artifact.
-
-    Nascent comes out of the RNA share and never on top of it, structurally: the nascent entities
-    are rows of the one RNA multinomial, so ``n_rna`` is the whole RNA budget and the mature/nascent
-    split inside it is realised, not imposed. Raises when the requested split leaves no RNA at all.
+    Nascent comes out of ``n_rna``, never on top of it. Raises when the split leaves no RNA.
 
     Gates: ``tests/test_sim_fixed_total_depth.py``.
     """
     total = getattr(sim, "n_total_fragments", None)
 
     if total is None:
-        # ── additive: RNA depth fixed, gDNA added on top ──────────────────────────────────────
+        # additive: RNA depth fixed, gDNA added on top
         n_rna = int(sim.n_rna_fragments)
         return ConditionDepths(n_rna, round(gdna_rate * n_rna))
 
-    # ── fixed total: `rate` decides the split only ────────────────────────────────────────────
+    # fixed total: `rate` decides the split only
     total = int(total)
     n_rna = round(total / (1.0 + float(gdna_rate)))
-    # gDNA is the remainder, so the total is conserved by construction rather than by luck. What
-    # breaks conservation is computing the two shares independently with truncation (`int()` on
-    # both), which drifts by a fragment at some rates; rounding both and taking the remainder does
-    # not. That truncation is the perturbation the gate uses.
+    # gDNA must stay the remainder: two shares computed independently drift from the total by a fragment.
     n_gdna = total - n_rna
     if n_rna <= 0:
         raise ValueError(
@@ -113,10 +92,8 @@ def capture_paired_condition_seed(
 ) -> int:
     """Seed shared by the capture and nascent variants of one ``(gdna, ss)`` base condition.
 
-    The nascent label is deliberately not an argument, so the variants of one base condition start
-    from the same stream. Nascent rows are drawn in the same multinomial as the mature rows,
-    so a nascent-on cell and its nascent-off twin share the seed but not a bit-identical mature
-    stream: turning nascent on re-allocates the RNA budget, as it physically must.
+    A nascent-on cell and its nascent-off twin share the seed but not an identical mature stream, since nascent
+    rows are drawn in the same multinomial and re-allocate the RNA budget.
     """
     seed_name = condition_dir_name(gdna_label, strand_specificity, "_paired")
     return stable_seed(base_seed, seed_name)
@@ -142,22 +119,15 @@ def run_condition_grid(
     oracle_bam: bool = True,
     emit_fastq: bool = True,
 ) -> list[dict]:
-    """Run the full condition grid and return the per-condition manifest entries.
+    """Run the full condition grid and return the per-condition manifest entries for the caller to write.
 
-    ``nrna_pairs`` entries are ``(label, mode, value, index)`` (see ``whole_genome._build_nrna_pairs``).
-    The modes reach the entities by two different routes and the difference is the point:
-    ``additive_ratio`` pools each entity's molecules from its contributors
-    (`whole_genome.assign_nrna_to_entities`, so nascent tracks mature and cannot exceed it), while
-    ``sparse`` writes each entity's absolute abundance directly (`whole_genome.apply_sparse_nrna`, so
-    most entities get exactly zero and the rest are independent of the mature level). ``file`` leaves
-    the loaded abundances alone. Every mode then shares one thing: the RNA budget is one multinomial
-    over mature and nascent rows, so the fragment split is realised rather than allocated.
-    The caller writes the manifest.
+    ``nrna_pairs`` entries are ``(label, mode, value, index)`` (``whole_genome._build_nrna_pairs``).
+    ``additive_ratio`` pools each entity's molecules from its contributors (`whole_genome.apply_nrna_ratio`),
+    ``sparse`` sets each entity's absolute abundance (`whole_genome.apply_sparse_nrna`), and ``file`` keeps the
+    loaded abundances.
     """
-    # One CaptureSampler per capture scenario, built once and reused by every condition that shares
-    # it. The probe layout and the per-width partition depend only on the panel and the templates —
-    # not on abundance, gDNA rate, strand or nascent — so rebuilding per condition would recompute
-    # minutes of identical numbers each time.
+    # One CaptureSampler per capture scenario, shared by its conditions: the probe layout and the per-width
+    # partition depend only on the panel and the templates.
     from rigel.index import load_reference_lengths
 
     _ref_lengths = load_reference_lengths(genome_path)
@@ -187,8 +157,6 @@ def run_condition_grid(
             nrna_ratio = float(nrna_value or 0.0)
             apply_nrna_ratio(cond_transcripts, nrna_ratio)
         elif nrna_mode == "sparse":
-            # nascent is absent from most gene spans and independent of the mature level where it
-            # is present; the fragment share is emergent and recorded below
             nrna_abundance_range = tuple(nrna_value)  # type: ignore[arg-type]
             nrna_ratio = apply_sparse_nrna(
                 cond_transcripts,
@@ -251,7 +219,7 @@ def run_condition_grid(
                         "n_gdna": n_gdna,
                         "n_total": n_rna + n_gdna,
                         "seed": condition_seed,
-                        # one key per path, and each table's key the one its truth_summary.json uses
+                        # each table's key is the one its truth_summary.json uses
                         "truth_kind": "post_capture_empirical",
                         "pre_capture_abundances": molecular_truth_name,
                         "post_capture_abundances": truth_abundances_name,
@@ -261,10 +229,8 @@ def run_condition_grid(
                         "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
                     }
 
-                    # The existence key is the oracle BAM whenever one is requested, because the BAM
-                    # is the artifact the instruments read. On a panel whose BAM exists but whose
-                    # FASTQs are gone, a run that wants FASTQs skips instead of regenerating them;
-                    # delete the BAM to force it.
+                    # The resume key is the oracle BAM whenever one is requested, so a condition whose BAM
+                    # exists is skipped even if its FASTQs are gone; delete the BAM to regenerate it.
                     _exists_key = cond_dir / ("sim_oracle.bam" if oracle_bam else "sim_R1.fq.gz")
                     if _exists_key.exists():
                         print("    Output exists, skipping", flush=True)
@@ -311,8 +277,7 @@ def run_condition_grid(
                         pre_capture_abundances=molecular_truth_name,
                         gdna_strand_overdispersion=gdna_od,
                     )
-                    # The FASTQs are dropped only after the truth is written, which reads the oracle
-                    # BAM when one exists (``sim.truth._iter_origins_from_source``).
+                    # The FASTQs are dropped only after the truth is written, since it falls back to them.
                     if not emit_fastq:
                         for _fq in (cond_dir / "sim_R1.fq.gz", cond_dir / "sim_R2.fq.gz"):
                             if _fq.exists():

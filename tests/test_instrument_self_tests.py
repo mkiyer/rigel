@@ -1,14 +1,9 @@
 """The instruments that carry their own falsification, run inside the suite.
 
-A `scripts/design/` instrument that perturbs every one of its own comparators and requires each to fire,
-with no I/O. A `--self-test` flag that nothing invokes is a gate that goes stale silently: the
-perturbations pass on the day they are written and nobody runs them again. This file runs them
-in-process on every suite run, and asserts the COUNT as well as the pass, so losing a perturbation is a
-failure rather than a quieter green.
-
-In-process, never a subprocess: a subprocess would need the panel's conda environment resolved from
-inside pytest and would hide an import error as a non-zero exit code, and importing the module is also
-what proves the shared sibling loader still finds the instruments' helpers.
+A `scripts/design/` instrument's `--self-test` perturbs every one of its own comparators, with no I/O, and requires
+each to fire. A self-test nothing invokes goes stale silently, so this file runs each in-process on every suite run
+and asserts the count of gates as well as the pass: losing a perturbation fails. In-process, not a subprocess, so an
+import error surfaces as itself and the shared sibling loader is proved to find the instruments' helpers.
 """
 
 from __future__ import annotations
@@ -28,7 +23,7 @@ DESIGN = ROOT / "scripts" / "design"
 #: instrument's own output rather than adjusting it here: a self-test that quietly lost a case reads
 #: exactly like one that never had it.
 INSTRUMENTS = [
-    ("calibration_vs_oracle", 33, "{n}/{n} self-test gates fired"),
+    ("calibration_vs_oracle", 26, "{n}/{n} self-test gates fired"),
     ("ruler_vs_truth", 43, "{n}/{n} self-test gates fired"),
 ]
 

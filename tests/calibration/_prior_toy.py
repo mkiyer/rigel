@@ -1,6 +1,6 @@
-"""The prior-vs-oracle toy — the one contaminated three-gene scenario the ``LocusPriors`` gates and the
-message-layer gates (``_transfer_harness.capture_sweep_inputs``) both build on, so that one structure is defined
-once. A ``_``-prefixed helper: pytest collects nothing here.
+"""The prior-vs-oracle toy: the one contaminated three-gene scenario the ``LocusPriors`` tests and the message-layer
+tests (``_transfer_harness.capture_sweep_inputs``) both build on, defined once. A ``_``-prefixed helper, so pytest
+collects nothing here.
 """
 
 from __future__ import annotations
@@ -9,11 +9,9 @@ from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 
 def _scenario(name: str, seed: int, work_dir) -> Scenario:
-    """Three genes, staggered isoforms, and one region shorter than the shortest fragment.
-
-    The stagger is load-bearing for the ``boundary_spliced`` bank (a contiguous crossing by a molecule
-    that spliced elsewhere can only land where a region_bound falls inside another transcript's exon), and the
-    short region gives the toy genuinely EMPTY objects.
+    """Three genes, staggered isoforms, and one region shorter than the shortest fragment. The stagger feeds the
+    ``boundary_spliced`` bank (a contiguous crossing by a molecule that spliced elsewhere can only land where a
+    region_bound falls inside another transcript's exon), and the short region gives the toy empty objects.
     """
     sc = Scenario(name, genome_length=9000, seed=seed, work_dir=work_dir)
     sc.add_gene(
@@ -60,8 +58,7 @@ def build_toy(tmp_path_factory):
 
 
 def build_toy_zero_gdna(tmp_path_factory):
-    """The zero-gDNA control, at the instrument level. Truth is exactly 0 at every locus, so there
-    is nothing for a false positive to cancel against."""
+    """The zero-gDNA control: truth is exactly 0 at every locus, so a false positive has nothing to cancel against."""
     sc = _scenario("pv0", 23, tmp_path_factory.mktemp("pv0_sim"))
     return sc.build_oracle(
         n_rna_fragments=4000,

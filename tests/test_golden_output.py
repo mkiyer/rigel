@@ -1,15 +1,9 @@
-"""The pipeline's numerical output does not drift, on a battery of diverse oracle scenarios.
+"""The pipeline's numerical output does not drift, on a battery of oracle scenarios.
 
-Each scenario runs from a fixed-seed oracle BAM, so no aligner is needed, and captures every numerical
-column of the transcript-, gene- and locus-level frames plus the scalar aggregates, against a golden
-stored in `tests/golden/` as feather for a lossless float round trip with a TSV mirror for diffing.
-Every numeric column, counts included, is compared to a relative tolerance with an absolute floor,
-because the native EM is compiled with FMA contraction and a SIMD exp and its iterative solve
-amplifies ULP-level platform differences — pinning one EM thread makes a run reproducible on a
-single machine but not across machines. The scenarios cover single- and multi-exon genes, multi-isoform EM, antisense overlap, gDNA
-contamination, nascent RNA, imperfect strand specificity and many loci, so a change in any of those
-shows up as a diff rather than as a number nobody was watching. `--update-golden` regenerates the
-files, and reading the diff before doing that is the point of having them.
+Each scenario runs from a fixed-seed oracle BAM, so no aligner is needed, and compares every numeric column of the
+transcript, gene and locus frames, and the scalar aggregates, against a golden in `tests/golden/` (feather for a
+lossless round trip, a TSV mirror for diffing), to a relative tolerance with an absolute floor. `--update-golden`
+regenerates the files; the diff is to be read before that.
 """
 
 import json
@@ -32,20 +26,13 @@ SEED = 42
 PIPELINE_SEED = 42
 N_FRAGS = 1000  # enough to exercise EM meaningfully
 
-# Tolerance for golden comparison, applied to every numeric column.
-# The native EM (_em_impl) is compiled with -ffp-contract=fast and uses a SIMD exp
-# (fast_exp.h); the scoring kernels (_scoring_impl) are compiled with -ffast-math.
-# Pinning the EM to one thread (below) makes results deterministic on a *single*
-# machine — but NOT bit-identical across machines: FMA contraction, SIMD lane
-# width, and library versions differ between the machine where the goldens are
-# generated and the CI runners. The iterative solver amplifies those ULP-level
-# input differences to ~1e-8 relative on derived quantities such as
-# em_effective_length, so a bit-exact golden is unachievable. Near-zero quantities
-# (gdna with no contamination, ~1e-296) also wander by several percent in relative
-# terms while remaining scientifically meaningless. rtol=1e-6 sits ~2 orders of
-# magnitude below any real regression — an algorithmic change moves meaningful
-# values by >=1e-3 — yet absorbs cross-platform float noise; atol=1e-10 absorbs
-# noise on effectively-zero quantities.
+# Tolerance for golden comparison, applied to every numeric column. The native EM (_em_impl) is compiled
+# with -ffp-contract=fast and a SIMD exp (fast_exp.h), and the scoring kernels (_scoring_impl) with
+# -ffast-math, so one EM thread makes a run deterministic on one machine but not bit-identical across
+# machines (FMA contraction, SIMD lane width and library versions differ), and the iterative solve
+# amplifies those ULP-level differences to about 1e-8 relative. rtol=1e-6 absorbs that noise and stays
+# far below what an algorithmic change moves (>= 1e-3 on meaningful values); atol=1e-10 absorbs noise on
+# effectively-zero quantities such as gDNA with no contamination.
 RTOL = 1e-6
 ATOL = 1e-10
 
@@ -314,12 +301,12 @@ def _run_golden_test(scenario_name, result, index, update_golden):
 
 
 # =====================================================================
-# SCENARIO DEFINITIONS
+# Scenario definitions
 # =====================================================================
 #
 # Each scenario exercises a different axis of complexity.  Together they
 # cover: single/multi-exon genes, multi-isoform EM, antisense overlap,
-# gDNA contamination, nRNA, imperfect strand specificity, many-loci
+# gDNA contamination, nascent RNA, imperfect strand specificity, many-loci
 # batching, extreme abundance ratios, and combinations thereof.
 # =====================================================================
 
@@ -561,7 +548,7 @@ class TestGDNA:
 
 
 class TestNRNA:
-    """Nascent RNA — tests nRNA component handling in EM."""
+    """Nascent RNA (the simulator's ``nrna_abundance``): tests the EM's nascent spans."""
 
     def test_nrna_moderate(self, tmp_path, update_golden):
         sc = Scenario(
@@ -732,7 +719,7 @@ class TestManyLoci:
 
 
 class TestCombinedStress:
-    """Combined stress: multi-isoform + gDNA + nRNA + imperfect strand."""
+    """Combined stress: multi-isoform + gDNA + nascent RNA + imperfect strand."""
 
     def test_full_combo_moderate(self, tmp_path, update_golden):
         gdna = GDNAConfig(abundance=20.0, frag_mean=350, frag_std=100, frag_min=100, frag_max=1000)
@@ -764,7 +751,7 @@ class TestCombinedStress:
         sc.cleanup()
 
     def test_full_combo_extreme(self, tmp_path, update_golden):
-        """Extreme: heavy gDNA + heavy nRNA + low strand spec + 3 isoforms."""
+        """Extreme: heavy gDNA + heavy nascent RNA + low strand spec + 3 isoforms."""
         gdna = GDNAConfig(abundance=80.0, frag_mean=350, frag_std=100, frag_min=100, frag_max=1000)
         sc = Scenario(
             "golden_combo_ext",

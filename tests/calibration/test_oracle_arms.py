@@ -1,17 +1,10 @@
-"""Falsification gates for ``scripts/design/_oracle_arms.py`` — the oracle cache and the per-object scorer
-``calibration_vs_oracle.py`` reads.
+"""Tests for ``scripts/design/_oracle_arms.py``: the oracle cache and the per-object scorer ``calibration_vs_oracle.py``
+reads.
 
-Every number the scorer prints is a difference between two per-object arrays, so every way of getting
-that wrong is a way of getting a *plausible* answer. These gates are the ways.
-
-EACH GATE HERE CARRIES ITS OWN PERTURBATION, in the same test, because a gate that has never been
-watched to fire has not been written yet (TRAPS: perturb-every-gate). Reading a gate is not evidence;
-each test below breaks the thing it guards and asserts the guard notices.
-
-The toy serves the cache and sum-to-full gates; the scoring gates run on synthetic arrays. A
-single-reference toy is deliberately NOT enough to judge the deposit path, since a single-reference
-index hides ref-id-space mismatches. The deposit path has its own gates in ``tests/native/`` and its
-truth-scored instruments run on the panel.
+Every number the scorer prints is a difference between two per-object arrays, so every way of getting it wrong yields a
+plausible answer; each test breaks the thing it guards and asserts the guard notices. The toy serves the cache and
+sum-to-full tests; the scoring tests run on synthetic arrays. A single-reference toy cannot judge the deposit path,
+since it hides ref-id mismatches; ``tests/native/`` covers that path.
 """
 
 from __future__ import annotations
@@ -27,22 +20,17 @@ import pytest
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.config import PipelineConfig
-from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
+from _prior_toy import build_toy
 
 
 def _load_sibling(name: str):
     """Import a ``scripts/design/`` instrument by path.
 
-    ``scripts/`` is not a package and must not become one — it is a toolkit of instruments, not an
-    importable library, and putting an ``__init__.py`` in it would make every script a public API
-    surface with a compatibility obligation. Loading by path keeps the dependency one-directional:
-    the test knows about the script, the script knows nothing about the test.
-
-    The module goes into ``sys.modules`` BEFORE it is executed. ``@dataclass`` resolves its own
-    class's ``__module__`` through that table, so a module that is not registered fails at class
-    definition with an ``AttributeError`` on ``None`` — nothing to do with the script. The scripts'
-    directory goes on ``sys.path`` too, as running a script puts it there: the instruments import
-    their shared helper ``_shared`` by name.
+    ``scripts/`` is not a package: it is a toolkit of instruments, not a library with a public API, and loading by path
+    keeps the dependency one-directional. The module goes into ``sys.modules`` before it runs, because ``@dataclass``
+    resolves its class's ``__module__`` through that table and an unregistered module fails at class definition. The
+    scripts' directory goes on ``sys.path`` too, as running a script puts it there: the instruments import their shared
+    helper ``_shared`` by name.
     """
     import sys
 
@@ -68,65 +56,23 @@ P0 = _load_sibling("_oracle_arms.py")
 
 @pytest.fixture(scope="module")
 def toy(tmp_path_factory):
-    """gDNA + mature + nascent, with spliced reads.
-
-    The staggered isoform boundary is load-bearing: ``boundary_spliced`` — a molecule that crossed a
-    contiguous boundary having spliced *elsewhere* — can only be deposited where a region bound falls
-    INSIDE another transcript's exon. A single-isoform gene has no such bound, so its spliced-boundary
-    bank is identically zero and GATE 1's perturbation removes nothing.
+    """gDNA + mature + nascent, with spliced reads. The staggered isoform boundary matters: ``boundary_spliced`` (a
+    molecule that crossed a contiguous boundary having spliced elsewhere) can only be deposited where a region bound
+    falls inside another transcript's exon, so a single-isoform gene would leave the bank zero and gate 1's perturbation
+    would remove nothing.
     """
-    wd = tmp_path_factory.mktemp("p0_orc")
-    sc = Scenario("p0", genome_length=9000, seed=17, work_dir=wd / "sim")
-    sc.add_gene(
-        "g1",
-        "+",
-        [
-            {"t_id": "t1", "exons": [(600, 1100), (1800, 2300)], "abundance": 60},
-            # the stagger must sit CLOSE to the sj: the fragment has to reach the boundary
-            # contiguously AND reach the sj, so a bound 700 bp away is one no fragment spans.
-            {"t_id": "t1b", "exons": [(1000, 1100), (1800, 1900)], "abundance": 30},
-        ],
-    )
-    sc.add_gene("g2", "-", [{"t_id": "t2", "exons": [(4000, 4500), (5200, 5700)], "abundance": 40}])
-    sc.add_gene(
-        "g3",
-        "+",
-        [
-            {"t_id": "t3", "exons": [(6600, 7100), (7800, 8300)], "abundance": 25},
-            {"t_id": "t3b", "exons": [(6600, 7100), (7400, 7440), (7800, 8300)], "abundance": 12},
-        ],
-    )
-    return sc.build_oracle(
-        n_rna_fragments=4000,
-        gdna_fraction=1.0,
-        nrna_abundance=15.0,
-        sim_config=ReadSimConfig(
-            frag_mean=180,
-            frag_std=30,
-            frag_min=80,
-            frag_max=400,
-            read_length=90,
-            strand_specificity=0.99,
-            seed=17,
-        ),
-        gdna_config=GDNAConfig(abundance=0.0, frag_mean=240, frag_std=45),
-    )
+    return build_toy(tmp_path_factory)
 
 
-# ── GATE 0: the oracle cache HITS, is REFUSED when stale, and is still validated ──────────────────
+# ── Gate 0: the oracle cache hits, is refused when stale, and is still validated ──────────────────
 
 
 def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_path, monkeypatch):
-    """The cache exists so a solver-debugging campaign can re-measure the panel without re-splitting
-    every BAM. Three things must hold or it is a liability rather than a saving:
+    """The cache lets a panel be re-measured without re-splitting every BAM, provided:
 
-    1. a warm run must not touch the BAM at all;
-    2. it must reproduce the cold build's arrays exactly;
-    3. it must STILL run sum-to-full — a cached oracle that skipped validation would be a silently
-       wrong truth source feeding every number downstream.
-
-    PERTURBATION (1): make ``_split_bam`` raise, so a warm run that touched the BAM cannot pass.
-    PERTURBATION (3): corrupt a cached partition on disk and require the warm load to abort.
+    1. a warm run does not touch the BAM (``_split_bam`` is made to raise);
+    2. it reproduces the cold build's arrays exactly;
+    3. it still runs sum-to-full: a corrupted cached partition on disk must abort the warm load.
     """
     import _oracle
 
@@ -151,8 +97,8 @@ def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_p
             np.asarray(cold.parts[origin].region_contained_count),
         )
 
-    # a forced build re-splits even though the cache would hit: after a change to what the scan offers a stale
-    # partition still loads, and only a rebuild makes it describe the scan again
+    # a forced build re-splits even though the cache would hit: after a change to what the scan offers a stale partition
+    # still loads, and only a rebuild makes it describe the scan again
     calls = {"n": 0}
     real = _oracle._split_bam
 
@@ -172,7 +118,7 @@ def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_p
         )
     monkeypatch.setattr(mod, "_split_bam", _boom)
 
-    # the cached path is NOT exempt from sum-to-full
+    # the cached path still runs sum-to-full
     npz = cache / "t" / "gdna" / "payload.npz"
     data = {k: v for k, v in np.load(npz).items()}
     data["region_contained_count"] = data["region_contained_count"].copy()
@@ -183,18 +129,13 @@ def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_p
 
 
 def test_a_cache_that_does_not_describe_this_SCAN_is_rebuilt_not_reused(toy, tmp_path, monkeypatch):
-    """A cache keyed to a different scan configuration is a different tally. It must be REBUILT,
-    never silently reused — and never propagated as an error either, since a miss is normal.
+    """A cache keyed to a different scan configuration is a different tally: it must be rebuilt, never reused, and a
+    miss is normal rather than an error. The cache is populated under the default scan config, then requested under a
+    changed one, which must re-split the BAM.
 
-    PERTURBATION: populate the cache under the default scan config, then ask for it under a changed
-    one and require the BAM to be re-split.
-
-    ``full`` is re-scanned under the changed config too, and that is not tidying: reusing the
-    default-config ``full`` makes sum-to-full reject the result outright, because two scan configs
-    are two different tallies, and the test would then be asserting the wrong thing. It also shows
-    the guarantee is belt-and-braces — the cache KEY refuses a stale partition, and the IDENTITY
-    independently refuses a ``full`` that does not match the partitions, even when the key was
-    bypassed.
+    ``full`` is re-scanned under the changed config too: two scan configs are two tallies, so a default-config ``full``
+    would fail sum-to-full. The cache key refuses a stale partition, and the identity independently refuses a ``full``
+    that does not match the partitions.
     """
     import _oracle
 
@@ -222,23 +163,19 @@ def test_a_cache_that_does_not_describe_this_SCAN_is_rebuilt_not_reused(toy, tmp
     mod.load_or_build_oracle(bam, index, changed, tmp_path / "w2", "t", changed_full, cache)
     assert calls["n"] == 1, "a cache from a different scan config was reused instead of rebuilt"
 
-    # ...and the rebuilt cache now serves the CHANGED config without re-splitting again.
+    # and the rebuilt cache now serves the changed config without re-splitting.
     mod.load_or_build_oracle(bam, index, changed, tmp_path / "w3", "t", changed_full, cache)
     assert calls["n"] == 1, "the rebuilt cache did not hit on the next call"
 
 
-# ── GATE 1: T's per-axis totals are the FULL payload's totals ─────────────────────────────────────
+# ── Gate 1: T's per-axis totals are the full payload's totals ─────────────────────────────────────
 
 
 def test_T_totals_equal_the_full_payload_PER_AXIS(toy, tmp_path):
-    """``check_same_basis`` must hold between T and the payload it claims to partition, **per axis**.
-
-    Per axis, never pooled: ``n_regions`` and ``n_boundaries`` differ by only ``n_refs``, so an error on
-    one axis cancelling an equal and opposite one on the other is not far-fetched.
-
-    PERTURBATION: drop the spliced term from ``count_rna_boundary``. That is the exact schema mistake
-    ``override_masses`` exists to avoid — ``chain_boundary_deconv`` builds ``rna = (1−f_g)·unspliced +
-    spliced``, so a T without the spliced term is on a different basis from every P.
+    """``check_same_basis`` must hold between T and the payload it partitions, per axis, never pooled: ``n_regions`` and
+    ``n_boundaries`` differ by only ``n_refs``, so equal and opposite errors on the two axes could cancel. Dropping the
+    spliced term from ``count_rna_boundary`` must be refused: ``chain_boundary_deconv`` builds ``rna = (1−f_g)·unspliced
+    + spliced``, so such a T would be on a different basis from every P.
     """
     from _oracle import OracleTruth
 
@@ -255,16 +192,13 @@ def test_T_totals_equal_the_full_payload_PER_AXIS(toy, tmp_path):
         P0.check_same_basis("T", SimpleNamespace(**broken), full)
 
 
-# ── GATE 2: an arm and its truth are on the same basis, per object ────────────────────────────────
+# ── Gate 2: an arm and its truth are on the same basis, per object ────────────────────────────────
 
 
 def test_an_arm_on_a_DIFFERENT_BASIS_is_refused():
-    """Every arm's per-object total must equal T's per-object total. This is what makes ``f_g``
-    comparable at all: two arrays of fractions over different denominators subtract to a number that
-    means nothing.
-
-    PERTURBATION (a): score against another axis' truth (a different object count).
-    PERTURBATION (b): scale the arm's masses, i.e. put it on a different denominator.
+    """Every arm's per-object total must equal T's, which makes ``f_g`` comparable: fractions over different
+    denominators subtract to nothing meaningful. Scoring against another axis' truth (a different object count) and
+    scaling the arm's masses (a different denominator) are both refused.
     """
     g, r = np.array([4.0, 1.0, 3.0]), np.array([6.0, 2.0, 0.0])
     tg, tr = np.array([5.0, 0.0, 3.0]), np.array([5.0, 3.0, 0.0])
@@ -275,17 +209,14 @@ def test_an_arm_on_a_DIFFERENT_BASIS_is_refused():
         P0.score_axis(g * 2.0, r * 2.0, tg, tr)
 
 
-# ── GATE 3: no data is ABSENT, never f_g = 0 ──────────────────────────────────────────────────────
+# ── Gate 3: no data is absent, never f_g = 0 ──────────────────────────────────────────────────────
 
 
 def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero():
-    """No data must be inert: never "100 % gDNA", and never its mirror "0 % gDNA" either. Most regions
-    in any real index carry no fragments at all, so a scorer that turns 0/0 into a number reports a
-    beautiful answer for the majority of the genome.
-
-    PERTURBATION: the mass-weighted mean is *blind* to this by construction (a zero-mass object gets
-    zero weight), so the gate is on the COUNT of scored objects — which is exactly where a floored 0
-    would hide.
+    """No data must be inert, neither "100 % gDNA" nor "0 % gDNA". Most regions in a real index carry no fragments, so a
+    scorer turning 0/0 into a number would report a good answer for most of the genome. The mass-weighted mean gives a
+    zero-mass object zero weight and so cannot see this; the test is on the count of scored objects, where a floored 0
+    would show.
     """
     g = np.array([4.0, 0.0, 0.0, 1.0])
     r = np.array([6.0, 0.0, 0.0, 0.0])
@@ -300,16 +231,13 @@ def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero():
     np.testing.assert_allclose(score.mwae, 2.0 / 11.0)
 
 
-# ── GATE 4: the directional split is reported and does not cancel ─────────────────────────────────
+# ── Gate 4: the directional split is reported and does not cancel ─────────────────────────────────
 
 
 def test_the_directional_split_is_reported_and_the_net_is_their_DIFFERENCE():
-    """The library-level number looks far better than the per-object answer
-    because a large under-call sits next to a large over-call. Reporting only the net is what makes
-    that invisible, so the two directions are separate fields and their relationship is an identity.
-
-    PERTURBATION: an arm whose errors all point one way must have one direction exactly zero — if
-    both are always populated the split is measuring noise, not direction.
+    """A library-level net hides a large under-call beside a large over-call, so the two directions are separate fields
+    and their relationship is an identity. An arm whose errors all point one way must have one direction exactly zero,
+    or the split would be measuring noise.
     """
     s = P0.score_axis(
         np.array([4.0, 1.0, 3.0]),

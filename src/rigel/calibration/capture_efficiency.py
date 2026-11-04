@@ -1,50 +1,30 @@
-"""The capture efficiency of every region and boundary — the object's own gDNA density read against the bulk, with
-the fitted gDNA landscape as a two-group prior and the object's OWN count as the likelihood.
+"""The capture efficiency of every region and boundary: the object's own gDNA density read against the bulk, under the
+gDNA landscape as a two-group prior.
 
-gDNA is one template at a uniform rate before capture, so after capture an object's gDNA density measures how
-strongly capture enriched it. Off the probes the template is not enriched at all: that is the BULK. The landscape
-``P(log ρ)`` is the population's own statement of where gDNA densities sit, and its largest basin
-(`landscape.census`, `landscape.split_basins`) is the bulk, since gDNA off the probes always outnumbers gDNA on them.
+gDNA is one template at a uniform rate before capture, so an object's gDNA density after capture measures how strongly
+capture enriched it. The bulk is the landscape's largest basin (``landscape.split_basins``), since gDNA off the probes
+always outnumbers gDNA on them, and it is the unit: an efficiency is a relative yield, not a probability, and a factor
+common to every efficiency cancels in the EM.
 
-THE PRIOR — Efron's two groups. The bulk basin collapses onto its peak ``x_b`` and carries the basin's whole mass
-``π₀``: off the probes there is one uniform template, and the basin's width is measurement, not spectrum. Everywhere
-else the prior is the population's own rendered density as it is (``DensityLandscape.logP_free``): the enriched
-spectrum, at whatever levels and in whatever quantity it sits. No mode is located, no member is counted, no width is
-tested and nothing is gated. A library whose landscape is one basin reads exactly 1 everywhere, because the prior
-is then a point.
+- Prior (Efron's two groups): the bulk basin collapses onto its peak ``x_b`` with the basin's whole mass ``π₀``, since
+  off the probes there is one template and the basin's width is measurement; elsewhere the prior is the population's
+  own rendered density (``DensityLandscape.logP_free``). Nothing is located, counted or gated, and a one-basin
+  landscape reads exactly 1 everywhere.
+- Likelihood: the object's deconvolved gDNA mass ``k`` on its gDNA support ``S``, the Poisson
+  ``ℓ(x) = k·log(S·eˣ) − S·eˣ``.
+- Readout: ``log e = E[min(x, s(x))] − x_b`` over the posterior, so the bulk reads 1. The mean is of the log density,
+  so a lone prior level of mass ``μ`` at ``Δ`` nats above the bulk lifts an object with no evidence by ``e^{μΔ}``
+  rather than a linear mean's ``1 + μ(e^Δ − 1)``. ``s(x)`` is the peak of the enriched basin holding ``x`` (``+∞``
+  outside every enriched basin), so capture saturates per level.
+- Saturation: ``exp(x_sat − x_b)`` for the most massive enriched basin's peak ``x_sat``, or 1 when there is none; the
+  junction price saturates at it (``capture_eff_length``).
 
-THE LIKELIHOOD. The object's own count: its deconvolved gDNA mass ``k`` on its gDNA support ``S``, as the Poisson
-``ℓ(x) = k·log(S·eˣ) − S·eˣ`` (a mass, so the Poisson continues through the gamma function).
+Each object reads the fragments the deposit rule gives it: a region its contained gDNA count on its contained support,
+a boundary its crossing count on its crossing support, never apportioned onto the regions beside it. An object with
+no gDNA support (``S = 0``) reads 1. Objects are read in row tiles (``simplex_logodds._block_rows``) with every sum
+along one object's row, so the tile height changes no bit. Layer 5; ``calibrate`` publishes the reading on the result.
 
-THE READOUT. ``log e = E[min(x, s(x))] − x_b`` over the posterior, so the bulk reads exactly 1:
-
-- the posterior mean of the LOG density. An object with no evidence of its own reads the prior, and a lone level of
-  prior mass ``μ`` at ``Δ`` nats above the bulk lifts it by ``e^{μΔ}``, where a linear mean would lift it by
-  ``1 + μ(e^Δ − 1)``;
-- CAPTURE SATURATES PER LEVEL: ``s(x)`` is the peak of the enriched basin holding ``x`` (``+∞`` outside every
-  enriched basin), so a density above its own basin's peak reads that peak.
-
-THE SATURATION LEVEL. ``saturation = exp(x_sat − x_b)``, with ``x_sat`` the peak of the most massive enriched basin,
-and 1 when there is none: the fully captured level against the bulk. The junction price saturates at it
-(`capture_eff_length`).
-
-THE UNIT IS THE BULK. An efficiency is a relative yield, not a probability: an enriched object reads far above 1.
-Every consumer prices every component's opportunity at these efficiencies, so a factor common to all of them
-cancels in the EM (`capture_eff_length`, `priors`).
-
-EACH OBJECT READS ITS OWN EVIDENCE — the fragments the deposit rule gives it. A region holds the fragments contained
-in it: its gDNA count on its contained support. A boundary holds the fragments that cross it: its gDNA count on its
-crossing support. That is the split the capture-contracted length prices (`capture_eff_length`, `priors`): a
-component's contained share of a region at the region's efficiency, and its conserved share at a boundary at the
-boundary's. The crossings are read once, by the boundary that holds them, and never apportioned onto the regions
-beside it as well. An object with no gDNA support (``S = 0``) has no likelihood and reads 1, the null: no gDNA
-fragment could sit there to witness its capture.
-
-The objects are read in row tiles (`simplex_logodds._block_rows`), so a million objects never exist against the
-grid at once; every sum runs along one object's own row, so the tile's height moves no bit.
-
-Layer 5: a posterior under the density prior. The consumer is `calibrate`, which publishes the efficiencies, the
-bulk density and the saturation level on the result. Gate: ``tests/calibration/test_capture_efficiency.py``.
+Gate: ``tests/calibration/test_capture_efficiency.py``.
 """
 
 from __future__ import annotations
@@ -153,9 +133,8 @@ def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray) -> np.ndarray:
         w_null = np.exp(a_null - top)
         w_alt = np.exp(a_alt - top[:, None])
         den = np.maximum(w_null + w_alt.sum(1), _TINY)
-        # the level moment as a sum over the object's own row, not a matrix–vector product: BLAS need not sum a
-        # row in one order at every tile height (a one-row tile takes another kernel), and the height is a
-        # resource setting (``tests/calibration/test_capture_efficiency.py``)
+        # the level moment as a sum along the object's own row, not a matrix–vector product: BLAS need not sum a row
+        # in one order at every tile height, and the height is a resource setting
         mean_level = (w_null * xb + (w_alt * prior.level).sum(1)) / den
         out[sl] = np.where(S[sl] > 0.0, np.exp(mean_level - xb), 1.0)
     return out

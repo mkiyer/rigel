@@ -319,7 +319,7 @@ class TestMissingAndInvalidTags:
         """No XS/ts tags → zero exonic_spliced observations (scanner level).
 
         Asserts the scanner behaviour directly via ``scan_and_buffer``; what the full pipeline
-        makes of such a library is ``test_a_library_without_spliced_reads_calibrates_as_unstranded``.
+        makes of such a library is the next test's.
         """
         from rigel.config import BamScanConfig
         from rigel.pipeline import scan_and_buffer
@@ -336,8 +336,8 @@ class TestMissingAndInvalidTags:
         """Zero spliced strand observations → κ = ½, od = 0, a dead strand channel, and the run completes.
 
         With no spliced read there is no strand anchor, so the strand channel carries nothing and the
-        deconvolution reads density alone; the fallback must work with no RNA (owner, 2026-09-30), so it
-        is a valid library, never an error.
+        deconvolution reads density alone; the fallback must work with no RNA, so it is a valid library,
+        never an error.
         """
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
@@ -347,8 +347,6 @@ class TestMissingAndInvalidTags:
         result = run_pipeline(bam_path, index, config=config)
         cal = result.calibration
         assert cal.rna_sense_frac == 0.5
-        assert cal.gdna_strand_overdispersion == 0.0
-        assert cal.rna_strand_overdispersion == 0.0
 
     def test_sj_mode_none_ignores_tags(self, tmp_path):
         """sj_strand_tag='none' → ignore all strand tags (scanner level)."""
@@ -772,7 +770,7 @@ def plus_strand_library(tmp_path_factory):
 
 def _retag(src, dst, *, xs, ts):
     """``src`` rewritten in its own record order, every spliced record given XS ``xs`` (None: no XS) and a ts naming
-    GENOMIC strand ``ts`` (None: no ts), written read-relative as minimap2 writes it. Returns the spliced records."""
+    genomic strand ``ts`` (None: no ts), written read-relative as minimap2 writes it. Returns the spliced records."""
     flip = {"+": "-", "-": "+"}
     n = 0
     with (

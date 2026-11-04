@@ -1,54 +1,22 @@
 """The splice graph: the calibration partition of regions and boundaries.
 
-This module builds what the accumulator deposits into and what the solver reads, and it validates
-that structure against the annotation it came from. It also owns the CSR array factories the rest
-of calibration addresses that structure with (the region partition, the sj arrays and geometry, the
-boundary flags).
+Builds the structure the accumulator deposits into and the solver reads, validates it against the annotation it came
+from, and provides the array factories the rest of calibration addresses it with (the region partition, the sj arrays
+and geometry, the boundary flags). Layer 1, the payload view.
 
-A region is a genomic interval; regions tile each reference and are numbered in genomic order.
-A boundary is a transition, always ``src < dst`` so genomic order is a topological order:
+A region is a genomic interval; regions tile each reference in genomic order. A boundary is a transition, always
+``src < dst``, so genomic order is a topological order:
 
-* ``CONTIGUOUS(i, i+1)`` — the genomic point ``end(i) == start(i+1)``. Carries the 8 structural
-  :ref:`flag bits <flags>`.
-* ``SJ(donor, acceptor, strand)`` — one per distinct annotated intron.
+* ``CONTIGUOUS(i, i+1)`` — the genomic point ``end(i) == start(i+1)``, carrying the 8 structural flag bits
+  ``TSS_s`` / ``TES_s`` / ``DONOR_s`` / ``ACCEPTOR_s`` for ``s`` in ``{+, -}``. The bits are not mutually exclusive:
+  one position can be a terminus of one transcript and a splice site of another.
+* ``SJ(donor, acceptor, strand)`` — one per distinct annotated intron, carrying its exonic reaches
+  (:class:`SpliceJunctionGeometry`); a contiguous boundary's reach columns hold 0.
 
-Every distinct exon endpoint is a region bound, and adjacent equal-signature regions are NOT merged.
-Merging is what makes a partition blind to transcript termini, because a terminus that falls strictly
-inside a merged region vanishes from the partition entirely; on a human annotation that is a majority
-of all termini. The price of not merging is roughly 40 % more regions.
-
-The transcript filter is ``~is_synthetic``, and it is one predicate, defined once in :func:`_is_real`
-and shared by the builder and the validator. Every manufactured span row is ``is_synthetic``,
-so that predicate already excludes all of them. Do not add ``& ~is_single_exon``: a real single-exon
-transcript is a real transcript, and excluding those rows deletes the TSS and TES of tens of
-thousands of them — exactly the visibility this partition exists to buy.
-
-.. _flags:
-
-Structural flags (contiguous boundaries) are ``TSS_s`` / ``TES_s`` / ``DONOR_s`` / ``ACCEPTOR_s`` for
-``s`` in ``{+, -}``. They are not mutually exclusive: a position that is both a terminus for one
-transcript and a splice site for another is exactly the case the 4-bit signature is blind to.
-
-Reaches are how many bases of the molecule's own sequence remain either side of an sj boundary. An sj
-is used only by a molecule that spliced across it, so what remains either side is EXONIC
-(:func:`_sj_edges`). A contiguous boundary carries 0 in the four reach columns: nothing reads a
-contiguous reach, and the one reader of a reach, :func:`build_sj_geometry_arrays`, takes the sj rows.
-
-Reaches are named ``lo`` / ``hi``, never ``donor`` / ``acceptor``. Boundaries store ``src < dst``, so
-``src`` is genomically LEFT whatever the strand, while for a minus-strand sj the biological donor is
-on the right; the divisor is symmetric in the two reaches, so no number changes, but a ``reach_donor``
-would mislabel about half the sj. ``lo`` / ``hi`` means genomically lower/higher and cannot be misread.
-
-Reaches are per strand: an sj row fills its own strand's pair and leaves the other strand's at 0, so two
-strand-coincident sj, which share ``(src, dst)`` and differ only in strand, never read each other's.
-
-Reaches are maximal over isoforms, independently per side. An sj is often shared by several transcripts
-that disagree about where the molecule ends, and the isoform abundances are precisely what calibration
-does not know. The independent maximum is one-sided: it over-states opportunity, hence under-states the
-RNA density, hence over-states the gDNA fraction.
-
-On an sj row a reach of 0 is meaningful, not a sentinel: no strand-``s`` RNA molecule splices across it,
-so the opportunity is genuinely zero and the trapezoid returns 0 for free.
+Every distinct exon endpoint is a region bound, and adjacent equal-signature regions are not merged, because a merged
+region hides every transcript terminus that falls strictly inside it. The transcript filter is :func:`_is_real`
+(``~is_synthetic``), shared by the builder and the validator; a real single-exon transcript passes it, since its
+termini are real.
 """
 
 from __future__ import annotations
@@ -343,11 +311,8 @@ def build_splice_graph(
         else pd.DataFrame(columns=BOUNDARY_COLUMNS[1:])
     )
     if len(edges_df):
-        # Sorted by (src, kind, dst, STRAND). (src, kind, dst) alone is not a TOTAL order: two
-        # strand-coincident sj (G18) share all three and differ only in strand, so the order would be
-        # ambiguous and determinism would depend on the input order. Real annotations contain no such
-        # sj, which is why only a synthetic case catches it. Adding strand REFINES the order, so the
-        # "out-boundaries of a region are contiguous" CSR contract is unchanged.
+        # Strand completes the order: two strand-coincident sj share (src, kind, dst). It only refines the order, so a
+        # region's out-boundaries stay contiguous for the CSR.
         edges_df = edges_df.sort_values(
             ["src", "kind", "dst", "strand"], kind="stable"
         ).reset_index(drop=True)
@@ -360,9 +325,8 @@ def build_splice_graph(
 def _signature_intervals(ev: _Exons, ei, ev_i, ii):
     """The four ``(bit, starts, ends)`` interval sets that define a region's 4-bit signature.
 
-    One definition, consumed by the builder (cumulative difference arrays over the region index) and
-    by validator I3b (midpoint containment). Sharing the interval sets and differing in the
-    evaluation is the point: the two can then only agree by both being right.
+    Shared by the builder (difference arrays over the region index) and validator I3b (midpoint containment). The two
+    evaluate them by different algorithms, so they agree only if both are right.
     """
     return (
         (
@@ -389,13 +353,9 @@ def _signature_intervals(ev: _Exons, ei, ev_i, ii):
 
 
 def _is_real(tx, reflen) -> bool:
-    """The transcript filter — one definition, shared by the builder and the validator.
+    """The transcript filter, shared by the builder and the validator so the two cannot drift apart.
 
-    It must stay shared: a validator with its own copy of the predicate checks the flags against a
-    filter that can drift from the one that built them, and the two then agree while both are wrong.
-
-    Manufactured spans are ``is_synthetic``; a non-synthetic ``is_single_exon`` row is a real
-    single-exon transcript, whose termini are real. See the module docstring.
+    Manufactured spans are ``is_synthetic``; a non-synthetic single-exon row is a real transcript with real termini.
     """
     return (
         not tx.is_synthetic
@@ -430,11 +390,9 @@ _BIT_SPEC = (
 
 
 def _terminus_and_splice_events(ma: _Exons, mj, ma_i, mi_):
-    """(positions, flag_bit) for each of the 8 structural bits — the BUILDER's derivation.
+    """``(positions, flag_bit)`` for each structural bit that has events: the builder's derivation.
 
-    Emits an entry only for a class that HAS events, which is right for building (an empty class
-    sets no bit) and wrong for validating. :func:`_events_independently` is I13's counterpart: all
-    eight classes, always, by a different algorithm.
+    A class with no event sets no bit, so it is omitted; :func:`_events_independently` is the validator's counterpart.
     """
     out = []
     for st, tss_bit, tes_bit, don_bit, acc_bit in _BIT_SPEC:
@@ -457,17 +415,11 @@ def _terminus_and_splice_events(ma: _Exons, mj, ma_i, mi_):
 
 
 def _events_independently(ex: _Exons, rows, intr, i_rows):
-    """I13's second opinion: the same 8 event sets, derived by a different algorithm.
+    """Validator I13's own derivation of the 8 event sets, by a different algorithm from the builder's.
 
-    The same discipline as I3b. The builder finds a transcript's outer exons by cumulative-exonic-
-    offset arithmetic (``before == 0`` / ``before + len == total``); this finds them by per-transcript
-    ``min(start)`` and ``max(end)`` via ``np.minimum.at``, with no cumulative offsets at all. The two
-    can then only agree by both being right.
-
-    All eight entries are returned, always, even for a class with zero events on this reference. The
-    builder emits only non-empty classes, which is correct for building and useless for validating:
-    a spurious ``TSS_NEG`` on a reference with no NEG transcript would never be compared. Returned
-    as ``(positions, bit)``, positions possibly empty.
+    The builder finds a transcript's outer exons by cumulative exonic offsets; this takes each transcript's
+    ``min(start)`` and ``max(end)``. All eight entries are returned, an empty class included, so a spurious flag on a
+    reference with no transcript of that strand is still compared. Returns ``(positions, bit)`` pairs.
     """
     out = []
     if rows.size:
@@ -507,8 +459,8 @@ def _sj_edges(region_bounds, ma_i, mi_, ref_name):
     uniq, inv = np.unique(key, axis=0, return_inverse=True)
     inv = np.asarray(inv).ravel()
     ua, ub, ust = uniq[:, 0], uniq[:, 1], uniq[:, 2].astype(np.int8)
-    src = np.searchsorted(region_bounds, ua) - 1  # the region ENDING at intron_start
-    dst = np.searchsorted(region_bounds, ub)  # the region STARTING at intron_end
+    src = np.searchsorted(region_bounds, ua) - 1  # the region ending at intron_start
+    dst = np.searchsorted(region_bounds, ub)  # the region starting at intron_end
     if not (np.all(region_bounds[src + 1] == ua) and np.all(region_bounds[dst] == ub)):
         raise ValueError(f"ref {ref_name!r}: a sj endpoint is not a region interface (I5)")
     out = {k: np.zeros(uniq.shape[0], np.int64) for k in keys}
@@ -538,19 +490,18 @@ def _coerce(df, columns, dtypes):
 
 
 # ---------------------------------------------------------------------------
-# Validation — I1..I13. I3b, I4, I11 and I13 need the transcripts and therefore run at
-# BUILD ONLY; a load-time call passes none and gets the graph-internal checks (I1/I2/I5-I9/I12).
+# Validation — invariants I1..I13. I3b, I4, I11 and I13 need the transcripts and run only at build; a load-time call
+# gets the graph-internal checks (I1/I2/I5-I9/I12).
 # ---------------------------------------------------------------------------
 
 
 def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcripts=None) -> None:
-    """Assert invariants I1–I13. Raises :class:`ValueError` on the first violation.
+    """Assert invariants I1–I13; raises :class:`ValueError` on the first violation.
 
-    ``transcripts`` gates four invariants, not one: I3b (the signature, recomputed), I4 (the
-    interfaces ARE the events), I11 (every transcript walks) and I13 (the flags ARE the events).
-    Without it only the graph-internal checks run — I1/I2/I5-I9/I12 — which cannot detect a
-    ``signature`` or ``flags`` column that has drifted from the annotation. The build passes
-    transcripts; the load path does not, because reconstructing them costs seconds at human scale.
+    ``transcripts`` enables the four annotation checks: I3b (the signature, recomputed), I4 (the interfaces are the
+    events), I11 (every transcript walks the graph) and I13 (the flags are the events). Without it only the
+    graph-internal checks run, which cannot see a ``signature`` or ``flags`` column that has drifted from the
+    annotation. The build passes transcripts; the load path does not, since rebuilding them is slow at human scale.
     """
     reflen = {str(k): int(v) for k, v in ref_lengths.items()}
     nid = regions_df["region_id"].to_numpy(np.int64)
@@ -571,9 +522,8 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     if nid.size and int(length.min()) <= 0:
         raise ValueError("I1: a region has non-positive length. Rebuild the index.")
 
-    # I1 — regions tile each reference exactly. Reference slices are computed ONCE from the run
-    # boundaries: `np.flatnonzero(ref == name)` inside the loop is one full-array string comparison
-    # per reference over every region row, which dominates the whole validation.
+    # I1 — regions tile each reference exactly. The reference slices come once from the run boundaries; a per-reference
+    # string comparison over every row would dominate the validation.
     slices = _ref_slices(ref)
     for name, L in reflen.items():
         sl = slices.get(name)
@@ -596,7 +546,7 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     kind = edges_df["kind"].to_numpy(np.uint8)
     estrand = edges_df["strand"].to_numpy(np.int8)
 
-    # I8 — src < dst on EVERY boundary  ⇒ genomic order is a topological order
+    # I8 — src < dst on every boundary  ⇒ genomic order is a topological order
     if src.size and not np.all(src < dst):
         raise ValueError("I8: a boundary has src >= dst; genomic order is not a topological order.")
     if src.size and not np.all(ref[src] == ref[dst]):
@@ -605,9 +555,8 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     if not np.array_equal(edges_df["edge_id"].to_numpy(np.int64), np.arange(src.size)):
         raise ValueError("I12: edge_id is not the row index.")
     if src.size > 1:
-        # (src, kind, dst, strand) packed into one strictly-increasing int64 key. STRAND is part of the
-        # key because it is part of the order (see the sort in build_splice_graph): without it two
-        # strand-coincident sj collide and read as a duplicate.
+        # (src, kind, dst, strand) packed into one int64 key that must strictly increase. Strand is in it because it is
+        # in the order; without it two strand-coincident sj would read as a duplicate.
         n_regions_ = max(nid.size, 1)
         key = ((src * 2 + kind.astype(np.int64)) * n_regions_ + dst) * 4 + estrand.astype(np.int64)
         if not np.all(np.diff(key) > 0):
@@ -619,9 +568,7 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     c = kind == EDGE_KIND_CONTIGUOUS
     if not np.all(dst[c] == src[c] + 1):
         raise ValueError("I7: a CONTIGUOUS boundary is not between adjacent regions.")
-    # The count comes from `slices`, which already holds it: recomputing it as one full-array
-    # object-dtype comparison per reference over every region row dominated load-time validation.
-    # This is the same trap the I1 block above documents.
+    # the expected count comes from `slices`, for the same reason as in I1
     n_expected = nid.size - len(slices)
     if int(c.sum()) != n_expected:
         raise ValueError(f"I7: {int(c.sum())} contiguous boundaries, expected {n_expected}.")
@@ -633,14 +580,9 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     if j.any():
         if not np.all(np.isin(estrand[j], [Strand.POS, Strand.NEG])):
             raise ValueError("I6: a SJ boundary has an invalid strand.")
-        # Strand-coincident sj are biologically impossible and are reported, not tolerated silently.
-        # Splicing reads a non-palindromic motif: the reverse complement of a GT..AG intron begins CT,
-        # so the same interval cannot be a valid intron on both strands. One in a GTF therefore means
-        # the ANNOTATION is wrong (a simulator, or a strand column filled in by hand), and silence
-        # would let it propagate into every downstream density. It is a WARNING rather than an error
-        # on purpose: the graph handles the case correctly, because the sort key carries strand so the
-        # two boundaries stay distinct and ordered, and the G18 test builds exactly this input to
-        # prove it. Raising would make the guard untestable.
+        # A strand-coincident sj pair is biologically impossible (splice motifs are not palindromic: GT..AG
+        # reverse-complements to CT..AC), so one means the annotation is wrong. It warns rather than raises because the
+        # graph handles it correctly: strand is in the sort key, so the two boundaries stay distinct and ordered.
         pair = src[j] * max(nid.size, 1) + dst[j]
         _u, _cnt = np.unique(pair, return_counts=True)
         n_coincident = int((_cnt > 1).sum())
@@ -663,20 +605,15 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
             if m.any() and not (np.all(sig[src[m]] & bit) and np.all(sig[dst[m]] & bit)):
                 raise ValueError(f"I9: a strand-{int(s)} sj endpoint lacks its exon bit.")
 
-    # I3b — signature recomputed; I4 — interfaces ARE the events; I11 — every transcript walks;
-    # I13 — the flags ARE the events
+    # the annotation checks: I3b signature recomputed, I4 interfaces are the events, I11 every transcript walks,
+    # I13 flags are the events
     if transcripts is not None:
         _validate_against_transcripts(transcripts, reflen, regions_df, edges_df)
 
 
 def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> None:
-    """I3b (the signature, recomputed) + I4 (interfaces ARE the events) + I11 (every transcript
-    walks) + I13 (the flags ARE the events), vectorised.
-
-    Written without a per-transcript Python loop on purpose: the loop form is several times slower
-    on a human annotation, and this is the check most likely to be switched off when it is slow —
-    exactly backwards, since I11 is the one that catches real bugs.
-    """
+    """I3b (the signature, recomputed), I4 (the interfaces are the events), I11 (every transcript walks the graph) and
+    I13 (the flags are the events), vectorised so the check stays cheap enough to run on every build."""
     ref = regions_df["ref_name"].astype(str).to_numpy()
     start = regions_df["start"].to_numpy(np.int64)
     end = regions_df["end"].to_numpy(np.int64)
@@ -706,7 +643,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
             continue
         base, region_bounds = int(m[0]), np.concatenate([start[m], end[m][-1:]])
 
-        # I4 — the interior interfaces are EXACTLY the annotation events
+        # I4 — the interior interfaces are exactly the annotation events
         rows = by_ref.get(name, EMPTY_I64)
         i_rows = intr_by_ref.get(name, EMPTY_I64)
         events = (
@@ -722,10 +659,9 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
                 f"({extra} extra, {missing} missing)."
             )
 
-        # I3b — recompute the signature from each region's MIDPOINT, by direct interval containment.
-        # Deliberately a DIFFERENT algorithm from the builder's cumulative-difference sweep, so the
-        # two can only agree by both being right. A region is homogeneous by construction, because
-        # every interval endpoint is a region bound, so its midpoint decides it.
+        # I3b — recompute the signature from each region's midpoint by direct interval containment, a different
+        # algorithm from the builder's difference sweep. Every interval endpoint is a region bound, so a region is
+        # homogeneous and its midpoint decides it.
         mid = (start[m] + end[m]) // 2
         want = np.zeros(mid.size, np.uint8)
         for bit, iv_s, iv_e in _signature_intervals(ex, rows, intr, i_rows):
@@ -741,21 +677,9 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
                 f"{int(end[m][k])}) has signature {int(sig[m][k])}, recomputed {int(want[k])}."
             )
 
-        # I13 — each structural bit is set at EXACTLY the positions that generate it.
-        #
-        # Both directions, per bit: no event without its flag, no flag without its event. It
-        # subsumes a terminus count, and it is the check that catches a flags column built under a
-        # different transcript filter than the one the annotation events are read with.
-        #
-        # It compares ALL EIGHT bits, including classes with zero events on this reference, because
-        # `_events_independently` returns an empty position set rather than omitting the entry. The
-        # builder's own emitter omits empty classes, which is correct for building and useless for
-        # validating: a spurious TSS_NEG on a reference with no NEG transcript is never compared.
-        #
-        # The converse of I4 does NOT hold bit-wise: an interior interface may carry no flag at all,
-        # when adjacent exons of one transcript are BOOKENDED (a zero-length intron). That is an exon
-        # endpoint which is neither a terminus nor a splice site — a real third case, absent from
-        # real annotations but constructed by G14.
+        # I13 — each structural bit is set at exactly the positions that generate it, in both directions, for all
+        # eight bits, including a class with no event on this reference. The converse of I4 does not hold bit-wise: the
+        # interface between bookended exons of one transcript (a zero-length intron) carries no flag.
         if m.size > 1:
             interior = end[m[:-1]]
             at = np.zeros(interior.size, np.uint16)
@@ -801,7 +725,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
             if miss.any():
                 k = int(np.flatnonzero(miss)[0])
                 raise ValueError(
-                    f"I11: reference {name!r} has {int(miss.sum())} mature introns with no SJ "
+                    f"I11: reference {name!r} has {int(miss.sum())} annotated introns with no SJ "
                     f"boundary (first [{int(a[k])}, {int(b[k])}) strand {int(st[k])})."
                 )
 
@@ -812,20 +736,15 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
 
 
 def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Flatten the graph into the ``BamScanner.set_regions`` ABI — THE partition the accumulator
-    deposits into.
+    """Flatten the graph into the ``BamScanner.set_regions`` ABI: the partition the accumulator deposits into.
 
-    For each reference in ``index.ref_names`` the region_bound positions are ``[n0.start, n0.end, n1.end, …]``
-    over that reference's regions (which tile it contiguously), so ``k`` regions give ``k + 1`` positions.
-    References with zero regions contribute none.
+    For each reference in ``index.ref_names`` the bounds are ``[n0.start, n0.end, n1.end, …]`` over its regions, so
+    ``k`` regions give ``k + 1`` positions; a reference with no region contributes none.
+    :meth:`RegionArrays.from_index <rigel.calibration.region_arrays.RegionArrays.from_index>` reads the same frame,
+    so calibration and the scanner address one partition.
 
-    :meth:`RegionArrays.from_index <rigel.calibration.region_arrays.RegionArrays.from_index>` reads
-    the same frame; that is what keeps the calibration geometry and the scanner from addressing
-    different partitions.
-
-    Returns ``(region_bounds int64[P], ref_pos_offsets int64[n_refs+1], region_types uint8[N])``, where
-    ``region_types`` is the coarse type (0=intergenic, 1=intron, 2=exon) aligned 1:1 with the regions —
-    the gDNA FL-pool axis.
+    Returns ``(region_bounds int64[P], ref_pos_offsets int64[n_refs+1], region_types uint8[N])``, ``region_types``
+    the coarse type (0=intergenic, 1=intron, 2=exon) aligned 1:1 with the regions.
     """
     regions_df = index.regions_df
     ref_names = index.ref_names
@@ -859,59 +778,42 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.nda
 
 @dataclass(frozen=True, slots=True)
 class SpliceJunctionArrays:
-    """The sj boundaries, re-indexed onto the accumulator's flat region-bound axis as a CSR.
+    """The sj boundaries re-indexed onto the accumulator's flat region-bound axis, as a CSR.
 
-    The deposit rule has to answer one question per observed intron, in the BAM-scan hot loop: is
-    this intron an annotated sj, and if so which boundary? This is the lookup table for it.
-
-    It is cheap because of a structural property of the graph: every annotated intron has both of its
-    endpoints as partition region bounds, forced, since a bound is placed at every exon endpoint. So
-    "is this intron annotated?" reduces to "are both endpoints bounds, and is the pair registered?",
-    and finding the bound index is the binary search the deposit already performs to locate the
-    crossed boundaries. If an intron's start is not a bound it is unannotated and the table is never
-    consulted.
-
-    Keyed by the DONOR region-bound index, i.e. the flat index into
-    ``build_region_partition_arrays(index)[0]`` of the intron's LOW endpoint::
+    It is the deposit rule's per-intron lookup: is this observed intron an annotated sj, and which one? Every annotated
+    intron's endpoints are region bounds (a bound sits at every exon endpoint), so the lookup is the binary search the
+    deposit already does, then a scan of one CSR row, keyed by the flat index into
+    ``build_region_partition_arrays(index)[0]`` of the intron's low endpoint::
 
         for k in range(offsets[boundary_left], offsets[boundary_left + 1]):
-            if boundary_right[k] == observed_right_boundary:   # 1-3 iterations at human scale
-                credit sj boundary k          # <- the SLOT is the id; see below
+            if boundary_right[k] == observed_right_boundary:
+                credit sj boundary k          # the CSR slot k is the sj-boundary id
 
-    The sj-boundary id IS the CSR slot ``k``. ``edge_row`` is not the id: it is the key for joining a
-    payload row back to ``index.edges_df``, and using it to index an sj bank is a memory-safety bug,
-    because edge rows are numbered over all boundaries and run far past the end of a bank sized to
-    the sj count — and even in bounds they permute every surviving row. The accumulator never
-    receives this column.
+    ``edge_row`` is only the join key back to ``index.edges_df`` and must never index an sj bank: edge rows number
+    every boundary, so they run past a bank sized to the sj count and permute it even in bounds. The accumulator never
+    receives it. Because the id is the rank, the slot order must match the reference accumulator's
+    ``Partition.from_region_bounds`` exactly; ``strand`` is in the sort key and separates two sj that share a
+    coordinate pair.
 
-    The slot ordering is a contract, because the id is the rank: this function and the reference
-    accumulator's ``Partition.from_region_bounds`` must sort identically, or every row permutes and
-    the native build's byte-identity gate compares two different labellings. A disagreement is
-    reachable only through a strand-coincident sj pair, which is why the sort key carries strand.
-    Pinned by ``test_the_csr_slot_order_matches_the_reference_accumulator``.
-
-    ``strand`` disambiguates that (biologically improbable, constructible) case of two sj sharing a
-    coordinate pair and differing only in strand; the caller matches on it when the observed motif strand
-    is known.
+    Gate: ``tests/calibration/test_splice_graph.py::test_the_csr_slot_order_matches_the_reference_accumulator``.
     """
 
     offsets: (
         np.ndarray
     )  # int64[P + 1] — CSR over the flat region_bound axis, P = region_bounds.size
-    boundary_right: np.ndarray  # int64[J] — flat region_bound index of the intron's HIGH endpoint
-    edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the sj-boundary id
+    boundary_right: np.ndarray  # int64[J] — flat region_bound index of the intron's high endpoint
+    edge_row: np.ndarray  # int64[J] — row in index.edges_df: a join key, not the sj-boundary id
     strand: np.ndarray  # int8[J]  — the sj's genomic strand (Strand POS/NEG)
 
 
 def build_sj_arrays(index) -> SpliceJunctionArrays:
     """Build the :class:`SpliceJunctionArrays` CSR for ``index``.
 
-    A sj boundary stores region ids; the accumulator works in region_bound indices. For a reference whose first
-    region is ``region_base`` and whose first region_bound is ``region_bound_base``, region ``i`` spans
-    ``[region_bounds[region_bound_base + i - region_base], region_bounds[region_bound_base + i - region_base + 1])``, so::
+    An sj boundary stores region ids; the accumulator works in region-bound indices. For a reference whose first region
+    is ``region_base`` and whose first bound is ``region_bound_base``::
 
-        donor region_bound    = region_bound_base + (src - region_base) + 1      # the intron starts where src ENDS
-        acceptor region_bound = region_bound_base + (dst - region_base)          # and ends where dst BEGINS
+        left bound  = region_bound_base + (src - region_base) + 1      # the intron starts where src ends
+        right bound = region_bound_base + (dst - region_base)          # and ends where dst begins
     """
     regions_df, edges_df = index.regions_df, index.edges_df
     _, region_bound_offsets, _ = build_region_partition_arrays(index)
@@ -935,11 +837,8 @@ def build_sj_arrays(index) -> SpliceJunctionArrays:
     boundary_left = src + shift + 1
     boundary_right = dst + shift
 
-    # The sort key includes STRAND, and it must match the reference accumulator's
-    # ``Partition.from_region_bounds`` exactly: the sj-boundary id IS the rank in this order, so the
-    # two disagreeing would permute every row and break byte-identity. It shows up only on a
-    # donor/acceptor pair carrying two strands, which is biologically impossible and therefore only
-    # ever reachable from a synthetic stress test.
+    # The sort key must match the reference accumulator's ``Partition.from_region_bounds`` exactly, since the
+    # sj-boundary id is the rank in this order. Strand matters only for a coordinate pair annotated on both strands.
     order = np.lexsort((strand, boundary_right, boundary_left))
     boundary_left, boundary_right = boundary_left[order], boundary_right[order]
     offsets = np.zeros(n_region_bounds + 1, dtype=np.int64)
@@ -948,18 +847,12 @@ def build_sj_arrays(index) -> SpliceJunctionArrays:
 
 
 def build_boundary_flags_array(index) -> np.ndarray:
-    """The structural flags on the accumulator's contiguous-boundary axis — one entry per boundary.
+    """The structural flags on the accumulator's contiguous-boundary axis, one entry per boundary.
 
-    There is no padding, because there are no terminal slots: a contiguous boundary is the boundary
-    BETWEEN two adjacent regions, and there is no such boundary before the first region or after the
-    last, so a reference with ``k`` regions contributes exactly ``k - 1`` entries.
-
-    A contiguous boundary IS the interface to the right of its ``src`` region, so the flags are keyed
-    by ``src``. Splice-junction boundaries carry no flags — they are not a genomic position — and are
-    excluded.
-
-    Returns ``uint16[E]`` with ``E == ref_boundary_offsets[-1]``, aligned element for element with
-    the payload's contiguous-boundary axis.
+    A contiguous boundary is the interface to the right of its ``src`` region, so the flags are keyed by ``src``; a
+    reference with ``k`` regions contributes ``k - 1`` entries, with no padding. Sj boundaries are not a genomic
+    position and carry no flags. Returns ``uint16[E]``, ``E == ref_boundary_offsets[-1]``, aligned with the payload's
+    contiguous-boundary axis.
     """
     regions_df, edges_df = index.regions_df, index.edges_df
     contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
@@ -985,29 +878,24 @@ def build_boundary_flags_array(index) -> np.ndarray:
 
 @dataclass(frozen=True, slots=True)
 class SpliceJunctionGeometry:
-    """The sj boundaries on the accumulator's sj axis, in its own slot order.
+    """The sj boundaries on the accumulator's sj axis, in its slot order.
 
-    An sj boundary is not a chain slot: the graph is a DAG but not a polytree, so an sj must be a
-    factor on its endpoint regions and never a message channel. This is what a consumer needs to
-    place that factor — where the sj attaches, whose transcript it belongs to, and how much of its
-    own template remains either side.
+    An sj is a factor on its two endpoint regions, never a chain slot or message channel, because the graph is a DAG
+    but not a polytree; this holds what a consumer needs to place that factor. ``strand`` is the transcript strand,
+    from which sense is derived: the accumulator's ``sj_count`` columns are the genome strand the read aligned to.
 
-    ``strand`` is the TRANSCRIPT strand, and it is the whole reason the accumulator does not store
-    sense/antisense. The accumulator's ``sj_count`` columns are the GENOME strand the read aligned
-    to; which transcript the molecule came from is a property of the annotation, stated here, and
-    deriving sense from an sj's own strand is exactly this join.
-
-    ``reach_lo`` / ``reach_hi`` are EXONIC: only a spliced molecule uses an sj, so what remains either
-    side of it is exonic — see the module docstring. A reach of 0 is meaningful, not a sentinel.
-
-    ``lo`` / ``hi`` are genomically lower/higher, never donor/acceptor: boundaries store
-    ``src < dst``, so on a minus-strand sj the biological donor is on the right.
+    A reach is how many bases of the molecule's own sequence remain either side of the sj. Only a molecule that spliced
+    across it uses an sj, so the reaches are exonic. They are ``lo`` / ``hi`` (genomically lower / higher), never
+    donor / acceptor, because ``src`` is genomically left whatever the strand. The graph stores them per strand (an sj
+    row fills only its own strand's pair, so two strand-coincident sj never read each other's) and maximal over
+    isoforms independently per side, which over-states opportunity and so errs toward a higher gDNA fraction. A reach
+    of 0 means no RNA of that strand splices across the sj: zero opportunity, not a sentinel.
     """
 
-    src_region: np.ndarray  # int64[J] — global region id; the intron STARTS where this region ends
-    dst_region: np.ndarray  # int64[J] — global region id; the intron ENDS where this region begins
-    strand: np.ndarray  # int8[J]  — the sj's own genomic strand == the TRANSCRIPT strand
-    reach_lo: np.ndarray  # float64[J] — exonic reach on the sj's OWN strand
+    src_region: np.ndarray  # int64[J] — global region id; the intron starts where this region ends
+    dst_region: np.ndarray  # int64[J] — global region id; the intron ends where this region begins
+    strand: np.ndarray  # int8[J]  — the sj's own genomic strand, which is the transcript strand
+    reach_lo: np.ndarray  # float64[J] — exonic reach on the sj's own strand
     reach_hi: np.ndarray  # float64[J]
 
     @property
@@ -1018,11 +906,8 @@ class SpliceJunctionGeometry:
 def build_sj_geometry_arrays(index) -> SpliceJunctionGeometry:
     """Build :class:`SpliceJunctionGeometry` for ``index``, in the accumulator's sj slot order.
 
-    The slot order is not recomputed here. It is read off :func:`build_sj_arrays`, whose
-    ``edge_row`` is already the ``edges_df`` row of each sj slot. That ordering is a byte-identity
-    contract against the reference accumulator's ``Partition.from_region_bounds``, and two
-    implementations of one ordering is how the same quantity comes to differ in two places, so there
-    is one and this joins through it.
+    The slot order is read off :func:`build_sj_arrays` (its ``edge_row``), never recomputed, so the order that must
+    match the reference accumulator has one implementation.
     """
     rows = build_sj_arrays(index).edge_row
     boundaries = index.edges_df
@@ -1030,9 +915,8 @@ def build_sj_geometry_arrays(index) -> SpliceJunctionGeometry:
     is_pos = strand == np.int8(Strand.POS)
 
     def reach(column_pos: str, column_neg: str) -> np.ndarray:
-        # An sj row carries ONE strand, so only that strand's pair was populated by the builder;
-        # selecting on the strand is what stops a NEG sj reading a POS column of zeros and
-        # declaring itself opportunity-free.
+        # An sj row fills only its own strand's pair, so select on the strand: a NEG sj reading the POS column would
+        # read zeros and look opportunity-free.
         return np.where(
             is_pos,
             boundaries[column_pos].to_numpy(np.int64)[rows],

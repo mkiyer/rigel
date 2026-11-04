@@ -1,13 +1,5 @@
-"""Read-simulation configuration for a single-condition run.
-
-``ReadSimConfig`` and ``GDNAConfig`` are the small dataclasses :class:`scenario.Scenario` and its
-tests use to describe one condition; ``Scenario`` translates them into the engine's
-``SimulationParams`` / ``GDNASimConfig``, and the engine itself is
-:class:`rigel.sim.wgs_engine.WholeGenomeSimulator`. Nothing here generates reads.
-
-The read names the engine emits encode each fragment's ground-truth origin; :mod:`read_name`
-defines that format, writes it and parses it back.
-"""
+"""Single-condition read-simulation configuration: the dataclasses :class:`scenario.Scenario` reads and translates
+into the engine's ``SimulationParams`` / ``GDNASimConfig``."""
 
 from dataclasses import dataclass
 
@@ -26,11 +18,9 @@ class ReadSimConfig:
     strand_specificity : probability an RNA fragment preserves correct read orientation
         (1.0 = perfectly stranded, 0.5 = no strand information); implemented as an R1↔R2 swap
         with probability ``1 − strand_specificity`` per fragment.
-    r1_sense : which orientation the protocol *targets* — ``False`` (default) emits R1-ANTISENSE
-        (Illumina TruSeq dUTP), ``True`` emits R1-SENSE (KAPA Stranded). This is a DIRECTION and
-        ``strand_specificity`` is a FIDELITY about it; the two are independent, and conflating
-        them is what made the same non-defect get filed twice (see
-        ``tests/calibration/test_strand_sense_convention.py``).
+    r1_sense : the orientation the protocol targets — ``False`` (default) emits R1-antisense (dUTP),
+        ``True`` emits R1-sense. This is a direction and ``strand_specificity`` is a fidelity about it;
+        the two are independent.
     seed : random seed for reproducibility.
     """
 
@@ -49,19 +39,18 @@ class ReadSimConfig:
 class GDNAConfig:
     """Configuration for genomic DNA contamination.
 
-    gDNA fragments are sampled from the genome (both strands) with an independent fragment-size
-    distribution. ``abundance`` uses the same relative scale as transcript abundances — the gDNA
-    fragment fraction is ``abundance × genome_eff_len`` over the total abundance × effective-length
-    weight (see :meth:`rigel.sim.wgs_engine.WholeGenomeSimulator.rna_gdna_split`).
+    gDNA fragments are drawn from both genomic strands with their own fragment-length distribution.
+    ``abundance`` is on the transcript-abundance scale: the gDNA fraction is ``abundance × genome_eff_len``
+    over the total abundance × effective-length weight
+    (:meth:`rigel.sim.wgs_engine.WholeGenomeSimulator.rna_gdna_split`).
 
     Attributes
     ----------
     abundance : relative gDNA abundance (transcript-abundance scale).
     frag_mean, frag_std, frag_min, frag_max : gDNA fragment-length distribution (bp).
     gdna_strand_overdispersion : float or None
-        gDNA strand overdispersion — the intra-class correlation of the per-region sense/antisense
-        split in ``[0, 1)``, in the same units the calibrator fits. ``0`` ⇒ exact Binomial 50/50;
-        larger ⇒ more region-to-region strand skew.
+        The intra-class correlation of the per-region sense/antisense split, in ``[0, 1)``, in the
+        calibrator's units. ``0`` is an exact Binomial 50/50; larger is more region-to-region skew.
     """
 
     abundance: float = 10.0
