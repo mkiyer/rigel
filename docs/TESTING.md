@@ -48,6 +48,19 @@ Read the realised gap count-weighted off each condition's `truth_fragment_length
 (`TRAPS: configured-lengths-are-not-realised`). A calibration mechanism is ranked here only on what stops before the
 EM, because a length gap hands the EM part of the answer (`TRAPS: a-length-gap-bypasses-calibration`).
 
+**The low-gDNA side panel** (`scripts/sim/configs/gdna_ladder_lowg.yaml`, `suite/ladder_lowg/`) is the ladder with two
+gDNA rates between its `g00` and `g05` rungs, stranded only, everything else the ladder's own. The ladder steps from no
+gDNA to 5 %, and a capture reader can fail between them (`ISSUES: the-reader-reads-false-gdna-as-capture`).
+
+| rung | g001 | g01 |
+|---|---|---|
+| rate | 0.001001 | 0.010101 |
+| f_gdna | 0.1 % | 1 % |
+| gDNA fragments of 10 M | 10,000 | 100,000 |
+
+Read each row beside the ladder's `g00` and `g05` rows, and each capture-ON row beside `quant_accuracy.py --arm
+no_capture`.
+
 **The test chromosome's fl arms** (`scripts/sim/configs/test_reference_fl_{rna_long,gdna_long,equal200}.yaml`, the 30
 conditions of §0a each) set gDNA / RNA to 100 ± 50 / 250 ± 150, 250 ± 150 / 100 ± 50, and 200 ± 100 for both. The
 equal arm is the control: an fl-gap result that also moves there is an artefact.
@@ -284,9 +297,10 @@ untouched stages drift between sittings, so alternate the arms in one sitting an
 **Every speed-up, rename or refactor is a proven numeric no-op** (`scripts/design/rename_identity.py`): `--freeze` a
 reference once from the tree a stage starts on, then `--check` each step against it, on a ladder condition and on a
 real library (`--bam`). The default `--reference` does not exist and prints ⛔ rather than failing, so pass it and read
-the log. The current references, frozen on the second pass's draw:
+the log. The current references, frozen on the tree with the junction cap landed (2026-11-13); the same directory
+holds `identity_head_{g00off,g50u_on,g50s_on}.json` for the zero control and the two capture-ON strata:
 
-    P=$RIGEL_RUNS/arms/2026-10-29_identity S=$RIGEL_RUNS/suite
+    P=$RIGEL_RUNS/arms/2026-11-13_identity S=$RIGEL_RUNS/suite
     python scripts/design/rename_identity.py --check --suite $S/ladder --index $S/rigel_index \
       --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference $P/identity_head_g05off.json
     python scripts/design/rename_identity.py --check --index $RIGEL_RUNS/refs/rigel_index \

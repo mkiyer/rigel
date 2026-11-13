@@ -606,6 +606,13 @@ class CalibrationConstants:
     #: a finite floor rather than −∞ (``capture_efficiency``).
     rate_log_floor: float = 1e-300
 
+    #: Levels on the geometric grid the junction cap is searched on, from the landscape's saturated level to the
+    #: largest uncapped junction price (``capture_eff_length.fit_junction_cap``). The likelihood is flat where no
+    #: junction is at the cap and concave only between the junctions' own bounds, so it is maximised by search and
+    #: the first maximum taken. A discretization, not a model choice: at 600 neighbouring levels are under 1 % apart
+    #: over any range up to 380-fold.
+    junction_cap_grid_points: int = 600
+
     def __post_init__(self) -> None:
         _check_ranges(
             self,
@@ -616,6 +623,7 @@ class CalibrationConstants:
             fraction_tolerance=0.0 <= self.fraction_tolerance < 1.0,
             track_floor=self.track_floor > 0.0,
             rate_log_floor=self.rate_log_floor > 0.0,
+            junction_cap_grid_points=self.junction_cap_grid_points >= 2,
         )
 
 

@@ -79,6 +79,9 @@ class PipelineResult:
     fl_models: FLModels
     # The EM's two length tables and the decision behind them (`calibration.shared_length_law`).
     length_tables: LengthTables
+    # The level a junction's capture price is capped at: calibration's saturated level, raised as far as RNA's own
+    # spliced fragments support (`calibration.capture_eff_length.fit_junction_cap`).
+    junction_cap: float
     # Per-region genome-wide gDNA track (ref/start/end + gDNA mass/density/frac),
     # built from the calibration result; feeds the report's genome track + bedGraph.
     calibration_track: pd.DataFrame
@@ -618,14 +621,15 @@ def setup_geometry_and_estimator(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
     tables: "LengthTables",
+    junction_cap: float,
 ) -> AbundanceEstimator:
     """Compute the transcripts' effective lengths and create the AbundanceEstimator.
 
     ``effective_lengths_em`` are capture-contracted by the rule the gDNA component's length takes too (each
     transcript's share of every region, boundary and junction its fragments deposit on, at that object's capture
-    efficiency), so every component competes on one footing under capture. ``effective_lengths``, TPM's, stay the
-    full FL-marginal length over the observable starts. Off capture, or with no gDNA, the two are bit-identical
-    (``calibration/capture_eff_length.py``).
+    efficiency, a junction's capped at ``junction_cap``), so every component competes on one footing under capture.
+    ``effective_lengths``, TPM's, stay the full FL-marginal length over the observable starts. Off capture, or with
+    no gDNA, the two are bit-identical (``calibration/capture_eff_length.py``).
     """
     if rna_fl.n_observations <= 0:
         raise ValueError(
@@ -640,7 +644,7 @@ def setup_geometry_and_estimator(
     effective_lengths = observable_fl_eff_lengths(index, region_arrays, rna_fl)
 
     effective_lengths_em = transcript_capture_eff_lengths(
-        calibration, region_arrays, index, effective_lengths, tables
+        calibration, region_arrays, index, effective_lengths, tables, junction_cap
     )
 
     geometry = TranscriptGeometry(
@@ -946,6 +950,7 @@ def quant_from_buffer(
     region_arrays: "RegionArrays",
     stats: PipelineStats,
     calibration: "CalibrationResult",
+    junction_cap: float,
     *,
     em_config: EMConfig | None = None,
     scoring: FragmentScoringConfig | None = None,
@@ -955,8 +960,9 @@ def quant_from_buffer(
 ) -> AbundanceEstimator:
     """Quantify buffered fragments: calibration prior → per-locus EM.
 
-    Scores the buffer with the EM's two length tables (:func:`length_tables`),
-    builds connected-component loci, turns the per-region ``CalibrationResult``
+    Scores the buffer with the EM's two length tables (:func:`length_tables`), prices every junction under one cap
+    (``junction_cap``, `calibration.capture_eff_length.fit_junction_cap`) in the transcripts' lengths and in a
+    multimapper's place weights alike, builds connected-component loci, turns the per-region ``CalibrationResult``
     into each locus's gDNA count and gDNA length (``assemble_priors``), partitions
     the global CSR, and runs the per-locus EM, whose pseudocounts read that count
     against the locus's own fragments (``em_pseudocounts``). Returns the populated
@@ -977,7 +983,7 @@ def quant_from_buffer(
     gdna_fl = FragmentLengthModel.from_pmf(tables.gdna, max_size)
 
     estimator = setup_geometry_and_estimator(
-        index, rna_fl, em_config, calibration, region_arrays, tables
+        index, rna_fl, em_config, calibration, region_arrays, tables, junction_cap
     )
 
     em_data = score_fragments(
@@ -991,8 +997,8 @@ def quant_from_buffer(
         scoring_cfg,
         log_every,
         annotations,
-        # each multimapper's place weighs its candidates by its capture
-        place_efficiencies(calibration, region_arrays, index),
+        # each multimapper's place weighs its candidates by its capture, a junction's at the lengths' own cap
+        place_efficiencies(calibration, region_arrays, index, junction_cap),
     )
 
     multi_loci = build_multi_loci(em_data, index)
@@ -1071,6 +1077,11 @@ def run_pipeline(
         # The EM's two length tables: one shared law unless the data show a difference capture cannot make
         tables = length_tables(fl_models, calibration, region_arrays)
         _log_length_tables(tables)
+        # The cap on a junction's capture price: the saturated level, raised as far as RNA's spliced fragments support
+        from .calibration.capture_eff_length import fit_junction_cap
+
+        junction_cap = fit_junction_cap(calibration, region_arrays, index, tables)
+        _log_junction_cap(calibration.gdna_capture_saturation, junction_cap)
         annotations = None if config.annotated_bam_path is None else _annotation_table(buffer)
         estimator = quant_from_buffer(
             buffer,
@@ -1080,6 +1091,7 @@ def run_pipeline(
             region_arrays,
             stats,
             calibration,
+            junction_cap,
             em_config=config.em,
             scoring=config.scoring,
             log_every=scan.log_every,
@@ -1098,6 +1110,7 @@ def run_pipeline(
         calibration=calibration,
         fl_models=fl_models,
         length_tables=tables,
+        junction_cap=junction_cap,
         calibration_track=build_gdna_track(calibration, region_arrays, index.ref_names),
     )
     if before_annotated_bam is not None:
@@ -1202,6 +1215,22 @@ def _log_length_tables(tables: "LengthTables") -> None:
         float(np.dot(bins, tables.rna)),
         float(np.dot(bins, tables.gdna)),
     )
+
+
+def _log_junction_cap(saturation: float, junction_cap: float) -> None:
+    """Say where the junction cap sits, and whether RNA's spliced fragments raised it."""
+    if junction_cap == saturation:
+        logger.info(
+            "junction cap: the landscape's saturated level, %.4g× the bulk (the spliced counts raise nothing)",
+            saturation,
+        )
+    else:
+        logger.info(
+            "junction cap: %.4g× the bulk, raised by RNA's spliced fragments from the landscape's saturated level, "
+            "%.4g×",
+            junction_cap,
+            saturation,
+        )
 
 
 def _annotation_table(buffer: FragmentBuffer) -> "AnnotationTable":

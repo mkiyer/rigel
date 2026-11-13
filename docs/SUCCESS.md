@@ -12,6 +12,9 @@ for a current number), and lessons (`TRAPS.md`).
 - **Per stratum, never pooled.** Three strata are in scope — unstranded × capture-OFF, stranded × capture-OFF and
   stranded × capture-ON. Unstranded × capture-ON is deferred: it is reported on every table and is never a target,
   and because it carries most of the error, a pooled total mostly reports it (`TRAPS: never-pool-the-strata`).
+- **In three pools.** gDNA, annotated RNA (the reference transcripts) and nascent RNA (Rigel's synthetic spans),
+  never RNA against DNA. The annotated pool is what a user counts, so DNA called annotated RNA is the severe error and
+  the annotated pool is read first; DNA called nascent RNA is reported beside it and is the milder one.
 - **Against truth.** Every scorer reads the simulator's per-fragment truth — the oracle BAM's read names, the oracle
   caches split from them, the truth tables beside each condition — never the previous run.
 - **In a pinned, fractional pair.** An end-to-end arm runs with `--set scan.total_threads=1` (`OMP_NUM_THREADS=1` does
@@ -70,6 +73,7 @@ that one thing is worth:
 | arm | substitutes | read |
 |---|---|---|
 | `base` | nothing: the shipped pipeline | the deliverable |
+| `no_capture` | every capture efficiency read as 1; calibration's bulk kept | what reading capture is worth: a row where `base` is worse is a row where the capture reader cost more than it gave. It substitutes no truth, so it runs under `--bam` too |
 | `oracle` | the `LocusPriors` built from the origin-split truth | what a perfect prior is worth; what is left belongs to the EM, the lengths and the annotation |
 | `oracle_ruler` | the simulator's capture-aware effective length for every transcript and span, anchored on the fully probed transcripts | what the lengths do to the isoform split; the gDNA component keeps the shipped length |
 | `oracle_alloc_seed` | the true relative abundances as the EM's per-transcript allocation weights, with the shipped coverage seed | a capability proof, never a headroom claim |
@@ -79,6 +83,11 @@ Every prior arm wraps `assemble_priors`, which runs after the effective lengths 
 reaches the lengths; say which call an arm patches and check it sits downstream of everything you mean to price
 (`TRAPS: a-symptom-is-not-a-second-defect`). `--bam` scores an aligner's BAM of the same reads against the same truth:
 the ladder's STAR rung (`TESTING.md` §0d).
+
+**The screen a change is read on** is every row there is, per stratum: the ladder's 16 conditions on the simulator's
+alignments and on the STAR rung; the low-gDNA side panel and the fl-gap side panels (`TESTING.md` §0); and the test
+chromosome's three probe designs at stranded capture-ON (`test_reference.yaml` and its two probe panels,
+`TESTING.md` §0a). Every capture-ON row is read beside `no_capture`.
 
 ## 0.8.0 is done when
 
@@ -92,7 +101,8 @@ Each bar names its quantity, its strata and its truth; the numeric threshold on 
    measures capture, it reads 1 (`em_effective_length` equals `effective_length`), and elsewhere it tracks the
    simulator's yield (`ruler_vs_truth.py --scale`). A separate correction of the length is a defect, not a fix.
 4. **The three in-scope strata improve, or at worst hold, on the transcript table**, in a pinned A/B pair decomposed
-   by the arms, with the deferred stratum and the fl-gap panels reported beside them.
+   by the arms, with the deferred stratum and the rest of the screen (the fl-gap panels, the low-gDNA panel, the
+   probe designs) reported beside them.
 
 The accumulator's own correctness (fidelity to the specification, worker-order independence, conservation) is a
 closed regression check, gated in the suite (`TESTING.md` §5).
@@ -124,10 +134,14 @@ python scripts/design/ruler_vs_truth.py --panel ladder --condition gdna_g05_ss_0
 python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
 
 # 3. THE TOOL END TO END — fractional, scan pinned; --jobs 2 (a 10 M-fragment condition holds ~8.5 GB).
-python scripts/sim/panel.py score  --config $CFG --arms base oracle oracle_ruler --jobs 2
-python scripts/sim/panel.py report --config $CFG --arms base oracle oracle_ruler
+python scripts/sim/panel.py score  --config $CFG --arms base no_capture oracle oracle_ruler --jobs 2
+python scripts/sim/panel.py report --config $CFG --arms base no_capture oracle oracle_ruler
 #    ...and on STAR alignments of the same reads (aligned once with `panel.py align`).
-python scripts/sim/panel.py score  --config $CFG --arms base --bam rustar_recommended --jobs 2
+python scripts/sim/panel.py score  --config $CFG --arms base no_capture --bam rustar_recommended --jobs 2
+#    ...and the rest of the screen: the same two arms on each side panel and probe design.
+for C in gdna_ladder_lowg flgap_rna_long flgap_rna_short test_reference test_reference_probes_junction test_reference_probes_sparse; do
+  python scripts/sim/panel.py score --config scripts/sim/configs/$C.yaml --arms base no_capture --jobs 2
+done
 
 # 4. A RENAME, REFACTOR OR SPEED-UP must be a numeric no-op against a frozen reference (TESTING.md §6).
 python scripts/design/rename_identity.py --check --suite $LADDER --index $INDEX \

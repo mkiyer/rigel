@@ -455,7 +455,7 @@ synthetic nascent spans are rows of `nascent_quant`.
 | `start`, `end` | Genomic coordinates (0-based, half-open) |
 | `length` | Spliced exonic length (bp) |
 | `effective_length` | Length after fragment-length correction; the length `tpm` is normalised by, never contracted by capture |
-| `em_effective_length` | The yield the EM reads: `effective_length` scaled by the capture efficiency of every stretch the transcript's fragments land on (its exon pieces, the boundaries between them and its splice junctions), each read from the genomic DNA captured there or, for a junction, beside it. An efficiency is relative to uncaptured gDNA (the bulk), so `em_effective_length` equals `effective_length` off the probes and in a library without capture, and rises above it where capture enriched the transcript — to about `gdna_capture_saturation` times for a fully captured one. `count / em_effective_length` is the capture-corrected abundance, and a zero-count transcript's abundance is below about `3 / em_effective_length` |
+| `em_effective_length` | The yield the EM reads: `effective_length` scaled by the capture efficiency of every stretch the transcript's fragments land on (its exon pieces, the boundaries between them and its splice junctions), each read from the genomic DNA captured there or, for a junction, beside it. An efficiency is relative to uncaptured gDNA (the bulk), so `em_effective_length` equals `effective_length` off the probes and in a library without capture, and rises above it where capture enriched the transcript — to about `gdna_capture_saturation` times for a fully captured one, a junction's own level being capped at `junction_capture_cap`. `count / em_effective_length` is the capture-corrected abundance, and a zero-count transcript's abundance is below about `3 / em_effective_length` |
 | `locus_id` | Locus ID; `-1` if not placed in an EM locus |
 | `nascent_id` | The transcript's synthetic nascent span, a row of `nascent_quant`; `"."` when it has none: a single-exon transcript, or a transcript whose span an annotated single-exon transcript covers, which reports that RNA as annotated on its own row |
 | `is_basic` | True if the transcript has the GENCODE `basic` tag |
@@ -595,6 +595,7 @@ scalars (it is `null` if calibration did not run):
     "gdna_density_global":        <float>,       // library-average gDNA density, per observable base of effective length (QC scalar)
     "gdna_bulk_density":          <float|null>,  // the uncaptured gDNA level capture is read against, gDNA fragments/bp; null = no landscape
     "gdna_capture_saturation":    <float>,       // the saturated gDNA level over that bulk; 1 = nothing above it
+    "junction_capture_cap":       <float>,       // the cap on a splice junction's capture; the saturation unless spliced RNA raises it
     "fraction_rna_sense":         <float>,       // kappa: sense-strand RNA fraction
     "n_regions":                  <int>,         // number of calibration regions
     "n_boundaries":               <int>,         // number of contiguous boundaries between adjacent regions
@@ -612,6 +613,13 @@ capture saturates. A library without capture has a landscape of one level: its s
 efficiency is 1, and every `em_effective_length` equals `effective_length`. `gdna_bulk_density` is `null`
 only when calibration fitted no landscape at all. The report shows both, descriptively: no pass/fail
 verdict.
+
+`junction_capture_cap` is the level a splice junction's capture is capped at in `em_effective_length`.
+Genomic DNA never crosses a junction, so the saturated level only bounds what gDNA can show. RNA crosses it:
+each junction's spliced fragments are read against the unspliced RNA of the exons beside it, and where
+the library's junctions together support a higher level the cap is raised to it. It is never lowered, so
+it equals `gdna_capture_saturation` wherever the spliced counts ask for no more, and in every library that
+reads no capture.
 
 **Known limitation: a library with almost no gDNA.** There the bulk sits near the landscape's floor, and
 the few regions where calibration calls gDNA read as enormous capture against it. A transcriptome-only
@@ -757,7 +765,8 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 
 - **Library scalars**, in `summary.json` → `calibration`: `gdna_density_global`,
   `fraction_rna_sense` (the sense fraction κ), the uncaptured gDNA level `gdna_bulk_density` that capture
-  is read against, and the saturated level over it, `gdna_capture_saturation`. The junction fit behind
+  is read against, the saturated level over it, `gdna_capture_saturation`, and the cap on a splice
+  junction's capture, `junction_capture_cap`. The junction fit behind
   κ and the strand overdispersion (0, binomial) are in `strand_model`.
 - **A per-locus Dirichlet prior** — `count_gdna_prior` and `count_rna_prior` in `loci.feather`
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's

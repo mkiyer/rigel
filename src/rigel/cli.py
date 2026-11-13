@@ -341,7 +341,7 @@ def _summary(result, index, output_dir: Path, args, tables: dict, fl_summary: di
         "read_pairs": _read_pair_summary(stats),
         "fragment_stats": _fragment_summary(stats, index),
         "strand_model": _strand_model_summary(result.strand_models),
-        "calibration": _calibration_summary(result.calibration),
+        "calibration": _calibration_summary(result.calibration, result.junction_cap),
         "gdna_em_effective_length": _series_summary(tables["loci"], "gdna_em_effective_length"),
         "fragment_length": fl_summary,
         "length_tables": _length_tables_summary(result.length_tables),
@@ -594,8 +594,8 @@ def strand_fit_summary(strand_models) -> dict:
     }
 
 
-def _calibration_summary(cal) -> dict | None:
-    """Calibration's library scalars, never a per-region dict."""
+def _calibration_summary(cal, junction_cap: float) -> dict | None:
+    """Calibration's library scalars and the junction cap fitted from them, never a per-region dict."""
     if cal is None:
         return None
     return {
@@ -608,6 +608,9 @@ def _calibration_summary(cal) -> dict | None:
             None if cal.gdna_bulk_density is None else float(cal.gdna_bulk_density)
         ),
         "gdna_capture_saturation": float(cal.gdna_capture_saturation),
+        # the cap on a junction's capture price in the EM's lengths: the saturated level, raised as far as RNA's own
+        # spliced fragments support (equal to it where they raise nothing)
+        "junction_capture_cap": float(junction_cap),
         "fraction_rna_sense": round(float(cal.rna_sense_frac), SUMMARY_DECIMALS),
         "n_regions": int(cal.n_regions),
         "n_boundaries": int(cal.n_boundaries),

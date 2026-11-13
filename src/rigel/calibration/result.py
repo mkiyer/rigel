@@ -168,8 +168,8 @@ class CalibrationResult:
     #: efficiency is exactly 1; otherwise positive and finite.
     gdna_bulk_density: float | None
     #: The landscape's saturated level against the bulk: the most massive enriched basin's peak over the bulk peak,
-    #: ``> 1``, or exactly 1 when nothing lies above the bulk or no landscape was fitted. The ruler's junction price
-    #: saturates at it (`capture_eff_length`).
+    #: ``> 1``, or exactly 1 when nothing lies above the bulk or no landscape was fitted. The ruler's junction cap
+    #: starts at it and RNA's spliced fragments can raise it (`capture_eff_length.fit_junction_cap`).
     gdna_capture_saturation: float
     #: float64[n_regions]: each region's capture efficiency ``exp(E[min(x, s(x))] − x_b)``, its own gDNA density
     #: against the bulk with the landscape as a two-group prior and its contained count as the likelihood

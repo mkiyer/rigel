@@ -62,7 +62,10 @@ _REPO = Path(__file__).resolve().parents[2]
 
 from _shared import ORACLE_BAM, PANELS, add_set_option, capture_config, configured, refuses, sibling  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
+from rigel.calibration.capture_eff_length import (  # noqa: E402
+    fit_junction_cap,
+    transcript_capture_eff_lengths,
+)
 from rigel.calibration.capture_efficiency import capture_efficiencies  # noqa: E402
 from rigel.calibration.diagnostics import CalibrationDiagnostics  # noqa: E402
 from rigel.calibration.landscape import fit_landscape  # noqa: E402
@@ -397,16 +400,18 @@ def run_condition(index, region_arrays, index_dir, panel_dir, condition, config,
     cal, inputs = calibrate_condition(index, region_arrays, panel_dir, condition, config)
     out = {}
     tables = inputs["length_tables"]
-    out["shipped"] = (
-        transcript_capture_eff_lengths(cal, region_arrays, index, truth.L_plain, tables),
-        cal,
-    )
+
+    def shipped_ruler(result):
+        # each result's lengths at its own junction cap, as the pipeline fits it
+        cap = fit_junction_cap(result, region_arrays, index, tables)
+        return transcript_capture_eff_lengths(
+            result, region_arrays, index, truth.L_plain, tables, cap
+        )
+
+    out["shipped"] = (shipped_ruler(cal), cal)
     if (panel_dir / "oracle_cache" / condition / "slot_truth.npz").is_file():
         o = oracle_gdna_result(cal, region_arrays, panel_dir, condition)
-        out["oracle_gdna"] = (
-            transcript_capture_eff_lengths(o, region_arrays, index, truth.L_plain, tables),
-            o,
-        )
+        out["oracle_gdna"] = (shipped_ruler(o), o)
     for name, ruler in arms.items():
         out[name] = (
             np.asarray(ruler(cal, region_arrays, index, truth.L_plain, **inputs), dtype=np.float64),
@@ -588,8 +593,8 @@ def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
         cap["fl_models"] = models  # the last fit is calibration's
         return models
 
-    def ruler_hook(calibration, region_arrays, index_, fl_eff_lengths, tables):
-        out = orig_ruler(calibration, region_arrays, index_, fl_eff_lengths, tables)
+    def ruler_hook(calibration, region_arrays, index_, fl_eff_lengths, tables, junction_cap):
+        out = orig_ruler(calibration, region_arrays, index_, fl_eff_lengths, tables, junction_cap)
         cap["fl"] = np.asarray(fl_eff_lengths, dtype=np.float64).copy()
         cap["rna_pmf"] = np.asarray(tables.rna, dtype=np.float64).copy()
         cap["length_tables"] = tables

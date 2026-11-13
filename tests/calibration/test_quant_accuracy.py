@@ -552,6 +552,58 @@ def test_the_ruler_guard_refuses_an_arm_that_could_not_have_measured():
         qa.check_ruler_arm("c", "oracle_ruler", dict(fired, ruler=0))
 
 
+def test_the_no_capture_arm_replaces_the_readers_answer_and_nothing_else(monkeypatch):
+    """The arm's wrapper sits on the one place the result takes its capture reading. A reading with capture in it (a
+    saturated level of 50, efficiencies of 7 and 3) comes out as no capture at all: every efficiency exactly 1 and the
+    saturated level 1, with calibration's bulk density kept, since the bulk is not the reader's answer about capture.
+    After ``restore`` the reading is the reader's again."""
+    import importlib
+
+    CALIBRATE = importlib.import_module("rigel.calibration.calibrate")
+    read = dict(
+        gdna_bulk_density=2e-4,
+        gdna_capture_saturation=50.0,
+        gdna_capture_efficiency_region=np.array([7.0, 1.0, 0.2]),
+        gdna_capture_efficiency_boundary=np.array([3.0, 0.5]),
+    )
+    monkeypatch.setattr(CALIBRATE, "_capture_fields", lambda *a, **k: dict(read))
+    restore, fired = qa.install_no_capture()
+    try:
+        got = CALIBRATE._capture_fields()
+    finally:
+        restore()
+    assert fired["n"] == 1
+    assert got["gdna_bulk_density"] == 2e-4 and got["gdna_capture_saturation"] == 1.0
+    np.testing.assert_array_equal(got["gdna_capture_efficiency_region"], np.ones(3))
+    np.testing.assert_array_equal(got["gdna_capture_efficiency_boundary"], np.ones(2))
+    assert CALIBRATE._capture_fields()["gdna_capture_saturation"] == 50.0, (
+        "restore left the wrapper installed"
+    )
+
+
+def test_the_no_capture_arm_reaches_the_result_and_its_guard_refuses_one_it_did_not(toy):
+    """End to end the arm's claim is read off the run's own calibration result, not the wrapper's return value, which
+    would stay healthy if the result were assembled from another reading. A result holding any efficiency other than
+    1, or a saturated level above 1, is refused as no measurement of reading no capture."""
+    from rigel.pipeline import run_pipeline
+
+    restore, fired = qa.install_no_capture()
+    try:
+        result = run_pipeline(str(toy.bam_path), toy.index, PipelineConfig())
+    finally:
+        restore()
+    assert fired["n"] >= 1
+    cal = result.calibration
+    qa.check_no_capture("toy", cal)
+    c = np.array(cal.gdna_capture_efficiency_region)
+    c[0] = 2.0
+    with pytest.raises(RuntimeError, match="no_capture"):
+        qa.check_no_capture("toy", dataclasses.replace(cal, gdna_capture_efficiency_region=c))
+    if cal.gdna_bulk_density is not None:
+        with pytest.raises(RuntimeError, match="no_capture"):
+            qa.check_no_capture("toy", dataclasses.replace(cal, gdna_capture_saturation=3.0))
+
+
 def test_the_capture_truth_is_anchored_on_the_fully_probed_class():
     """The shipped ruler's convention puts a fully probed transcript at 1 and every other below it, so the simulator's
     factor is divided by the fully probed class's median; a transcript with no length is the identity; and with no
@@ -991,10 +1043,11 @@ def test_an_aligned_bam_that_is_not_the_simulators_is_refused(toy, tmp_path):
         qa.aligner_loss(_write(tmp_path / "split.bam", header, split), counts)
 
 
-def test_another_input_bam_is_scored_by_the_base_arm_alone_and_must_exist(tmp_path):
+def test_another_input_bam_is_scored_by_the_truth_free_arms_alone_and_must_exist(tmp_path):
     """The oracle arms inject truth built from the simulator's own alignments (the oracle cache), so on another input
-    their substitution would be another scan's and is refused. A condition without the named BAM is refused by name
-    before anything runs, never scored as a shorter panel."""
+    their substitution would be another scan's and is refused. ``base`` and ``no_capture`` substitute no truth and
+    score any BAM of the reads. A condition without the named BAM is refused by name before anything runs, never
+    scored as a shorter panel."""
     for c in ("c1", "c2"):
         (tmp_path / c).mkdir()
         (tmp_path / c / qa.ORACLE_BAM).write_bytes(b"")
@@ -1002,6 +1055,7 @@ def test_another_input_bam_is_scored_by_the_base_arm_alone_and_must_exist(tmp_pa
     with pytest.raises(SystemExit, match="c2"):
         qa.check_input_bam(tmp_path, ["c1", "c2"], "base", "aligned.bam")
     qa.check_input_bam(tmp_path, ["c1"], "base", "aligned.bam")  # every condition has it
+    qa.check_input_bam(tmp_path, ["c1"], "no_capture", "aligned.bam")  # no truth substituted
     with pytest.raises(SystemExit, match="base"):
         qa.check_input_bam(tmp_path, ["c1"], "oracle", "aligned.bam")
     qa.check_input_bam(tmp_path, ["c1", "c2"], "oracle", qa.ORACLE_BAM)  # the simulator's: any arm

@@ -30,7 +30,8 @@ for robustness, so a number measured at the panel's nascent share is a stress re
 
 ## Where things stand
 
-- `src/`'s numbers are 81fc67b6's; the code pass after it is a proven numeric no-op.
+- `src/`'s numbers are 81fc67b6's plus the **junction cap**, landed 2026-11-13: identical on 40 of the screen's 56
+  rows, moved only under stranded capture, worse on none (`docs/ROADMAP.md`). This tree is the baseline.
 - The validation of ec996bba beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
   (`docs/ROADMAP.md`).
 - **No preview ships.** A pre-release waits for the capture reader and a review of the open issues.
@@ -122,7 +123,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The baseline: 0 failed / 3,444 passed / 0 skipped, 3,444 collected** (re-derived 2026-11-04, after the code pass). Any failure is a regression.
+**The baseline: 0 failed / 3,460 passed / 0 skipped, 3,460 collected** (re-derived 2026-11-13, with the junction cap landed). Any failure is a regression.
 - Re-derive the count; never edit it by hand. Only adding or removing a test moves it.
 - A golden update (`--update-golden`) is where a regression gets laundered into "intended". Read the diff and check the
   truth-scored instruments first.
@@ -137,7 +138,7 @@ Each instrument's module docstring and `--help` are its manual. `docs/SUCCESS.md
 | | the question it answers |
 |---|---|
 | `design/preflight.py` | Can this session run and regenerate everything? `--full` adds every `--self-test` |
-| `design/quant_accuracy.py` | How accurate is the tool end to end, against truth? Read in a pinned A/B pair. `--report … --markdown` renders the release report; `--bam` runs on an aligner's input (the STAR rung) |
+| `design/quant_accuracy.py` | How accurate is the tool end to end, against truth? Read in a pinned A/B pair. `--arm no_capture` is the line a capture reader must beat; `--report … --markdown` renders the release report; `--bam` runs on an aligner's input (the STAR rung) |
 | `design/calibration_vs_oracle.py` | Is the calibration result right against an oracle calibration? `--set` prices a config value on both arms. It cannot see the capture-contracted length: read `ruler_vs_truth.py` beside every capture-ON arm |
 | `design/ruler_vs_truth.py` | Is the EM's capture-contracted length right against the simulator's own yield? `--scale` puts every class on one scale; `--module` runs prototype rulers |
 | `design/prior_vs_oracle.py` | Is the locus prior's gDNA count right? `P − O` is calibration's error, `O − S` the pooled share's |
@@ -149,6 +150,7 @@ Each instrument's module docstring and `--help` are its manual. `docs/SUCCESS.md
 | `sim/build_test_reference.py` | Renders the test chromosome from `test_chr.yaml` (`docs/TESTING.md` §0a) |
 | `sim/configs/gdna_ladder.yaml` | The 16-condition panel the tool is ranked on |
 | `sim/configs/flgap_rna_long.yaml`, `flgap_rna_short.yaml` | The fl-gap side panels; read both, per stratum, beside the ladder |
+| `sim/configs/gdna_ladder_lowg.yaml` | The low-gDNA side panel: 0.1 % and 1 % gDNA, stranded, beside the ladder's `g00` and `g05` |
 
 ## CLI
 

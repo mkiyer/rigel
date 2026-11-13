@@ -9,6 +9,8 @@ difference from ``base`` is what that one thing is worth:
 - ``oracle_ruler``: the simulator's capture-aware effective length in place of the shipped ruler's, the only arm
   that reaches the lengths the EM divides by;
 - ``oracle_alloc_seed``: the true per-transcript allocation weights, a capability proof, not a headroom claim;
+- ``no_capture``: every capture efficiency read as 1, the line a capture reader must beat: under it a row is worth
+  what reading no capture at all is worth. It substitutes no truth, so it scores an aligner's BAM too;
 - ``noop`` and ``oracle_ruler_noop``: the full wrappers taking nothing; they must be byte-identical to ``base``.
 
 One scorer serves every arm. The primary score is count against count: the truth is each condition's realised
@@ -42,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import importlib
 import json
 import os
 import time
@@ -95,7 +98,11 @@ from _scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
 #: prices the ruler end to end; capture-OFF it is the identity.
 _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
-ARMS = ("base", "noop", "oracle", "oracle_alloc_seed") + tuple(_RULER_ARMS)
+ARMS = ("base", "noop", "oracle", "oracle_alloc_seed", "no_capture") + tuple(_RULER_ARMS)
+
+#: The arms that substitute no truth, so they score any BAM of the condition's reads (``--bam``): every other arm
+#: injects truth built from the simulator's own alignments.
+_TRUTH_FREE_ARMS = ("base", "no_capture")
 
 #: arm -> which ``LocusPriors`` fields come from the oracle O. ``noop`` takes none and still builds O, so it tests
 #: the wrapper rather than an ``if``. There is no RNA arm: calibration's RNA count does not reach the EM
@@ -315,15 +322,16 @@ def gdna_estimate(library: dict) -> float:
 
 
 def check_input_bam(suite: Path, names: list[str], arm: str, bam_name: str) -> None:
-    """Refuse an input no row could honestly come from. Only the base arm reads another BAM than the simulator's:
-    every other arm substitutes truth built from the simulator's alignments. Every condition must hold the named
-    BAM, or the panel would be scored short and read as complete."""
+    """Refuse an input no row could honestly come from. Only an arm that substitutes no truth (``base``,
+    ``no_capture``) reads another BAM than the simulator's: every other arm substitutes truth built from the
+    simulator's alignments. Every condition must hold the named BAM, or the panel would be scored short and read as
+    complete."""
     if bam_name == ORACLE_BAM:
         return
-    if arm != "base":
+    if arm not in _TRUTH_FREE_ARMS:
         raise SystemExit(
-            f"⛔ --bam {bam_name} reads an aligner's output, which only the base arm can score: arm {arm!r} "
-            f"substitutes truth built from the simulator's own alignments"
+            f"⛔ --bam {bam_name} reads an aligner's output, which only {' or '.join(_TRUTH_FREE_ARMS)} can score: "
+            f"arm {arm!r} substitutes truth built from the simulator's own alignments"
         )
     missing = [n for n in names if not (suite / n / bam_name).is_file()]
     if missing:
@@ -479,8 +487,8 @@ def install_ruler_arm(arm: str, factor: np.ndarray):
     orig_ruler = CEL.transcript_capture_eff_lengths
     fired = {"n": 0, "ruler": 0, "max_abs_delta": 0.0, "truth_delta": 0.0}
 
-    def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths, tables):
-        shipped = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, tables)
+    def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths, tables, junction_cap):
+        shipped = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, tables, junction_cap)
         base = np.asarray(shipped, dtype=np.float64)
         truth = np.asarray(fl_eff_lengths, dtype=np.float64) * factor
         out = truth if substitute else shipped
@@ -517,6 +525,53 @@ def check_ruler_arm(condition: str, arm: str, fired: dict) -> None:
     if not _RULER_ARMS[arm] and fired["max_abs_delta"] != 0.0:
         raise RuntimeError(
             f"{condition} [{arm}]: the NOOP arm moved the EM's lengths by {fired['max_abs_delta']:.3e}."
+        )
+
+
+def install_no_capture():
+    """Read every capture efficiency as 1. Returns ``(restore, fired)``.
+
+    ``calibrate._capture_fields`` is the one place the result takes its capture reading, so the wrapper replaces the
+    reader's answer and nothing else: every region's and boundary's efficiency is 1 and the saturated level is 1, as a
+    library with one gDNA level reads, and the bulk density is calibration's own. Everything downstream (the
+    transcripts' lengths, the locus gDNA lengths, a multimapper's place weights, RNA's captured fraction) then reads no
+    capture. The arm prices the capture reader as a whole: a row where ``base`` is worse than this arm is a row where
+    reading capture cost more than it gave. ``fired`` counts the readings replaced; ``check_no_capture`` reads the
+    result.
+    """
+    # the package re-exports the function `calibrate` under the module's name, so the module is imported by name
+    CALIBRATE = importlib.import_module("rigel.calibration.calibrate")
+    inner = CALIBRATE._capture_fields
+    fired = {"n": 0}
+
+    def wrapper(*args, **kwargs):
+        fields = inner(*args, **kwargs)
+        fired["n"] += 1
+        return dict(
+            fields,
+            gdna_capture_saturation=1.0,
+            gdna_capture_efficiency_region=np.ones_like(fields["gdna_capture_efficiency_region"]),
+            gdna_capture_efficiency_boundary=np.ones_like(fields["gdna_capture_efficiency_boundary"]),
+        )
+
+    CALIBRATE._capture_fields = wrapper
+
+    def restore():
+        CALIBRATE._capture_fields = inner
+
+    return restore, fired
+
+
+def check_no_capture(condition: str, calibration) -> None:
+    """The ``no_capture`` arm's claim is that the run read no capture; refuse a result that read any."""
+    read = [
+        np.asarray(calibration.gdna_capture_efficiency_region),
+        np.asarray(calibration.gdna_capture_efficiency_boundary),
+    ]
+    if any(np.any(c != 1.0) for c in read) or calibration.gdna_capture_saturation != 1.0:
+        raise RuntimeError(
+            f"{condition} [no_capture]: the run read a capture efficiency other than 1; the arm never reached the "
+            "result. This is not a measurement of reading no capture."
         )
 
 
@@ -557,6 +612,8 @@ def install_condition_arm(arm: str, suite: Path, index, condition: str, pipeline
     if arm in _RULER_ARMS:
         # checked before the fall-through: `install_arm` has no fields for a ruler arm
         return install_ruler_arm(arm, capture_truth_factor(suite, index, condition))
+    if arm == "no_capture":
+        return install_no_capture()
     oracle = None
     if arm != "base":
         if oracle_cache is None:
@@ -589,6 +646,8 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     if arm in _RULER_ARMS:
         # the ruler arms carry a second requirement: the EM's lengths are what they name (check_ruler_arm)
         check_ruler_arm(condition, arm, fired)
+    if arm == "no_capture":
+        check_no_capture(condition, result.calibration)
     seconds = time.perf_counter() - start
 
     quant = result.estimator.get_counts_df(index)
@@ -1052,7 +1111,8 @@ def _parse_args():
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--bam", default=ORACLE_BAM,
                     help="the BAM each condition is read from, by name in its directory: the simulator's own "
-                         "alignments by default, or an aligner's (panel.py align), which only the base arm scores")
+                         "alignments by default, or an aligner's (panel.py align), which only base and no_capture "
+                         "score")
     ap.add_argument("--oracle-cache", type=Path, default=None,
                     help="defaults to <suite>/oracle_cache when that directory exists")
     ap.add_argument("--out", type=Path, default=None)

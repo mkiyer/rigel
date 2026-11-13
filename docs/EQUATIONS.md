@@ -570,10 +570,33 @@ fragment's bases: a gDNA crossing of the low boundary holds the junction fragmen
 bases, one of the high boundary `x` intron bases plus its high-exon bases; on average each extra is half an intron
 fragment. Capture saturates (a fragment binds its best probe part), so
 
-    c_junction = min( max(c_lo + c_hi − ½(c_intron,lo + c_intron,hi), 0),  max(S, c_exon,lo, c_exon,hi, c_lo, c_hi) )
+    c_junction = min( max(c_lo + c_hi − ½(c_intron,lo + c_intron,hi), 0),  max(C, c_exon,lo, c_exon,hi, c_lo, c_hi) )
 
-`S` the saturation level. Where each boundary reads its flanks' mean it is `½(c_exon,lo + c_exon,hi)`. An intron piece
+`C` the junction cap. Where each boundary reads its flanks' mean it is `½(c_exon,lo + c_exon,hi)`. An intron piece
 too short for a gDNA fragment reads the boundary on its far side, so a one-region intron gives `½(c_lo + c_hi)`.
+
+**The junction cap, from RNA's own split** (`fit_junction_cap`). The saturation level `S` (below) is gDNA's, and gDNA
+never deposits on a junction, so `S` bounds only what gDNA can show. RNA crosses the junction. In an exon region `A`
+RNA and gDNA are the same placements under the same probes, so a transcript at rate `ρ_t` leaves `ρ_t S_t(A) c_A`
+contained fragments in `A` and `ρ_t M_t(J) p_J` on a junction `J` priced `p_J`: the ratio is free of `ρ_t`. Over the
+transcripts using `J`, with `A` covered by them alone and their `M_t(J)` read at the mean `X_J`,
+
+    E[W_J] / E[m_J] = X_J p_J / D_J,        D_J = Σ_{A beside J, its own} S(A) c_A
+
+`W_J` the junction's conserved spliced mass (`sj_conserved_mass`) and `m_J` calibration's unspliced RNA in those
+regions (`count_rna_region`). As counts, with `p_J(C)` the rule above at cap `C`:
+
+    W_J | W_J + m_J  ~  Binomial( q_J(C) ),        q_J(C) = X_J p_J(C) / (X_J p_J(C) + D_J)
+
+    C = argmax_{C ≥ S}  Σ_J [ W_J log q_J(C) + m_J log(1 − q_J(C)) ]
+
+over the junctions with a region of their own, a fragment in their footprint and a price the cap can move
+(conservation's sum above `max(S, the best object beside)`). A term is constant in `C` below its junction's best
+object and above its sum, and concave in `log C` between, so the sum is not concave: it is maximised by search on a
+geometric grid from `S` to the largest sum (`CONSTANTS.calibration.junction_cap_grid_points`) and the first maximum
+is taken, so a cap the counts cannot tell from `S` is `S`. The cap is one-sided (`C ≥ S`), and with no level above the
+bulk (`S = 1`) it is 1. The shares are the ruler's own, carried to gDNA's table as an efficiency is (§14), so the fit
+and the lengths it feeds state one model. What it assumes without checking is `ISSUES: the-junction-cap-reads-bookings`.
 
 **The efficiency** (`capture_efficiencies`). Each object reads its gDNA count `k` on its support `S` (a region's
 contained, a boundary's crossing) as `ℓ(x) = k log(S eˣ) − S eˣ` over `x = log ρ`, against the fitted landscape as

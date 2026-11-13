@@ -529,6 +529,10 @@ and continuous, and no enrichment is the limit where every weight is 1. **Captur
 binds any fragment overlapping it, so enrichment is shared with adjacent regions, boundaries and the connected
 junction, represented at the object resolution, never by reconstructing probes or by a fixed cutoff.
 
+**Capture inference is probe-free** (owner reaffirmed 2026-11-11): Rigel learns enrichment from the reads and
+annotation; it must not depend on a bait-sequence file, probe coordinates or panel-design metadata. Probe designs
+used to construct validation truth do not become inputs to the production estimator.
+
 > **The reader** (`capture_efficiency.capture_efficiencies`, after the last refit). Each object's efficiency is its own
 > gDNA density read against the BULK, the peak of the landscape's largest basin, since gDNA off the probes always
 > outnumbers gDNA on them. The prior is Efron's two groups — the bulk basin collapsed onto its peak, elsewhere the
@@ -639,10 +643,19 @@ gDNA component sums its locus's region supports and boundary shares at their eff
 With no landscape every length is its uncontracted span, bit-identically.
 
 - **A junction is priced by conservation of bases**: `c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`, within
-  `[0, max(saturation, the best object it touches)]`, since a fragment binds its best single probe part
+  `[0, max(the junction cap, the best object it touches)]`, since a fragment binds its best single probe part
   (`capture_eff_length._junction_prices`). **Capture is local**: only objects within a fragment of it enter.
-- **Junctions are never pooled**: some are probed by a probe spanning the junction and some are not, so pooling them is
-  invalid, and any gain is chance another panel reverses. **Capture efficiency stays outside the EM**.
+- **The junction cap is RNA's** (`capture_eff_length.fit_junction_cap`, landed 2026-11-13). gDNA never crosses a
+  junction, so the landscape's saturated level only bounds what gDNA shows. The cap starts there and is raised as far
+  as the library's junctions support, each read on its own footprint: its conserved spliced mass against the
+  unspliced RNA of the exon regions beside it that its transcripts alone cover (`EQUATIONS.md` §11). The counts never
+  lower it, and with no level above the bulk (a saturated level of exactly 1) it is not fitted: no capture is read,
+  so there is none for a junction to exceed. The lengths and a multimapper's place weights read the one value
+  (`summary.json`'s `junction_capture_cap`).
+- **A junction's price is never pooled**: some are probed by a probe spanning the junction and some are not, so each
+  keeps its own two boundaries and intron, no junction's price is evidence for another's, and any gain from pooling
+  them is chance another panel reverses. The cap is the rule's one library level, as the saturated level was, and its
+  fit reads every junction on its own footprint. **Capture efficiency stays outside the EM**.
 - **The yield's two consumers**: the contracted length is a YIELD and enters only the E-step, where only ratios within
   a locus decide, and the locus prior's gDNA length. TPM uses the plain fl-marginal length, since Rigel never knows
   which transcripts a panel probes. The yield has no floor — a component with no start position cannot emit — and its

@@ -47,6 +47,7 @@ BROKEN = {
         "fraction_tolerance": 1.0,
         "track_floor": 0.0,
         "rate_log_floor": 0.0,
+        "junction_cap_grid_points": 1,
     },
     "fragment_length": {
         "pool_prior_ess": -1.0,

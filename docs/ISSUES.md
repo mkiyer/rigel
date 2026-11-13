@@ -26,12 +26,33 @@ one expected gDNA fragment cannot tell depletion from capture.
 - STAR g00 κ0.99 ON, the capture tail: a few uncertain gDNA bookings swing RNA called gDNA ×2 across draw seeds, carrying
   1.1–1.4 M transcript errors; genes 386 k against 0.7.1's 328 k.
 - Under capture the reader is most of the accuracy (every efficiency at 1: stranded ON transcripts ×6.7, genes ×14), and it
-  amplifies every upstream change, so a scan or scoring change is read beside an efficiencies-at-1 arm.
+  amplifies every upstream change, so a scan or scoring change is read beside `quant_accuracy.py --arm no_capture`.
+- **The hole between 0 and 1 % gDNA under capture.** The low-gDNA side panel (simulator's alignments, stranded,
+  transcript / gene error): at 0.1 % gDNA capture ON 4,662,854 / 438,698 against 625,980 / 232,061 with every
+  efficiency at 1, so reading capture costs ×7.4 / ×1.9 there. At 1 % it is 512,257 / 70,459 against 648,510 / 259,982,
+  at 5 % 283,588 / 53,379 against 739,602 / 369,729, and at 0 % 620,762 / 229,741. A few thousand gDNA fragments fit a
+  landscape, the bookings of objects holding almost none read as levels, and the isoforms of one gene take
+  inconsistent lengths. Located by one rung at one depth (10 M fragments).
+- **False depletion off capture.** The same panel, capture OFF: 373,270 / 26,548 at 0.1 % against 146,083 / 10,993 at
+  0 % and 137,220 / 10,930 at 1 %. A level floored at the bulk removes it (−62 % / −64 %), but the reader reads below
+  1 on purpose: its bulk is the largest basin, which under a captured majority is the captured level
+  (`tests/calibration/test_capture_efficiency.py`), and no panel holds that case. The floor needs a ruling.
+
+The 2026-11-11 audit also finds enriched basins on STAR capture-OFF at g50, g05 and g00 under both strandednesses.
+Removing the reader's cap therefore changes all six rows despite absent capture; it is an exact no-op only at g98
+on STAR and at every tested level on the simulator's alignments. Of those six STAR rows only g00 stranded was run
+end to end: transcript error rises 0.2 % (1,896,916 → 1,899,995). The other five were not run because the capture-ON
+A/B already rejected the candidate (`$RIGEL_RUNS/prototypes/2026-11-10_length_gap/`, section 7).
 
 Known: candidates centred on ψ's booking keep the tail (widening the count by ψ's Var(log f_g) is refused); candidates
 reading only the object's own evidence lose the deferred stratum. Open: the bulk's uncertainty propagated jointly with
 the object's; a regularised estimator that shrinks an object toward uniform capture from its own evidence, with no count
-threshold or clamp. Instruments: `quant_accuracy.py --bam`, `ruler_vs_truth.py`.
+threshold or clamp. Not candidates, each screened end to end on 2026-11-10 to 11-13: a reader fitted on the located
+objects alone (best at g98 ON, and at zero gDNA off capture it reads capture, +446 % / +736 %), and a reader in which a gene's
+objects share a prior probability of enrichment (its zero-gDNA limit is a library switch that does not hold on other
+probe designs). Receipts: `$RIGEL_RUNS/prototypes/2026-11-10_length_gap/`, sections 10 and 15–18. Instruments:
+`quant_accuracy.py --arm no_capture`, `--bam`, `ruler_vs_truth.py`; the low-gDNA side panel
+(`scripts/sim/configs/gdna_ladder_lowg.yaml`).
 
 ### capture-outside-the-annotation-partition
 `priority: now — a stated failure of the preview · stage: calibration · kind: defect`
@@ -110,13 +131,51 @@ raises gDNA called RNA on all twelve contaminated STAR conditions and worsens th
 because the exclusion was cancelling calibration's own under-count (`ISSUES: the-pooled-q-in-the-gdna-count`). It lands
 only with that count. Prototype: `$RIGEL_RUNS/prototypes/2026-11-02_share_frame/`.
 
+### the-junction-cap-reads-bookings
+`priority: next — the landed cap's stated limits · stage: pre-EM · kind: limitation`
+The junction cap (`capture_eff_length.fit_junction_cap`, landed 2026-11-13) is one library level, fitted from each
+junction's spliced mass against the unspliced RNA calibration booked in its own exons (`EQUATIONS.md` §11). What it
+assumes without checking:
+- **The anchors are bookings, nascent RNA included.** With the true annotated RNA at the anchors the fitted cap is
+  within 2 % of the best cap against truth; with the bookings it is 6 % low on the ladder at g98 and 5 % high on the
+  exon-only test panel. Taking nascent RNA off by the junction's intron is unstable at g98.
+- **It reads opportunity through gDNA's length law**, which is off on aligned input
+  (`ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`). At STAR g50 stranded ON the counts then ask
+  for a lower cap, and a fit allowed to lower it falls to the best object beside every junction (transcripts +12.6 %
+  against the saturated level's). So the fit only raises the cap, and stays one-sided until that law is right.
+- **One level per library.** The cap bounds a junction's price and does not set it: on the sparse probe design
+  junction levels span 62–791× the bulk, and the cap moves 358× → 830× on six junctions with no visible effect. With
+  weak evidence the likelihood is flat and the first maximum is kept.
+- **The trades.** Simulator stranded ON, transcripts against genes: +3.7 % for −20.0 % at g50 (+7,213 fragments for
+  −17,132) and +1.6 % for −6.9 % at g05; on the exon-only design at g98, genes +2.7 % for transcripts −3.0 %.
+- An exon between two junctions anchors both, so the joint likelihood counts its RNA twice; a junction's multiplier
+  is the unweighted mean over its transcripts; the maximum is found on a 600-level grid.
+- It does nothing at 0–1 % gDNA or on unstranded libraries (the counts raise nothing there), and it leaves the cuts
+  inside exons, half the length's within-gene scatter on the ladder, with no candidate.
+Receipts: `$RIGEL_RUNS/prototypes/2026-11-10_length_gap/`, sections 12, 13 and 18, and
+`$RIGEL_RUNS/prototypes/2026-11-13_landing/`. Instruments: `quant_accuracy.py` on the screen, `ruler_vs_truth.py --scale`.
+
 ### the-capture-likelihood-leans-toward-rna
 `priority: next — under capture the EM calls gDNA RNA even when calibration is right · stage: EM · kind: defect`
-With no prior the EM leaves −35.5 k gDNA at g98 ss.99 ON under an exact calibration, and on the test chromosome's
-gDNA-long g50 ss.99 ON, given the oracle's gDNA count and gDNA's table in the capture frame, RNA is over-called by
-5.7 k fragments, 0.5–1.7 % in every captured gene. Not dissected. The candidate: RNA's normaliser under capture prices each
-object at one length-independent efficiency, exact only at one length law or a flat capture response. A truthful prior
-can mask it, so an oracle-prior arm is an intervention, not a ceiling. Instrument: `quant_accuracy.py --arm oracle`.
+On the ladder's g98 stranded capture-ON simulator row, the true-share prior with shipped lengths leaves +7.8 % net
+RNA; with each component's exact capture yield it leaves −0.1 %. Without a count prior, exact yields reduce net RNA
+from +70.0 % to +8.0 %. The prior masks much of the length error. This closes aggregate source imbalance in that
+cell, not every transcript error or the gross source-confusion floor. The length discrepancy includes the object's
+capture readout, junction pricing, and applying gDNA efficiencies to RNA opportunities. The simulator-yield
+intervention is not a validated STAR oracle: it worsens STAR, for reasons not yet established.
+
+Removing the reader's enriched-basin cap must not land. It improves g98 simulator transcript/gene error by
+20.4 %/20.9 %, but worsens STAR by 3.9 %/2.0 %, transcript error at g50 by 9–11 %, and transcript error at g05 by
+about 39 % on both inputs. Uncapping improves class-mean lengths while increasing within-gene length-error spread;
+class-wide corrections can instead transfer annotated RNA into synthetic spans. The cap's flattening helps the tested
+isoform splits, but this does not establish clipping to a basin peak as the generally correct regularizer. Receipts:
+`$RIGEL_RUNS/prototypes/2026-11-10_length_gap/`, sections 1 and 5–7; the exact-yield comparison is in
+`$RIGEL_RUNS/prototypes/2026-11-10_error_map/`.
+
+The older unequal-length finding remains distinct: on the test chromosome's gDNA-long g50 stranded capture-ON row,
+the oracle gDNA count and gDNA table in the capture frame still leave 5.7 k excess RNA fragments, 0.5–1.7 % per captured
+gene. A candidate mechanism is pricing each object at one length-independent efficiency. The equal-length ladder
+does not settle that case. Instruments: `ruler_vs_truth.py`, `quant_accuracy.py --arm oracle`.
 
 ### the-release-builds
 `priority: next — the owner's actions before any tag · stage: release · kind: release`
@@ -341,13 +400,25 @@ on one STAR-rung library). The splice blacklist's minimum count of 2 is underive
 ### ruler-witness-geometry-on-transcript-panels
 `priority: later · stage: pre-EM · kind: defect`
 Only a transcript holding the junction a probe spans binds that probe whole, so junction-spanning capture is
-isoform-specific, and the EM splits a gene's shared fragments by its isoforms' capture-aware lengths. gDNA holds the
-probe's two parts apart, and at zero gDNA there is no witness at all. The junction price (`capture_eff_length`) reads it
-from gDNA at the junction's two boundaries by conservation of bases, with no panel input: right in aggregate (0.959 of
-the simulator's junction capture over 395 junctions) but noisy per junction. The simulator's exact yields as RNA's
-normaliser take ladder g50 / g98 stranded × ON genes −56 / −64 %, an oracle intervention. The probe design sees
-isoform-specific capture directly, but Rigel reads no panel and real designs are usually unavailable. Instruments:
-`ruler_vs_truth.py`, `quant_accuracy.py --arm oracle_ruler` (wrong under capture until re-anchored,
+isoform-specific. Two probe panels with identical genomic probe parts have identical exact gDNA efficiencies, yet
+their RNA yields differ by 7.1 % when the parts belong to junction-spanning baits in one panel and separate baits in
+the other. Thus gDNA alone does not identify junction-specific RNA capture. The owner's real panel includes
+junction-spanning baits (confirmed 2026-11-10); capture inference must nevertheless remain probe-free (`DESIGN` §7.2).
+
+Neither junction-cap choice is universal. On the junction-only test panel, removing both reader and junction caps
+puts every class's length/yield ratio within 2 % of one and improves gene error 33–49 %. On the panel without junction
+baits, it makes isoforms 7–8 % too long and increases gene error 41–366 %. A common class correction also fails;
+within-gene length differences matter. The observation that capping flattens useful RNA readings describes these
+tested layouts, not a rule that every partially or sparsely probed transcript has one capture level.
+
+The remaining data-derived route requires RNA-specific evidence. A feasibility check using true annotated-RNA
+counts tracks junction/exon capture ratios across the three designs but remains 10–20 % low. It uses selected exon
+regions feeding one junction and at least 50 true fragments on each side; it has not been demonstrated using
+observable inputs without that selection. The maximal-reach junction opportunity is a suspected source of the low
+reading. Spliced counts certify RNA but do not alone separate capture from abundance or isoform mixture. No
+per-junction RNA-witness estimator has been accepted; the junction cap landed on 2026-11-13 is one library level read
+from every junction's own footprint (`ISSUES: the-junction-cap-reads-bookings`). Receipts: `$RIGEL_RUNS/prototypes/2026-11-10_length_gap/`, sections 2 and 5–7.
+Instruments: `ruler_vs_truth.py`, `quant_accuracy.py --arm oracle_ruler` (the older unanchored arm is described in
 `ISSUES: instrument-ledger`).
 
 ### the-em-stops-before-it-converges
@@ -359,6 +430,16 @@ The accelerator is rounding-sensitive: a common length factor of 1 + 1e-12 moves
 of fragments between exact paralogs (SIK1 and SIK1B), part of the g00 rows' instability. Converged, the ladder's
 capture-ON rows move only −0.13 to +0.12 points. The repair is explicit regularisation of the poorly determined
 directions with a stable solver run to convergence, decided on the ladder.
+
+The cap is SQUAREM's iterations // 3 = 333. At ladder g05 stranded × ON on the simulator it stops the 34–36 largest
+loci, a quarter of the EM units, and running them to convergence (cap × 100, same δ) adds 0.6–2.5 k fragments of
+transcript error under each of three gDNA priors. The cap also widens differences between priors. Two priors 0.02 % apart
+differ by 2.4 k fragments of transcript error at the cap and 0.9 k converged. At LARGE1 one stopped on a flat ridge, 1.6 k
+fragments of isoform error for 0.3 nats; uncapped, it reaches the other's split. At CLTCL1 the converged split moves
+1.1 k fragments with a 3-pseudocount change of the gDNA prior, and δ six decades tighter moves neither solution. Whether
+those are two basins is unproved: that needs both starts under one prior and the VB objective compared. So a transcript
+difference of about 2 k between two prior mechanisms at g05 is mostly where capped solves stopped
+(`$RIGEL_RUNS/prototypes/2026-11-09_g05_isoforms/`).
 
 ### the-x86-e-step-is-scalar
 `priority: later — with the performance session · stage: EM · kind: build`
@@ -372,24 +453,27 @@ by the CPU it finds. Each must pass `test_fast_exp.py`, state how far it moves t
 (an FMA polynomial does, as NEON's does on AArch64), and be timed in back-to-back pairs.
 
 ### instrument-ledger
-`priority: later — (a) to (c) before the capture-reader session's A/Bs · stage: instruments · kind: instrument`
+`priority: later — (a) and (b) before the capture-reader session's A/Bs · stage: instruments · kind: instrument`
 What the instruments do wrong or leave out, each fix its own commit with its `--self-test` or a gate:
-(a) The efficiencies-at-1 arm that every scan, scoring or capture change is read beside is a harness outside the tree;
-`quant_accuracy.py` (and `--bam`) scores only as shipped.
-(b) The paired proper score the preview was judged by (Brier and its calibration component on identical read IDs) lives
+(a) The paired proper score the preview was judged by (Brier and its calibration component on identical read IDs) lives
 outside the tree; no in-tree instrument reports it.
-(c) `quant_accuracy.py --arm oracle_ruler` is wrong under capture (g98 ss.99 ON 475.87 % of the transcript truth): it
+(b) `quant_accuracy.py --arm oracle_ruler` is wrong under capture (g98 ss.99 ON 475.87 % of the transcript truth): it
 scales the simulator's factor so the fully probed class reads 1, while the shipped efficiencies read 1 at the uncaptured
 bulk. Re-anchor on that convention and prove it on the capture-OFF identity and one capture-ON row.
-(d) `calibration_vs_oracle.py` has no arm carrying the true capture efficiencies and no gDNA-only object row.
-(e) The gdna-field-uniformity gate (`calibration_oracle.py`) z-scores every slot as an independent Poisson draw, but the
+(c) `calibration_vs_oracle.py` has no arm carrying the true capture efficiencies and no gDNA-only object row.
+(d) The gdna-field-uniformity gate (`calibration_oracle.py`) z-scores every slot as an independent Poisson draw, but the
 boundaries of a run of short regions share one draw, so one high draw fails a row; seven capture-OFF test-chromosome
 rows certify composition only. Z-score such a run once, on its total.
-(f) `slot_truth.npz` counts boundary gDNA per crossing, so under capture its sums exceed the library's true gDNA, while
+(e) `slot_truth.npz` counts boundary gDNA per crossing, so under capture its sums exceed the library's true gDNA, while
 `policy_benchmark.py` calls its Σ|Δ| "in fragments".
-(g) No instrument output records the code revision, the `--set` overrides or the prototype arm.
-(h) `build_test_reference.py` puts `src` first on `sys.path` unconditionally; the ladder-report skill hard-codes the four
+(f) No instrument output records the code revision, the `--set` overrides or the prototype arm.
+(g) `build_test_reference.py` puts `src` first on `sys.path` unconditionally; the ladder-report skill hard-codes the four
 ladder rungs; `panel.py --index` does not reach `simulate`.
+(h) A refactor's no-op proof has not included a real library. The code pass (5341ea06) was proven on three ladder
+conditions; on the VCaP mix its transcript table differs from 81fc67b6's on 8 transcripts (30 of 13.2 M fragments,
+exchanged between isoforms of four genes; one zero-count transcript changes locus), with every payload and calibration
+array identical. Which change did it is not established. The references of 2026-11-13 hold the VCaP mix
+(`TESTING.md` §6): check it at every stage.
 
 ### debug-capture-memory-is-unbounded
 `priority: later · stage: instruments · kind: instrument`

@@ -1,0 +1,76 @@
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#  THE LOW-gDNA SIDE PANEL — two rungs between the ladder's 0 % and 5 %, where a library with little gDNA lives
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# A side panel, never a ladder rung: the same reference, index, probes, seeds, abundances, fragment lengths and
+# nascent block as `gdna_ladder.yaml`, with only the gDNA rates changed, and stranded only (unstranded × capture-ON
+# is the deferred stratum, and the ladder's own unstranded rows cover capture-OFF).
+#
+# What it exercises: the ladder steps from no gDNA to 5 %, and a capture reader can fail between them. With a few
+# thousand gDNA fragments in the library the gDNA landscape is fitted from almost nothing, an object's booked gDNA
+# is mostly calibration's uncertainty, and a reader that takes those bookings as a level reads capture that is not
+# there. The ladder's `g00` and `g05` rows are both blind to that.
+#
+#     label   g001        g01
+#     rate    0.001001    0.010101        (f_gdna = rate / (1 + rate))
+#     f_gdna  0.1 %       1 %
+#     n_gdna  10,000      100,000         of 10 M fragments
+#
+# Read each row per stratum beside the ladder's `g00` and `g05` rows, with the `no_capture` arm beside every
+# capture-ON row: a row where `base` is worse than `no_capture` is a row where reading capture cost more than it gave.
+#
+# Run:  python scripts/sim/panel.py status --config scripts/sim/configs/gdna_ladder_lowg.yaml
+
+genome: $RIGEL_RUNS/suite/reference/genome.fa
+gtf: $RIGEL_RUNS/suite/reference/genes.gtf
+index: $RIGEL_RUNS/suite/rigel_index
+outdir: $RIGEL_RUNS/suite/ladder_lowg
+emit_fastq: false
+
+simulation:
+  n_total_fragments: 10000000
+  n_rna_fragments: 10000000
+  sim_seed: 42
+  frag_mean: 206
+  frag_std: 98
+  frag_min: 50
+  frag_max: 500
+  read_length: 100
+  error_rate: 0.002
+  n_workers: 4
+
+abundance:
+  mode: random
+  seed: 42
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+gdna:
+  rates:       [0.001001001, 0.01010101]
+  rate_labels: [g001,        g01]
+  genomic_refs: [chr21, chr22]
+  frag_mean: 206
+  frag_std: 98
+  frag_min: 50
+  frag_max: 500
+
+strand_specificities: [0.99]
+
+nrna:
+  mode: sparse
+  abundance_ranges: [[1.0, 100.0]]
+  on_fraction: 0.50
+  ratio_labels: [mid]
+
+capture:
+  probe_format: transcript
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  min_overlap: 1
+  configs:
+    - {label: "off", enabled: false}
+    - {label: "on", probes: $RIGEL_RUNS/suite/reference/capture_panel.tsv}
+
+oracle_bam: true
+verbose: true

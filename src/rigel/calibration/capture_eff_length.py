@@ -10,8 +10,8 @@ a boundary or a junction. With ``S_p`` its contained share of piece ``p`` and ``
     eff_t = fl_t · (Σ_pieces S_p c_p + Σ_cuts M_k c_k) / (Σ_pieces S_p + Σ_cuts M_k).
 
 A piece prices at its region's efficiency, a contiguous cut at its boundary's, a junction by conservation of bases
-(:func:`_junction_prices`). With no landscape, or every efficiency exactly 1, ``fl_eff_lengths`` comes back
-bit-identically. Efficiencies are yields against the bulk, so a captured transcript's length exceeds ``fl``, and a
+(:func:`_junction_prices`), up to a cap RNA's own spliced fragments set (:func:`fit_junction_cap`). With no landscape,
+or every efficiency exactly 1, ``fl_eff_lengths`` comes back bit-identically. Efficiencies are yields against the bulk, so a captured transcript's length exceeds ``fl``, and a
 factor common to every component cancels in the EM. Pieces are cut at the index's unobservable mask; a template the
 mask does not touch is unchanged to the bit.
 
@@ -27,7 +27,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from ..types import IntervalType
+from ..config import CONSTANTS
+from ..types import IntervalType, Strand
 from .effective_length import conserved_cut_shares, contained_eff_length
 from .region_arrays import overlapping_region_runs, region_right_boundary
 from .signature import RegionType, coarse_type_array
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TranscriptObjects",
+    "fit_junction_cap",
     "observable_fl_eff_lengths",
     "place_efficiencies",
     "place_log_weights",
@@ -287,10 +289,10 @@ def cut_efficiencies(
     c_region: np.ndarray,
     c_boundary: np.ndarray,
     gdna_contained: np.ndarray,
-    saturation: float,
+    junction_cap: float,
 ) -> np.ndarray:
-    """Every cut's efficiency: a contiguous cut's boundary's, a junction's from :func:`_junction_prices`. ``A`` is the
-    piece below the cut and ``B`` the piece above it, in genomic order."""
+    """Every cut's efficiency: a contiguous cut's boundary's, a junction's from :func:`_junction_prices` at
+    ``junction_cap``. ``A`` is the piece below the cut and ``B`` the piece above it, in genomic order."""
     right_of = region_right_boundary(np.asarray(region_arrays.ref_id))
     A = objects.piece[objects.cut_row]
     B = objects.piece[objects.cut_row + 1]
@@ -299,13 +301,13 @@ def cut_efficiencies(
     if j.size:
         out = out.copy()
         out[j] = _junction_prices(
-            A[j], B[j], right_of, c_region, c_boundary, gdna_contained, saturation
+            A[j], B[j], right_of, c_region, c_boundary, gdna_contained, junction_cap
         )
     return out
 
 
 def _junction_prices(
-    A, B, right_of, c_region, c_boundary, gdna_contained, saturation
+    A, B, right_of, c_region, c_boundary, gdna_contained, junction_cap
 ) -> np.ndarray:
     """The junction between exon pieces ``A`` (below it, in genomic order) and ``B`` (above it), by conservation of
     bases::
@@ -318,12 +320,21 @@ def _junction_prices(
     carries half a fragment of intron; where capture adds over bases, that is the two boundaries less the intron
     pieces beside them.
 
-    The price is at least 0 and at most the larger of the landscape's saturated level and the best object the junction
-    touches (its two pieces and two boundaries). A fragment binds its best single probe part, so it is captured no more
-    than one inside a fully captured piece; without the cap, probes tiled to the exons' edges would count the exon's
-    capture about twice. The saturation term lets a probe spanning the junction (one part for spliced RNA, two for
-    gDNA) out-capture every gDNA object beside it; the best-object term lets a junction beside a stronger probe reach
-    that object's level."""
+    The price is at least 0 and at most the larger of ``junction_cap`` and the best object the junction touches (its
+    two pieces and two boundaries). A fragment binds its best single probe part, so it is captured no more than one
+    inside a fully captured piece; without the cap, probes tiled to the exons' edges would count the exon's capture
+    about twice. The cap lets a probe spanning the junction (one part for spliced RNA, two for gDNA) out-capture every
+    gDNA object beside it; the best-object term lets a junction beside a stronger probe reach that object's level.
+    The cap is the library's (:func:`fit_junction_cap`); every other term is the junction's own."""
+    summed, best = _junction_parts(A, B, right_of, c_region, c_boundary, gdna_contained)
+    return np.minimum(summed, np.maximum(junction_cap, best))
+
+
+def _junction_parts(
+    A, B, right_of, c_region, c_boundary, gdna_contained
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(summed, best)``: conservation's price at the junction between pieces ``A`` and ``B``, floored at 0, and the
+    best object the junction touches. :func:`_junction_prices` is ``min(summed, max(cap, best))``."""
     junction_lo, junction_hi = right_of[A], right_of[B - 1]
     intron_lo, intron_hi = A + 1, B - 1
     # an intron piece too short to contain a gDNA fragment reads the boundary on its far side
@@ -335,26 +346,150 @@ def _junction_prices(
         c_region[intron_hi],
         c_boundary[right_of[intron_hi - 1]],
     )
-    bound = np.maximum(
-        saturation,
-        np.maximum.reduce(
-            [c_region[A], c_region[B], c_boundary[junction_lo], c_boundary[junction_hi]]
-        ),
+    summed = np.maximum(
+        c_boundary[junction_lo] + c_boundary[junction_hi] - 0.5 * (c_intron_lo + c_intron_hi), 0.0
     )
-    return np.clip(
-        c_boundary[junction_lo] + c_boundary[junction_hi] - 0.5 * (c_intron_lo + c_intron_hi),
-        0.0,
-        bound,
+    best = np.maximum.reduce(
+        [c_region[A], c_region[B], c_boundary[junction_lo], c_boundary[junction_hi]]
     )
+    return summed, best
+
+
+def fit_junction_cap(
+    calibration: "CalibrationResult",
+    region_arrays: "RegionArrays",
+    index: "TranscriptIndex",
+    tables: "LengthTables",
+) -> float:
+    """The level a junction's price is capped at (:func:`_junction_prices`): the landscape's saturated level, raised as
+    far as RNA's own spliced fragments support.
+
+    The saturated level is gDNA's, and gDNA never deposits on a junction; RNA does. In an exon region RNA and gDNA are
+    the same placements under the same probes, so a transcript's fragments split between a junction and an exon region
+    beside it as the ruler's own terms say: its conserved share at the junction times the junction's price, against its
+    contained share of the region times the region's efficiency. With ``W`` a junction's conserved spliced mass and
+    ``m`` the unspliced RNA calibration booked in the exon regions beside it::
+
+        W | W + m  ~  Binomial( X·p(C) / (X·p(C) + D) ),      p(C) = min(summed, max(C, best))
+
+    ``X`` is the mean, over the annotated transcripts using the junction, of what the ruler multiplies its price by;
+    ``D`` is what the ruler multiplies those regions' efficiencies by, times the efficiencies; ``p(C)`` is the junction
+    rule at cap ``C``. The cap is the ``C`` that maximises the junctions' joint likelihood on a geometric grid from the
+    saturated level to the largest uncapped price, the first maximum taken. The counts can raise the cap and never
+    lower it, so where they ask for no more the rule is the saturated level's, bit for bit.
+
+    A junction's evidence is its own footprint. An exon region beside it enters only when every annotated transcript
+    covering the region uses the junction, so no other junction's and no other isoform's fragments are read; a
+    junction is a row of the sj axis, its two regions and its strand. A junction with no such region, with no fragment
+    in its footprint, or whose price the cap cannot move is not in the fit, and with none in it the cap is the
+    saturated level. So it is with no level above the bulk (a saturated level of exactly 1): the reader read no
+    capture, and there is none for a junction to exceed.
+    """
+    from .splice_graph import build_sj_geometry_arrays
+
+    saturation = float(calibration.gdna_capture_saturation)
+    if saturation == 1.0:
+        return saturation
+    c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
+    c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
+    pieces = transcript_pieces(index, region_arrays)
+    obj = object_shares(pieces, tables.rna)
+    piece_mult, cut_mult = obj.contained, obj.cut_share
+    carry = _carry_shares(pieces, obj, tables)
+    if carry is not None:
+        on_anchor, on_table = carry
+        piece_mult = _carried(piece_mult, on_anchor.contained, on_table.contained)
+        cut_mult = _carried(cut_mult, on_anchor.cut_share, on_table.cut_share)
+
+    # each annotated transcript's junction cuts, on the sj axis
+    geo = build_sj_geometry_arrays(index)
+    src = np.asarray(geo.src_region, dtype=np.int64)
+    dst = np.asarray(geo.dst_region, dtype=np.int64)
+    n_regions, n_sj = int(region_arrays.n_regions), src.shape[0]
+    synthetic = index.t_df["is_synthetic"].to_numpy(dtype=bool)
+    strand = index.t_df["strand"].to_numpy(dtype=np.int64)
+    cut_t = obj.t[obj.cut_row]
+    sj_of_cut = _sj_rows(
+        (src, dst, np.asarray(geo.strand, dtype=np.int64)),
+        (obj.piece[obj.cut_row], obj.piece[obj.cut_row + 1], strand[cut_t]),
+        n_regions,
+    )
+    used = obj.is_junction & ~synthetic[cut_t] & (sj_of_cut >= 0)
+    users = np.bincount(sj_of_cut[used], minlength=n_sj)
+    price_mult = np.bincount(sj_of_cut[used], weights=cut_mult[used], minlength=n_sj) / np.maximum(
+        users, 1
+    )
+
+    # the junction's own footprint: an exon region beside it that only its transcripts cover. The pieces of one
+    # region are one length, so the region has one multiplier.
+    annotated = ~synthetic[obj.t]
+    cover = np.bincount(obj.piece[annotated], minlength=n_regions)
+    region_mult = np.zeros(n_regions)
+    region_mult[obj.piece[annotated]] = piece_mult[annotated]
+    rna = np.maximum(np.asarray(calibration.count_rna_region, dtype=np.float64), 0.0)
+    anchor = np.zeros(n_sj)
+    anchor_mult = np.zeros(n_sj)
+    for side in (src, dst):
+        own = (users > 0) & (cover[side] == users) & (region_mult[side] > 0.0)
+        anchor += np.where(own, rna[side], 0.0)
+        anchor_mult += np.where(own, region_mult[side] * c_region[side], 0.0)
+    spliced = np.asarray(calibration.sj_conserved_mass, dtype=np.float64)
+
+    summed, best = _junction_parts(
+        src,
+        dst,
+        region_right_boundary(np.asarray(region_arrays.ref_id)),
+        c_region,
+        c_boundary,
+        np.asarray(calibration.gdna_region_eff_len, dtype=np.float64),
+    )
+    fit = (
+        (price_mult > 0.0)
+        & (summed > np.maximum(saturation, best))
+        & (anchor_mult > 0.0)
+        & (spliced + anchor > 0.0)
+    )
+    if not fit.any():
+        return saturation
+    W, m, X, D, s, b = (a[fit] for a in (spliced, anchor, price_mult, anchor_mult, summed, best))
+    levels = np.geomspace(
+        saturation, float(s.max()), CONSTANTS.calibration.junction_cap_grid_points
+    )
+    log_likelihood = np.empty(levels.shape[0])
+    for i, level in enumerate(levels):
+        a = X * np.minimum(s, np.maximum(level, b))
+        log_likelihood[i] = (
+            W * (np.log(a) - np.log(a + D)) + m * (np.log(D) - np.log(a + D))
+        ).sum()
+    return float(levels[int(np.argmax(log_likelihood))])
+
+
+def _sj_rows(sj: tuple, cut: tuple, n_regions: int) -> np.ndarray:
+    """The sj row of each cut, ``-1`` where it has none: the row with the cut's two regions and its transcript's
+    strand. ``sj`` and ``cut`` are ``(low region, high region, strand)``."""
+
+    def key(lo, hi, strand):
+        return (lo * (n_regions + 1) + hi) * len(Strand) + strand
+
+    sj_key = key(*sj)
+    if sj_key.shape[0] == 0:
+        return np.full(cut[0].shape[0], -1, dtype=np.int64)
+    order = np.argsort(sj_key, kind="stable")
+    cut_key = key(*cut)
+    at = np.minimum(np.searchsorted(sj_key[order], cut_key), sj_key.shape[0] - 1)
+    return np.where(sj_key[order][at] == cut_key, order[at], -1)
 
 
 def place_efficiencies(
-    calibration: "CalibrationResult", region_arrays: "RegionArrays", index: "TranscriptIndex"
+    calibration: "CalibrationResult",
+    region_arrays: "RegionArrays",
+    index: "TranscriptIndex",
+    junction_cap: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(c_region, c_boundary, c_sj)``: the efficiencies a multimapper's place weight reads
     (:func:`place_log_weights`), on the accumulator's flat object axes: calibration's own at a region and a boundary,
-    and at an annotated junction the price the transcripts' lengths give it (``_junction_prices``), from its two exon
-    regions. A junction reads 1 with no landscape, as every object does."""
+    and at an annotated junction the price the transcripts' lengths give it (``_junction_prices`` at the same
+    ``junction_cap``), from its two exon regions. A junction reads 1 with no landscape, as every object does."""
     from .splice_graph import build_sj_geometry_arrays
 
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
@@ -370,7 +505,7 @@ def place_efficiencies(
         c_region,
         c_boundary,
         np.asarray(calibration.gdna_region_eff_len, dtype=np.float64),
-        calibration.gdna_capture_saturation,
+        junction_cap,
     )
     return c_region, c_boundary, c_sj
 
@@ -422,11 +557,13 @@ def transcript_capture_eff_lengths(
     index: "TranscriptIndex",
     fl_eff_lengths: np.ndarray,
     tables: "LengthTables",
+    junction_cap: float,
 ) -> np.ndarray:
     """``eff_em_t = fl_t · Σ_o share_o(T_R) ĉ_o / Σ_o share_o(T_R)`` over the transcript's pieces and cuts.
 
     The efficiencies ``c_o`` are the result's (a piece's region's, a contiguous cut's boundary's, a junction's from the
-    objects beside it): gDNA's yields, read on gDNA's uncaptured law ``g`` (``tables.anchor``). Each is carried to the
+    objects beside it, capped at ``junction_cap``, :func:`fit_junction_cap`): gDNA's yields, read on gDNA's uncaptured
+    law ``g`` (``tables.anchor``). Each is carried to the
     scorer's gDNA table ``T_G`` (``tables.gdna``) as ``ĉ_o = c_o · share_o(g) / share_o(T_G)``. Where the two tables
     are one law the per-fragment capture weight cancels and this is ``Σ_o c_o share_o(g)``, the null model exactly;
     where ``T_G`` is ``g`` the efficiencies are used as read. An object ``T_G`` cannot reach keeps ``c_o``. With no
@@ -448,13 +585,11 @@ def transcript_capture_eff_lengths(
         c_region,
         c_boundary,
         gdna_contained,
-        calibration.gdna_capture_saturation,
+        junction_cap,
     )
-    if not np.array_equal(tables.gdna, tables.anchor):
-        on_anchor = object_shares(pieces, tables.anchor)
-        on_table = (
-            obj if np.array_equal(tables.gdna, tables.rna) else object_shares(pieces, tables.gdna)
-        )
+    carry = _carry_shares(pieces, obj, tables)
+    if carry is not None:
+        on_anchor, on_table = carry
         c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)
         c_cut = _carried(c_cut, on_anchor.cut_share, on_table.cut_share)
     num = np.zeros(fl.shape[0])
@@ -466,6 +601,20 @@ def transcript_capture_eff_lengths(
     np.add.at(den, cut_t, obj.cut_share)
     factor = np.divide(num, den, out=np.ones_like(num), where=den > 0.0)
     return fl * factor
+
+
+def _carry_shares(
+    pieces: TranscriptPieces, obj: TranscriptObjects, tables: "LengthTables"
+) -> tuple[TranscriptObjects, TranscriptObjects] | None:
+    """``(on_anchor, on_table)``: the objects' shares on gDNA's uncaptured law and on the scorer's gDNA table, by
+    which an efficiency is carried to that table (:func:`_carried`); ``None`` where the table is the uncaptured law
+    and nothing is carried. ``obj`` is the shares on RNA's table."""
+    if np.array_equal(tables.gdna, tables.anchor):
+        return None
+    on_table = (
+        obj if np.array_equal(tables.gdna, tables.rna) else object_shares(pieces, tables.gdna)
+    )
+    return object_shares(pieces, tables.anchor), on_table
 
 
 def _carried(c: np.ndarray, share_anchor: np.ndarray, share_table: np.ndarray) -> np.ndarray:

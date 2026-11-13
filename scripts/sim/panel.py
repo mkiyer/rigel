@@ -446,7 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--arms",
         nargs="+",
         default=["base"],
-        help="quant_accuracy arms: base, noop, oracle, oracle_ruler, oracle_alloc_seed, …",
+        help="quant_accuracy arms: base, no_capture, noop, oracle, oracle_ruler, oracle_alloc_seed, …",
     )
     ap.add_argument("--force", action="store_true", help="rebuild a stage that already exists")
     ap.add_argument("--aligner", default=None, help="align: a STAR or rustar binary")

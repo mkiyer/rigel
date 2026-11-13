@@ -153,5 +153,5 @@ def test_an_rna_length_model_with_no_observations_is_refused_not_defaulted(mini_
 
     with pytest.raises(ValueError, match="no RNA fragment-length observation"):
         setup_geometry_and_estimator(
-            mini_index, FragmentLengthModel(), EMConfig(n_threads=1), None, None, None
+            mini_index, FragmentLengthModel(), EMConfig(n_threads=1), None, None, None, 1.0
         )

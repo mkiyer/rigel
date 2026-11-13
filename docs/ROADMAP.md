@@ -6,8 +6,18 @@ is git.
 
 ## State
 
-`src/`'s numbers are 81fc67b6's: the code pass after it is a proven numeric no-op (`rename_identity.py`, bit-identical
-on the three frozen references). The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
+`src/`'s numbers are 81fc67b6's with the junction cap landed on 2026-11-13 (`DESIGN.md` §9.2), and that tree is the
+baseline every change is now read against. (On the ladder; on the VCaP mix the tree before the cap already sat 30
+fragments of 13.2 M from 81fc67b6, `ISSUES: instrument-ledger`, and the cap moves nothing there.) On the screen (`SUCCESS.md`; 56 rows, pinned and fractional) it is identical
+to its predecessor on 40 rows, better on 7, within 1 % on 6 and worse on none, and three rows trade one axis for the
+other (`ISSUES: the-junction-cap-reads-bookings`). Only stranded capture-ON rows with gDNA to anchor a junction move.
+On the simulator's alignments, transcript / gene error is −2.5 % / −6.6 % at g98, +3.7 % / −20.0 % at g50 and +1.6 % /
+−6.9 % at g05, and the annotated pool's excess falls 10 %, 28 % and 15 %; on the test chromosome's junction-probe
+design it is −19 % / −36 %, −9 % / −46 % and −5 % / −41 %. The STAR rung moves by at most 1.2 %. The identity references
+are re-frozen on this tree (`TESTING.md` §6). The cap is an accuracy gain under capture, not the capture reader's
+repair: the hole between 0 and 1 % gDNA stands (`ISSUES: the-reader-reads-false-gdna-as-capture`).
+
+The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
 alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
 identical reads, and transcript error 0.10–0.47 of 0.7.1's. It also states eight failures, each an open entry:
 - unstranded sparse capture, where most true gDNA is called RNA in every build, and the deferred stratum (unstranded ×
@@ -34,7 +44,7 @@ issues. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_prev
 | HEAD's source probabilities beat 0.7.1's by the proper score on identical reads, and most of the exchange is compatible with approximately calibrated source uncertainty at the resolution tested | the validation's `paired.py`, outside the tree (`ISSUES: instrument-ledger`) |
 | Scarce gDNA at 1/10 and 1/100 depth shows no blow-up, and dense probe panels hold | `quant_accuracy.py` on the test chromosome's depth and probe panels |
 | Calibration's library gDNA is near truth on the in-scope strata; its per-locus count errs both ways, mostly its own error rather than the pooled share | `calibration_vs_oracle.py`, `prior_vs_oracle.py` |
-| Under capture the capture reader carries most of the accuracy, and at STAR g00 most of the error | `quant_accuracy.py --bam` beside an efficiencies-at-1 arm (outside the tree), `ruler_vs_truth.py` |
+| Under capture the capture reader carries most of the accuracy, and at STAR g00 most of the error | `quant_accuracy.py --bam` beside `--arm no_capture`, `ruler_vs_truth.py` |
 | The transfer policy wins on unstranded × capture ON and the contaminated stranded rows, and loses to silent on unstranded × capture OFF | `policy_benchmark.py --panel ladder` |
 | A refactor or speed-up is a numeric no-op | `rename_identity.py --check` against the frozen reference |
 | Every instrument runs and regenerates | `preflight.py --full` |
@@ -44,8 +54,8 @@ issues. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_prev
 1. **The capture-reader session, developed with the owner.** It starts from
    `ISSUES: the-reader-reads-false-gdna-as-capture`, with `ISSUES: capture-outside-the-annotation-partition`,
    `ISSUES: unstranded-capture-calls-gdna-rna`, `ISSUES: vcap-exome-dna-called-rna` and
-   `ISSUES: an-anchor-only-landscape-reads-as-capture` read beside it. Its A/Bs need the efficiencies-at-1 arm and the
-   paired proper score in the tree (`ISSUES: instrument-ledger`). The trade-off between strata is the owner's to set.
+   `ISSUES: an-anchor-only-landscape-reads-as-capture` read beside it. Its A/Bs need the paired proper score in the
+   tree (`ISSUES: instrument-ledger`). The trade-off between strata is the owner's to set.
 2. **A review of the open issues**, each entry read for a problem a pre-release cannot carry.
 3. **The pre-release**, with its supported uses and its stated failures: `ISSUES: unstranded-capture-calls-gdna-rna`,
    `ISSUES: capture-outside-the-annotation-partition`, `ISSUES: the-reader-reads-false-gdna-as-capture`,
