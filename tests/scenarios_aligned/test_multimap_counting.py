@@ -13,7 +13,8 @@ from functools import partial
 
 import pytest
 
-from rigel.config import EMConfig
+from rigel.config import BamScanConfig, EMConfig, PipelineConfig
+from rigel.pipeline import run_pipeline
 from rigel.sim import Scenario
 
 import _scenarios
@@ -941,6 +942,39 @@ class TestMixedMultimapperKitchenSink:
             )
             assert_alignment(bench)
             assert_accountability(bench)
+        finally:
+            sc.cleanup()
+
+    def test_a_locus_holding_expressed_rna_is_not_handed_a_gdna_share_of_one(self, tmp_path):
+        """The prior's gDNA share is calibration's gDNA count of a locus over calibration's count of every fragment
+        it deposited there, the multimappers on both sides. Here nearly every fragment of the spliced gene and of the
+        two paralogs multimaps, and gDNA multimaps with them: read over the locus's unique fragments alone, the count
+        exceeds what it is divided by, the share clips at one, and loci whose genes are expressed get an RNA
+        pseudocount of exactly zero under a prior as strong as their data."""
+        sc = self._make_scenario(tmp_path, "_share")
+        try:
+            result = sc.build(
+                n_fragments=3000,
+                sim_config=_scenarios.sim_config(strand_specificity=1.0),
+                gdna_config=_scenarios.gdna_config(20),
+                nrna_abundance=0,
+            )
+            config = PipelineConfig(
+                em=EMConfig(seed=PIPELINE_SEED),
+                scan=BamScanConfig(sj_strand_tag="ts", include_multimap=True),
+            )
+            pr = run_pipeline(result.bam_path, result.index, config=config)
+            t_ids = result.index.t_df["t_id"].tolist()
+            locus_of = pr.estimator.locus_id_per_transcript
+            by_locus = {int(r["locus_id"]): r for r in pr.estimator.locus_results}
+            for t_id in ("t_spliced", "t_single_a", "t_single_b", "t_helper"):
+                row = by_locus[int(locus_of[t_ids.index(t_id)])]
+                strength = row["count_gdna_prior"] + row["count_rna_prior"]
+                assert strength > 0.0, f"the locus of {t_id} has no prior"
+                assert row["count_rna_prior"] > 0.0, (
+                    f"the locus of {t_id}, an expressed gene, has an RNA pseudocount of 0 "
+                    f"beside a gDNA pseudocount of {row['count_gdna_prior']:.1f}"
+                )
         finally:
             sc.cleanup()
 

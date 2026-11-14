@@ -406,13 +406,25 @@ and the residual after `log c` normalises away is bounded by `1/(2α_min)`, vani
 deterministic fragments (one candidate, an annotated junction) skip the E-step but enter every M-step, so θ_g is
 gDNA's share of all `N` fragments — as it must be, since a transcript's length counts its spliced starts. The grouped
 update is exact EM for `log L(θ) + P_g log θ_g + P_R log(1 − θ_g)`, which leaves the EM's fixed point in place iff
-`P_g : P_R = G : (N − G)`. With `G_c` calibration's gDNA count of the locus (§11), `U` the units with a gDNA candidate,
-and `N_c` the units neither multimapper nor splice artifact, plus the deterministic fragments:
+`P_g : P_R = G : (N − G)`. With `G_c` calibration's gDNA count of the locus (§11), `T_c` its count of every fragment
+it deposited on the same objects, and `U` the units with a gDNA candidate:
 
-    P_g = U · min(G_c/N_c, 1),     P_R = U − P_g,     no prior where N_c = 0
+    P_g = U · G_c/T_c,     P_R = U − P_g,     no prior where T_c = 0
 
-neutral iff `G_c/N_c = G/N`; calibration's RNA count never enters. `G_c` counts multimappers at their second-pass draw
-and `N_c` does not (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`). The strength `U` is not derived.
+neutral iff `G_c/T_c = G/N`. Both counts are one tally over one projection (`priors.assemble_priors`). With `s` the
+locus's share of an object (a region by overlap; a boundary, or an sj, by the stronger of the two regions it joins),
+`g, r` a region's contained gDNA and RNA, `g_e, u_e, c_e` a boundary's unspliced gDNA, unspliced RNA and spliced
+crossings, `q_e, q'_e` its two banks' mass per crossing (§3b) and `m_j` an sj's conserved mass:
+
+    G_c = Σ_r s_r g_r + Σ_e s_e g_e q_e
+    T_c = Σ_r s_r (g_r + r_r) + Σ_e s_e [(g_e + u_e) q_e + c_e q'_e] + Σ_j s_j m_j
+
+`T_c` holds every deposited fragment once (§1), spliced ones included, as θ_g's `N` does. Every term of `G_c` is a
+part of a term of `T_c`, summed in the same order, so `G_c ≤ T_c` holds in floating point too and a count above it is
+an accounting error, refused, never clipped. A multimapper is deposited once, at its second-pass draw (§10), and so is
+in both. Read against the locus's unique fragments instead, the share holds the drawn multimappers in its numerator
+alone: it is `T_c / N_unique` times too high, above one wherever gDNA fills a locus that multimappers join, and the
+clip then hands RNA a pseudocount of exactly zero. The strength `U` is not derived.
 
 ---
 

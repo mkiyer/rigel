@@ -691,6 +691,7 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
         count_gdna_region=z, count_rna_region=z, count_gdna_boundary=ez, count_rna_boundary=ez,
         count_rna_spliced_boundary=ez, boundary_mass_per_crossing=np.ones(ne), count_rna_sj=np.zeros(0),
         boundary_spliced_mass_per_crossing=np.ones(ne), sj_mass_per_crossing=np.zeros(0),
+        sj_src_region=np.zeros(0, dtype=np.int64), sj_dst_region=np.zeros(0, dtype=np.int64),
         gdna_region_eff_len=contained_eff_length(length, gdna_fl_pmf), gdna_boundary_eff_len=ez,
         gdna_boundary_conserved_len=observable_cut_shares(region_arrays, gdna_fl_pmf),
         gdna_frac_region=z, rna_pos_frac_region=z,

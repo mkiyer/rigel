@@ -39,6 +39,9 @@ def _valid_kwargs() -> dict:
         count_rna_sj=np.array([4.0, 6.0]),
         boundary_spliced_mass_per_crossing=boundary.copy(),
         sj_mass_per_crossing=np.array([0.5, 0.25]),
+        # The two regions each sj joins, as ids on the region axis; different on the two sj, so a swap shows.
+        sj_src_region=np.array([0, 1], dtype=np.int64),
+        sj_dst_region=np.array([2, 3], dtype=np.int64),
         gdna_region_eff_len=region.copy(),
         gdna_boundary_eff_len=boundary.copy(),
         gdna_boundary_conserved_len=boundary.copy(),
@@ -82,6 +85,8 @@ def test_a_library_with_no_sj_constructs():
     kw = _valid_kwargs()
     kw["count_rna_sj"] = np.zeros(0)
     kw["sj_mass_per_crossing"] = np.zeros(0)
+    kw["sj_src_region"] = np.zeros(0, dtype=np.int64)
+    kw["sj_dst_region"] = np.zeros(0, dtype=np.int64)
     kw["n_sj"] = 0
     assert CalibrationResult(**kw).count_rna_sj.shape == (0,)
 
@@ -373,3 +378,77 @@ def test_the_saturation_is_finite_and_at_least_the_bulk():
         kw["gdna_capture_saturation"] = bad
         with pytest.raises(ValueError, match="gdna_capture_saturation"):
             CalibrationResult(**kw)
+
+
+# ---------------------------------------------------------------------------
+# The sj axis names the regions each sj joins.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["sj_src_region", "sj_dst_region"])
+def test_the_sj_regions_are_pinned_to_the_sj_axis(field):
+    kw = _valid_kwargs()
+    kw[field] = np.zeros(N_REGIONS, dtype=np.int64)
+    with pytest.raises(ValueError, match=f"{field}.*expected \\({N_SJ},\\)"):
+        CalibrationResult(**kw)
+
+
+@pytest.mark.parametrize("field", ["sj_src_region", "sj_dst_region"])
+def test_the_sj_regions_are_integer_region_ids(field):
+    """A float array of the right length would index nothing and pass every shape check."""
+    kw = _valid_kwargs()
+    kw[field] = kw[field].astype(np.float64)
+    with pytest.raises(ValueError, match=f"{field}.*integer"):
+        CalibrationResult(**kw)
+
+
+@pytest.mark.parametrize("field", ["sj_src_region", "sj_dst_region"])
+def test_an_sj_region_off_the_region_axis_is_refused(field):
+    kw = _valid_kwargs()
+    past = kw[field].copy()
+    past[1] = N_REGIONS
+    kw[field] = past
+    with pytest.raises(ValueError, match=f"{field} names region {N_REGIONS} at sj 1"):
+        CalibrationResult(**kw)
+    below = _valid_kwargs()
+    below[field] = np.array([-1, 0], dtype=np.int64)
+    with pytest.raises(ValueError, match="non-negative"):
+        CalibrationResult(**below)
+
+
+# ---------------------------------------------------------------------------
+# Every deposited fragment, per object, once.
+# ---------------------------------------------------------------------------
+
+
+def _every_bank_occupied() -> dict:
+    """Unspliced gDNA and RNA and spliced crossings at every boundary, with the two conversions different."""
+    kw = _valid_kwargs()
+    kw["count_gdna_region"] = np.array([10.0, 0.0, 20.0, 3.0])
+    kw["count_rna_region"] = np.array([5.0, 1.0, 5.0, 0.0])
+    kw["count_gdna_boundary"] = np.array([4.0, 6.0, 0.0])
+    kw["count_rna_boundary"] = np.array([9.0, 3.0, 2.0])  # spliced-inclusive
+    kw["count_rna_spliced_boundary"] = np.array([5.0, 1.0, 2.0])
+    kw["boundary_mass_per_crossing"] = np.array([0.5, 0.8, 1.0])
+    kw["boundary_spliced_mass_per_crossing"] = np.array([0.25, 0.4, 0.125])
+    return kw
+
+
+def test_the_three_conserved_masses_hold_every_library_fragment_once():
+    res = CalibrationResult(**_every_bank_occupied())
+    total = (
+        res.region_conserved_mass.sum()
+        + res.boundary_conserved_mass.sum()
+        + res.sj_conserved_mass.sum()
+    )
+    np.testing.assert_allclose(
+        total, res.library_gdna_fragments + res.library_rna_fragments, rtol=1e-12
+    )
+
+
+def test_a_boundary_converts_each_bank_at_its_own_mass_per_crossing():
+    """Unspliced crossings (gDNA 4, RNA 9 − 5) at 0.5 and the 5 spliced ones at 0.25: 5.25, not the 6.5 one pooled
+    conversion would give, nor the 4 the unspliced bank alone holds."""
+    res = CalibrationResult(**_every_bank_occupied())
+    np.testing.assert_allclose(res.boundary_conserved_mass, [5.25, 6.8, 0.25])
+    np.testing.assert_allclose(res.region_conserved_mass, [15.0, 1.0, 25.0, 3.0])

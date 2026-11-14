@@ -8,7 +8,7 @@
   component.
 
 The EM's two pseudocounts are formed per locus by ``rigel.pipeline.em_pseudocounts``, from
-calibration's per-locus gDNA count (``rigel.calibration.priors``).
+calibration's two per-locus counts, its gDNA fragments and every fragment (``rigel.calibration.priors``).
 """
 
 from __future__ import annotations

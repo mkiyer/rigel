@@ -99,6 +99,8 @@ def _result(
         count_rna_sj=np.zeros(0, dtype=np.float64),
         boundary_spliced_mass_per_crossing=np.ones_like(ez),
         sj_mass_per_crossing=np.ones(0, dtype=np.float64),
+        sj_src_region=np.zeros(0, dtype=np.int64),
+        sj_dst_region=np.zeros(0, dtype=np.int64),
         gdna_region_eff_len=region_eff_arr,
         gdna_boundary_eff_len=boundary_eff_arr,
         gdna_boundary_conserved_len=(
@@ -438,7 +440,7 @@ def test_the_rna_mass_spliced_or_not_never_enters_the_gdna_count():
 
 def test_the_sj_flux_does_not_enter_the_gdna_count():
     """A sj fragment is certified RNA with no gDNA candidate in the EM, so it has no place in calibration's count of the
-    locus's gDNA fragments. The result carries the flux for QC; ``assemble_priors`` ignores it on purpose.
+    locus's gDNA fragments. Its conserved mass is in the count of every fragment, which the gDNA count is a share of.
     """
     base = _result(
         region_g=[1.0, 1.0], region_r=[2.0, 2.0], region_eff=[100.0, 100.0], boundary_eff=[50.0]
@@ -449,6 +451,8 @@ def test_the_sj_flux_does_not_enter_the_gdna_count():
         base,
         count_rna_sj=np.array([10_000.0]),
         sj_mass_per_crossing=np.ones(1),
+        sj_src_region=np.array([0], dtype=np.int64),
+        sj_dst_region=np.array([1], dtype=np.int64),
         n_sj=1,
     )
     ra = _regions([0, 100], [100, 200])
@@ -456,6 +460,149 @@ def test_the_sj_flux_does_not_enter_the_gdna_count():
     quiet_priors = assemble_priors(base, ra, ml)
     loud_priors = assemble_priors(loud, ra, ml)
     np.testing.assert_array_equal(quiet_priors.gdna_count, loud_priors.gdna_count)
+    np.testing.assert_allclose(loud_priors.fragment_count - quiet_priors.fragment_count, [10_000.0])
+
+
+# --- the fragment count: what the gDNA count is a share of ---------------------------------------
+
+
+def _three_axis_result() -> CalibrationResult:
+    """Three regions, two boundaries and one sj joining regions 0 and 2, with every bank occupied and the two
+    conversions different, so no term can stand in for another:
+
+    regions      gDNA [10, 0, 20], RNA [5, 1, 5]                                   -> 41
+    boundaries   unspliced gDNA [4, 6] and RNA [4, 2] at q = [0.5, 0.8]            -> 4 + 6.4
+                 spliced [5, 1] at their own q = [0.25, 0.4]                       -> 1.25 + 0.4
+    sj           7 incidences at 0.5 a crossing                                    -> 3.5
+
+    Every fragment: 56.55. gDNA: 30 + 4·0.5 + 6·0.8 = 36.8.
+    """
+    import dataclasses
+
+    base = _result(
+        region_g=[10.0, 0.0, 20.0],
+        region_r=[5.0, 1.0, 5.0],
+        region_eff=[100.0, 100.0, 100.0],
+        boundary_g=[4.0, 6.0],
+        boundary_r=[9.0, 3.0],  # spliced-inclusive
+        boundary_spliced=[5.0, 1.0],
+        boundary_eff=[50.0, 50.0],
+        mass_per_crossing=[0.5, 0.8],
+    )
+    return dataclasses.replace(
+        base,
+        boundary_spliced_mass_per_crossing=np.array([0.25, 0.4]),
+        count_rna_sj=np.array([7.0]),
+        sj_mass_per_crossing=np.array([0.5]),
+        sj_src_region=np.array([0], dtype=np.int64),
+        sj_dst_region=np.array([2], dtype=np.int64),
+        n_sj=1,
+    )
+
+
+def test_the_fragment_count_holds_every_fragment_on_the_locus_once():
+    """One locus over every object: its fragment count is the library's, gDNA and RNA, contained, crossing unspliced,
+    crossing spliced and jumping, each at its own conversion. The gDNA count is the gDNA part of the same sum."""
+    cal = _three_axis_result()
+    ra = _regions([0, 100, 200], [100, 200, 300])
+    priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
+    np.testing.assert_allclose(priors.fragment_count, [56.55], rtol=1e-12)
+    np.testing.assert_allclose(priors.gdna_count, [36.8], rtol=1e-12)
+    np.testing.assert_allclose(
+        priors.fragment_count, [cal.library_gdna_fragments + cal.library_rna_fragments], rtol=1e-12
+    )
+
+
+def test_the_fragment_count_takes_the_gdna_counts_own_shares():
+    """Region 1 is split between two loci. Each locus's two counts take the same share of it and of the boundaries
+    that touch it, so the pair of fragment counts adds every region's mass once and each locus's gDNA count stays a
+    part of its own fragment count."""
+    cal = _result(
+        region_g=[10.0, 8.0, 20.0],
+        region_r=[5.0, 4.0, 5.0],
+        region_eff=[100.0, 100.0, 100.0],
+        boundary_eff=[50.0, 50.0],
+    )
+    ra = _regions([0, 100, 200], [100, 200, 300])
+    priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 150)]), _ml(1, [(0, 150, 300)])])
+    np.testing.assert_allclose(priors.gdna_count, [10.0 + 4.0, 4.0 + 20.0])
+    np.testing.assert_allclose(priors.fragment_count, [15.0 + 6.0, 6.0 + 25.0])
+    np.testing.assert_allclose(priors.fragment_count.sum(), cal.region_conserved_mass.sum())
+
+
+def test_an_sj_belongs_to_the_locus_of_the_exon_regions_it_joins():
+    """Two loci on one reference with an intergenic region between them, and one sj inside the second. Its conserved
+    mass goes to that locus alone; an sj whose regions are in no locus goes nowhere."""
+    import dataclasses
+
+    base = _result(
+        region_g=np.zeros(5),
+        region_r=np.ones(5),
+        region_eff=np.full(5, 100.0),
+        boundary_eff=np.full(4, 50.0),
+    )
+    ra = _regions([0, 100, 200, 300, 400], [100, 200, 300, 400, 500])
+    loci = [_ml(0, [(0, 0, 100)]), _ml(1, [(0, 200, 500)])]
+    quiet = assemble_priors(base, ra, loci).fragment_count
+    inside = dataclasses.replace(
+        base,
+        count_rna_sj=np.array([12.0]),
+        sj_mass_per_crossing=np.array([0.5]),
+        sj_src_region=np.array([2], dtype=np.int64),
+        sj_dst_region=np.array([4], dtype=np.int64),
+        n_sj=1,
+    )
+    np.testing.assert_allclose(assemble_priors(inside, ra, loci).fragment_count - quiet, [0.0, 6.0])
+    outside = dataclasses.replace(
+        inside,
+        sj_src_region=np.array([1], dtype=np.int64),
+        sj_dst_region=np.array([1], dtype=np.int64),
+    )
+    np.testing.assert_allclose(
+        assemble_priors(outside, ra, loci).fragment_count - quiet, [0.0, 0.0]
+    )
+
+
+def test_the_gdna_count_never_exceeds_the_fragment_count_in_floating_point():
+    """Every term of the gDNA count is a part of a term of the fragment count, summed in the same order, so the
+    inequality is exact, with no tolerance, on any masses and any loci; and a locus that is all gDNA has the two
+    equal to the bit, a share of exactly one."""
+    import dataclasses
+
+    rng = np.random.default_rng(20261114)
+    for trial in range(200):
+        n = int(rng.integers(3, 12))
+        bounds = np.concatenate([[0], np.cumsum(rng.integers(20, 400, n))])
+        ra = _regions(bounds[:-1], bounds[1:])
+        pure_gdna = trial % 4 == 0
+        spliced = np.zeros(n - 1) if pure_gdna else rng.uniform(0.0, 50.0, n - 1)
+        base = _result(
+            region_g=rng.uniform(0.0, 1e4, n),
+            region_r=np.zeros(n) if pure_gdna else rng.uniform(0.0, 1e3, n),
+            region_eff=np.full(n, 100.0),
+            boundary_g=rng.uniform(0.0, 1e3, n - 1),
+            boundary_r=spliced + (0.0 if pure_gdna else rng.uniform(0.0, 300.0, n - 1)),
+            boundary_spliced=spliced,
+            boundary_eff=np.full(n - 1, 50.0),
+            mass_per_crossing=rng.uniform(0.05, 1.0, n - 1),
+        )
+        j = 0 if pure_gdna else int(rng.integers(0, 6))
+        src = np.sort(rng.integers(0, n - 1, j))
+        cal = dataclasses.replace(
+            base,
+            boundary_spliced_mass_per_crossing=rng.uniform(0.05, 1.0, n - 1),
+            count_rna_sj=rng.uniform(0.0, 500.0, j),
+            sj_mass_per_crossing=rng.uniform(0.05, 1.0, j),
+            sj_src_region=src.astype(np.int64),
+            sj_dst_region=np.minimum(src + 1 + rng.integers(0, 3, j), n - 1).astype(np.int64),
+            n_sj=j,
+        )
+        cut = int(bounds[int(rng.integers(1, n))])
+        loci = [_ml(0, [(0, 0, cut)]), _ml(1, [(0, cut, int(bounds[-1]))])]
+        priors = assemble_priors(cal, ra, loci)
+        assert np.all(priors.gdna_count <= priors.fragment_count), (trial, priors)
+        if pure_gdna:
+            np.testing.assert_array_equal(priors.gdna_count, priors.fragment_count)
 
 
 def test_region_split_between_two_loci():

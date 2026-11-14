@@ -5,7 +5,7 @@
 simulator's per-transcript truth. Every other arm runs the same pipeline with one thing substituted, and its
 difference from ``base`` is what that one thing is worth:
 
-- ``oracle``: the ``LocusPriors`` gDNA fields built from the origin-split truth (needs the oracle cache);
+- ``oracle``: the ``LocusPriors`` built from the origin-split truth (needs the oracle cache);
 - ``oracle_ruler``: the simulator's capture-aware effective length in place of the shipped ruler's, the only arm
   that reaches the lengths the EM divides by;
 - ``oracle_alloc_seed``: the true per-transcript allocation weights, a capability proof, not a headroom claim;
@@ -105,12 +105,13 @@ ARMS = ("base", "noop", "oracle", "oracle_alloc_seed", "no_capture") + tuple(_RU
 _TRUTH_FREE_ARMS = ("base", "no_capture")
 
 #: arm -> which ``LocusPriors`` fields come from the oracle O. ``noop`` takes none and still builds O, so it tests
-#: the wrapper rather than an ``if``. There is no RNA arm: calibration's RNA count does not reach the EM
-#: (``pipeline.em_pseudocounts`` reads the gDNA count against the EM's own locus count), so it could not fire.
+#: the wrapper rather than an ``if``. There is no RNA arm: calibration's RNA masses reach the EM only inside
+#: ``fragment_count``, each object's whole tally, which the oracle's split of it leaves where it was, so it could not
+#: fire. ``oracle`` takes O whole, its fragment count with its gDNA count, so the share is one result's.
 _ARM_FIELDS = {
     "base": (),
     "noop": (),
-    "oracle": ("gdna_count", "gdna_eff_len"),
+    "oracle": ("gdna_count", "fragment_count", "gdna_eff_len"),
 }
 
 

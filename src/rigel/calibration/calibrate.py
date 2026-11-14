@@ -301,7 +301,7 @@ def _solve(s: _SweepInputs, diagnostics: SweepDiagnostics | None):
 
 
 def _result(
-    s: _SweepInputs, substrate, belief, landscape, gdna_fl_pmf: np.ndarray
+    s: _SweepInputs, substrate, sj, belief, landscape, gdna_fl_pmf: np.ndarray
 ) -> CalibrationResult:
     """Project the solved chain onto the two payload axes and publish the :class:`CalibrationResult`.
 
@@ -313,7 +313,8 @@ def _result(
     ``count_rna_spliced_boundary`` is the certified-RNA crossings per boundary (molecules that crossed contiguously
     having spliced elsewhere); `chain_boundary_deconv` adds all of it to ``rna_mass``. A region has no such count:
     its contained population cannot hold a spliced molecule. ``count_rna_sj`` is the jumping population, pure RNA,
-    exported verbatim. Each ``mass_per_crossing`` converts only its own population's incidences to fragments."""
+    exported verbatim, beside the two regions each sj joins (``sj``'s own, so a consumer can place the sj mass). Each
+    ``mass_per_crossing`` converts only its own population's incidences to fragments."""
     n_regions, n_boundaries = int(substrate.n_regions), int(substrate.n_boundaries)
     regions = chain_region_deconv(s.chain, belief, substrate)
     boundaries = chain_boundary_deconv(s.chain, belief, substrate)
@@ -331,6 +332,8 @@ def _result(
         count_rna_sj=np.asarray(substrate.sj.count, dtype=np.float64).sum(axis=1),
         boundary_spliced_mass_per_crossing=substrate.boundary_spliced.mass_per_crossing,
         sj_mass_per_crossing=substrate.sj.mass_per_crossing,
+        sj_src_region=np.asarray(sj.src_region, dtype=np.int64),
+        sj_dst_region=np.asarray(sj.dst_region, dtype=np.int64),
         gdna_region_eff_len=region_eff,
         gdna_boundary_eff_len=boundary_eff,
         gdna_boundary_conserved_len=observable_cut_shares(s.region_arrays, gdna_fl_pmf),
@@ -487,7 +490,7 @@ def calibrate(
         config,
     )
     belief, landscape = _solve(inputs, None if diagnostics is None else diagnostics.sweep)
-    result = _result(inputs, substrate, belief, landscape, gdna_fl_pmf)
+    result = _result(inputs, substrate, sj, belief, landscape, gdna_fl_pmf)
     if diagnostics is not None:
         diagnostics.chain = inputs.chain
         diagnostics.geometry = inputs.geometry

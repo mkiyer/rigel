@@ -1,10 +1,11 @@
 """``assemble_priors``: from a finished ``CalibrationResult`` to the per-locus EM prior inputs (layer 7, assemble).
 
-Calibration gives the locus EM two numbers per locus: ``gdna_count``, its count of the locus's gDNA fragments, and the
-gDNA component's effective length, gDNA's conserved shares of the locus's objects at their capture efficiencies
-(``Σ S_r c_r + Σ M_e c_e``). The EM forms its two pseudocounts from ``gdna_count`` and its own count of the locus's
-fragments (``pipeline.em_pseudocounts``), so calibration's RNA count does not enter and the two stages never have to
-agree on which fragments are spliced. Nothing here re-solves calibration or attributes RNA to transcripts.
+Calibration gives the locus EM three numbers per locus: ``gdna_count``, its count of the locus's gDNA fragments;
+``fragment_count``, its count of every fragment it deposited on the same objects; and the gDNA component's effective
+length, gDNA's conserved shares of the locus's objects at their capture efficiencies (``Σ S_r c_r + Σ M_e c_e``). The
+EM's two pseudocounts carry the share ``gdna_count / fragment_count`` (``pipeline.em_pseudocounts``): both sides are
+calibration's own tally over one projection, so a fragment is in the numerator only if it is in the denominator.
+Nothing here re-solves calibration or attributes RNA to transcripts.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ class LocusPriors:
     """Per-locus EM prior inputs (float64[n_loci], indexed by ``multi_locus_id``)."""
 
     gdna_count: np.ndarray  # calibration's count of the locus's gDNA fragments
+    #: calibration's count of every fragment it deposited on the same objects, gDNA and RNA, spliced or not: what
+    #: ``gdna_count`` is a share of
+    fragment_count: np.ndarray
     gdna_eff_len: np.ndarray  # capture-contracted effective length of the gDNA component
 
 
@@ -142,13 +146,27 @@ def boundary_locus_shares(
 
     ``region_shares`` is :func:`region_locus_shares`'s triples, so the overlap is computed once.
     """
-    r_idx, l_idx, w = region_shares
     lo, hi = boundary_region_indices(np.asarray(region_arrays.ref_id))
+    return _edge_locus_shares(lo, hi, region_shares, int(region_arrays.n_regions), n_loci)
+
+
+def _edge_locus_shares(
+    lo: np.ndarray,
+    hi: np.ndarray,
+    region_shares: tuple[np.ndarray, np.ndarray, np.ndarray],
+    n_regions: int,
+    n_loci: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(edge_idx, locus_idx, share)`` for edges that each join two regions, ``lo[e]`` and ``hi[e]``: the stronger of
+    the two regions' shares. One rule for both kinds of edge: a contiguous boundary joins two adjacent regions
+    (:func:`boundary_locus_shares`), an sj the two exon regions either side of its intron."""
+    r_idx, l_idx, w = region_shares
+    lo = np.asarray(lo, dtype=np.int64)
+    hi = np.asarray(hi, dtype=np.int64)
     if r_idx.size == 0 or lo.size == 0:
         return (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.float64))
 
-    # per-region CSR over the (locus, share) pairs, so each boundary can gather both of its flanks' pairs
-    n_regions = int(region_arrays.n_regions)
+    # per-region CSR over the (locus, share) pairs, so each edge can gather both of its regions' pairs
     order = np.argsort(r_idx, kind="stable")
     r_sorted, l_sorted, w_sorted = r_idx[order], l_idx[order], w[order]
     region_off = np.searchsorted(r_sorted, np.arange(n_regions + 1)).astype(np.int64)
@@ -160,7 +178,7 @@ def boundary_locus_shares(
         if not counts.sum():
             continue
         live = counts > 0
-        # expand each boundary once per (locus, share) pair its flank carries
+        # expand each edge once per (locus, share) pair its region carries
         parts_e.append(np.repeat(np.flatnonzero(live).astype(np.int64), counts[live]))
         starts = region_off[flank][live]
         c = counts[live]
@@ -174,7 +192,7 @@ def boundary_locus_shares(
     locus_ids = l_sorted[pair_ids]
     shares = w_sorted[pair_ids]
 
-    # reduce duplicates — a boundary whose two flanks are both in L appears twice — keeping the MAX
+    # reduce duplicates — an edge whose two regions are both in L appears twice — keeping the MAX
     key = edge_ids * np.int64(n_loci) + locus_ids
     uniq, inv = np.unique(key, return_inverse=True)
     out = np.zeros(uniq.size, dtype=np.float64)
@@ -185,7 +203,7 @@ def boundary_locus_shares(
 def sum_by_locus(
     idx: np.ndarray, lid: np.ndarray, share: np.ndarray, values: np.ndarray, n_loci: int
 ) -> np.ndarray:
-    """``float64[n_loci]`` — ``Σ share · values[idx]``, the one weighted scatter both axes use."""
+    """``float64[n_loci]`` — ``Σ share · values[idx]``, the one weighted scatter every axis uses."""
     out = np.zeros(n_loci, dtype=np.float64)
     if idx.size:
         np.add.at(out, lid, share * np.asarray(values, dtype=np.float64)[idx])
@@ -199,10 +217,12 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior inputs from the calibration result.
 
-    A locus collects its regions by genomic overlap (:func:`region_locus_shares`) and its boundaries by touching those
-    regions (:func:`boundary_locus_shares`)::
+    A locus collects its regions by genomic overlap (:func:`region_locus_shares`), its boundaries by touching those
+    regions (:func:`boundary_locus_shares`), and its sj by the exon regions they join (the same rule)::
 
         gdna_count = Σ_regions share(r,L)·gdna_mass_region[r] + Σ_boundaries share(e,L)·gdna_mass_boundary[e]·q[e]
+
+        fragment_count = Σ_regions share·mass_region[r] + Σ_boundaries share·mass_boundary[e] + Σ_sj share·mass_sj[j]
 
         gdna_eff_len = Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·M_e·c̃_e
 
@@ -210,8 +230,8 @@ def assemble_priors(
     ``_boundary``), ``S_r`` a region's contained support and ``M_e`` gDNA's conserved share at a boundary
     (``gdna_boundary_conserved_len``).
 
-    The count is a conserved fragment count, because the EM compares it with its own count of the locus's fragments,
-    which holds each fragment once. A contained fragment deposits on exactly one region, so the region term already is
+    The count is a conserved fragment count, because the EM reads it as a share of the locus's fragments, each held
+    once. A contained fragment deposits on exactly one region, so the region term already is
     one; the crossing term is converted by ``q = boundary_mass_per_crossing``, the accumulator's own ``mass / count``
     at the boundary, which undoes the one-per-crossed-boundary inflation (under a uniform field
     ``q = [min(w−1,a) + min(w−1,b)] / 2(w−1)``). The outer boundaries are included because their straddling fragments
@@ -232,10 +252,15 @@ def assemble_priors(
     cancels in the EM. There is no floor and no shrinkage: the efficiencies are posterior means under the landscape,
     so a locus with little evidence reads the population's level.
 
-    No RNA count is produced. The EM's gDNA share is a share of every fragment in the locus, spliced ones included
-    (they skip the E-step but enter every M-step), while calibration's RNA count is its unspliced RNA only, so using it
-    would lean the EM toward gDNA in proportion to the spliced share. The RNA side is the EM's own count less this
-    one, formed where the EM's count exists.
+    ``fragment_count`` is what the gDNA count is a share of: every fragment calibration deposited on the locus's
+    objects, each once (``CalibrationResult.region_conserved_mass``, ``boundary_conserved_mass``, ``sj_conserved_mass``),
+    over the gDNA count's own shares. The EM's gDNA share is a share of every fragment in the locus, spliced ones
+    included (they skip the E-step but enter every M-step), so the spliced banks and the sj axis are in it; left out,
+    the prior would lean toward gDNA in proportion to the spliced share. A fragment the second pass drew a placement
+    for is on both sides, as every deposit is: read against the EM's count of the locus's unique fragments instead,
+    the gDNA count would hold the drawn multimappers and its divisor none, and a locus that multimappers join could be
+    handed a share above one. Every term of the gDNA count is a part of a term of the fragment count, summed in the same
+    order, so ``gdna_count <= fragment_count`` holds in floating point too.
     """
     if calibration.n_regions != region_arrays.n_regions:
         raise ValueError(
@@ -245,6 +270,13 @@ def assemble_priors(
     n_loci = len(multi_loci)
     r_idx, r_lid, r_w = region_locus_shares(region_arrays, multi_loci, n_loci)
     e_idx, e_lid, e_w = boundary_locus_shares(region_arrays, (r_idx, r_lid, r_w), n_loci)
+    j_idx, j_lid, j_w = _edge_locus_shares(
+        calibration.sj_src_region,
+        calibration.sj_dst_region,
+        (r_idx, r_lid, r_w),
+        int(region_arrays.n_regions),
+        n_loci,
+    )
 
     def by_region(values):
         return sum_by_locus(r_idx, r_lid, r_w, values, n_loci)
@@ -260,6 +292,14 @@ def assemble_priors(
         by_region(calibration.count_gdna_region) + by_boundary(gdna_boundary), 0.0
     )
 
+    # every fragment on the same objects: the regions' and boundaries' whole masses by the gDNA count's own shares,
+    # and the sj mass, which only the sj axis holds
+    fragment_locus = (
+        by_region(calibration.region_conserved_mass)
+        + by_boundary(calibration.boundary_conserved_mass)
+        + sum_by_locus(j_idx, j_lid, j_w, calibration.sj_conserved_mass, n_loci)
+    )
+
     # the gDNA effective length: gDNA's conserved shares of the count's own objects at their efficiencies
     region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
     boundary_m = np.maximum(
@@ -271,6 +311,7 @@ def assemble_priors(
 
     return LocusPriors(
         gdna_count=gdna_locus,
+        fragment_count=fragment_locus,
         # in the efficiencies' unit, the bulk; no floor, because the EM reads a zero yield as "cannot emit"
         gdna_eff_len=eff_len,
     )

@@ -24,7 +24,7 @@ from .annotate import (
     AF_UNRESOLVED,
     winner_flags,
 )
-from .buffer import FRAG_MULTIMAPPER, FragmentBuffer, FinalizedChunk
+from .buffer import FragmentBuffer, FinalizedChunk
 from .config import (
     CONSTANTS,
     EMConfig,
@@ -40,7 +40,6 @@ from .native import EM_WINNER_INTERGENIC
 from .native import BamScanner as _NativeBamScanner
 from .routing import FragmentRouter
 from .scoring import build_scorer, sequence_log_penalties
-from .splice import SpliceType
 from .stats import PipelineStats
 from .strand_model import StrandModels
 
@@ -766,31 +765,35 @@ def populate_em_annotations(
 
 
 def em_pseudocounts(
-    gdna_count: np.ndarray, n_calibrated: np.ndarray, n_gdna_eligible: np.ndarray
+    gdna_count: np.ndarray, fragment_count: np.ndarray, n_gdna_eligible: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """The locus EM's two pseudocounts, ``(gdna_prior_count, rna_prior_count)``, per locus.
 
     The odds are calibration's gDNA share of the locus. The EM's theta is each component's share of every fragment
     in the locus (the E-step's units and the deterministic spliced fragments, which skip the E-step but enter every
     M-step), and the grouped prior update is exact EM for ``P_g log theta_g + P_R log(1 − theta_g)``, which leaves
-    the EM's own answer in place iff ``P_g : P_R = G : (N − G)``. ``gdna_count`` is calibration's count from its own
-    sample of the locus and ``n_calibrated`` that sample's unique fragments (no multimapper, no fragment whose every
-    junction the blacklist rejected), so the share is read over that sample and applied to the whole locus; a
-    fragment calibration never saw carries the locus's share, not RNA. Calibration also deposits each multimapper
-    at its drawn placement, which ``n_calibrated`` does not count, so in a locus holding multimappers the count
-    covers more fragments than the share is read over.
+    the EM's own answer in place iff ``P_g : P_R = G : (N − G)``. ``gdna_count`` and ``fragment_count`` are
+    calibration's two counts of the locus (``LocusPriors``): its gDNA fragments, and every fragment it deposited on
+    the same objects. Both hold a multimapper once, where the second pass drew it, so the share is read over one set
+    of fragments and applied to the whole locus; a fragment calibration never saw carries the locus's share, not RNA.
 
-    The strength is one pseudocount per unit that has a gDNA candidate; it is chosen, not derived. A share above
-    one is a share of one, and a locus with no gDNA candidate, or none of whose fragments calibration counted, gets
-    no prior.
+    The strength is one pseudocount per unit that has a gDNA candidate; it is chosen, not derived. A locus with no
+    gDNA candidate, or none of whose fragments calibration counted, gets no prior. A gDNA count above the fragment
+    count, beyond rounding, is refused: the two are one tally, so it is an accounting error, and clipping it would
+    hand the locus a share of one and RNA no pseudocount at all.
     """
     gdna_count = np.asarray(gdna_count, dtype=np.float64)
-    n_calibrated = np.asarray(n_calibrated, dtype=np.float64)
+    fragment_count = np.asarray(fragment_count, dtype=np.float64)
     n_gdna_eligible = np.asarray(n_gdna_eligible, dtype=np.float64)
-    seen = n_calibrated > 0
-    share = np.clip(
-        np.divide(gdna_count, n_calibrated, out=np.zeros_like(gdna_count), where=seen), 0.0, 1.0
-    )
+    seen = fragment_count > 0
+    share = np.divide(gdna_count, fragment_count, out=np.zeros_like(gdna_count), where=seen)
+    if np.any(share > 1.0 + CONSTANTS.calibration.fraction_tolerance):
+        i = int(np.argmax(share))
+        raise ValueError(
+            f"a locus's gDNA count ({float(gdna_count[i])!r}) exceeds its count of every fragment "
+            f"({float(fragment_count[i])!r}); the two must be read over the same fragments."
+        )
+    share = np.clip(share, 0.0, 1.0)
     strength = np.where(seen, n_gdna_eligible, 0.0)
     gdna_prior = strength * share
     return gdna_prior, strength - gdna_prior
@@ -802,6 +805,7 @@ def run_locus_em_partitioned(
     multi_loci: list,
     index: TranscriptIndex,
     gdna_count: np.ndarray,
+    fragment_count: np.ndarray,
     gdna_eff_len: np.ndarray,
     *,
     em_config: EMConfig,
@@ -814,9 +818,8 @@ def run_locus_em_partitioned(
     Packs each ``LocusPartition`` into the C++ 8-tuple, runs the whole batch in one
     ``run_batch_locus_em_partitioned`` call (the solver runs its own threads), and appends a per-locus dict to
     ``estimator.locus_results`` for ``get_loci_df``. Calibration enters as its per-locus gDNA count, which
-    :func:`em_pseudocounts` reads against the unique part of the locus calibration counted
-    (:func:`_calibrated_units`). The loci table's ``has_gdna`` is structural: some unspliced unit carries a finite
-    gDNA log-likelihood.
+    :func:`em_pseudocounts` reads against its count of every fragment it deposited on the locus. The loci table's
+    ``has_gdna`` is structural: some unspliced unit carries a finite gDNA log-likelihood.
     """
     if not multi_loci:
         return
@@ -829,7 +832,7 @@ def run_locus_em_partitioned(
     )
     gdna_prior, rna_prior = em_pseudocounts(
         np.asarray(gdna_count, dtype=np.float64)[ids],
-        _calibrated_units(estimator, parts, multi_loci),
+        np.asarray(fragment_count, dtype=np.float64)[ids],
         n_gdna_eligible,
     )
     gdna_prior = np.ascontiguousarray(gdna_prior)
@@ -883,23 +886,6 @@ def _partition_tuple(p) -> tuple:
         p.is_spliced,
         p.gdna_log_liks,
         p.intergenic_log_liks,
-    )
-
-
-def _calibrated_units(estimator: AbundanceEstimator, parts: list, multi_loci: list) -> np.ndarray:
-    """Per locus, the unique part of calibration's sample: the deterministic fragments of its transcripts (unique by
-    construction) and every deposited unit that is neither a multimapper nor a fragment whose every junction the
-    blacklist rejected."""
-    deterministic = estimator.unambig_counts.sum(axis=1)
-    return np.array(
-        [
-            np.count_nonzero(
-                (p.frag_class != FRAG_MULTIMAPPER) & (p.splice_type != SpliceType.SPLICE_ARTIFACT)
-            )
-            + deterministic[np.asarray(loc.transcript_indices, np.int64)].sum()
-            for p, loc in zip(parts, multi_loci)
-        ],
-        dtype=np.float64,
     )
 
 
@@ -963,9 +949,9 @@ def quant_from_buffer(
     Scores the buffer with the EM's two length tables (:func:`length_tables`), prices every junction under one cap
     (``junction_cap``, `calibration.capture_eff_length.fit_junction_cap`) in the transcripts' lengths and in a
     multimapper's place weights alike, builds connected-component loci, turns the per-region ``CalibrationResult``
-    into each locus's gDNA count and gDNA length (``assemble_priors``), partitions
-    the global CSR, and runs the per-locus EM, whose pseudocounts read that count
-    against the locus's own fragments (``em_pseudocounts``). Returns the populated
+    into each locus's gDNA count, fragment count and gDNA length (``assemble_priors``), partitions
+    the global CSR, and runs the per-locus EM, whose pseudocounts read the gDNA count
+    against the fragment count (``em_pseudocounts``). Returns the populated
     ``AbundanceEstimator``.
     """
     from .calibration.capture_eff_length import place_efficiencies
@@ -1015,6 +1001,7 @@ def quant_from_buffer(
         multi_loci,
         index,
         priors.gdna_count,
+        priors.fragment_count,
         priors.gdna_eff_len,
         em_config=em_config,
         intergenic_rate=intergenic_gdna_rate(calibration, region_arrays),

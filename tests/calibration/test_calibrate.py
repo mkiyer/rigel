@@ -78,6 +78,14 @@ def test_sj_flux_is_exported_verbatim_and_never_deconvolved():
     np.testing.assert_array_equal(result.count_rna_sj, SJ_FLUX)
 
 
+def test_the_result_names_the_two_regions_each_sj_joins():
+    """The sj axis alone cannot say where an sj is, so the result carries the splice graph's own answer, unswapped: the
+    fixture's sj runs region 0 → region 2, and a consumer placing its conserved mass on a locus reads those."""
+    result = _run()
+    np.testing.assert_array_equal(result.sj_src_region, [0])
+    np.testing.assert_array_equal(result.sj_dst_region, [2])
+
+
 def test_the_conserved_sj_mass_recovers_the_accumulators_own_sj_mass_bank():
     """``sj_conserved_mass`` is ``sj_count × (sj_mass / sj_count)``, so it must come back as ``sj_mass`` itself, the
     bank the scanner wrote. The fixture's sj carries 13 incidences against an ``sj_mass`` of 1.3, so the two cannot

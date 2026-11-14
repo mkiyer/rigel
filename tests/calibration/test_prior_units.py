@@ -133,6 +133,8 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
             _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r)
         ),
         sj_mass_per_crossing=np.ones(0, dtype=np.float64),
+        sj_src_region=np.zeros(0, dtype=np.int64),
+        sj_dst_region=np.zeros(0, dtype=np.int64),
         gdna_region_eff_len=a_g_region,
         gdna_boundary_eff_len=a_g_boundary,
         gdna_boundary_conserved_len=np.add(

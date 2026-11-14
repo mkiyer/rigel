@@ -4,7 +4,8 @@ The splice graph has three kinds of object, so the result has three axes::
 
     regions                N             deconvolved contained count and its geometric support
     contiguous boundaries  E = N − refs  deconvolved crossing count and its geometric support
-    sj boundaries          J             the jumping flux: certified RNA, never deconvolved
+    sj boundaries          J             the jumping flux: certified RNA, never deconvolved; and the two
+                                         regions each sj joins
 
 A contiguous boundary is a 0-bp object with one set of numbers, never a left/right pair, so no consumer pools faces
 and halves them. ``__post_init__`` enforces the intrinsic invariants (per-axis shape, dtype, finiteness, sign); mass
@@ -119,8 +120,9 @@ class CalibrationResult:
     # --- the jumping population, per sj boundary (float64[n_sj]) ---
     #: An incidence count, not a mass: ``sj_count`` summed over the genome-strand columns. A fragment deposits +1 on
     #: every sj it uses, so this over-counts the conserved mass in proportion to how many sj a fragment spans;
-    #: :attr:`sj_conserved_mass` is the mass. Never deconvolved, since an sj boundary is pure RNA. ``assemble_priors``
-    #: does not read it; it is exported for QC and reporting, because this population dominates a donor boundary.
+    #: :attr:`sj_conserved_mass` is the mass. Never deconvolved, since an sj boundary is pure RNA, so it is no part of
+    #: a locus's gDNA count; ``assemble_priors`` reads its mass into the locus's fragment count, and the incidences are
+    #: exported for QC and reporting, because this population dominates a donor boundary.
     count_rna_sj: np.ndarray
 
     #: float64[n_boundaries] and float64[n_sj]: the ``boundary_spliced`` and sj twins of
@@ -129,6 +131,12 @@ class CalibrationResult:
     #: crosses no boundary and is not contained, so only the sj bank holds it.
     boundary_spliced_mass_per_crossing: np.ndarray
     sj_mass_per_crossing: np.ndarray
+
+    #: int64[n_sj] each: the two regions an sj joins, as global region ids: the intron starts where ``sj_src_region``
+    #: ends and ends where ``sj_dst_region`` begins. Geometry, identical under any split. It places an sj's conserved
+    #: mass on the locus that owns its exons (``assemble_priors``), which the sj axis alone cannot say.
+    sj_src_region: np.ndarray
+    sj_dst_region: np.ndarray
 
     # --- the gDNA geometric supports: expected admissible start positions, per object ---
     #: float64[n_regions]: gDNA's contained placements over the region's observable pieces
@@ -200,6 +208,7 @@ class CalibrationResult:
         ):
             for name in names:
                 _check_axis_array(getattr(self, name), name, axis)
+        self._check_sj_regions()
         self._check_fractions()
         self._check_capture()
         if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
@@ -208,6 +217,22 @@ class CalibrationResult:
                 f"got {self.gdna_density_global}."
             )
         _check_unit_interval(self.rna_sense_frac, "rna_sense_frac")
+
+    def _check_sj_regions(self) -> None:
+        """Each sj names two regions of this result's own region axis: integer ids, one per sj, below ``n_regions``."""
+        for name in ("sj_src_region", "sj_dst_region"):
+            arr = getattr(self, name)
+            _check_axis_array(arr, name, int(self.n_sj))
+            if arr.dtype.kind not in ("i", "u"):
+                raise ValueError(
+                    f"CalibrationResult.{name} holds region ids and must be an integer array; got {arr.dtype}."
+                )
+            if np.any(arr >= int(self.n_regions)):
+                i = int(np.flatnonzero(arr >= int(self.n_regions))[0])
+                raise ValueError(
+                    f"CalibrationResult.{name} names region {int(arr[i])} at sj {i}, but the result has "
+                    f"{int(self.n_regions)} regions."
+                )
 
     def _check_fractions(self) -> None:
         """Each composition component is a fraction, bounded by 1 up to rounding; closure holds by construction (ψ's
@@ -263,6 +288,42 @@ class CalibrationResult:
             self.sj_mass_per_crossing, dtype=np.float64
         )
 
+    # ── every fragment calibration deposited, per object, in fragment units ──
+
+    def _rna_unspliced_boundary(self) -> np.ndarray:
+        """float64[n_boundaries]: RNA's unspliced crossings, ``count_rna_boundary`` less its certified part."""
+        return np.maximum(
+            np.asarray(self.count_rna_boundary, dtype=np.float64)
+            - np.asarray(self.count_rna_spliced_boundary, dtype=np.float64),
+            0.0,
+        )
+
+    @property
+    def region_conserved_mass(self) -> np.ndarray:
+        """float64[n_regions]: every fragment contained in each region, gDNA and RNA together. A contained fragment
+        deposits on exactly one region, so the count is the conserved mass."""
+        return np.asarray(self.count_gdna_region, dtype=np.float64) + np.asarray(
+            self.count_rna_region, dtype=np.float64
+        )
+
+    @property
+    def boundary_conserved_mass(self) -> np.ndarray:
+        """float64[n_boundaries]: every fragment's conserved mass at each boundary, both components and both banks:
+        the unspliced crossings, gDNA's and RNA's, at ``boundary_mass_per_crossing``, and the spliced ones at
+        ``boundary_spliced_mass_per_crossing``.
+
+        With :attr:`region_conserved_mass` and :attr:`sj_conserved_mass` it holds every deposited fragment once, so
+        the three sum to ``library_gdna_fragments + library_rna_fragments``. The gDNA part of each object's mass is
+        the term ``assemble_priors`` counts as gDNA, so a locus's gDNA count never exceeds its sum of these.
+        Properties for the same reason as :attr:`sj_conserved_mass`: an oracle arm swaps the masses.
+        """
+        gdna = np.asarray(self.count_gdna_boundary, dtype=np.float64)
+        unspliced = gdna + self._rna_unspliced_boundary()
+        spliced = np.asarray(self.count_rna_spliced_boundary, dtype=np.float64)
+        per_unspliced = np.asarray(self.boundary_mass_per_crossing, dtype=np.float64)
+        per_spliced = np.asarray(self.boundary_spliced_mass_per_crossing, dtype=np.float64)
+        return unspliced * per_unspliced + spliced * per_spliced
+
     # ── the library fragment counts, in fragment units ──
 
     @property
@@ -290,11 +351,7 @@ class CalibrationResult:
         fragment's bases between ``boundary_spliced_mass`` and ``sj_mass``. A property for the same reason as
         :attr:`sj_conserved_mass`.
         """
-        unspliced_boundary = np.maximum(
-            np.asarray(self.count_rna_boundary, dtype=np.float64)
-            - np.asarray(self.count_rna_spliced_boundary, dtype=np.float64),
-            0.0,
-        )
+        unspliced_boundary = self._rna_unspliced_boundary()
         return float(
             np.asarray(self.count_rna_region, dtype=np.float64).sum()
             + (

@@ -43,7 +43,7 @@ refused; a calibration figure cannot say whether the user's number improved.
 | | what is scored | against | instrument |
 |---|---|---|---|
 | the result | `P`, the `CalibrationResult`'s six deconvolved arrays | `O`, the same result with only those arrays replaced by the origin-split truth | `calibration_vs_oracle.py` |
-| the prior | `LocusPriors`: each locus's `gdna_count`, which the EM reads against its own fragment count | `O`, the same assembler fed the true per-object masses | `prior_vs_oracle.py` |
+| the prior | `LocusPriors`: each locus's `gdna_count` and `fragment_count`, whose ratio is the EM's gDNA share | `O`, the same assembler fed the true per-object masses | `prior_vs_oracle.py` |
 | one number | the library gDNA fraction | the per-fragment truth | `calibration_vs_oracle.py`, each row's `pools` block |
 | the length | the capture-contracted length the EM divides by | the simulator's own capture-aware yield | `ruler_vs_truth.py --scale` |
 

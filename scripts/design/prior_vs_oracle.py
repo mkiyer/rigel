@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Is ``LocusPriors`` -- what the EM takes from calibration -- right?
 
-Calibration hands the EM, per ``multi_locus_id``, ``gdna_count`` (the locus's conserved gDNA fragment count) and
-``gdna_eff_len``. The EM reads the count against its own locus count ``N`` (odds ``G : N - G``,
-``pipeline.em_pseudocounts``), so the count's error is the whole error; the RNA count never reaches the EM. This
+Calibration hands the EM, per ``multi_locus_id``, ``gdna_count`` (the locus's conserved gDNA fragment count),
+``fragment_count`` (every fragment it deposited on the same objects) and ``gdna_eff_len``. The EM reads the gDNA count
+as a share of the fragment count (odds ``G : T - G``, ``pipeline.em_pseudocounts``), and the fragment count is each
+object's whole tally, which no split of it moves, so the gDNA count's error is the whole error of the split. This
 scores ``gdna_count`` in fragments (``Σ|Δ|``), per condition and per stratum, over three arms:
 
 - ``P``: the shipped prior;
@@ -71,8 +72,8 @@ from rigel.pipeline import (  # noqa: E402
     scan_and_buffer,
 )
 
-#: The two ``LocusPriors`` fields, in the order every table prints them.
-PRIOR_FIELDS = ("gdna_count", "gdna_eff_len")
+#: The ``LocusPriors`` fields: the noop gate holds every one byte-identical.
+PRIOR_FIELDS = ("gdna_count", "fragment_count", "gdna_eff_len")
 
 # ── the scoring ──────────────────────────────────────────────────────────────────────────────────
 

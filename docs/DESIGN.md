@@ -663,10 +663,10 @@ With no landscape every length is its uncontracted span, bit-identically.
 
 ### 9.3 The locus prior
 
-> **The EM's gDNA share is gDNA's share of every fragment in the locus**: `P_g = U·min(G_c/N_c, 1)`,
-> `P_R = U − P_g` (`pipeline.em_pseudocounts`), with `G_c` calibration's gDNA count of the locus, `N_c` the unique
-> fragments it counted from, and `U` the units with a gDNA candidate. Calibration's RNA count does not enter, so the two
-> stages never have to agree on which fragments are spliced.
+> **The EM's gDNA share is gDNA's share of every fragment in the locus, and both sides of it are one tally**:
+> `P_g = U·G_c/T_c`, `P_R = U − P_g` (`pipeline.em_pseudocounts`), with `G_c` calibration's gDNA count of the locus,
+> `T_c` its count of every fragment it deposited on the same objects, and `U` the units with a gDNA candidate. A
+> fragment is in the numerator only if it is in the denominator (the owner's ruling, 2026-11-14).
 
 The deterministic spliced fragments skip the E-step but enter every M-step, so the prior is neutral iff
 `P_g : P_R = G : (N − G)` (`EQUATIONS.md`, the pseudocounts' odds). The strength is one pseudo-fragment per eligible
@@ -676,8 +676,17 @@ every RNA component in proportion to its evidence, so a component with none rece
 **The count** (`priors.assemble_priors`) holds each gDNA candidate fragment of a multi-locus once: the regions it
 overlaps and every boundary touching them, the outer two included, since a fragment crossing a locus's boundary is its
 candidate; only the crossing term converts, by the boundary's own `mass / count`. The pooled `q` is
-`ISSUES: the-pooled-q-in-the-gdna-count`; the share's unique-only denominator is
-`ISSUES: the-em-prior-share-excludes-drawn-multimappers`.
+`ISSUES: the-pooled-q-in-the-gdna-count`.
+
+**The fragment count** (`LocusPriors.fragment_count`) is every deposit on the same objects by the same shares: each
+region's whole contained count, each boundary's two banks at their own conversions, and each sj's conserved mass at
+the locus of the exon regions it joins, which the result names (`CalibrationResult.sj_src_region`, `sj_dst_region`).
+Until 2026-11-14 the share's divisor was the EM's count of the locus's unique fragments, while the gDNA count held
+every multimapper at its drawn placement. On an aligner's input the multimappers join most of the library into one
+locus (61–96 % of the located fragments on the STAR rung) and are 4–7 % of it, so the share read that much too high:
+1.030 at STAR g98 stranded capture ON, clipped to one, an RNA pseudocount of exactly 0 on 7.66 M fragments. The
+simulator's alignments hold no multimapper and could not show it. A gDNA count above the fragment count is now
+refused (`EQUATIONS.md`, the pseudocounts' odds).
 
 ### 9.4 A multimapper's places, and the intergenic background
 

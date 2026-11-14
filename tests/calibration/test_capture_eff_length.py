@@ -99,6 +99,9 @@ def _cal(
         count_rna_sj=sj,
         boundary_spliced_mass_per_crossing=np.ones(ne),
         sj_mass_per_crossing=np.ones(sj.shape[0]),
+        # not read here: the ruler and the cap take each junction's regions from the index
+        sj_src_region=np.zeros(sj.shape[0], dtype=np.int64),
+        sj_dst_region=np.zeros(sj.shape[0], dtype=np.int64),
         gdna_region_eff_len=contained_eff_length(
             np.asarray(ra.region_size_bp, dtype=np.float64), PMF
         ),

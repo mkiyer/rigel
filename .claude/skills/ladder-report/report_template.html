@@ -198,6 +198,17 @@ footer code{background:none;padding:0;word-break:break-all}
     by &minus;2.5&nbsp;%, +3.7&nbsp;% and +1.6&nbsp;% and gene error by &minus;6.6&nbsp;%, &minus;20.0&nbsp;% and
     &minus;6.9&nbsp;% at 98, 50 and 5&nbsp;% gDNA. Every other ladder row on the simulator&rsquo;s alignments is
     unchanged, and the STAR rung moves by at most 1.2&nbsp;%.</p>
+    <p style="margin-top:10px">Since 2026-11-14 the EM&rsquo;s gDNA share of a locus is read over <b>one tally</b>:
+    calibration&rsquo;s gDNA count over calibration&rsquo;s own count of every fragment it placed there. Before, the count
+    held each multimapper where the second pass drew it and its divisor held none, so on aligned input, where
+    multimappers join most of the library into one locus, the share read 4&ndash;7&nbsp;% too high and was clipped where
+    it passed one. The simulator&rsquo;s alignments hold no multimapper and move by under 1&nbsp;%. The STAR rung moves:
+    on its contaminated in-scope rows transcript error falls by up to 53&nbsp;% and gene error by up to 80&nbsp;%, and
+    its pools now carry the simulator&rsquo;s signs, so the excess of annotated RNA under capture shows on both inputs
+    (stranded capture ON at 98, 50 and 5&nbsp;% gDNA: +30.1&nbsp;k, +35.0&nbsp;k and +12.7&nbsp;k fragments, from
+    &minus;60.7&nbsp;k, &minus;7.7&nbsp;k and &minus;0.1&nbsp;k). Two STAR rows rise: 98&nbsp;% gDNA in the deferred
+    stratum (transcripts +13.9&nbsp;%, genes +15.4&nbsp;%) and 0&nbsp;% gDNA unstranded capture OFF (+3.0&nbsp;%,
+    +7.5&nbsp;%, one duplicated locus).</p>
     <p style="margin-top:10px" id="star-lede"></p>
   </div>
 

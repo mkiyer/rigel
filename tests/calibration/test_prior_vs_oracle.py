@@ -117,24 +117,35 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_picofragment(me
     )
 
 
-def test_the_prior_reads_exactly_the_two_gdna_mass_fields_and_none_of_the_rna_ones(
+def test_the_gdna_count_reads_exactly_the_two_gdna_mass_fields_and_the_fragment_count_every_tally(
     measured,
 ):
-    """The two gDNA arrays ``override_masses`` writes must reach the prior; an override landing on a field nothing reads
-    would read as "calibration is already correct on that channel". The four RNA arrays must not reach it: calibration's
-    RNA count does not enter the EM (``pipeline.em_pseudocounts`` reads the gDNA count against the EM's own count of the
-    locus's fragments), so an RNA field moving the prior would be that count leaking in. Each field is nudged at its
-    largest in-locus site, so a field that does not move the prior is genuinely unread.
+    """The two gDNA arrays ``override_masses`` writes must reach the prior's gDNA count; an override landing on a field
+    nothing reads would read as "calibration is already correct on that channel". The four RNA arrays must not reach
+    the gDNA count or the gDNA length: calibration's RNA split is no part of either. They reach the prior only inside
+    ``fragment_count``, each object's whole tally, which the oracle's split of that tally leaves where it was. Each
+    field is nudged at its largest in-locus site, so a field that does not move a prior field is genuinely unread there.
     """
     base = measured.priors["P"]
-    reads = {}
+    split, total = {}, {}
     for field in prior_vs_oracle.OVERRIDE_FIELDS:
         site = _biggest_in_locus_site(measured, field)
-        reads[field] = _moved(_nudged_prior(measured, field, site, 1.0), base)
-    assert {f for f, m in reads.items() if m} == {"count_gdna_region", "count_gdna_boundary"}, (
-        f"the override fields the prior reads are {sorted(f for f, m in reads.items() if m)} — an RNA "
-        "field reaching the prior is calibration's RNA count back in the EM, and a gDNA field missing "
-        "is an override that never ran"
+        nudged = _nudged_prior(measured, field, site, 1.0)
+        split[field] = any(
+            not np.array_equal(getattr(nudged, f), getattr(base, f))
+            for f in ("gdna_count", "gdna_eff_len")
+        )
+        total[field] = not np.array_equal(nudged.fragment_count, base.fragment_count)
+    assert {f for f, m in split.items() if m} == {"count_gdna_region", "count_gdna_boundary"}, (
+        f"the override fields the gDNA count and length read are {sorted(f for f, m in split.items() if m)} — an "
+        "RNA field reaching them is calibration's RNA split in the gDNA count, and a gDNA field missing is an "
+        "override that never ran"
+    )
+    # a spliced crossing moves between a boundary's two banks, by nothing where their conversions agree
+    every_tally = set(prior_vs_oracle.OVERRIDE_FIELDS) - {"count_rna_spliced_boundary"}
+    assert {f for f, m in total.items() if m} >= every_tally, (
+        f"the fragment count reads only {sorted(f for f, m in total.items() if m)} — a tally it does not hold is "
+        "a fragment in no locus's denominator"
     )
 
 
@@ -362,7 +373,7 @@ def _biggest_in_locus_site(measured, field):
         keep[e_idx] = True
     if arr.shape[0] == keep.shape[0]:
         ranked = np.where(keep.reshape((-1,) + (1,) * (arr.ndim - 1)), arr, -np.inf)
-    else:  # the sj axis — never projected, and never read by the prior
+    else:  # the sj axis: projected through the regions each sj joins, and read into the fragment count
         ranked = arr
     site = np.unravel_index(int(np.argmax(ranked)), arr.shape)
     return site

@@ -74,7 +74,10 @@ gDNA density, so a gene's unspliced coverage fits RNA, mostly the synthetic nasc
   1,146,600 under HEAD, 1,026,110 under 0.7.1; MCB 805,566 of a 827,074 Brier). The capture reading reads about 1 there,
   so the probe-enriched gDNA goes to RNA. Dense probes at κ 0.50, and κ 0.70 or 0.99, do not fail.
 - The ladder's deferred stratum (unstranded × capture ON) on STAR: gDNA called RNA 3.30 M against 0.7.1's 2.97 M, a one-way
-  under-forecast (MCB 458 k of a 1.55 M Brier).
+  under-forecast (MCB 458 k of a 1.55 M Brier). Until 2026-11-14 the EM's share was read 4–7 % too high on the STAR rung
+  and hid part of this. With the share over one tally the rung reads as the simulator's alignments do: the gDNA pool's
+  deficit is 2.08 M, 0.95 M and 96 k at g98, g50 and g05 (before: 1.67 M, 0.72 M, 51 k; the simulator's alignments:
+  1.96 M, 0.92 M, 86 k), and g98's transcript / gene error rose 13.9 % / 15.4 %.
 
 The one discriminating signal identified is the spliced fraction: mature RNA at a multi-exon transcript makes
 junction-crossing fragments at a rate its geometry and length law set, and gDNA read as RNA carries almost none. No
@@ -118,18 +121,6 @@ The index's blacklist (`splice_blacklist.py`, applied by the resolver) errs both
   one mate and kept on the other, and one kept junction shielding a rejected one.
 
 The spliced fragments train κ and RNA's length law, so artifacts bias both; κ already fits only the genuine junctions.
-
-### the-em-prior-share-excludes-drawn-multimappers
-`priority: next — a stated failure of the preview, a gene regression against 0.7.1 · stage: pre-EM · kind: defect`
-Calibration deposits every multimapper at its drawn placement, so a locus's `gdna_count` includes them, while
-`pipeline.em_pseudocounts` divides it by `n_calibrated`, which counts no multimapper; the share is inflated toward 1.
-At STAR g98 κ0.99 OFF, gDNA multimappers fuse 1,687 genes into one 44.8 Mb locus whose share reads 0.99906 (truth about
-0.968), its RNA pseudocount is 5,414 instead of about 185,000, and 33,550 unique unspliced mRNA fragments go to gDNA:
-genes 37,304 against 0.7.1's 22,898, mature RNA ×0.84 and nascent ×0.32 of truth. A share frame with numerator and
-denominator over the same fragments takes those genes to 7,595 and improves every in-scope contaminated stratum, but
-raises gDNA called RNA on all twelve contaminated STAR conditions and worsens the deferred stratum (×1.14 transcripts),
-because the exclusion was cancelling calibration's own under-count (`ISSUES: the-pooled-q-in-the-gdna-count`). It lands
-only with that count. Prototype: `$RIGEL_RUNS/prototypes/2026-11-02_share_frame/`.
 
 ### the-junction-cap-reads-bookings
 `priority: next — the landed cap's stated limits · stage: pre-EM · kind: limitation`
@@ -176,6 +167,27 @@ The older unequal-length finding remains distinct: on the test chromosome's gDNA
 the oracle gDNA count and gDNA table in the capture frame still leave 5.7 k excess RNA fragments, 0.5–1.7 % per captured
 gene. A candidate mechanism is pricing each object at one length-independent efficiency. The equal-length ladder
 does not settle that case. Instruments: `ruler_vs_truth.py`, `quant_accuracy.py --arm oracle`.
+
+### gdna-in-duplicated-blocks-is-called-rna
+`priority: next — the STAR rung's next error now that the share's two sides are one tally · stage: EM · kind: defect`
+On an aligner's input, gDNA reported at several places is called RNA where the reference repeats itself. STAR g98
+stranded capture ON, per read with the share over one tally (2026-11-12, an arm on HEAD 5341ea06): the 610,692 gDNA
+read pairs at several places are called nascent 20,974 and annotated 11,261 fragments (5.3 %), against 2,932 and 5,746
+on the simulator's alignments (1.4 %), where each sits at its true place. 85 % of the nascent fragments are in five
+1-Mb bins of chr21 (5–8 Mb, 34 Mb, 44 Mb), and three quarters are read pairs with exactly two places. The same blocks
+carry two thirds of the STAR rung's extra transcript error at g50 and g05: about 300 transcripts holding 3 % of the
+true fragments, every read a multimapper, the split between copies wrong (one gene −16.6 k of 36.3 k at g05, a
+neighbouring copy +8.8 k on 14.6 k). Until 2026-11-14 a share clipped at one hid the gDNA half of this. Located, not
+dissected; part of the transcript half compares against the simulator's alignment, which knows the copy a read came
+from. Receipts: `$RIGEL_RUNS/prototypes/2026-11-12_star_gap/` (sections 4.1, 4.2).
+
+The clipped share hid part of the split too, and the one in-scope row that rose when the share was repaired is this
+entry (STAR g00 unstranded capture OFF, transcript / gene error +3.0 % / +7.5 %). One locus of two chr21 copies (6.08 Mb
+and LINC00319 at 43.4 Mb; 59 k units, 98 % multimappers) was handed a share of one, and 18.2 k of its RNA fragments
+were called gDNA in a library with none. With the share over one tally 3.1 k are. Of the 15.1 k returned, 12.6 k go to
+the copy already over-called (true 25.1 k; 30.4 k before, 43.0 k after) while LINC00319 stays 21 k short of 35.9 k: the
+pools improve by 15 k and the gene error rises by 10.4 k, all of it in that locus. Receipts:
+`$RIGEL_RUNS/prototypes/2026-11-14_share_frame_landing/` (`why_row.py`).
 
 ### the-release-builds
 `priority: next — the owner's actions before any tag · stage: release · kind: release`
@@ -270,6 +282,15 @@ chr22:12.6–15.3 Mb hold 69 k of the rung's 71.6 k unplaced gDNA pairs) reads e
 masks only 29 kb beyond N there. The resolution weight also reads the purities' scalar error, never the per-length noise
 the division amplifies. Instrument: the STAR rung with the oracle's gDNA law injected.
 
+What swings the contrast on the STAR rung is the second pass's deposits (2026-11-12, `pipeline.library_fl_models` on
+the cached STAR scans, on pass one's tally and on the drained one). The drain adds the held multimappers to the DNA
+length pools, two thirds again of the intergenic pool and a quarter to a third of the intron pool, 9–15 bp longer than
+the unique fragments there, and the fitted law's mean moves from 217.3 to 248.4 bp at g50 stranded capture ON and from
+222.0 to 210.4 at g98 (the simulator's law is 217.1). On the simulator's alignments the drain puts nothing into those
+pools and the law does not move. With the true law injected, the annotated pool of STAR g50 stranded capture ON moved
++33 k fragments. Untested: the law read on pass one's tally in the drained one's place. Receipts:
+`$RIGEL_RUNS/prototypes/2026-11-12_star_gap/` (section 4.3).
+
 ### eb-shrinkage-magic-ess
 `priority: later · stage: calibration · kind: defect`
 gDNA's length law is shrunk toward the all-fragment pmf, mostly RNA's where gDNA is a minority, at a fixed ESS
@@ -360,7 +381,9 @@ stratum's gDNA). Calibration's own error P − O is larger and of the other sign
 does not shrink with size; at g50 ss.50 ON partly in the refit training on its own under-called captured exons. A
 plausible, unestablished mechanism: ψ's composition arm reads the landscape with no term for the slot's own count noise.
 gDNA's own share in the count alone improves capture-ON pools (stranded |gDNA| −26 %) and worsens capture OFF (+2 to
-+7 %), so it lands only with the count repaired. Instrument: `prior_vs_oracle.py` (P, O, S).
++7 %), so it lands only with the count repaired. On the STAR rung the EM's share was read 4–7 % too high until
+2026-11-14, which hid calibration's under-count: at g98 unstranded capture OFF gDNA called nascent RNA read +70 k then
+and reads +302 k now, the simulator's +292 k. Instrument: `prior_vs_oracle.py` (P, O, S).
 
 ### pruning-uses-three-references
 `priority: later · stage: pre-EM · kind: defect`

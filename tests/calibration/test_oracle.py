@@ -131,6 +131,8 @@ def test_the_oracle_result_is_a_valid_calibration_result(oracle_scenario, tmp_pa
         count_rna_sj=np.zeros(j),
         boundary_spliced_mass_per_crossing=np.ones(e),
         sj_mass_per_crossing=np.ones(j),
+        sj_src_region=np.zeros(j, dtype=np.int64),
+        sj_dst_region=np.zeros(j, dtype=np.int64),
         gdna_region_eff_len=np.ones(n),
         gdna_boundary_eff_len=np.ones(e),
         gdna_boundary_conserved_len=np.ones(e),

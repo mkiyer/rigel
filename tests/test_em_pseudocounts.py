@@ -8,9 +8,12 @@ iff ``P_g : P_R = G : (N - G)`` over that whole pool. Calibration's unspliced sp
 unspliced fragments' split as the whole pool's and leans toward gDNA in proportion to the spliced share.
 
 The falsification test drives the shipped solver through the pipeline's own locus runner on a locus whose
-counts are exact expectations, so the prior-free fixed point is the truth, and hands it calibration's exact gDNA
-count: gDNA and every transcript must land on the truth whatever the spliced share and however the spliced
-fragments split between the E-step and the deterministic path.
+counts are exact expectations, so the prior-free fixed point is the truth, and hands it calibration's exact
+counts: gDNA and every transcript must land on the truth whatever the spliced share, however the spliced
+fragments split between the E-step and the deterministic path, and whatever share of the locus's fragments are
+multimappers. Calibration counts a multimapper once, where the second pass drew it, in its gDNA count and in its
+count of every fragment alike; a share read against the locus's unique fragments instead would hold the
+multimappers in its numerator only and call gDNA above the truth.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from rigel.buffer import FRAG_MULTIMAPPER
 from rigel.config import EMConfig
 from rigel.estimator import AbundanceEstimator
 from rigel.locus import Locus, MultiLocus
@@ -54,14 +58,33 @@ def test_the_strength_is_one_pseudocount_per_gdna_eligible_unit():
     np.testing.assert_allclose(pg + pr, [600.0, 40.0])
 
 
-def test_a_gdna_count_above_the_locus_total_is_a_share_of_one_not_negative_rna():
-    pg, pr = em_pseudocounts(np.array([1200.0]), np.array([1000.0]), np.array([600.0]))
+def test_a_gdna_count_above_the_fragment_count_is_refused_not_clipped():
+    """The two counts are one tally over one set of fragments, so a gDNA count above the fragment count is an
+    accounting error. Clipped to a share of one it would hand the locus no RNA pseudocount at all, which is how a
+    share read over mismatched fragments once went unseen."""
+    with pytest.raises(ValueError, match="exceeds its count of every fragment"):
+        em_pseudocounts(np.array([1200.0]), np.array([1000.0]), np.array([600.0]))
+
+
+def test_a_gdna_count_one_rounding_above_the_fragment_count_is_a_share_of_one():
+    """A locus that is all gDNA has the two counts equal, and a count summed in another order (an oracle's) can sit
+    a rounding above: a share of one, not a refusal and not a negative RNA pseudocount."""
+    pg, pr = em_pseudocounts(
+        np.array([1000.0 * (1.0 + 1e-12)]), np.array([1000.0]), np.array([600.0])
+    )
     assert (pg[0], pr[0]) == (600.0, 0.0)
 
 
 def test_a_locus_with_no_gdna_eligible_unit_gets_no_prior():
     pg, pr = em_pseudocounts(np.array([80.0]), np.array([100.0]), np.array([0.0]))
     assert (pg[0], pr[0]) == (0.0, 0.0)
+
+
+def test_a_locus_calibration_booked_no_gdna_in_puts_its_whole_strength_on_rna():
+    """Counted, and found free of gDNA: that is a share of zero, stated at full strength, not the absence of a
+    prior."""
+    pg, pr = em_pseudocounts(np.array([0.0]), np.array([100.0]), np.array([40.0]))
+    assert (pg[0], pr[0]) == (0.0, 40.0)
 
 
 def test_a_locus_calibration_counted_none_of_gets_no_prior():
@@ -159,8 +182,13 @@ def _toy_locus(ss: float, junction_len: int):
     return em, deterministic, t_len, gdna_len, truth_gdna, truth_t
 
 
-def _run(ss: float, junction_len: int, mode: str):
+def _run(ss: float, junction_len: int, mode: str, multimapper_every: int = 0):
+    """``multimapper_every`` flags every n-th unit a multimapper (0: none): the fragments are the same, and so is
+    what an exact calibration counted of them."""
     em, deterministic, t_len, gdna_len, truth_gdna, truth_t = _toy_locus(ss, junction_len)
+    if multimapper_every:
+        em.frag_class[::multimapper_every] = FRAG_MULTIMAPPER
+    n_fragments = float(em.n_units + deterministic.sum())
     n_t = len(t_len)
     est = AbundanceEstimator(
         n_t, em_config=EMConfig(seed=1, mode=mode, assignment_mode="fractional", n_threads=1)
@@ -182,7 +210,8 @@ def _run(ss: float, junction_len: int, mode: str):
         partition_and_free(em, [locus]),
         [locus],
         index,
-        gdna_count=np.array([truth_gdna]),  # calibration exact
+        gdna_count=np.array([truth_gdna]),  # calibration exact, in both of its counts
+        fragment_count=np.array([n_fragments]),
         gdna_eff_len=np.array([gdna_len]),
         em_config=EMConfig(mode=mode, iterations=20000, convergence_delta=1e-12),
     )
@@ -204,3 +233,19 @@ def test_an_exact_calibration_leaves_gdna_and_every_transcript_at_the_truth(mode
         # VBEM moves the split between two isoforms that share positions by O(1) fragment at these counts
         # whatever the prior (``exp ψ(α) ≈ α − ½``), so the transcripts are held to 1 % of 250–800.
         np.testing.assert_allclose(t, truth_t, rtol=0.01)
+
+
+@pytest.mark.parametrize("mode", ["map", "vbem"])
+@pytest.mark.parametrize("multimapper_every", [4, 2])
+def test_an_exact_calibration_is_neutral_whatever_share_of_the_locus_multimaps(
+    mode, multimapper_every
+):
+    """A quarter, then half, of the locus's units are multimappers. Calibration counted every one of them once, so
+    its gDNA share is the truth and the prior must leave the EM there. Read against the unique fragments alone the
+    same count is a share 1/3 and 2 times too high, and gDNA lands 127 and 338 fragments above its 900."""
+    gdna, truth_gdna, t, truth_t = _run(0.9, 20, mode, multimapper_every)
+    assert gdna == pytest.approx(truth_gdna, abs=0.5), f"gDNA {gdna:.2f} against {truth_gdna:.0f}"
+    if mode == "map":
+        np.testing.assert_allclose(t, truth_t, atol=0.5)
+    else:
+        np.testing.assert_allclose(t, truth_t, rtol=0.01)  # as above: VBEM's O(1) between isoforms
