@@ -1,8 +1,8 @@
 # TRAPS — mistakes this project has already made
 
 Read before designing anything. Each rule is a mistake already made here, stated as what to do and why. A rule is not
-a measurement (where the tool stands is `ROADMAP.md`'s), and open problems, rulings and derivations live in
-`ISSUES.md`, `DESIGN.md` and `EQUATIONS.md`.
+a measurement (where the tool stands is `ROADMAP.md`'s), and open problems live in GitHub issues, rulings and
+derivations in `DESIGN.md` and `EQUATIONS.md`.
 
 Cite a rule by its name, e.g. `TRAPS: panel-before-src`. A rule starts at column 0 as its bold name and a full stop,
 and is one paragraph; no other line here starts with bold, because `tests/test_docs_boundary.py` reads every such line

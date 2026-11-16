@@ -1,5 +1,5 @@
 """The docs' citation boundaries: nothing outside `docs/dev/` may depend on the sandbox, nothing under
-`src/` may cite a doc, and every rule has one name.
+`src/` may cite a doc or an issue, nothing tracked cites the retired issue log, and every rule has one name.
 
 A working note nobody cites costs nothing and can be deleted at any time; once a permanent doc, a
 docstring or a test cites it, it is load-bearing. So the sandbox gate holds one property, no citation
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEV = ROOT / "docs" / "dev"
@@ -53,7 +54,7 @@ def test_nothing_outside_the_sandbox_cites_into_it():
     }
     assert not hits, (
         f"these cite the sandbox: {hits}. Nothing outside `docs/dev/` may depend on it. If the finding "
-        f"has settled, MOVE it to its permanent home — an issue or refusal to ISSUES.md, a lesson to TRAPS.md, a "
+        f"has settled, MOVE it to its permanent home — an open problem to a GitHub issue, a lesson to TRAPS.md, a "
         f"ruling to DESIGN.md, a derivation to EQUATIONS.md — and delete it from the dev doc in the same "
         f"edit. Copying is what creates two homes; moving does not."
     )
@@ -85,21 +86,20 @@ def test_the_sandbox_exists_and_says_what_it_is_for():
     assert "MOVE it out" in txt and "may cite" in txt
 
 
-def test_the_permanent_set_is_nine_files():
-    """The permanent docs are exactly the nine written out here, so the sandbox cannot add a tenth by
+def test_the_permanent_set_is_eight_files():
+    """The permanent docs are exactly the eight written out here, so the sandbox cannot add a ninth by
     accretion: a working note everyone reads is promoted, not blessed."""
     top = sorted(p.name for p in (ROOT / "docs").glob("*.md"))
     assert top == [
         "DESIGN.md",
         "EQUATIONS.md",
-        "ISSUES.md",
         "MANUAL.md",
         "PUBLISHING.md",
         "ROADMAP.md",
         "SUCCESS.md",
         "TESTING.md",
         "TRAPS.md",
-    ], f"the permanent set changed: {top}. Adding a tenth is an owner decision, not a side effect."
+    ], f"the permanent set changed: {top}. Adding a ninth is an owner decision, not a side effect."
 
 
 def test_this_gate_is_not_vacuous():
@@ -118,27 +118,25 @@ SOURCE = sorted(
     if p.suffix in (".py", ".h", ".cpp", ".c", ".js", ".css") and p.is_file()
 )
 
-#: a markdown file's name or path, a `§` with the word before it, a path into a `docs/` tree, or an
-#: `ISSUES: name` / `TRAPS: name` citation, whether or not the file or the name exists
+#: a markdown file's name or path, a `§` with the word before it, a path into a `docs/` tree, a
+#: `TRAPS: name` citation, whether or not the file or the name exists, or an `issue #N`
 _CITES_A_DOC = re.compile(
     r"[\w./-]*\w\.md\b"
     r"|(?:\w+\s*)?§[\w.]*"
     r"|\bdocs/[\w./-]*"
-    r"|\b(?:ISSUES|TRAPS):\s*`?[a-z0-9]+(?:-[a-z0-9]+)+"
+    r"|\bTRAPS:\s*`?[a-z0-9]+(?:-[a-z0-9]+)+"
+    r"|\b[Ii]ssues?\s*#\d+"
 )
 
 #: a whole kebab token: not part of a longer token or an identifier
 _KEBAB = re.compile(r"(?<![\w-])[a-z0-9]+(?:-[a-z0-9]+)+(?![\w-])")
 
-#: an ISSUES entry is a `### name` heading, a TRAPS rule a column-0 `**name.`
-_ISSUE_HEADING = re.compile(r"^### ([a-z0-9-]+)\s*$", re.M)
+#: a TRAPS rule is a column-0 `**name.`
 _TRAP_HEADING = re.compile(r"^\*\*([a-z0-9-]+)\.", re.M)
 
 
 def _entry_names() -> set[str]:
-    return set(_ISSUE_HEADING.findall((DOCS / "ISSUES.md").read_text())) | set(
-        _TRAP_HEADING.findall((DOCS / "TRAPS.md").read_text())
-    )
+    return set(_TRAP_HEADING.findall((DOCS / "TRAPS.md").read_text()))
 
 
 def _doc_citations(txt: str, names: set[str]) -> list[str]:
@@ -146,7 +144,7 @@ def _doc_citations(txt: str, names: set[str]) -> list[str]:
 
 
 def test_the_source_cites_no_doc():
-    """A doc's file name or path, a `§`, an `ISSUES:` / `TRAPS:` citation and a bare entry name are all
+    """A doc's file name or path, a `§`, a `TRAPS:` citation, a bare rule name and an `issue #N` are all
     citations."""
     names = _entry_names()
     hits = {
@@ -155,17 +153,15 @@ def test_the_source_cites_no_doc():
         if (found := _doc_citations(p.read_text(errors="ignore"), names))
     }
     assert not hits, (
-        f"the source cites the docs: {hits}. Drop the pointer and keep the content (a hit that is not a "
+        f"the source cites the docs or an issue: {hits}. Drop the pointer and keep the content (a hit that is not a "
         f"citation is a name colliding with the code's own text)."
     )
 
 
 def test_the_doc_citation_gate_is_not_vacuous():
-    """Every citation form matches, ordinary text does not, and every entry heading parses as a name,
+    """Every citation form matches, ordinary text does not, and every rule heading parses as a name,
     or the gate above checks nothing."""
-    issues = (DOCS / "ISSUES.md").read_text()
     traps = (DOCS / "TRAPS.md").read_text()
-    assert 0 < len(_ISSUE_HEADING.findall(issues)) == len(re.findall(r"^### ", issues, re.M))
     assert 0 < len(_TRAP_HEADING.findall(traps)) == len(re.findall(r"^\*\*", traps, re.M))
 
     names = _entry_names()
@@ -184,10 +180,13 @@ def test_the_doc_citation_gate_is_not_vacuous():
         "docs/em_strand/03"
     ]
     assert _doc_citations("(`TRAPS: a-deleted-rule`)", names) == ["TRAPS: a-deleted-rule"]
-    assert _doc_citations(f"ISSUES: {name}", names) == sorted([f"ISSUES: {name}", name])
+    assert _doc_citations(f"TRAPS: {name}", names) == sorted([f"TRAPS: {name}", name])
     assert _doc_citations(f"// as {name} says", names) == [name]
+    assert _doc_citations("# the fix for issue #12", names) == ["issue #12"]
+    assert _doc_citations("// see issues #3 and #4", names) == ["issues #3"]
     assert not _doc_citations(
-        f"BY DESIGN; KNOWN ISSUES: none; --{name}; {name}-x; {name}_x; {name.replace('-', '_')}",
+        f"BY DESIGN; KNOWN ISSUES: none; #include <vector>; --{name}; {name}-x; {name}_x; "
+        f"{name.replace('-', '_')}",
         names,
     )
 
@@ -197,3 +196,29 @@ def test_the_trap_names_are_unique():
     heads = _TRAP_HEADING.findall((DOCS / "TRAPS.md").read_text())
     dupes = sorted({h for h in heads if heads.count(h) > 1})
     assert not dupes, f"duplicate rule names: {dupes}"
+
+
+#: a citation of the retired issue log: `ISSUES: name`, also across a comment's line break
+_CITES_THE_ISSUE_LOG = re.compile(r"\bISSUES:[\s#*/]*`?[a-z0-9]+(?:-[a-z0-9]+)*")
+
+
+def test_no_issue_log_citations():
+    """The issue log moved to GitHub Issues on 2026-11-16: cite `issue #N`, not a backlog name."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout.split("\0")
+    files = [ROOT / rel for rel in tracked if rel and (ROOT / rel).is_file()]
+    assert files, "git ls-files listed nothing: this gate reads the tracked files"
+    found = []
+    for path in files:
+        if path == pathlib.Path(__file__).resolve():
+            continue
+        text = path.read_text(errors="ignore")
+        for match in _CITES_THE_ISSUE_LOG.finditer(text):
+            found.append(f"{path.relative_to(ROOT)}:{text.count(chr(10), 0, match.start()) + 1}")
+    assert not found, "cites a backlog name; cite `issue #N`:\n" + "\n".join(found)
+    # the pattern itself, or the gate checks nothing
+    assert _CITES_THE_ISSUE_LOG.search("(`ISSUES: the-release-builds`)")
+    assert _CITES_THE_ISSUE_LOG.search("ISSUES: x")
+    assert _CITES_THE_ISSUE_LOG.search("# see ISSUES:\n# the-release-builds")
+    assert not _CITES_THE_ISSUE_LOG.search("issue #11; docs/ROADMAP.md; MISSUES: none")

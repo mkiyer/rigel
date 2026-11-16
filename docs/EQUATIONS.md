@@ -104,7 +104,7 @@ means `a/2 + q r` and `a/2 + (1−q) r`; conditional on their total the `+` colu
 
 `q = κ` on a `+`-strand slot, `1 − κ` on a `−`; constant at `q = ½`; no row without a strand model. It is the
 likelihood of an expected fraction: an inferred fraction times `M` is no observed Poisson DNA count
-(`ISSUES: the-reader-reads-false-gdna-as-capture`). Gate: `tests/calibration/test_observed_strand_claims.py`.
+(issue #1). Gate: `tests/calibration/test_observed_strand_claims.py`.
 
 **Row arithmetic** (`transfer_rows.h`). A level row is a log-likelihood over `u = log(ρ/ρ_ref)` on a fixed lattice.
 
@@ -121,7 +121,7 @@ likelihood of an expected fraction: an inferred fraction times `M` is no observe
 - *The edge row* (`edge_level_row`). A pure-DNA boundary with count `N_b` and opportunity `E_b` gives
   `Q_b(ρ) = N_b log(min(ρE_b, N_b)/N_b) − min(ρE_b, N_b) + N_b` (Poisson below its mode, flat above), read at
   `ρ = σ(λ)N_e/E_e` on the recipient. It assumes the recipient's DNA density is at least the boundary's
-  (`ISSUES: the-edge-density-floor-under-capture`) and is a projection through the observed total, not an intensity.
+  (issue #41) and is a projection through the observed total, not an intensity.
 
 **3.2b Component opportunities in a face map** (`face_map_lambda`). A boundary with unspliced count `U`, count fraction
 `f`, opportunities `E_g,b`, `E_r,b`, and certified RNA rate `s` on flank `x`:
@@ -132,7 +132,7 @@ The rate is the route sum `Σ_J J/A_J`, plus `S/E_r,b` for a contiguous spliced 
 boundary's profile through this monotone map; the reverse (`splice_out_row`) reads the exon's profile at `λ_x(f)`,
 marginalising `s` over its counting width. Profiles, so no Jacobian. With no RNA added it is §3.2's shift. That the
 two supplied laws share a capture frame is not established here. Gates: `test_splice_out_opportunities.py`,
-`test_transfer_faces.py`; the route rate's width is `ISSUES: message-layer-open-cases`.
+`test_transfer_faces.py`; the route rate's width is issue #45.
 
 **3.3 Conservation with unequal effective lengths is `Σ_c ρ_c E_c = M`**, not `Σ_c ρ_c = M/E` (the message densities
 `ρ = f·M/E`).
@@ -223,7 +223,7 @@ mixture's, `q = M/C = φ share_g + (1−φ) share_r`. Rescaling both crossing co
     (â_g/â_r) / (a_g/a_r) = share_r / share_g      independent of the true mixing ratio
 
 a purely compositional error (`TRAPS: conservation-misses-mis-attribution`), zero iff the two length laws agree. The
-EM's prior reads the gDNA half, `â_g/a_g = q/share_g` per boundary (`ISSUES: the-pooled-q-in-the-gdna-count`).
+EM's prior reads the gDNA half, `â_g/a_g = q/share_g` per boundary (issue #28).
 
 ---
 
@@ -355,7 +355,7 @@ A region resolves a rate only above `~1/E` (Fisher information `ρE`); `ρ ≈ 0
 
 The kernel's `JEFFREYS_REF`. `½ log f_g + ½ log(1−f_g)` on the λ grid is exactly
 Beta(½, ½) in `f_g` — strength 1, mean ½ — and the only grid-width-stable choice (`TRAPS: no-prior-means-haldane`).
-A fitted landscape's gDNA arm is added on top of both halves (`ISSUES: the-gdna-prior-enters-psi-twice`).
+A fitted landscape's gDNA arm is added on top of both halves (issue #21).
 
 **9a. A vertex is unreachable without evidence.** A prior with a density has its median strictly inside `(0, 1)`, and
 with no composition evidence posterior = prior, so the read-out (the median) cannot reach a vertex at any depth. On an
@@ -388,7 +388,7 @@ with only root `r = 0` at `L_n ≥ L_g`. At `ss = 0.99` the span's share is 0 at
 
 `out[i] = raw[i](1 + P/R) = raw[i] + a_i`, `a_i = P·w_i/Σw` at `w_i = raw[i]`: an allocation echoing the current
 posterior, hence neutral within RNA. `AggregatePrior::component_rna_prior_weight` generalises `w`; `pipeline.py` passes
-none (`ISSUES: per-transcript-prior-lane`). At `w_i = raw[i]`, `out[i] = 0` is absorbing: no prior revives a component
+none (issue #31). At `w_i = raw[i]`, `out[i] = 0` is absorbing: no prior revives a component
 with no warm-start evidence, while a flat `P/n` (`P` a fragment count) would lift every component past VBEM's
 activation point, reviving every shadow span.
 
@@ -487,7 +487,7 @@ among the hypotheses; `f_g` is still the θ-marginal's median, `w₊` the RNA-ma
 
 **The witness.** A pure column also explains an interior tilt at the cap. A held RNA level delivered on strand `s`
 certifies `s` carries RNA, so the pure `−s` column is `−∞` wherever the slot's row holds a profile on `s`; with
-nothing delivered both atoms stand (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`).
+nothing delivered both atoms stand (issue #42).
 
 ---
 
@@ -609,7 +609,7 @@ object and above its sum, and concave in `log C` between, so the sum is not conc
 geometric grid from `S` to the largest sum (`CONSTANTS.calibration.junction_cap_grid_points`) and the first maximum
 is taken, so a cap the counts cannot tell from `S` is `S`. The cap is one-sided (`C ≥ S`), and with no level above the
 bulk (`S = 1`) it is 1. The shares are the ruler's own, carried to gDNA's table as an efficiency is (§14), so the fit
-and the lengths it feeds state one model. What it assumes without checking is `ISSUES: the-junction-cap-reads-bookings`.
+and the lengths it feeds state one model. What it assumes without checking is issue #8.
 
 **The efficiency** (`capture_efficiencies`). Each object reads its gDNA count `k` on its support `S` (a region's
 contained, a boundary's crossing) as `ℓ(x) = k log(S eˣ) − S eˣ` over `x = log ρ`, against the fitted landscape as
@@ -635,20 +635,20 @@ as in the landscape's training. In the log the power shrinks every level toward 
 `log c → w log c`: the bulk stays 1, the order of the levels is kept, `S^w ≥ 1`, and the junction cap is fitted from
 `S^w` upward. `w = 1` is the reader and `w = 0` the no-capture line. What it assumes without checking: that RNA on an
 object whose gDNA cannot show is evidence that the library's capture cannot be read there. Off-target RNA in a library
-whose off-target gDNA is thin breaks it (`ISSUES: off-target-rna-dilutes-the-capture-weight`).
+whose off-target gDNA is thin breaks it (issue #2).
 
 **The bulk, the saturation, the unit** (`landscape.census`, `split_basins`). The grid splits into basins at the minima
 between maxima; the bulk is the most massive, since gDNA off the probes outnumbers gDNA on them, and every basin above
 it is an enriched level. `S = exp(x_sat − x_b)` with `x_sat` the most massive enriched peak, 1 if none; the result
 publishes it at the capture weight, `S^w` (`CalibrationResult.gdna_capture_saturation`). Efficiencies are relative
 yields against the bulk (`gdna_bulk_density`), so a factor common to every component cancels at convergence
-(`ISSUES: the-em-stops-before-it-converges`). One basin makes every efficiency exactly 1; no landscape publishes no
+(issue #34). One basin makes every efficiency exactly 1; no landscape publishes no
 bulk, and `transcript_capture_eff_lengths` returns `fl` while `assemble_priors` reads `Σ S_r + Σ M_e`.
 
 **Where the rule is exact.** For gDNA under any capture physics; for another component on the objects where its
 fragments are gDNA's — contained pieces and cuts away from junctions, exon edges and template ends. Near an edge or end
 its fragments splice or stop where gDNA's run on, and a probe captures in genomic coordinates on gDNA but transcript
-coordinates on cDNA (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
+coordinates on cDNA (issue #33).
 
 ---
 

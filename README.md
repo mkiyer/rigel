@@ -225,7 +225,7 @@ its rulings are in [docs/DESIGN.md](https://github.com/mkiyer/rigel/blob/main/do
 | [docs/SUCCESS.md](https://github.com/mkiyer/rigel/blob/main/docs/SUCCESS.md) | How performance is measured: the accumulator, then calibration against an oracle |
 | [docs/TESTING.md](https://github.com/mkiyer/rigel/blob/main/docs/TESTING.md) | The benchmark panels, how to build them, and what the test suite can judge |
 | [docs/ROADMAP.md](https://github.com/mkiyer/rigel/blob/main/docs/ROADMAP.md) | The ranked view of what is next for the 0.8.0 release |
-| [docs/ISSUES.md](https://github.com/mkiyer/rigel/blob/main/docs/ISSUES.md) | The issue log: open problems and the record of what was refused |
+| [Issues](https://github.com/mkiyer/rigel/issues) | Open problems, and what was refused (closed as not planned); the [0.8.0 milestone](https://github.com/mkiyer/rigel/milestone/1) is what the release must fix or state |
 | [docs/TRAPS.md](https://github.com/mkiyer/rigel/blob/main/docs/TRAPS.md) | Mistakes already made, as named rules |
 | [docs/PUBLISHING.md](https://github.com/mkiyer/rigel/blob/main/docs/PUBLISHING.md) | Release workflow for PyPI and Bioconda |
 

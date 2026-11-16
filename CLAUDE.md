@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 A session primer: what Rigel is, where it stands, where a change goes, and how work is done here. Git holds the history
-and the nine docs below hold the detail.
+and the eight docs below hold the detail; open problems are GitHub issues.
 
 ## What Rigel is
 
@@ -63,18 +63,21 @@ The ruling is in `docs/DESIGN.md` §0b.
 |---|---|
 | `docs/SUCCESS.md` | **Start here.** How performance is judged, and the instruments in run order |
 | `docs/ROADMAP.md` | The state, and the ordered next steps |
-| `docs/ISSUES.md` | Every open problem as a named entry |
 | `docs/TRAPS.md` | Mistakes already made, as named rules |
 | `docs/EQUATIONS.md` | The derivations the code depends on |
 | `docs/DESIGN.md` | What is built and the rulings behind it. §0 is the binding vocabulary |
 | `docs/TESTING.md` | The panels, the test chromosome (§0a), and the gates |
 | `docs/MANUAL.md`, `docs/PUBLISHING.md` | The user's manual and the release procedure |
 
+Every open problem is a GitHub issue (https://github.com/mkiyer/rigel/issues). The `0.8.0` milestone
+(https://github.com/mkiyer/rigel/milestone/1) is what the release must fix or state.
+
 - **One home per finding.** When a finding settles, move it to its home and delete it where it was: an open problem to
-  ISSUES, a lesson to TRAPS, a ruling to DESIGN, a derivation to EQUATIONS.
-- **Cite an entry by its name**, e.g. `ISSUES: name`, never by a number.
+  a GitHub issue, a lesson to TRAPS, a ruling to DESIGN, a derivation to EQUATIONS.
+- **Cite an open problem as `issue #N`**, and a TRAPS rule by its name, e.g. `TRAPS: name`. A fix's commit says
+  `Fixes #N`; a refusal closes as not planned, with the number that killed it.
 - **`docs/dev/` is the sandbox.** Nothing there is authoritative and nothing may cite into it.
-- **The source cites no doc.** `tests/test_docs_boundary.py` gates these rules.
+- **The source cites no doc and no issue.** `tests/test_docs_boundary.py` gates these rules.
 
 ## Where a change goes: the calibration layering
 
@@ -125,7 +128,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The baseline: 0 failed / 3,496 passed / 0 skipped, 3,496 collected** (re-derived 2026-11-15, with the capture weight landed). Any failure is a regression.
+**The baseline: 0 failed / 3,497 passed / 0 skipped, 3,497 collected** (re-derived 2026-11-16, with the issue log moved to GitHub). Any failure is a regression.
 - Re-derive the count; never edit it by hand. Only adding or removing a test moves it.
 - A golden update (`--update-golden`) is where a regression gets laundered into "intended". Read the diff and check the
   truth-scored instruments first.

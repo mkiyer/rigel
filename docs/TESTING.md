@@ -50,7 +50,7 @@ EM, because a length gap hands the EM part of the answer (`TRAPS: a-length-gap-b
 
 **The low-gDNA side panel** (`scripts/sim/configs/gdna_ladder_lowg.yaml`, `suite/ladder_lowg/`) is the ladder with two
 gDNA rates between its `g00` and `g05` rungs, stranded only, everything else the ladder's own. The ladder steps from no
-gDNA to 5 %, and a capture reader can fail between them (`ISSUES: the-reader-reads-false-gdna-as-capture`).
+gDNA to 5 %, and a capture reader can fail between them (issue #1).
 
 | rung | g001 | g01 |
 |---|---|---|

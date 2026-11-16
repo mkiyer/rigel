@@ -1,8 +1,8 @@
 # ROADMAP — the state and the next steps
 
 The tool's state in one paragraph, the claims that still hold with the instrument that re-derives each, and the ordered
-next steps. Every open problem's substance is in `ISSUES.md`; how performance is judged is `SUCCESS.md`; the changelog
-is git.
+next steps. Every open problem's substance is in its GitHub issue (https://github.com/mkiyer/rigel/issues); how
+performance is judged is `SUCCESS.md`; the changelog is git.
 
 ## State
 
@@ -21,13 +21,13 @@ depth panels and the one-probe panel, pinned and fractional. Against 1f97ff96, t
 - STAR's zero-gDNA rows fall: stranded capture OFF, the switch row, 1.90 M / 415 k → 0.78 M / 120 k (the line 0.20 M /
   27 k); stranded capture ON 1.19 M / 386 k → 0.67 M / 250 k; unstranded capture OFF 342 k / 147 k → 256 k / 55 k. The
   switch row stays about four times the line, because calibration's false gDNA counts as visible there
-  (`ISSUES: the-reader-reads-false-gdna-as-capture`).
+  (issue #1).
 - The one-probe panel keeps its probe from 5 % gDNA up: weight 0.96–1.00, genes within 0.2 %.
 - The test chromosome's transcripts move by up to 5 % with its genes and pools flat, which is
-  `ISSUES: the-em-stops-before-it-converges`. At 1/100 depth the weight falls even at 5 % gDNA (0.44 under capture),
+  issue #34. At 1/100 depth the weight falls even at 5 % gDNA (0.44 under capture),
   and the genes there improve (−38 %).
 - On three real captured cfRNA libraries the weight is 0.25, 0.95 and 0.32. On the 93 %-gDNA one it calls some DNA RNA
-  (`ISSUES: off-target-rna-dilutes-the-capture-weight`).
+  (issue #2).
 
 The identity references are re-frozen on this tree (`TESTING.md` §6).
 
@@ -36,18 +36,18 @@ alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope stra
 identical reads, and transcript error 0.10–0.47 of 0.7.1's. It also states eight failures, each an open entry
 but those marked closed:
 - unstranded sparse capture, where most true gDNA is called RNA in every build, and the deferred stratum (unstranded ×
-  capture ON) (`ISSUES: unstranded-capture-calls-gdna-rna`);
+  capture ON) (issue #4);
 - capture outside the annotation's partition: with exact probe copies, gDNA called RNA rises ×2.7–2.8 at stranded
-  capture ON, mostly away from the copies (`ISSUES: capture-outside-the-annotation-partition`);
+  capture ON, mostly away from the copies (issue #3);
 - on STAR at g00, the capture tail, whose few uncertain gDNA bookings swing ×2 across draw seeds, and the switch row,
   where under 0.1 % of templates move transcript error ×9.5, worse than 0.7.1
-  (`ISSUES: the-reader-reads-false-gdna-as-capture`). With the capture weight both beat 0.7.1 on the pinned seed (the
+  (issue #1). With the capture weight both beat 0.7.1 on the pinned seed (the
   switch row 0.78 M transcript errors against 1.38 M), and the switch row stays four times the no-capture line;
 - two gene regressions against 0.7.1, both closed: STAR g98 κ0.99 OFF with the share over one tally (37,304 → 7,595,
   against 22,898), and the STAR g00 tail with the capture weight (386 k → 250 k against 328 k, one seed);
-- VCaP exome DNA called RNA ×1.48 against 0.7.1 on identical reads (`ISSUES: vcap-exome-dna-called-rna`);
+- VCaP exome DNA called RNA ×1.48 against 0.7.1 on identical reads (issue #5);
 - annotation omission: unannotated unspliced RNA booked gDNA, and retained genes damaged ×1.4–3.0
-  (`ISSUES: annotation-omission`).
+  (issue #12).
 
 No preview ships (the owner's ruling, 2026-11-04): a pre-release waits for the capture reader and a review of the open
 issues. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_preview_validation/`.
@@ -57,7 +57,7 @@ issues. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_prev
 | claim | re-derived by |
 |---|---|
 | HEAD beats 0.7.1 on the ladder's three in-scope strata, on both inputs | `quant_accuracy.py` per stratum, pinned and fractional, `--bam` for the STAR rung, beside the tag |
-| HEAD's source probabilities beat 0.7.1's by the proper score on identical reads, and most of the exchange is compatible with approximately calibrated source uncertainty at the resolution tested | the validation's `paired.py`, outside the tree (`ISSUES: instrument-ledger`) |
+| HEAD's source probabilities beat 0.7.1's by the proper score on identical reads, and most of the exchange is compatible with approximately calibrated source uncertainty at the resolution tested | the validation's `paired.py`, outside the tree (issue #36) |
 | Scarce gDNA at 1/10 and 1/100 depth shows no blow-up, and dense probe panels hold | `quant_accuracy.py` on the test chromosome's depth and probe panels |
 | Calibration's library gDNA is near truth on the in-scope strata; its per-locus count errs both ways, mostly its own error rather than the pooled share | `calibration_vs_oracle.py`, `prior_vs_oracle.py` |
 | Under capture the capture reader carries most of the accuracy, and at STAR g00 most of the error | `quant_accuracy.py --bam` beside `--arm no_capture`, `ruler_vs_truth.py` |
@@ -68,15 +68,10 @@ issues. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_prev
 ## Next
 
 1. **The capture-reader session, developed with the owner.** It starts from what the capture weight leaves,
-   `ISSUES: the-reader-reads-false-gdna-as-capture` and `ISSUES: off-target-rna-dilutes-the-capture-weight`, with
-   `ISSUES: capture-outside-the-annotation-partition`, `ISSUES: unstranded-capture-calls-gdna-rna`,
-   `ISSUES: vcap-exome-dna-called-rna` and `ISSUES: an-anchor-only-landscape-reads-as-capture` read beside it. Its A/Bs
-   need the paired proper score in the tree (`ISSUES: instrument-ledger`). The trade-off between strata is the owner's
-   to set.
-2. **A review of the open issues**, each entry read for a problem a pre-release cannot carry.
-3. **The pre-release**, with its supported uses and its stated failures: `ISSUES: unstranded-capture-calls-gdna-rna`,
-   `ISSUES: capture-outside-the-annotation-partition`, `ISSUES: the-reader-reads-false-gdna-as-capture`,
-   `ISSUES: off-target-rna-dilutes-the-capture-weight`, `ISSUES: gdna-in-duplicated-blocks-is-called-rna`, `ISSUES: vcap-exome-dna-called-rna`,
-   `ISSUES: annotation-omission`, as the capture reader leaves them; before any tag, `ISSUES: the-release-builds`.
+   issue #1 and issue #2, with issue #3, issue #4, issue #5 and issue #6 read beside it. Its A/Bs need the paired
+   proper score in the tree (issue #36). The trade-off between strata is the owner's to set.
+2. **A review of the open issues**, each read for a problem a pre-release cannot carry.
+3. **The pre-release**, with its supported uses and its stated failures: issue #4, issue #3, issue #1, issue #2,
+   issue #10, issue #5, issue #12, as the capture reader leaves them; before any tag, issue #11.
 
-After that, `ISSUES.md`'s next tier, in its order.
+After that, the rest of the `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1), in issue order.

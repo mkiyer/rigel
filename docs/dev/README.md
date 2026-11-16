@@ -10,7 +10,7 @@ Working notes live here while a piece of work is in progress. Nothing here is se
 
    | the finding is… | its home |
    |---|---|
-   | an open problem | `docs/ISSUES.md` |
+   | an open problem | a GitHub issue (https://github.com/mkiyer/rigel/issues) |
    | the current state and the next steps | `docs/ROADMAP.md` |
    | a mistake not to repeat | `docs/TRAPS.md` |
    | a settled decision | `docs/DESIGN.md` |

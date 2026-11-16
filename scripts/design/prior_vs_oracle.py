@@ -386,7 +386,7 @@ def _print_drained_frame(rows: list[dict]) -> None:
           f"{amb:,} ({amb / max(held, 1):.2%}) bounds the per-origin truth attribution.")
     print(f"     ⚠ the drain deposited {leak:,} spliced records into the gdna partition on "
           f"{n_leak}/{len(d)} conditions — production behaviour, RECORDED "
-          "(ISSUES: drain-contaminates-certified-rna), never an oracle refusal.")
+          "(issue #17), never an oracle refusal.")
 
 
 def _print_per_condition(rows: list[dict]) -> None:
@@ -419,7 +419,7 @@ def report(rows: list[dict], settings=()) -> None:
     _print_arm_table(rows, "② O vs S — THE POOLED SHARE'S OWN CONTRIBUTION, ISOLATED · gdna_count",
                      "O_vs_S",
                      "⛔ What the pooled share moves off gDNA it moves onto RNA, so no gate on the locus total "
-                     "can see it (ISSUES: the-pooled-q-in-the-gdna-count).")
+                     "can see it (issue #28).")
     _print_drained_frame(rows)
     _print_per_condition(rows)
     print()
