@@ -14,29 +14,35 @@ settings.
 ## OPEN — now: the capture reader
 
 ### the-reader-reads-false-gdna-as-capture
-`priority: now — the largest error on aligned input, and the next session's subject · stage: calibration · kind: defect`
+`priority: now — the largest error on aligned input · stage: calibration · kind: defect`
 `capture_efficiency._read` turns each object's deconvolved gDNA mass, ψ's posterior-median booking, into a capture
 efficiency by reading it as a Poisson count on its support against the landscape's bulk, one grid cell. Calibration's
 false gDNA on a few objects then reads as enormous capture, which every EM length carries. Where the bulk sits at the
 resolution wall (STAR g00, 5.0×10⁻⁷ per bp) a booking ψ prefers over none by e^4.6 reads as e^250; an object holding under
-one expected gDNA fragment cannot tell depletion from capture.
-- STAR g00 κ0.99 OFF, the switch row: 1.90 M transcript errors against 0.20 M with every efficiency at 1 and 1.38 M for
-  0.7.1 (genes 414 k against 213 k); under 0.1 % of templates move it ×9.5. The 229 regions and 581 boundaries read above
-  10× carry the gap: setting only them to 1 closes 99 %.
-- STAR g00 κ0.99 ON, the capture tail: a few uncertain gDNA bookings swing RNA called gDNA ×2 across draw seeds, carrying
-  1.1–1.4 M transcript errors; genes 386 k against 0.7.1's 328 k.
+one expected gDNA fragment cannot tell depletion from capture. Since 2026-11-15 the reading is raised to the capture
+weight (`DESIGN.md` §7.2), which fades it where the library's reads sit on objects holding no gDNA; the false readings
+remain, at a lower weight. Transcript / gene error, the shipped reader of 1f97ff96 → the weight landed, beside the
+no-capture line (one seed):
+- STAR g00 κ0.99 OFF, the switch row: 1,897,401 / 414,763 → 780,582 / 120,075 at weight 0.187, against the line's
+  200,330 / 26,837 and 0.7.1's 1.38 M transcripts and 213 k genes. Calibration books gDNA of its own on objects holding
+  about a fifth of the read mass in a library that has none, so the weight counts it as visible, and the reader keeps
+  9.3× of its 149,367× saturation. Before the weight, the 229 regions and 581 boundaries read above 10× carried the
+  gap: setting only them to 1 closed 99 %.
+- STAR g00 κ0.99 ON, the capture tail: 1,188,241 / 385,519 → 672,234 / 250,244 at weight 0.052, against the line's
+  652,274 / 239,710 and 0.7.1's 328 k genes. Its few uncertain gDNA bookings swung RNA called gDNA ×2 across draw seeds
+  under the shipped reader; the other seeds are not re-run.
+- STAR g00 unstranded OFF: 342,493 / 146,647 → 255,694 / 55,325 at weight 0.259, against the line's 204,248 / 29,026.
 - Under capture the reader is most of the accuracy (every efficiency at 1: stranded ON transcripts ×6.7, genes ×14), and it
   amplifies every upstream change, so a scan or scoring change is read beside `quant_accuracy.py --arm no_capture`.
-- **The hole between 0 and 1 % gDNA under capture.** The low-gDNA side panel (simulator's alignments, stranded,
-  transcript / gene error): at 0.1 % gDNA capture ON 4,662,854 / 438,698 against 625,980 / 232,061 with every
-  efficiency at 1, so reading capture costs ×7.4 / ×1.9 there. At 1 % it is 512,257 / 70,459 against 648,510 / 259,982,
-  at 5 % 283,588 / 53,379 against 739,602 / 369,729, and at 0 % 620,762 / 229,741. A few thousand gDNA fragments fit a
-  landscape, the bookings of objects holding almost none read as levels, and the isoforms of one gene take
-  inconsistent lengths. Located by one rung at one depth (10 M fragments).
-- **False depletion off capture.** The same panel, capture OFF: 373,270 / 26,548 at 0.1 % against 146,083 / 10,993 at
-  0 % and 137,220 / 10,930 at 1 %. A level floored at the bulk removes it (−62 % / −64 %), but the reader reads below
-  1 on purpose: its bulk is the largest basin, which under a captured majority is the captured level
-  (`tests/calibration/test_capture_efficiency.py`), and no panel holds that case. The floor needs a ruling.
+- **The hole between 0 and 1 % gDNA under capture**, the low-gDNA side panel (simulator's alignments, stranded ON): at
+  0.1 % 4,662,866 / 438,698 → 1,049,271 / 228,305 at weight 0.129, against the line's 625,202 / 232,081, so genes are
+  on the line and transcripts 1.7× it (the release ruling reports transcripts there and does not require them). At 1 %
+  the weight is 0.97 and the reading stands (513,558 / 70,556 → 509,915 / 69,957; the line 648,791 / 259,961).
+- **False depletion off capture**, the same panel at capture OFF: 0.1 % 373,318 / 26,528 → 183,280 / 12,238 at weight
+  0.280, and 1 % 137,013 / 10,926 → 131,453 / 11,113 at 0.597, against the line's 140,017 / 9,567 and 126,849 /
+  11,188. The reader reads below 1 on purpose: its bulk is the largest basin, which under a captured majority is the
+  captured level (`tests/calibration/test_capture_efficiency.py`), and no panel holds that case. The rest of this error
+  is the floor's, which still needs a ruling.
 
 The 2026-11-11 audit also finds enriched basins on STAR capture-OFF at g50, g05 and g00 under both strandednesses.
 Removing the reader's cap therefore changes all six rows despite absent capture; it is an exact no-op only at g98
@@ -45,14 +51,37 @@ end to end: transcript error rises 0.2 % (1,896,916 → 1,899,995). The other fi
 A/B already rejected the candidate (`$RIGEL_RUNS/prototypes/2026-11-10_length_gap/`, section 7).
 
 Known: candidates centred on ψ's booking keep the tail (widening the count by ψ's Var(log f_g) is refused); candidates
-reading only the object's own evidence lose the deferred stratum. Open: the bulk's uncertainty propagated jointly with
-the object's; a regularised estimator that shrinks an object toward uniform capture from its own evidence, with no count
-threshold or clamp. Not candidates, each screened end to end on 2026-11-10 to 11-13: a reader fitted on the located
-objects alone (best at g98 ON, and at zero gDNA off capture it reads capture, +446 % / +736 %), and a reader in which a gene's
-objects share a prior probability of enrichment (its zero-gDNA limit is a library switch that does not hold on other
-probe designs). Receipts: `$RIGEL_RUNS/prototypes/2026-11-10_length_gap/`, sections 10 and 15–18. Instruments:
-`quant_accuracy.py --arm no_capture`, `--bam`, `ruler_vs_truth.py`; the low-gDNA side panel
-(`scripts/sim/configs/gdna_ladder_lowg.yaml`).
+reading only the object's own evidence lose the deferred stratum. Library weights that lose a stratum or a panel: from
+ψ's variance, or from the count the strand solve vouches for (unstranded capture ON fades), and from each object's count
+against the landscape's spread (one probe fades: `$RIGEL_RUNS/prototypes/2026-11-15_capture_fade/`). The landed weight
+cannot tell false gDNA from a small panel: both are a small set of objects where gDNA shows. Open: the bulk's
+uncertainty propagated jointly with the object's; a regularised estimator that shrinks an object toward uniform capture
+from its own evidence, with no count threshold or clamp. Not candidates, each screened end to end on 2026-11-10 to
+11-13: a reader fitted on the located objects alone (best at g98 ON, and at zero gDNA off capture it reads capture, +446
+% / +736 %), and a reader in which a gene's objects share a prior probability of enrichment (its zero-gDNA limit is a
+library switch that does not hold on other probe designs). Receipts: `$RIGEL_RUNS/prototypes/2026-11-10_length_gap/`,
+sections 10 and 15–18. Instruments: `quant_accuracy.py --arm no_capture`, `--bam`, `ruler_vs_truth.py`; the low-gDNA
+side panel (`scripts/sim/configs/gdna_ladder_lowg.yaml`).
+
+### off-target-rna-dilutes-the-capture-weight
+`priority: now — DNA called RNA at high gDNA on a captured library · stage: calibration · kind: defect`
+The capture weight is a mean over the library's one-strand reads (`DESIGN.md` §7.2), so RNA on objects whose own gDNA is
+too thin to show lowers it for the whole library, a readable panel included. In a deep library the off-target exons hold
+gDNA of their own and the weight stays near 1; where the off-target gDNA is thin it does not.
+- cfRNA-B (real, stranded, captured; 1.39 M unspliced fragments; 93 % gDNA in the EM; 17,306 regions read above 2×,
+  its panel read consistently at the saturated level): weight 0.946. Off-target RNA on highly expressed exons (ACTB,
+  HBB, TMSB4X, EEF1A1: 5.4 % of the unspliced mass, its booked gDNA about 0.01–0.1 per object) fades the saturation
+  from 4,239× to 2,702×. No truth; read by the strand of each gene's reads (reverse-stranded: a gene's RNA sits on one
+  strand, gDNA on both). Of the 1,000 largest gene moves against the shipped reader, 470 of the net +487 fragments go
+  to 816 genes whose reads are strand-balanced and already over-called (9,328 → 9,798, against 7,350 by strand), and 12
+  genes go from 0 to 5 or more (PAX1 0 → 18).
+- On the simulator the cost is small: the one-probe test chromosome pooled with the whole-genome capture-OFF library at
+  5 % gives 0.884, and the probed gene at a forced 0.87 reads +70 fragments at 5 % gDNA and nothing at 25–98 %.
+
+It is DNA called annotated RNA at high gDNA, the error the release ranks first. Not run: a weight from whether CAPTURED
+gDNA would show on each object (the saturated level × the bulk × its support), which would keep cfRNA-B but trusts the
+saturated level that the hole and STAR g00 inflate. Receipts: `$RIGEL_RUNS/prototypes/2026-11-15_capture_fade/`
+(README, the external review, points 1 and 7).
 
 ### capture-outside-the-annotation-partition
 `priority: now — a stated failure of the preview · stage: calibration · kind: defect`
@@ -211,7 +240,11 @@ On the STAR rung with annotation withheld from the quantifier:
 - unannotated splices are withheld by the scan's annotated-path rule and go unscored: 26 %;
 - retained genes are damaged ×1.4–3.0 and retained transcripts ×1.4–4.9 with lncRNA withheld, and withholding processed
   pseudogenes (1 % of the RNA) raises the g00 rows' transcript error ×1.7–1.9;
-- under isoform omission about a third of the missing isoforms' RNA leaves the gene table.
+- under isoform omission about a third of the missing isoforms' RNA leaves the gene table;
+- on real captured libraries the capture weight releases such RNA to a transcript on the other strand: on cfRNA-A and
+  cfRNA-C a single-exon lncRNA gains 687 and 530 fragments from reads 99.8 % antisense to it. Calibration books that RNA
+  gDNA, and the shipped reader read its region as each library's most extreme capture (2.6 M×, 37 k×), which kept it in
+  gDNA; at the weight the region reads far less. The weight also takes 50–302 fragments off two lncRNAs of the same kind.
 
 The same rule books real unannotated transcription as gDNA in calibration (all of the test chromosome's `test_blank`
 shadow RNA), biasing any pooled structural rate. Two routes are open: admitting RNA at unannotated slots needs a ruling,

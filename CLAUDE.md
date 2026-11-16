@@ -30,10 +30,10 @@ for robustness, so a number measured at the panel's nascent share is a stress re
 
 ## Where things stand
 
-- `src/`'s numbers are 0645adea's (the junction cap) plus the **share over one tally**, landed 2026-11-14: the EM's
-  gDNA share is calibration's gDNA count over its own count of every fragment on the locus. Of the screen's 56 rows the
-  simulator's alignments and the test chromosome move by at most 1.5 %, the STAR rung's contaminated in-scope rows
-  fall, and two STAR rows rise (`docs/ROADMAP.md`). This tree is the baseline.
+- `src/`'s numbers are 1f97ff96's (the junction cap and the share over one tally) plus the **capture weight**, landed
+  2026-11-15: the capture reading is raised to the share of the library's reads whose own gDNA would show. At 5 % gDNA
+  and above no in-scope whole-genome row rises by more than about 1 %; the 0.1 % hole closes on genes; STAR's zero-gDNA
+  rows fall, the switch row still about four times the no-capture line (`docs/ROADMAP.md`). This tree is the baseline.
 - The validation of ec996bba beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
   (`docs/ROADMAP.md`).
 - **No preview ships.** A pre-release waits for the capture reader and a review of the open issues.
@@ -125,7 +125,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The baseline: 0 failed / 3,480 passed / 0 skipped, 3,480 collected** (re-derived 2026-11-14, with the share over one tally landed). Any failure is a regression.
+**The baseline: 0 failed / 3,496 passed / 0 skipped, 3,496 collected** (re-derived 2026-11-15, with the capture weight landed). Any failure is a regression.
 - Re-derive the count; never edit it by hand. Only adding or removing a test moves it.
 - A golden update (`--update-golden`) is where a regression gets laundered into "intended". Read the diff and check the
   truth-scored instruments first.

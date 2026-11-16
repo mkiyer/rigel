@@ -55,6 +55,7 @@ def _valid_kwargs() -> dict:
         rna_neg_frac_boundary=np.zeros(N_BOUNDARIES),
         gdna_density_global=1e-3,
         gdna_bulk_density=None,
+        gdna_capture_weight=1.0,
         gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=np.ones(N_REGIONS),
         gdna_capture_efficiency_boundary=np.ones(N_BOUNDARIES),
@@ -377,6 +378,19 @@ def test_the_saturation_is_finite_and_at_least_the_bulk():
     for bad in (0.5, 0.0, float("nan"), float("inf")):
         kw["gdna_capture_saturation"] = bad
         with pytest.raises(ValueError, match="gdna_capture_saturation"):
+            CalibrationResult(**kw)
+
+
+def test_the_capture_weight_is_a_share_of_the_reads():
+    """The weight the capture reading is raised to is the share of the reads whose own gDNA would show, so 0 and 1 are
+    valid and a value outside them, or a non-finite one, is refused."""
+    kw = _valid_kwargs()
+    for good in (0.0, 0.25, 1.0):
+        kw["gdna_capture_weight"] = good
+        CalibrationResult(**kw)
+    for bad in (-0.01, 1.01, float("nan"), float("inf")):
+        kw["gdna_capture_weight"] = bad
+        with pytest.raises(ValueError, match="gdna_capture_weight"):
             CalibrationResult(**kw)
 
 

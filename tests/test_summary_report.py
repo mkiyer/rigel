@@ -359,12 +359,13 @@ def test_the_calibration_track_is_written_as_feather_and_bedgraph(quant_run):
 
 def test_the_calibration_block_is_the_library_scalars_the_manual_lists(quant_run):
     """Calibration's capture answer is the bulk density it reads capture against (null when no landscape was fitted),
-    the saturated level over it and the junction cap fitted above that level; the user manual's listing of the block is
-    the same set."""
+    the weight its reading is raised to, the saturated level over the bulk at that weight and the junction cap fitted
+    above that level; the user manual's listing of the block is the same set."""
     written = set(quant_run[4]["calibration"])
     assert written == {
         "gdna_density_global",
         "gdna_bulk_density",
+        "gdna_capture_weight",
         "gdna_capture_saturation",
         "junction_capture_cap",
         "fraction_rna_sense",

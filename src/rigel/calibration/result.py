@@ -175,18 +175,25 @@ class CalibrationResult:
     #: bulk, in gDNA fragments per bp (`capture_efficiency`). ``None`` when no landscape was fitted, and then every
     #: efficiency is exactly 1; otherwise positive and finite.
     gdna_bulk_density: float | None
-    #: The landscape's saturated level against the bulk: the most massive enriched basin's peak over the bulk peak,
-    #: ``> 1``, or exactly 1 when nothing lies above the bulk or no landscape was fitted. The ruler's junction cap
-    #: starts at it and RNA's spliced fragments can raise it (`capture_eff_length.fit_junction_cap`).
+    #: The weight the capture reading is raised to, in [0, 1]: the share of the one-strand unspliced mass whose object
+    #: would show a gDNA fragment of its own (`capture_efficiency.visible_share`), over the final solve's bookings. The
+    #: saturated level and every efficiency below are the reader's answer raised to it (`capture_efficiency.weighted`):
+    #: 1 keeps the reader's answer, 0 claims no capture anywhere. Published with or without a landscape.
+    gdna_capture_weight: float
+    #: The landscape's saturated level against the bulk at the capture weight: the most massive enriched basin's peak
+    #: over the bulk peak, raised to ``gdna_capture_weight``; at least 1, and exactly 1 when nothing lies above the bulk
+    #: or no landscape was fitted. The ruler's junction cap starts at it and RNA's spliced fragments can raise it
+    #: (`capture_eff_length.fit_junction_cap`).
     gdna_capture_saturation: float
-    #: float64[n_regions]: each region's capture efficiency ``exp(E[min(x, s(x))] − x_b)``, its own gDNA density
+    #: float64[n_regions]: each region's capture efficiency ``exp(w · (E[min(x, s(x))] − x_b))``, its own gDNA density
     #: against the bulk with the landscape as a two-group prior and its contained count as the likelihood
-    #: (`capture_efficiency.capture_efficiencies`). A relative yield: 1 at the bulk, above 1 under capture, and exactly
-    #: 1 everywhere with no bulk density. The ruler and the locus prior price every contained share at it.
+    #: (`capture_efficiency.capture_efficiencies`), raised to the capture weight ``w``. A relative yield: 1 at the bulk,
+    #: above 1 under capture, and exactly 1 everywhere with no bulk density. The ruler and the locus prior price every
+    #: contained share at it.
     gdna_capture_efficiency_region: np.ndarray
     #: float64[n_boundaries]: each boundary's capture efficiency, from its crossing count on its crossing support, in
-    #: the same unit. The ruler and the locus prior price every conserved boundary share at it, and the ruler prices a
-    #: junction from the efficiencies beside it (`capture_eff_length`).
+    #: the same unit and at the same weight. The ruler and the locus prior price every conserved boundary share at it,
+    #: and the ruler prices a junction from the efficiencies beside it (`capture_eff_length`).
     gdna_capture_efficiency_boundary: np.ndarray
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
 
@@ -217,6 +224,7 @@ class CalibrationResult:
                 f"got {self.gdna_density_global}."
             )
         _check_unit_interval(self.rna_sense_frac, "rna_sense_frac")
+        _check_unit_interval(self.gdna_capture_weight, "gdna_capture_weight")
 
     def _check_sj_regions(self) -> None:
         """Each sj names two regions of this result's own region axis: integer ids, one per sj, below ``n_regions``."""

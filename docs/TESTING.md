@@ -297,10 +297,10 @@ untouched stages drift between sittings, so alternate the arms in one sitting an
 **Every speed-up, rename or refactor is a proven numeric no-op** (`scripts/design/rename_identity.py`): `--freeze` a
 reference once from the tree a stage starts on, then `--check` each step against it, on a ladder condition and on a
 real library (`--bam`). The default `--reference` does not exist and prints ⛔ rather than failing, so pass it and read
-the log. The current references, frozen on the tree with the share over one tally landed (2026-11-14); the same
+the log. The current references, frozen on the tree with the capture weight landed (2026-11-15); the same
 directory holds `identity_head_{g00off,g50u_on,g50s_on}.json` for the zero control and the two capture-ON strata:
 
-    P=$RIGEL_RUNS/arms/2026-11-14_identity S=$RIGEL_RUNS/suite
+    P=$RIGEL_RUNS/arms/2026-11-15_identity S=$RIGEL_RUNS/suite
     python scripts/design/rename_identity.py --check --suite $S/ladder --index $S/rigel_index \
       --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference $P/identity_head_g05off.json
     python scripts/design/rename_identity.py --check --index $RIGEL_RUNS/refs/rigel_index \

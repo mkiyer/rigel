@@ -361,8 +361,8 @@ def fit_junction_cap(
     index: "TranscriptIndex",
     tables: "LengthTables",
 ) -> float:
-    """The level a junction's price is capped at (:func:`_junction_prices`): the landscape's saturated level, raised as
-    far as RNA's own spliced fragments support.
+    """The level a junction's price is capped at (:func:`_junction_prices`): the saturated level calibration publishes
+    (the landscape's, at the capture weight), raised as far as RNA's own spliced fragments support.
 
     The saturated level is gDNA's, and gDNA never deposits on a junction; RNA does. In an exon region RNA and gDNA are
     the same placements under the same probes, so a transcript's fragments split between a junction and an exon region
@@ -382,8 +382,8 @@ def fit_junction_cap(
     covering the region uses the junction, so no other junction's and no other isoform's fragments are read; a
     junction is a row of the sj axis, its two regions and its strand. A junction with no such region, with no fragment
     in its footprint, or whose price the cap cannot move is not in the fit, and with none in it the cap is the
-    saturated level. So it is with no level above the bulk (a saturated level of exactly 1): the reader read no
-    capture, and there is none for a junction to exceed.
+    saturated level. So it is at a saturated level of exactly 1 (no level above the bulk, or a capture weight of 0): no
+    capture is read, and there is none for a junction to exceed.
     """
     from .splice_graph import build_sj_geometry_arrays
 

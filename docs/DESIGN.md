@@ -541,16 +541,34 @@ used to construct validation truth do not become inputs to the production estima
 
 No mode is located and nothing gated: a one-basin landscape, no landscape, and an object with no gDNA support read 1.
 The crossings are read once, by their boundary. The unit is the bulk (`gdna_bulk_density`), so an enriched object reads
-far above 1, and the fully captured level is `gdna_capture_saturation`. False gDNA on a near-gDNA-free library reads as
-capture (`ISSUES: the-reader-reads-false-gdna-as-capture`); that off-target cDNA is depleted as gDNA is remains untested
+far above 1, and the fully captured level is the saturation.
+
+> **The weight** (`capture_efficiency.visible_share`, `weighted`; the owner's go, 2026-11-15). The published reading is
+> the reader's raised to one library-wide weight `w` (`gdna_capture_weight`), every efficiency and the saturated level
+> alike: `c → c^w`. `w` is the share of the one-strand unspliced mass whose object would show a gDNA fragment of its
+> own (EQUATIONS §11). Where gDNA is dense enough to be seen where the library's reads sit, `w` is near 1 and the
+> reading stands; where the reads sit on objects holding none, the few objects whose gDNA shows cannot speak for them,
+> and the claim fades toward no capture anywhere (`w = 0`, the no-capture line).
+
+The weight carries the release ruling of 2026-11-14: right wherever gDNA is easy to see, 5 % and above; where it is
+sparse the capture claim shrinks to 1, keeping genes and giving up transcripts. It is one weight because capture is a
+library pattern, and because the hole between 0 and 1 % gDNA is a transcript read inconsistently: some of its objects
+hold real gDNA evidence and read thousands-fold, its RNA-heavy neighbours read 1, and shrinking each object toward 1
+from its own evidence leaves that in place. It is continuous and has no constant: no detector, switch or threshold. Refused on the screen: a weight scaled by the landscape's spread (one probe
+reads as weak capture and fades), and one from ψ's own variance (an unstranded slot says nothing of its own gDNA, so
+unstranded capture ON fades). What it costs is `ISSUES: off-target-rna-dilutes-the-capture-weight`.
+
+False gDNA on a near-gDNA-free library still reads as capture, faded by the weight but not removed
+(`ISSUES: the-reader-reads-false-gdna-as-capture`); that off-target cDNA is depleted as gDNA is remains untested
 (`ISSUES: capture-premise-untested-on-cdna`).
 
 ### 7.3 The result
 
 `CalibrationResult` publishes per region and boundary the deconvolved gDNA and RNA masses (certified spliced crossings
 join RNA whole), the composition, the gDNA lengths, gDNA's conserved share at every boundary
-(`gdna_boundary_conserved_len`, unbounded where unmasked, since gDNA's template does not end), the efficiencies, κ and
-the QC density `gdna_density_global`, a ratio of sums. A zero-gDNA library and a pure-RNA object are valid outputs.
+(`gdna_boundary_conserved_len`, unbounded where unmasked, since gDNA's template does not end), the efficiencies at the
+capture weight and the weight itself, κ and the QC density `gdna_density_global`, a ratio of sums. A zero-gDNA library
+and a pure-RNA object are valid outputs.
 
 ---
 
@@ -646,12 +664,12 @@ With no landscape every length is its uncontracted span, bit-identically.
   `[0, max(the junction cap, the best object it touches)]`, since a fragment binds its best single probe part
   (`capture_eff_length._junction_prices`). **Capture is local**: only objects within a fragment of it enter.
 - **The junction cap is RNA's** (`capture_eff_length.fit_junction_cap`, landed 2026-11-13). gDNA never crosses a
-  junction, so the landscape's saturated level only bounds what gDNA shows. The cap starts there and is raised as far
-  as the library's junctions support, each read on its own footprint: its conserved spliced mass against the
-  unspliced RNA of the exon regions beside it that its transcripts alone cover (`EQUATIONS.md` §11). The counts never
-  lower it, and with no level above the bulk (a saturated level of exactly 1) it is not fitted: no capture is read,
-  so there is none for a junction to exceed. The lengths and a multimapper's place weights read the one value
-  (`summary.json`'s `junction_capture_cap`).
+  junction, so the landscape's saturated level only bounds what gDNA shows. The cap starts there, at the capture weight
+  (§7.2), and is raised as far as the library's junctions support, each read on its own footprint: its conserved spliced
+  mass against the unspliced RNA of the exon regions beside it that its transcripts alone cover (`EQUATIONS.md` §11).
+  The counts never lower it, and with no level above the bulk (a saturated level of exactly 1) it is not fitted: no
+  capture is read, so there is none for a junction to exceed. The lengths and a multimapper's place weights read the one
+  value (`summary.json`'s `junction_capture_cap`).
 - **A junction's price is never pooled**: some are probed by a probe spanning the junction and some are not, so each
   keeps its own two boundaries and intron, no junction's price is evidence for another's, and any gain from pooling
   them is chance another panel reverses. The cap is the rule's one library level, as the saturated level was, and its

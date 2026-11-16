@@ -18,11 +18,19 @@ common to every efficiency cancels in the EM.
   outside every enriched basin), so capture saturates per level.
 - Saturation: ``exp(x_sat − x_b)`` for the most massive enriched basin's peak ``x_sat``, or 1 when there is none; the
   junction price saturates at it (``capture_eff_length``).
+- Weight (``weighted``): the published reading is the reader's raised to one library-wide weight ``w`` in [0, 1], every
+  efficiency and the saturation alike, so each level keeps the share ``w`` of its distance from the bulk in nats. ``w``
+  is the share of the one-strand unspliced mass whose object would show a gDNA fragment of its own
+  (``visible_share``). Where gDNA is dense enough to be seen where the library's reads sit the reading stands; where
+  the reads sit on objects holding none, the few objects whose gDNA shows cannot speak for them and the claim fades
+  toward no capture anywhere. One weight per library, because capture is a library pattern, and a reading that holds
+  on some objects of a transcript and not on others gives the transcript inconsistent lengths.
 
 Each object reads the fragments the deposit rule gives it: a region its contained gDNA count on its contained support,
 a boundary its crossing count on its crossing support, never apportioned onto the regions beside it. An object with
 no gDNA support (``S = 0``) reads 1. Objects are read in row tiles (``simplex_logodds.block_rows``) with every sum
-along one object's row, so the tile height changes no bit. Layer 5; ``calibrate`` publishes the reading on the result.
+along one object's row, so the tile height changes no bit. Layer 5; ``calibrate`` computes the weight from its final
+solve and publishes the weighted reading on the result.
 
 Gate: ``tests/calibration/test_capture_efficiency.py``.
 """
@@ -37,7 +45,7 @@ from ..config import CONSTANTS
 from .landscape import DensityLandscape, census, split_basins
 from .simplex_logodds import block_rows
 
-__all__ = ["CaptureReading", "capture_efficiencies"]
+__all__ = ["CaptureReading", "capture_efficiencies", "visible_share", "weighted"]
 
 _TINY = np.finfo(np.float64).tiny
 
@@ -174,4 +182,47 @@ def capture_efficiencies(
         efficiency_boundary=_read(prior, k_b, s_b),
         bulk_density=float(np.exp(prior.x[prior.ib])),
         saturation=prior.saturation,
+    )
+
+
+def visible_share(gdna: np.ndarray, mass: np.ndarray, one_strand: np.ndarray) -> float:
+    """The share of the one-strand unspliced mass whose object would show a gDNA fragment of its own:
+    ``Σ m (1 − e^{−k}) / Σ m`` over the objects where ``one_strand`` is set, ``k`` the gDNA booked on the object and
+    ``m`` its unspliced count; 0 when no such object holds a fragment.
+
+    ``1 − e^{−k}`` is the Poisson chance that an object at an expected gDNA count ``k`` holds at least one, the chance
+    that its own count says anything about its gDNA density. Weighting by the reads asks where the library's fragments
+    sit, not how many objects capture enriched, so one probe keeps its reading wherever the gDNA around it shows. An
+    object whose annotation admits both RNA strands has no composition evidence of its own (its gDNA is where the
+    landscape put it), so it does not vote. No constant.
+    """
+    k = np.asarray(gdna, dtype=np.float64)
+    m = np.asarray(mass, dtype=np.float64)
+    one = np.asarray(one_strand, dtype=bool)
+    if (
+        k.ndim != 1
+        or m.shape != k.shape
+        or one.shape != k.shape
+        or not (np.all(np.isfinite(k)) and np.all(np.isfinite(m)))
+    ):
+        raise ValueError(
+            "visible_share: the gDNA, the mass and the strand mask must be finite 1-D arrays on one axis."
+        )
+    m = np.where(one, m, 0.0)
+    total = m.sum()
+    return float((m * -np.expm1(-k)).sum() / total) if total > 0.0 else 0.0
+
+
+def weighted(reading: CaptureReading, weight: float) -> CaptureReading:
+    """The reading raised to ``weight`` in [0, 1]: every efficiency and the saturated level become ``x ** weight``, so
+    each keeps the share ``weight`` of its distance from the bulk in nats, and the bulk stays the unit. 1 is the reader's
+    own answer bit for bit; 0 reads exactly 1 everywhere, no capture anywhere."""
+    w = float(weight)
+    if not 0.0 <= w <= 1.0:
+        raise ValueError(f"weighted: the weight must be in [0, 1]; got {weight!r}.")
+    return CaptureReading(
+        efficiency_region=reading.efficiency_region**w,
+        efficiency_boundary=reading.efficiency_boundary**w,
+        bulk_density=reading.bulk_density,
+        saturation=float(reading.saturation**w),
     )

@@ -534,7 +534,7 @@ def install_no_capture():
 
     ``calibrate._capture_fields`` is the one place the result takes its capture reading, so the wrapper replaces the
     reader's answer and nothing else: every region's and boundary's efficiency is 1 and the saturated level is 1, as a
-    library with one gDNA level reads, and the bulk density is calibration's own. Everything downstream (the
+    library with one gDNA level reads, at a capture weight of 0, and the bulk density is calibration's own. Everything downstream (the
     transcripts' lengths, the locus gDNA lengths, a multimapper's place weights, RNA's captured fraction) then reads no
     capture. The arm prices the capture reader as a whole: a row where ``base`` is worse than this arm is a row where
     reading capture cost more than it gave. ``fired`` counts the readings replaced; ``check_no_capture`` reads the
@@ -550,6 +550,7 @@ def install_no_capture():
         fired["n"] += 1
         return dict(
             fields,
+            gdna_capture_weight=0.0,
             gdna_capture_saturation=1.0,
             gdna_capture_efficiency_region=np.ones_like(fields["gdna_capture_efficiency_region"]),
             gdna_capture_efficiency_boundary=np.ones_like(fields["gdna_capture_efficiency_boundary"]),

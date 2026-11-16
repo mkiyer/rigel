@@ -144,6 +144,7 @@ def test_the_oracle_result_is_a_valid_calibration_result(oracle_scenario, tmp_pa
         rna_neg_frac_boundary=np.zeros(e),
         gdna_density_global=0.0,
         gdna_bulk_density=None,
+        gdna_capture_weight=1.0,
         gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=np.ones(n),
         gdna_capture_efficiency_boundary=np.ones(e),

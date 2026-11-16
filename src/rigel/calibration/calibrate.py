@@ -15,6 +15,7 @@ module below it. An object's composition has three sources: the binomial strand 
       -> chain_region_deconv, chain_boundary_deconv: per-object gDNA / RNA mass
       -> gdna_density_global: the library-average gDNA density (QC)
       -> capture_efficiencies: each object's gDNA density against the last landscape (1 everywhere without one)
+      -> the capture weight: the visible share of the gDNA the final solve booked; the reading is raised to it
 
 Gate: ``tests/calibration/test_calibrate.py``.
 """
@@ -27,7 +28,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .capture_efficiency import CaptureReading, capture_efficiencies
+from .capture_efficiency import CaptureReading, capture_efficiencies, visible_share, weighted
 from .diagnostics import CalibrationDiagnostics, SweepDiagnostics
 from .effective_length import observable_cut_shares
 from .landscape import DensityLandscape, fit_landscape
@@ -346,7 +347,9 @@ def _result(
         rna_pos_frac_boundary=boundaries.rna_pos_frac,
         rna_neg_frac_boundary=boundaries.rna_neg_frac,
         gdna_density_global=_gdna_density_global(regions, boundaries, region_eff, boundary_eff),
-        **_capture_fields(landscape, regions, boundaries, region_eff, boundary_eff),
+        **_capture_fields(
+            landscape, regions, boundaries, region_eff, boundary_eff, _capture_weight(s, belief)
+        ),
         rna_sense_frac=s.strand.rna_sense_frac,
         n_regions=n_regions,
         n_boundaries=n_boundaries,
@@ -377,28 +380,45 @@ def _gdna_density_global(
     return total_g / total_l if total_l > 0.0 else 0.0
 
 
+def _capture_weight(s: _SweepInputs, belief) -> float:
+    """The weight the capture reading is raised to: the visible share (`capture_efficiency.visible_share`) of the gDNA
+    the final solve booked, over the chain's slots. A slot's mass is its unspliced count, the support the landscape is
+    fitted on, and its booking is ``f_g`` of that; a slot whose annotation admits both RNA strands does not vote."""
+    both = np.asarray(s.statics.free_pos, dtype=bool) & np.asarray(s.statics.free_neg, dtype=bool)
+    return visible_share(
+        np.asarray(belief.f_g, dtype=np.float64) * s.mass_global, s.mass_global, ~both
+    )
+
+
 def _capture_fields(
     landscape: DensityLandscape | None,
     regions: RegionDeconv,
     boundaries: RegionDeconv,
     region_eff: np.ndarray,
     boundary_eff: np.ndarray,
+    weight: float,
 ) -> dict:
     """The result's capture reading: each object's own gDNA density read against the last landscape's bulk, with the
-    landscape as a two-group prior and the object's count as the likelihood (`capture_efficiency`). With no
-    landscape every efficiency is exactly 1, there is no bulk density and the saturation level is 1."""
+    landscape as a two-group prior and the object's count as the likelihood (`capture_efficiency`), raised to the
+    library's capture weight. With no landscape every efficiency is exactly 1, there is no bulk density and the
+    saturation level is 1; the weight is published either way."""
     if landscape is None:
         return dict(
             gdna_bulk_density=None,
+            gdna_capture_weight=weight,
             gdna_capture_saturation=1.0,
             gdna_capture_efficiency_region=np.ones(region_eff.shape[0]),
             gdna_capture_efficiency_boundary=np.ones(boundary_eff.shape[0]),
         )
-    reading: CaptureReading = capture_efficiencies(
-        landscape, regions.gdna_mass, region_eff, boundaries.gdna_mass, boundary_eff
+    reading: CaptureReading = weighted(
+        capture_efficiencies(
+            landscape, regions.gdna_mass, region_eff, boundaries.gdna_mass, boundary_eff
+        ),
+        weight,
     )
     return dict(
         gdna_bulk_density=reading.bulk_density,
+        gdna_capture_weight=weight,
         gdna_capture_saturation=reading.saturation,
         gdna_capture_efficiency_region=reading.efficiency_region,
         gdna_capture_efficiency_boundary=reading.efficiency_boundary,
@@ -422,9 +442,11 @@ def _log_summary(result: CalibrationResult, strand: StrandBalance, substrate, sj
         )
     else:
         logger.info(
-            "calibration: capture read against the gDNA bulk at %.3e fragments/bp; the landscape's saturated "
-            "level is %.4g× the bulk (1: no level above it)",
+            "calibration: capture read against the gDNA bulk at %.3e fragments/bp at weight %.4f (the share of the "
+            "reads whose own gDNA would show); the saturated level is %.4g× the bulk at that weight (1: no level "
+            "above it)",
             result.gdna_bulk_density,
+            result.gdna_capture_weight,
             result.gdna_capture_saturation,
         )
     logger.debug(

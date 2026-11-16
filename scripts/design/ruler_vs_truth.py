@@ -10,8 +10,8 @@ class and per kind (mRNA, annotated single-exon, synthetic span). A factor of ex
 the quantiles.
 
 Arms: ``shipped`` is the ruler in ``src/``; ``oracle_gdna`` feeds it the certified true gDNA counts per object
-(``slot_truth.npz``) under a landscape fitted on the truth, so the gap between the two is calibration's and what
-remains is the ruler's. ``--module FILE`` adds prototype rulers, ``ARMS = {name: ruler}`` with
+(``slot_truth.npz``) under a landscape fitted on the truth, at the capture weight the true counts give, so the gap
+between the two is calibration's and what remains is the ruler's. ``--module FILE`` adds prototype rulers, ``ARMS = {name: ruler}`` with
 ``ruler(calibration, region_arrays, index, fl, **inputs)`` returning effective lengths, where ``inputs`` is
 ``calibrate_condition``'s debug bundle. ``--set SECTION.FIELD=VALUE`` prices a config value on every arm.
 
@@ -66,10 +66,12 @@ from rigel.calibration.capture_eff_length import (  # noqa: E402
     fit_junction_cap,
     transcript_capture_eff_lengths,
 )
-from rigel.calibration.capture_efficiency import capture_efficiencies  # noqa: E402
+from rigel.calibration.capture_efficiency import capture_efficiencies, visible_share, weighted  # noqa: E402
 from rigel.calibration.diagnostics import CalibrationDiagnostics  # noqa: E402
 from rigel.calibration.landscape import fit_landscape  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
+from rigel.calibration.region_chain import REGION  # noqa: E402
+from rigel.calibration.region_geometry import region_gdna_geometry  # noqa: E402
 from rigel.calibration.signature import RegionType, coarse_type_array  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import length_tables, library_fl_models  # noqa: E402
@@ -263,11 +265,21 @@ def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, c
     return cal, debug
 
 
-def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str):
+def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, inputs: dict):
     """The same result with the ruler's gDNA masses replaced by the certified truth per object, read by the
-    shipped reader under a landscape fitted on the truth: the ideal witness, with no estimator noise."""
+    shipped reader under a landscape fitted on the truth and raised to the weight the truth gives (the visible share
+    of the true counts over the solve's chain, ``inputs`` being ``calibrate_condition``'s bundle): the ideal witness,
+    with no estimator noise."""
     truth = sibling("_oracle_arms.py").certified_gdna(panel_dir / "oracle_cache" / condition)
     m_reg, m_bnd = truth["region"], truth["boundary"]
+    chain, statics = inputs["chain"], inputs["statics"]
+    at = np.asarray(chain.kind) == REGION
+    idx = np.asarray(chain.obj_idx, dtype=np.int64)
+    booked = np.empty(at.shape[0])
+    booked[at] = m_reg[idx[at]]
+    booked[~at] = m_bnd[idx[~at]]
+    both = np.asarray(statics.free_pos, dtype=bool) & np.asarray(statics.free_neg, dtype=bool)
+    weight = visible_share(booked, region_gdna_geometry(inputs["geometry"])[0], ~both)
     S = np.maximum(np.asarray(cal.gdna_region_eff_len, float), 1e-9)
     rtype = coarse_type_array(np.asarray(region_arrays.signature))
     live = S > 1e-9
@@ -283,12 +295,15 @@ def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str):
     reading = (
         None
         if ls is None
-        else capture_efficiencies(
-            ls,
-            m_reg,
-            np.asarray(cal.gdna_region_eff_len, float),
-            m_bnd,
-            np.asarray(cal.gdna_boundary_eff_len, float),
+        else weighted(
+            capture_efficiencies(
+                ls,
+                m_reg,
+                np.asarray(cal.gdna_region_eff_len, float),
+                m_bnd,
+                np.asarray(cal.gdna_boundary_eff_len, float),
+            ),
+            weight,
         )
     )
     return dataclasses.replace(
@@ -296,6 +311,7 @@ def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str):
         count_gdna_region=m_reg,
         count_gdna_boundary=m_bnd,
         gdna_bulk_density=None if reading is None else reading.bulk_density,
+        gdna_capture_weight=weight,
         gdna_capture_saturation=1.0 if reading is None else reading.saturation,
         gdna_capture_efficiency_region=(
             np.ones(m_reg.shape[0]) if reading is None else reading.efficiency_region
@@ -410,7 +426,7 @@ def run_condition(index, region_arrays, index_dir, panel_dir, condition, config,
 
     out["shipped"] = (shipped_ruler(cal), cal)
     if (panel_dir / "oracle_cache" / condition / "slot_truth.npz").is_file():
-        o = oracle_gdna_result(cal, region_arrays, panel_dir, condition)
+        o = oracle_gdna_result(cal, region_arrays, panel_dir, condition, inputs)
         out["oracle_gdna"] = (shipped_ruler(o), o)
     for name, ruler in arms.items():
         out[name] = (
@@ -696,7 +712,8 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
         gdna_boundary_conserved_len=observable_cut_shares(region_arrays, gdna_fl_pmf),
         gdna_frac_region=z, rna_pos_frac_region=z,
         rna_neg_frac_region=z, gdna_frac_boundary=ez, rna_pos_frac_boundary=ez, rna_neg_frac_boundary=ez,
-        gdna_density_global=0.0, gdna_bulk_density=None, gdna_capture_saturation=1.0,
+        gdna_density_global=0.0, gdna_bulk_density=None, gdna_capture_weight=1.0,
+        gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=np.ones(n), gdna_capture_efficiency_boundary=np.ones(ne),
         rna_sense_frac=0.5,
         n_regions=n, n_boundaries=ne, n_sj=0,

@@ -78,8 +78,8 @@ class PipelineResult:
     fl_models: FLModels
     # The EM's two length tables and the decision behind them (`calibration.shared_length_law`).
     length_tables: LengthTables
-    # The level a junction's capture price is capped at: calibration's saturated level, raised as far as RNA's own
-    # spliced fragments support (`calibration.capture_eff_length.fit_junction_cap`).
+    # The level a junction's capture price is capped at: calibration's saturated level at its capture weight, raised as
+    # far as RNA's own spliced fragments support (`calibration.capture_eff_length.fit_junction_cap`).
     junction_cap: float
     # Per-region genome-wide gDNA track (ref/start/end + gDNA mass/density/frac),
     # built from the calibration result; feeds the report's genome track + bedGraph.
@@ -1208,13 +1208,13 @@ def _log_junction_cap(saturation: float, junction_cap: float) -> None:
     """Say where the junction cap sits, and whether RNA's spliced fragments raised it."""
     if junction_cap == saturation:
         logger.info(
-            "junction cap: the landscape's saturated level, %.4g× the bulk (the spliced counts raise nothing)",
+            "junction cap: the saturated level at the capture weight, %.4g× the bulk (the spliced counts raise nothing)",
             saturation,
         )
     else:
         logger.info(
-            "junction cap: %.4g× the bulk, raised by RNA's spliced fragments from the landscape's saturated level, "
-            "%.4g×",
+            "junction cap: %.4g× the bulk, raised by RNA's spliced fragments from the saturated level at the capture "
+            "weight, %.4g×",
             junction_cap,
             saturation,
         )

@@ -594,7 +594,8 @@ scalars (it is `null` if calibration did not run):
   "calibration": {
     "gdna_density_global":        <float>,       // library-average gDNA density, per observable base of effective length (QC scalar)
     "gdna_bulk_density":          <float|null>,  // the uncaptured gDNA level capture is read against, gDNA fragments/bp; null = no landscape
-    "gdna_capture_saturation":    <float>,       // the saturated gDNA level over that bulk; 1 = nothing above it
+    "gdna_capture_weight":        <float>,       // the weight the capture reading is raised to, 0 to 1: the share of the reads whose own gDNA would show
+    "gdna_capture_saturation":    <float>,       // the saturated gDNA level over that bulk, at that weight; 1 = nothing above it
     "junction_capture_cap":       <float>,       // the cap on a splice junction's capture; the saturation unless spliced RNA raises it
     "fraction_rna_sense":         <float>,       // kappa: sense-strand RNA fraction
     "n_regions":                  <int>,         // number of calibration regions
@@ -604,15 +605,20 @@ scalars (it is `null` if calibration did not run):
 }
 ```
 
-`gdna_bulk_density` and `gdna_capture_saturation` are calibration's capture answer. Calibration fits a
-landscape of gDNA densities over the genome; its largest basin is the bulk, the gDNA off the probes, and
-each region's capture efficiency is its own gDNA density read against that bulk, so `em_effective_length`
-is scaled by those efficiencies and rises above `effective_length` where capture enriched the transcript.
-`gdna_capture_saturation` is the landscape's most massive enriched level over the bulk, the level at which
-capture saturates. A library without capture has a landscape of one level: its saturation is 1, every
-efficiency is 1, and every `em_effective_length` equals `effective_length`. `gdna_bulk_density` is `null`
-only when calibration fitted no landscape at all. The report shows both, descriptively: no pass/fail
-verdict.
+`gdna_bulk_density`, `gdna_capture_weight` and `gdna_capture_saturation` are calibration's capture
+answer. Calibration fits a landscape of gDNA densities over the genome; its largest basin is the bulk,
+the gDNA off the probes, and each region's capture efficiency is its own gDNA density read against that
+bulk, so `em_effective_length` is scaled by those efficiencies and rises above `effective_length` where
+capture enriched the transcript. `gdna_capture_saturation` is the landscape's most massive enriched level
+over the bulk, the level at which capture saturates. Capture can only be read from genomic DNA, so every
+efficiency and the saturation are reported at `gdna_capture_weight`, between 0 and 1: the share of the
+library's reads that sit where their own region would show genomic DNA. Each is raised to that power, so
+where the reads sit on regions holding no DNA the reading fades toward no capture (a weight of 0 reads 1
+everywhere), and in our tests a captured library with 5 % DNA or more reads a weight of 0.98 or more. A
+library without capture has a landscape of one level: its saturation is 1, every efficiency is 1, and
+every `em_effective_length` equals `effective_length`. `gdna_bulk_density` is `null` only when
+calibration fitted no landscape at all. The report shows the bulk and the saturation, descriptively: no
+pass/fail verdict.
 
 `junction_capture_cap` is the level a splice junction's capture is capped at in `em_effective_length`.
 Genomic DNA never crosses a junction, so the saturated level only bounds what gDNA can show. RNA crosses it:
@@ -622,12 +628,21 @@ it equals `gdna_capture_saturation` wherever the spliced counts ask for no more,
 reads no capture.
 
 **Known limitation: a library with almost no gDNA.** There the bulk sits near the landscape's floor, and
-the few regions where calibration calls gDNA read as enormous capture against it. A transcriptome-only
-library with no capture panel reads `gdna_capture_saturation` of about 2 × 10⁷ and some thousands of
-regions above e× the bulk, and the `em_effective_length` of the transcripts on those regions is inflated
-by up to that factor. A saturation far above 1 on a library that was not captured is this limitation, not
-capture. With no gDNA evidence at all (an empty or nearly empty library) the landscape's smoothing alone can read
-a saturation near 10 and lengthen every `em_effective_length` by a few percent.
+the few regions where calibration calls gDNA read as enormous capture against it. The capture weight
+fades that reading, since such a library's reads sit where no genomic DNA shows, but does not remove it:
+a simulated transcriptome-only library aligned by STAR, with no capture panel, reads a landscape
+saturation of 149,367× and reports it at a weight of 0.19 as a `gdna_capture_saturation` of 9.3, and the
+`em_effective_length` of the transcripts on those regions is inflated by up to that factor. A saturation
+above 1 on a library that was not captured is this limitation, not capture. With no gDNA evidence at all
+(an empty or nearly empty library) the landscape's smoothing alone can read a saturation near 10 and
+lengthen every `em_effective_length` by a few percent.
+
+**Known limitation: a captured library whose off-target DNA is thin.** The capture weight is a share of
+the library's reads, so RNA on regions too thinly covered by genomic DNA to show any lowers it for the
+whole library, even where the panel itself reads cleanly. The panel's reading then fades a little and
+some genomic DNA on the probed genes is called RNA: on one real captured cfRNA library at about 93 % DNA
+the weight was 0.95, and a few hundred DNA fragments moved to RNA on genes whose reads are
+strand-balanced.
 
 **Known limitation: an unstranded capture library.** Without a strand channel, gDNA on the captured exons is told
 from RNA only through the neighbouring regions and the fragment counts, and some of it is read as RNA, most of
@@ -765,8 +780,9 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 
 - **Library scalars**, in `summary.json` → `calibration`: `gdna_density_global`,
   `fraction_rna_sense` (the sense fraction κ), the uncaptured gDNA level `gdna_bulk_density` that capture
-  is read against, the saturated level over it, `gdna_capture_saturation`, and the cap on a splice
-  junction's capture, `junction_capture_cap`. The junction fit behind
+  is read against, the weight the capture reading is raised to, `gdna_capture_weight`, the saturated level
+  over the bulk at that weight, `gdna_capture_saturation`, and the cap on a splice junction's capture,
+  `junction_capture_cap`. The junction fit behind
   κ and the strand overdispersion (0, binomial) are in `strand_model`.
 - **A per-locus Dirichlet prior** — `count_gdna_prior` and `count_rna_prior` in `loci.feather`
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's

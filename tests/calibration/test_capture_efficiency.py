@@ -9,6 +9,12 @@ landscape reads exactly 1, a lone level lifts an object without evidence by at m
 reads below 1, each object reads only its own count, the density unit is free, the row tiles change nothing, and
 calibrate's wiring. A piece too short to contain a fragment is read through its boundaries by the length
 (``test_capture_eff_length.py``), not here.
+
+The published reading is the reader's raised to one library-wide weight, the share of the one-strand unspliced mass
+whose object would show a gDNA fragment of its own (``visible_share``, ``weighted``). The tests pin the share's form
+(mass-weighted, the Poisson chance, both-strand objects silent), the power on every level alike, the hole it closes
+(the reads that sit where no gDNA shows take the claim with them) and the locality it keeps (one probe in a library
+whose gDNA shows keeps its reading).
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ import pytest
 from _synthetic import contained_support, normal_pmf, spike_pmf
 
 import rigel.calibration.capture_efficiency as CE
-from rigel.calibration.capture_efficiency import capture_efficiencies
+from rigel.calibration.capture_efficiency import capture_efficiencies, visible_share, weighted
 from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_eff_length
 from rigel.calibration.landscape import DensityLandscape, census, fit_landscape, split_basins
 
@@ -306,6 +312,114 @@ def test_the_saturation_level_is_the_most_massive_enriched_basins_peak():
     assert len(above) == 2 and heavy.log_rho < max(m.log_rho for m in above)
     assert r.saturation == pytest.approx(np.exp(heavy.log_rho - bulk.log_rho), rel=1e-12)
     assert r.efficiency_region.shape == (0,) and r.efficiency_boundary.shape == (0,)
+
+
+# --- the weight: the reading fades as a whole where the library's gDNA cannot be seen --------------------------------
+
+
+def test_the_visible_share_is_the_mass_weighted_poisson_chance_of_a_gdna_fragment():
+    """The weight is ``Σ m (1 − e^{−k}) / Σ m`` over the objects that admit at most one RNA strand, ``k`` the gDNA booked
+    on an object and ``m`` its unspliced count: the share of the reads whose object would show a gDNA fragment of its
+    own. Weighted by the reads, not by the objects; the Poisson chance, not a cut at one fragment; and an object that
+    admits both strands does not vote. Each of the three alternatives gives another number here (0.54, 0.90, 0.89)."""
+    mass = np.array([100.0, 300.0, 600.0, 1000.0])
+    gdna = np.array([0.0, 1.0, 40.0, 5.0])
+    one_strand = np.array([True, True, True, False])
+    expected = (300.0 * (1.0 - np.exp(-1.0)) + 600.0 * (1.0 - np.exp(-40.0))) / 1000.0
+    assert visible_share(gdna, mass, one_strand) == pytest.approx(expected, rel=1e-14)
+
+
+def test_an_object_admitting_both_rna_strands_does_not_vote():
+    """A both-strand object's gDNA is where the landscape put it, not its own evidence (the landscape is not trained on
+    it, for the same reason), so neither its booking nor its mass moves the weight."""
+    one_strand = np.array([True, True, False])
+    a = visible_share(np.array([0.2, 3.0, 0.0]), np.array([500.0, 500.0, 2000.0]), one_strand)
+    b = visible_share(np.array([0.2, 3.0, 900.0]), np.array([500.0, 500.0, 1e5]), one_strand)
+    assert a == b
+
+
+def test_with_no_one_strand_mass_nothing_can_show_and_the_weight_is_zero():
+    assert visible_share(np.array([5.0]), np.array([10.0]), np.array([False])) == 0.0
+    assert visible_share(np.zeros(0), np.zeros(0), np.zeros(0, dtype=bool)) == 0.0
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        dict(gdna=np.array([np.nan, 1.0])),
+        dict(mass=np.array([np.inf, 1.0])),
+        dict(mass=np.array([1.0, 2.0, 3.0])),
+        dict(one_strand=np.array([True])),
+    ],
+)
+def test_a_non_finite_or_misshapen_share_input_is_refused(bad):
+    kw = dict(
+        gdna=np.array([0.5, 1.0]), mass=np.array([3.0, 4.0]), one_strand=np.array([True, True])
+    )
+    kw.update(bad)
+    with pytest.raises(ValueError, match="visible_share"):
+        visible_share(kw["gdna"], kw["mass"], kw["one_strand"])
+
+
+def test_the_weight_raises_every_efficiency_and_the_saturation_alike(landscape):
+    """``weighted`` raises the reader's answer to ``w``: every efficiency and the saturated level become ``x ** w``, the
+    same fraction of each level's distance from the bulk in nats, and the bulk stays the unit. ``w = 1`` is the reader
+    bit for bit; ``w = 0`` reads exactly 1 everywhere, the no-capture line."""
+    r = capture_efficiencies(
+        landscape,
+        *_field([50000, 5000, 1000], [RHO_CAP, RHO_DEP, RHO_CAP / 3.0], [RHO_CAP, RHO_DEP]),
+    )
+    assert r.saturation > 100.0
+    for w in (0.0, 0.37, 1.0):
+        rw = weighted(r, w)
+        np.testing.assert_array_equal(rw.efficiency_region, r.efficiency_region**w)
+        np.testing.assert_array_equal(rw.efficiency_boundary, r.efficiency_boundary**w)
+        assert rw.saturation == r.saturation**w
+        assert rw.bulk_density == r.bulk_density
+    one, none = weighted(r, 1.0), weighted(r, 0.0)
+    np.testing.assert_array_equal(one.efficiency_region, r.efficiency_region)
+    np.testing.assert_array_equal(one.efficiency_boundary, r.efficiency_boundary)
+    assert one.saturation == r.saturation
+    np.testing.assert_array_equal(none.efficiency_region, 1.0)
+    np.testing.assert_array_equal(none.efficiency_boundary, 1.0)
+    assert none.saturation == 1.0
+
+
+@pytest.mark.parametrize("w", [-0.01, 1.01, np.nan, np.inf])
+def test_a_weight_outside_the_unit_interval_is_refused(landscape, w):
+    r = capture_efficiencies(landscape, *_field([5000], [RHO_CAP], [RHO_CAP]))
+    with pytest.raises(ValueError, match="weighted"):
+        weighted(r, w)
+
+
+def test_the_reads_that_sit_where_no_gdna_shows_take_the_claim_with_them(landscape):
+    """The hole between 0 and 1 % gDNA under capture: one probed exon holds enough gDNA to be read at the captured
+    level, while the library's reads sit on exons holding none, which cannot be read and stay near the bulk; a
+    transcript across them takes its lengths from a reading on some objects and none on others. Weighted by the share
+    of the reads whose object shows gDNA (here under 0.1 %), the captured level fades from hundreds-fold to under 1 %."""
+    k_reg, S, k_bnd, S_b = _field([5000] * 100, [0.0] * 99 + [RHO_CAP], [0.0] * 99)
+    rna = np.r_[np.full(99, 2e5), 0.0]
+    w = visible_share(np.r_[k_reg, k_bnd], np.r_[k_reg + rna, k_bnd], np.ones(199, dtype=bool))
+    r = capture_efficiencies(landscape, k_reg, S, k_bnd, S_b)
+    out = weighted(r, w)
+    assert w < 1e-3
+    assert r.efficiency_region[-1] > 100.0
+    assert out.efficiency_region[-1] < 1.01 and out.saturation < 1.01
+
+
+def test_one_probe_keeps_its_reading_in_a_library_whose_gdna_shows(landscape):
+    """Capture inference is local: one probe must not move the claim. The weight asks whether gDNA shows where the reads
+    sit, not how many objects are enriched, so a single probed exon among exons that each show a few gDNA fragments
+    (``k`` about 5, ``1 − e^{−k}`` about 0.99) keeps its reading to within a few percent. A weight scaled by the
+    landscape's spread would read one probe in a hundred as weak capture and fade it."""
+    k_reg, S, k_bnd, S_b = _field([5000] * 100, [RHO_DEP] * 99 + [RHO_CAP], [RHO_DEP] * 99)
+    rna = np.r_[np.full(99, 2e5), 0.0]
+    w = visible_share(np.r_[k_reg, k_bnd], np.r_[k_reg + rna, k_bnd], np.ones(199, dtype=bool))
+    r = capture_efficiencies(landscape, k_reg, S, k_bnd, S_b)
+    out = weighted(r, w)
+    assert 0.98 < w < 1.0
+    assert r.efficiency_region[-1] > 100.0
+    assert out.efficiency_region[-1] > 0.9 * r.efficiency_region[-1]
 
 
 @pytest.mark.parametrize(

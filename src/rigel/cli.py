@@ -602,11 +602,13 @@ def _calibration_summary(cal, junction_cap: float) -> dict | None:
         # full precision: a density is a few fragments per Mb, which a fixed count of decimals rounds to 0
         "gdna_density_global": float(cal.gdna_density_global),
         # calibration's capture answer, which the ruler reads: the gDNA bulk density the capture efficiencies are
-        # read against (None = no gDNA landscape, nothing contracted) and the landscape's saturated level against
-        # that bulk (1 = no level above it)
+        # read against (None = no gDNA landscape, nothing contracted), the weight the reading is raised to (the share
+        # of the reads whose own gDNA would show; 1 keeps the reading, 0 claims no capture) and the landscape's
+        # saturated level against that bulk at that weight (1 = no level above it)
         "gdna_bulk_density": (
             None if cal.gdna_bulk_density is None else float(cal.gdna_bulk_density)
         ),
+        "gdna_capture_weight": round(float(cal.gdna_capture_weight), SUMMARY_DECIMALS),
         "gdna_capture_saturation": float(cal.gdna_capture_saturation),
         # the cap on a junction's capture price in the EM's lengths: the saturated level, raised as far as RNA's own
         # spliced fragments support (equal to it where they raise nothing)

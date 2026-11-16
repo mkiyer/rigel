@@ -606,8 +606,8 @@ class CalibrationConstants:
     #: a finite floor rather than −∞ (``capture_efficiency``).
     rate_log_floor: float = 1e-300
 
-    #: Levels on the geometric grid the junction cap is searched on, from the landscape's saturated level to the
-    #: largest uncapped junction price (``capture_eff_length.fit_junction_cap``). The likelihood is flat where no
+    #: Levels on the geometric grid the junction cap is searched on, from the saturated level at the capture weight to
+    #: the largest uncapped junction price (``capture_eff_length.fit_junction_cap``). The likelihood is flat where no
     #: junction is at the cap and concave only between the junctions' own bounds, so it is maximised by search and
     #: the first maximum taken. A discretization, not a model choice: at 600 neighbouring levels are under 1 % apart
     #: over any range up to 380-fold.

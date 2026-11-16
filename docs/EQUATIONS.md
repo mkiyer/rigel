@@ -531,9 +531,10 @@ mappability split evenly and an expressed copy keeps its traffic. The exact `k_p
 ## 11. The conserved frame — every component's shares of its objects at their capture efficiencies
 
 `effective_length.conserved_cut_shares`, `capture_eff_length`, `capture_efficiency.capture_efficiencies`,
-`priors.assemble_priors`, `effective_length.observable_cut_shares`. Under capture the EM divides each component — the
-locus gDNA, each synthetic span, each transcript — by the sum over the objects its fragments deposit on of its
-CONSERVED SHARE of the object times the object's capture efficiency:
+`capture_efficiency.visible_share`, `capture_efficiency.weighted`, `priors.assemble_priors`,
+`effective_length.observable_cut_shares`. Under capture the EM divides each component — the locus gDNA, each
+synthetic span, each transcript — by the sum over the objects its fragments deposit on of its CONSERVED SHARE of the
+object times the object's capture efficiency:
 
     L_T = Σ_pieces S_T(p) · c_p + Σ_cuts M_T(k) · c_k
 
@@ -621,11 +622,26 @@ Efron's two groups — the bulk basin collapsed onto its peak `x_b` with its who
 density, so a lone level of mass `μ` at `Δ` nats above the bulk lifts an evidence-free object by `e^{μΔ}`, not
 `1 + μ(e^Δ − 1)`. `S = 0` reads 1; `k` is a deconvolved mass, the Poisson continued by the gamma function.
 
+**The weight** (`visible_share`, `weighted`). The published reading is the reader's raised to one library-wide weight:
+
+    w = Σ_o m_o (1 − e^{−k_o}) / Σ_o m_o,        c_o → c_o^w,   S → S^w
+
+over the chain's slots that admit at most one RNA strand, `m_o` a slot's unspliced count and `k_o = f_g,o m_o` the gDNA
+ψ booked there. `1 − e^{−k}` is the Poisson chance that an object at an expected gDNA count `k` holds at least one gDNA
+fragment, the chance that its own count can place it on the landscape at all. Weighted by the reads, `w` asks where
+the library's fragments sit, not how many objects capture enriched, so one probe keeps its reading where the gDNA
+around it shows. A both-strand slot is left out because its `f_g` is the landscape's resolution, not its own evidence,
+as in the landscape's training. In the log the power shrinks every level toward the bulk by one factor,
+`log c → w log c`: the bulk stays 1, the order of the levels is kept, `S^w ≥ 1`, and the junction cap is fitted from
+`S^w` upward. `w = 1` is the reader and `w = 0` the no-capture line. What it assumes without checking: that RNA on an
+object whose gDNA cannot show is evidence that the library's capture cannot be read there. Off-target RNA in a library
+whose off-target gDNA is thin breaks it (`ISSUES: off-target-rna-dilutes-the-capture-weight`).
+
 **The bulk, the saturation, the unit** (`landscape.census`, `split_basins`). The grid splits into basins at the minima
 between maxima; the bulk is the most massive, since gDNA off the probes outnumbers gDNA on them, and every basin above
-it is an enriched level. `S = exp(x_sat − x_b)` with `x_sat` the most massive enriched peak
-(`CalibrationResult.gdna_capture_saturation`; 1 if none). Efficiencies are relative yields against the bulk
-(`gdna_bulk_density`), so a factor common to every component cancels at convergence
+it is an enriched level. `S = exp(x_sat − x_b)` with `x_sat` the most massive enriched peak, 1 if none; the result
+publishes it at the capture weight, `S^w` (`CalibrationResult.gdna_capture_saturation`). Efficiencies are relative
+yields against the bulk (`gdna_bulk_density`), so a factor common to every component cancels at convergence
 (`ISSUES: the-em-stops-before-it-converges`). One basin makes every efficiency exactly 1; no landscape publishes no
 bulk, and `transcript_capture_eff_lengths` returns `fl` while `assemble_priors` reads `Σ S_r + Σ M_e`.
 

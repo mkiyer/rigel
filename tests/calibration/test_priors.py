@@ -116,6 +116,7 @@ def _result(
         rna_neg_frac_boundary=ez.copy(),
         gdna_density_global=gdna_density_global,
         gdna_bulk_density=gdna_bulk_density,
+        gdna_capture_weight=1.0,
         gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=(
             np.ones(n) if efficiency is None else np.asarray(efficiency, dtype=np.float64)

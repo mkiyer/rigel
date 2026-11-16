@@ -343,13 +343,38 @@ def test_a_failed_later_refit_keeps_the_landscape_the_final_solve_ran_under(
     assert res.gdna_bulk_density is not None
 
 
-def test_the_result_publishes_the_capture_reading_of_the_last_landscape(sweep_inputs, monkeypatch):
+def test_the_capture_weight_is_the_visible_share_of_the_final_booking_over_the_one_strand_slots():
+    """calibrate's weight reads each chain slot's unspliced count and the gDNA its final solve booked there, ``f_g`` of
+    that count, and leaves out only the slots whose annotation admits both RNA strands; a slot that admits neither (a
+    locked one) votes. Here a both-strand slot holding no gDNA sits beside one-strand slots that show plenty and one
+    that shows little: letting it vote, reading the counts alone, or dropping the locked slot each gives another
+    number."""
+    s = SimpleNamespace(
+        statics=SimpleNamespace(
+            free_pos=np.array([True, True, False, False]),
+            free_neg=np.array([False, True, True, False]),
+        ),
+        mass_global=np.array([100.0, 100.0, 100.0, 50.0]),
+    )
+    belief = SimpleNamespace(f_g=np.array([0.5, 0.0, 0.001, 1.0]))
+    shows = -np.expm1(-np.array([50.0, 0.1, 50.0]))
+    expected = float((np.array([100.0, 100.0, 50.0]) * shows).sum() / 250.0)
+    assert CAL._capture_weight(s, belief) == expected
+    assert 0.6 < expected < 0.65
+
+
+def test_the_result_publishes_the_capture_reading_of_the_last_landscape_at_its_weight(
+    sweep_inputs, monkeypatch
+):
     """The efficiencies, the bulk density and the saturated level that the ruler and the prior assembler read are the
-    capture reader's answer on the last refit's landscape, published as they are; with no refit there is no landscape,
-    no bulk, a saturated level of 1 and every efficiency 1. With the reader forced to answer, the result carries exactly
-    that answer.
+    capture reader's answer on the last refit's landscape, raised to the weight the result publishes: the visible share
+    of the gDNA the final solve booked, over the chain's one-strand slots. With no refit there is no landscape, no bulk,
+    a saturated level of 1 and every efficiency 1. With the reader and the weight forced, the result carries exactly the
+    forced reading at the forced weight.
     """
-    from rigel.calibration.capture_efficiency import CaptureReading
+    from rigel.calibration.capture_efficiency import CaptureReading, visible_share, weighted
+    from rigel.calibration.diagnostics import CalibrationDiagnostics
+    from rigel.calibration.region_geometry import region_gdna_geometry
     from rigel.config import CalibrationConfig
 
     res0 = CAL.calibrate(
@@ -375,32 +400,44 @@ def test_the_result_publishes_the_capture_reading_of_the_last_landscape(sweep_in
 
     monkeypatch.setattr(CAL, "fit_landscape", fit_spy)
     monkeypatch.setattr(CAL, "capture_efficiencies", read_spy)
+    diagnostics = CalibrationDiagnostics()
     res = CAL.calibrate(
         payload=sweep_inputs["payload"],
         config=CalibrationConfig(calib_refit_iters=2),
+        diagnostics=diagnostics,
         **sweep_inputs["calibrate_kw"],
     )
     assert len(fits) == 2 and fits[-1] is not None
     assert len(reads) == 1, "the reader runs once"
     ls, out = reads[0]
     assert ls is fits[-1], "on the last landscape"
-    assert res.gdna_bulk_density == out.bulk_density
-    assert res.gdna_capture_saturation == out.saturation
-    np.testing.assert_array_equal(res.gdna_capture_efficiency_region, out.efficiency_region)
-    np.testing.assert_array_equal(res.gdna_capture_efficiency_boundary, out.efficiency_boundary)
+    mass = region_gdna_geometry(diagnostics.geometry)[0]
+    statics = diagnostics.statics
+    both = np.asarray(statics.free_pos, dtype=bool) & np.asarray(statics.free_neg, dtype=bool)
+    booked = np.asarray(diagnostics.belief.f_g, dtype=np.float64) * mass
+    assert res.gdna_capture_weight == visible_share(booked, mass, ~both)
+    published = weighted(out, res.gdna_capture_weight)
+    assert res.gdna_bulk_density == published.bulk_density
+    assert res.gdna_capture_saturation == published.saturation
+    np.testing.assert_array_equal(res.gdna_capture_efficiency_region, published.efficiency_region)
+    np.testing.assert_array_equal(
+        res.gdna_capture_efficiency_boundary, published.efficiency_boundary
+    )
 
     forced = CaptureReading(
-        efficiency_region=np.full(res0.n_regions, 3.0),
-        efficiency_boundary=np.full(res0.n_boundaries, 2.0),
+        efficiency_region=np.full(res0.n_regions, 4.0),
+        efficiency_boundary=np.full(res0.n_boundaries, 9.0),
         bulk_density=0.01,
-        saturation=5.0,
+        saturation=25.0,
     )
     monkeypatch.setattr(CAL, "capture_efficiencies", lambda ls, *a: forced)
+    monkeypatch.setattr(CAL, "visible_share", lambda *a: 0.5)
     res2 = CAL.calibrate(
         payload=sweep_inputs["payload"],
         config=CalibrationConfig(calib_refit_iters=1),
         **sweep_inputs["calibrate_kw"],
     )
+    assert res2.gdna_capture_weight == 0.5
     assert res2.gdna_bulk_density == 0.01 and res2.gdna_capture_saturation == 5.0
-    np.testing.assert_array_equal(res2.gdna_capture_efficiency_region, 3.0)
-    np.testing.assert_array_equal(res2.gdna_capture_efficiency_boundary, 2.0)
+    np.testing.assert_array_equal(res2.gdna_capture_efficiency_region, 2.0)
+    np.testing.assert_array_equal(res2.gdna_capture_efficiency_boundary, 3.0)

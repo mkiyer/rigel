@@ -115,6 +115,7 @@ def _cal(
         rna_neg_frac_boundary=ez.copy(),
         gdna_density_global=0.01,
         gdna_bulk_density=bulk,
+        gdna_capture_weight=1.0,
         gdna_capture_saturation=1.0 if bulk is None else saturation,
         gdna_capture_efficiency_region=c,
         gdna_capture_efficiency_boundary=(
