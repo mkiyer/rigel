@@ -6,10 +6,10 @@ a panel and reports the whole-library gDNA error in fragments, `sum |estimate - 
 per-slot truth in `slot_truth.npz`, split by axis (region / boundary), one row per condition. It runs no EM and
 re-scans nothing: each condition is read from its cached scan in the drained frame the truth is certified in.
 
-Read the strand halves apart, never pooled: unstranded rows (`ss 0.50`) must win against `silent`, the floor;
-stranded rows (`ss 0.99`) must do minimal harm, so a ratio near 1.00x passes. A panel total hides a sign flip
-between them, and a row at any other specificity (the test panel's `ss 0.70`) is counted apart, against
-neither bar. `--panel test` is the development loop (seconds) and `--panel ladder` the shipping judgement; a toy
+Read each stratum (strand half x capture) apart, never pooled: unstranded rows (`ss 0.50`) must win against
+`silent`, the floor; stranded rows (`ss 0.99`) must do minimal harm, so a ratio near 1.00x passes. A panel total
+hides a sign flip between them, a strand half's total hides one between capture ON and OFF, and a row at any other
+specificity (the test panel's `ss 0.70`) is counted apart, against neither bar. `--panel test` is the development loop (seconds) and `--panel ladder` the shipping judgement; a toy
 and the panel can rank differently, so a claim names its substrate.
 
 `--by-class` sums the same error per node class (certified stratum, boundaries split by terminus flag, exons by
@@ -44,7 +44,7 @@ from rigel.config import CalibrationConfig, PipelineConfig
 from rigel.index import TranscriptIndex
 from _scan_cache import calibration_inputs, read_scan_cache
 
-from _shared import PANELS, add_set_option, configured, refuse_unconsumed, sibling, strandedness
+from _shared import PANELS, add_set_option, configured, refuse_unconsumed, scope, sibling, strata, stratum
 
 #: policy name -> the `CalibrationConfig` fields that install it
 POLICIES = {
@@ -169,28 +169,46 @@ def _print_by_class(table: dict, policies: list[str]) -> None:
             print(f"   {k:<38}{n:>8,}{mass:>12,.0f}{cells}")
 
 
-def _print_bars(table: dict, policies: list[str]) -> None:
-    """Each policy against `silent` on the two strand halves, counted separately."""
-    print("\nthe two bars, counted separately (never pooled):")
-    # a library in neither strand half (the test panel's ss 0.70) meets neither bar: counted apart
-    apart = sorted({strandedness(c) for c in table} - {"unstranded", "stranded"})
-    for half, want in (("unstranded", "WIN"), ("stranded", "minimal harm"),
-                       *((a, "no bar: apart") for a in apart)):
-        rows = [c for c in table if strandedness(c) == half]
+#: each strand half's bar against `silent`; a stratum in neither half (the test panel's ss 0.70) meets neither
+BARS = {"unstranded": "WIN", "stranded": "minimal harm"}
+
+
+def stratum_bars(table: dict, policies: list[str]) -> list[dict]:
+    """Each policy against `silent`, once per stratum (strand half x capture), never pooled: the conditions it
+    beats silence on, of how many, and its worst ratio to silence. A stratum with no condition is absent."""
+    out = []
+    for st in strata(table):
+        rows = [c for c in table if stratum(c) == st]
         if not rows:
             continue
         for p in policies:
             if p == "silent":
                 continue
-            better = sum(table[c][p]["total"] < table[c]["silent"]["total"] for c in rows)
-            worst = max(
-                (table[c][p]["total"] / table[c]["silent"]["total"] for c in rows if table[c]["silent"]["total"] > 0),
-                default=float("nan"),
-            )
-            print(
-                f"   {half:<11} ({want:<13}) {p:>8}: beats silence on {better}/{len(rows)}"
-                f"   worst row {worst:.2f}x"
-            )
+            out.append({
+                "stratum": st,
+                "scope": scope(st),
+                "bar": BARS.get(st[0], "no bar: apart"),
+                "policy": p,
+                "better": sum(table[c][p]["total"] < table[c]["silent"]["total"] for c in rows),
+                "n": len(rows),
+                "worst": max(
+                    (table[c][p]["total"] / table[c]["silent"]["total"] for c in rows
+                     if table[c]["silent"]["total"] > 0),
+                    default=float("nan"),
+                ),
+            })
+    return out
+
+
+def _print_bars(table: dict, policies: list[str]) -> None:
+    """Each policy against `silent`, per stratum, counted separately."""
+    print("\nthe bars, per stratum (strand half x capture; never pooled):")
+    for b in stratum_bars(table, policies):
+        label = " x ".join(b["stratum"])
+        print(
+            f"   {label:<26} {b['scope']:<8} ({b['bar']:<13}) {b['policy']:>8}: beats silence on "
+            f"{b['better']}/{b['n']}   worst row {b['worst']:.2f}x"
+        )
 
 
 def _conditions(panel_dir: Path, given) -> list[str]:
