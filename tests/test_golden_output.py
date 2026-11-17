@@ -1,12 +1,13 @@
 """The pipeline's numerical output does not drift, on a battery of oracle scenarios.
 
-Each scenario runs from a fixed-seed oracle BAM, so no aligner is needed, and compares every numeric column of the
-transcript, gene and locus frames, and the scalar aggregates, against a golden in `tests/golden/` (feather for a
-lossless round trip, a TSV mirror for diffing), to a relative tolerance with an absolute floor. `--update-golden`
-regenerates the files; the diff is to be read before that.
+Each scenario runs from a fixed-seed oracle BAM, so no aligner is needed, and compares every column of the
+transcript, gene and locus frames, row for row by id, and the scalar aggregates, against a golden in `tests/golden/`
+(feather for a lossless round trip, a TSV mirror for diffing): floating-point values to a relative tolerance with an
+absolute floor, everything else exactly. `--update-golden` regenerates the files; the diff is to be read before that.
 """
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -171,100 +172,94 @@ def _golden_exists(scenario_name):
 # Comparison
 # ---------------------------------------------------------------------------
 
-# Numeric columns compared against the golden, to RTOL / ATOL
-_TRANSCRIPT_NUMERIC_COLS = [
-    "effective_length",
-    "em_effective_length",
-    "count",
-    "count_unambig",
-    "count_em",
-    "count_spliced",
-    "count_nascent",
-    "tpm",
-    "tpm_total_rna",
-    "posterior_mean",
-]
-
-_GENE_NUMERIC_COLS = [
-    "effective_length",
-    "count",
-    "count_unambig",
-    "count_em",
-    "count_spliced",
-    "tpm",
-]
-
-_LOCI_NUMERIC_COLS = [
-    "locus_span_bp",
-    "n_em_fragments",
-    "count_annotated",
-    "count_nascent",
-    "count_gdna",
-    "count",
-    "fraction_gdna",
-    "count_gdna_prior",
-    "count_rna_prior",
-    "count_unambig",
-    "gdna_em_effective_length",
-]
+# Each frame's id column: the golden and the output are aligned on it, row for row
+_ID_COLUMNS = {"transcript_df": "transcript_id", "gene_df": "gene_id", "loci_df": "locus_id"}
 
 
-def _compare_df(actual, expected, numeric_cols, label):
-    """Compare two DataFrames column-by-column with informative errors."""
+def _compare_df(actual, expected, id_column, label):
+    """Compare an output frame with its golden: the same columns, the same ids, and every cell, aligned by id.
+
+    Rows are aligned on the id column, never by row order, so a scrambled id moves every value it carries. An id
+    that is missing or repeated is refused, because it aligns no row or several. A floating-point column agrees to
+    RTOL / ATOL with a NaN exactly where the golden has one; every other column (ids, names, integers, flags)
+    agrees exactly. A column in one frame and not the other is a changed table, never a skip.
+    """
+    only_golden = sorted(set(expected.columns) - set(actual.columns))
+    only_output = sorted(set(actual.columns) - set(expected.columns))
+    assert not only_golden and not only_output, (
+        f"{label}: column set differs — only in golden {only_golden}, only in output {only_output}"
+    )
+    assert id_column in expected.columns, f"{label}: no id column '{id_column}'"
     assert len(actual) == len(expected), (
         f"{label}: row count mismatch: {len(actual)} vs {len(expected)}"
     )
-    # A column the golden carries and the output lacks (or the reverse) is a changed table, never a skip:
-    # silently skipping it is how a dropped column would pass as "unchanged".
-    in_expected = [c for c in numeric_cols if c in expected.columns]
-    in_actual = [c for c in numeric_cols if c in actual.columns]
-    assert in_expected == in_actual, (
-        f"{label}: numeric column set differs — only in golden {sorted(set(in_expected) - set(in_actual))}, "
-        f"only in output {sorted(set(in_actual) - set(in_expected))}"
+    ids = {}
+    for name, frame in (("golden", expected), ("output", actual)):
+        values = frame[id_column].tolist()
+        assert not any(pd.isna(v) for v in values), (
+            f"{label}: the {name} has a row with no '{id_column}'"
+        )
+        repeated = sorted((v for v, n in Counter(values).items() if n > 1), key=str)
+        assert not repeated, f"{label}: the {name} repeats '{id_column}' {repeated[:5]}"
+        ids[name] = values
+    only_golden_ids = sorted(set(ids["golden"]) - set(ids["output"]), key=str)
+    only_output_ids = sorted(set(ids["output"]) - set(ids["golden"]), key=str)
+    assert not only_golden_ids and not only_output_ids, (
+        f"{label}: '{id_column}' differs — only in golden {only_golden_ids[:5]}, "
+        f"only in output {only_output_ids[:5]}"
     )
-    for col in in_expected:
-        a = actual[col].values.astype(np.float64)
-        e = expected[col].values.astype(np.float64)
-        # Handle NaN equality
-        nan_mask = np.isnan(e)
-        if nan_mask.any():
-            assert np.isnan(a[nan_mask]).all(), f"{label}.{col}: NaN mismatch"
-            a = a[~nan_mask]
-            e = e[~nan_mask]
+    # the output's rows in the golden's id order, by value: categorical ids sort by category, not by value
+    position = {v: i for i, v in enumerate(ids["output"])}
+    aligned = actual.iloc[[position[v] for v in ids["golden"]]].reset_index(drop=True)
+    golden = expected.reset_index(drop=True)
+    for col in golden.columns:
+        _compare_column(aligned[col], golden[col], f"{label}: column '{col}'")
+
+
+def _value_kind(column):
+    """A column's comparison class: floats within tolerance, everything else exactly. Text is one class whatever its
+    storage (object, string or categorical), because the feather round trip may store it either way."""
+    kind = column.dtype.kind
+    if kind == "f":
+        return "float"
+    if kind in "iu":
+        return "integer"
+    if kind == "b":
+        return "bool"
+    return "text"
+
+
+def _compare_column(actual, expected, where):
+    kind = _value_kind(expected)
+    assert _value_kind(actual) == kind, (
+        f"{where}: type differs — golden {expected.dtype}, output {actual.dtype}"
+    )
+    if kind == "float":
+        # equal_nan: a NaN must sit exactly where the golden has one
         np.testing.assert_allclose(
-            a,
-            e,
+            actual.to_numpy(np.float64),
+            expected.to_numpy(np.float64),
             atol=ATOL,
             rtol=RTOL,
-            err_msg=f"{label}: column '{col}' differs",
+            equal_nan=True,
+            err_msg=f"{where} differs",
         )
+        return
+    a, e = actual.tolist(), expected.tolist()
+    differ = [
+        i for i, (x, y) in enumerate(zip(a, e)) if not (x == y or (pd.isna(x) and pd.isna(y)))
+    ]
+    assert not differ, f"{where} differs at {len(differ)} row(s): " + ", ".join(
+        f"golden {e[i]!r} -> output {a[i]!r}" for i in differ[:5]
+    )
 
 
 def _compare_output(actual, expected, scenario_name):
     """Full comparison of pipeline output against golden data."""
-    # Transcript-level
-    _compare_df(
-        actual["transcript_df"],
-        expected["transcript_df"],
-        _TRANSCRIPT_NUMERIC_COLS,
-        f"{scenario_name}/transcript",
-    )
-
-    # Gene-level
-    _compare_df(
-        actual["gene_df"],
-        expected["gene_df"],
-        _GENE_NUMERIC_COLS,
-        f"{scenario_name}/gene",
-    )
-
-    # Loci-level
-    _compare_df(
-        actual["loci_df"],
-        expected["loci_df"],
-        _LOCI_NUMERIC_COLS,
-        f"{scenario_name}/loci",
-    )
+    for key, id_column in _ID_COLUMNS.items():
+        _compare_df(
+            actual[key], expected[key], id_column, f"{scenario_name}/{key.removesuffix('_df')}"
+        )
 
     # Scalars
     for key in ("gdna_em_count", "synthetic_count", "n_fragments"):
@@ -297,6 +292,131 @@ def _run_golden_test(scenario_name, result, index, update_golden):
 
     expected = _load_golden(scenario_name)
     _compare_output(output, expected, scenario_name)
+
+
+# ---------------------------------------------------------------------------
+# The gate's own falsification: a golden mutated one way at a time must fail the comparison
+# ---------------------------------------------------------------------------
+
+# Three transcripts on two genes in two loci, every count distinct, so a scrambled id moves values
+_GATE_SCENARIO = "combo_moderate"
+
+
+def _copy_output(output):
+    return {
+        key: (value.copy() if isinstance(value, pd.DataFrame) else dict(value))
+        for key, value in output.items()
+    }
+
+
+def _set_cell(frame, column, row, value):
+    # a categorical id or name column refuses a value outside its categories; every other column keeps its type, so
+    # each mutant fails on its value, never on a changed type
+    if isinstance(frame[column].dtype, pd.CategoricalDtype):
+        frame[column] = frame[column].astype(object)
+    frame.loc[row, column] = value
+
+
+def _scramble_ids(out):
+    frame = out["transcript_df"]
+    frame["transcript_id"] = frame["transcript_id"].to_numpy()[::-1]
+
+
+def _duplicate_id(out):
+    frame = out["transcript_df"]
+    _set_cell(frame, "transcript_id", 1, frame.loc[0, "transcript_id"])
+
+
+def _move_count(out):
+    frame = out["transcript_df"]
+    _set_cell(frame, "count", 0, frame.loc[0, "count"] * (1 + 1e-3))
+
+
+# each mutant, and the reason it must fail for: a mutant failing for another reason would not prove its own gate
+_GATE_MUTANTS = {
+    "scrambled transcript ids": (_scramble_ids, r"transcript: column '\w+' differs"),
+    "a transcript's locus_id = 999": (
+        lambda out: _set_cell(out["transcript_df"], "locus_id", 0, 999),
+        r"transcript: column 'locus_id' differs",
+    ),
+    "an added column": (
+        lambda out: out["transcript_df"].insert(3, "extra", 0.0),
+        r"transcript: column set differs .* only in output \['extra'\]",
+    ),
+    "a dropped text column": (
+        lambda out: out["gene_df"].pop("gene_name"),
+        r"gene: column set differs — only in golden \['gene_name'\]",
+    ),
+    "a duplicated transcript id": (
+        _duplicate_id,
+        r"transcript: the output repeats 'transcript_id'",
+    ),
+    "a missing transcript id": (
+        lambda out: _set_cell(out["transcript_df"], "transcript_id", 0, None),
+        r"transcript: the output has a row with no 'transcript_id'",
+    ),
+    "a transcript id the golden lacks": (
+        lambda out: _set_cell(out["transcript_df"], "transcript_id", 0, "t_new"),
+        r"transcript: 'transcript_id' differs .* only in output \['t_new'\]",
+    ),
+    "a locus id = 999 in the loci table": (
+        lambda out: _set_cell(out["loci_df"], "locus_id", 0, 999),
+        r"loci: 'locus_id' differs .* only in output \[999\]",
+    ),
+    "a changed gene_name": (
+        lambda out: _set_cell(out["gene_df"], "gene_name", 0, "renamed"),
+        r"gene: column 'gene_name' differs",
+    ),
+    "a moved gene n_transcripts": (
+        lambda out: _set_cell(out["gene_df"], "n_transcripts", 0, 3),
+        r"gene: column 'n_transcripts' differs",
+    ),
+    "a moved locus n_nascent": (
+        lambda out: _set_cell(out["loci_df"], "n_nascent", 0, 1),
+        r"loci: column 'n_nascent' differs",
+    ),
+    "a flipped locus has_gdna": (
+        lambda out: _set_cell(out["loci_df"], "has_gdna", 0, False),
+        r"loci: column 'has_gdna' differs",
+    ),
+    "a flipped transcript is_mane": (
+        lambda out: _set_cell(out["transcript_df"], "is_mane", 0, True),
+        r"transcript: column 'is_mane' differs",
+    ),
+    "a count moved beyond tolerance": (_move_count, r"transcript: column 'count' differs"),
+}
+
+
+class TestCompareGate:
+    """The comparison is itself a gate, so it is falsified like one: every mutant below changes the output a way a
+    regression could, and each must fail. The controls must pass: an unchanged copy, the rows in another order, and
+    a value moved by less than the tolerance."""
+
+    @pytest.mark.parametrize("mutant", sorted(_GATE_MUTANTS))
+    def test_mutant_fails(self, mutant):
+        mutate, reason = _GATE_MUTANTS[mutant]
+        golden = _load_golden(_GATE_SCENARIO)
+        actual = _copy_output(golden)
+        mutate(actual)
+        with pytest.raises(AssertionError, match=reason):
+            _compare_output(actual, golden, _GATE_SCENARIO)
+
+    def test_unchanged_passes(self):
+        golden = _load_golden(_GATE_SCENARIO)
+        _compare_output(_copy_output(golden), golden, _GATE_SCENARIO)
+
+    def test_row_order_alone_passes(self):
+        golden = _load_golden(_GATE_SCENARIO)
+        actual = _copy_output(golden)
+        for key in ("transcript_df", "gene_df", "loci_df"):
+            actual[key] = actual[key].iloc[::-1].reset_index(drop=True)
+        _compare_output(actual, golden, _GATE_SCENARIO)
+
+    def test_noise_within_tolerance_passes(self):
+        golden = _load_golden(_GATE_SCENARIO)
+        actual = _copy_output(golden)
+        actual["transcript_df"]["count"] = actual["transcript_df"]["count"] * (1 + RTOL / 10)
+        _compare_output(actual, golden, _GATE_SCENARIO)
 
 
 # =====================================================================
