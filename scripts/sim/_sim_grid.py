@@ -8,9 +8,10 @@ rate x gDNA strand overdispersion x strand specificity x capture. It writes ``ma
 
 Per condition the grid copies the transcripts at their base abundances, applies the nascent mode, splits the fragment
 budget (:func:`resolve_depths`), simulates on the capture sampler its panel shares, writes the truth (``_sim_truth``)
-and returns a manifest entry. A condition whose output already exists is skipped. The seed keys on ``(gdna, strand
-specificity)`` only (:func:`capture_paired_condition_seed`), so the capture, overdispersion and nascent variants of
-one base condition are paired.
+and returns a manifest entry. A condition whose output already exists is skipped only when the panel recorded it
+under the inputs this config would simulate it from (:func:`refuse_a_stale_resume`); otherwise the run refuses. The
+seed keys on ``(gdna, strand specificity)`` only (:func:`capture_paired_condition_seed`), so the capture,
+overdispersion and nascent variants of one base condition are paired.
 """
 
 from __future__ import annotations
@@ -368,6 +369,79 @@ def _condition_entry(
     }
 
 
+# ── resuming ─────────────────────────────────────────────────────────────────────────────────────
+
+#: Each finished condition's record of what it was simulated from, written in its directory once its truth is, so a
+#: run that dies before the panel's manifest is written still resumes every condition it finished.
+CONDITION_RECORD = "condition.json"
+
+#: A condition entry's fields that record what its simulation produced, not what it was asked to simulate.
+_OUTCOME_KEYS = frozenset({"oracle_bam", "n_mrna_observed", "n_nrna_observed", "n_gdna_observed"})
+
+#: Manifest fields that lay out the grid (which conditions exist; each entry records its own point on every axis) or
+#: divide the work, and so say nothing about what one condition is. `gtf` is a path: the index's record carries the
+#: GTF the transcriptome comes from by digest, and the run refuses a `gtf` that is not it.
+_NOT_IDENTITY = {
+    "": frozenset({"conditions", "strand_specificities", "capture", "capture_configs", "gtf"}),
+    "simulation": frozenset({"n_workers"}),
+    "gdna": frozenset(
+        {"rates", "rate_labels", "strand_overdispersion", "strand_overdispersions", "strand_overdispersion_labels"}
+    ),
+}
+
+
+def condition_identity(manifest: dict, name: str) -> dict | None:
+    """What condition *name* of a manifest-shaped record was simulated from: the panel's inputs (the index, the
+    simulation and gDNA laws, the nascent and abundance models, the genome, the shadow transcripts) and its own entry,
+    less what lays out the grid or records the outcome. ``None`` when the record lists no such condition."""
+    entry = next((c for c in manifest.get("conditions", []) if c.get("name") == name), None)
+    if entry is None:
+        return None
+    panel = {k: v for k, v in manifest.items() if k not in _NOT_IDENTITY[""]}
+    for section, keys in _NOT_IDENTITY.items():
+        if section and isinstance(panel.get(section), dict):
+            panel[section] = {k: v for k, v in panel[section].items() if k not in keys}
+    identity = {"panel": panel, "condition": {k: v for k, v in entry.items() if k not in _OUTCOME_KEYS}}
+    # the record is compared as JSON reads it back
+    return json.loads(json.dumps(identity))
+
+
+def _recorded_identity(outdir: Path, name: str, previous: dict | None) -> dict | None:
+    """The condition's identity as the panel recorded it: its own record when it has one, else the manifest the panel
+    held before this run, else ``None``."""
+    record = outdir / name / CONDITION_RECORD
+    if record.is_file():
+        return json.loads(record.read_text())
+    return condition_identity(previous, name) if previous is not None else None
+
+
+def refuse_a_stale_resume(outdir: Path, name: str, current: dict, previous: dict | None) -> None:
+    """Resume a condition whose output exists only when the panel's record of it is what this config would simulate:
+    otherwise the old reads would be kept under a manifest that names the new config."""
+    recorded = _recorded_identity(outdir, name, previous)
+    if recorded is None:
+        raise SystemExit(
+            f"⛔ {outdir / name} has output but no record of the config it was simulated from (no {CONDITION_RECORD}, "
+            f"and the panel's manifest does not list it). Delete the directory to simulate it again."
+        )
+    if recorded != current:
+        moved = sorted(
+            f"{part}.{k}"
+            for part in ("panel", "condition")
+            for k in set(recorded.get(part, {})) | set(current[part])
+            if recorded.get(part, {}).get(k) != current[part].get(k)
+        )
+        raise SystemExit(
+            f"⛔ {outdir / name} was simulated under a different config (differs in {moved}). Delete the directory "
+            f"to simulate it under this one, or run the config it was simulated from."
+        )
+
+
+def _output(cfg: WholeGenomeSimConfig, entry: dict) -> Path:
+    """The file a condition's output is resumed on: its oracle BAM whenever one is requested, else its FASTQ."""
+    return Path(cfg.outdir) / entry["name"] / ("sim_oracle.bam" if cfg.oracle_bam else "sim_R1.fq.gz")
+
+
 def _simulate_condition(
     cfg: WholeGenomeSimConfig,
     entry: dict,
@@ -376,15 +450,16 @@ def _simulate_condition(
     sampler: CaptureSampler,
 ) -> str | None:
     """Simulate one condition into its directory unless its output exists; return its oracle BAM's path in the
-    panel, ``None`` when it has none.
+    panel, ``None`` when it has none. The caller resumes only a condition the panel's record describes
+    (:func:`refuse_a_stale_resume`).
 
     The resume key is the oracle BAM whenever one is requested, so a condition whose BAM exists is skipped even if
     its FASTQs are gone; delete the BAM to regenerate it.
     """
     cond_dir = Path(cfg.outdir) / entry["name"]
     bam = f"{entry['name']}/sim_oracle.bam"
-    if (cond_dir / ("sim_oracle.bam" if cfg.oracle_bam else "sim_R1.fq.gz")).exists():
-        print("    Output exists, skipping", flush=True)
+    if _output(cfg, entry).exists():
+        print("    Output exists and its record matches this config, resuming", flush=True)
         return bam if cfg.oracle_bam else None
     print("    Simulating...", end="", flush=True)
     t0 = time.monotonic()
@@ -441,11 +516,21 @@ def _write_condition_truth(
 
 
 def run_condition_grid(
-    cfg: WholeGenomeSimConfig, transcripts: list[Transcript], *, has_file_nrna: bool = False
+    cfg: WholeGenomeSimConfig,
+    transcripts: list[Transcript],
+    *,
+    has_file_nrna: bool = False,
+    index: dict[str, Any] | None = None,
+    n_shadow_transcripts: int = 0,
 ) -> list[dict]:
     """Run every condition *cfg* lays out over *transcripts*, which carry their base abundances, and return the
     per-condition manifest entries for the caller to write. *has_file_nrna* replaces the nascent sweep with the
-    abundance file's own levels. Every axis is checked before anything is written."""
+    abundance file's own levels. Every axis is checked before anything is written. *index* and
+    *n_shadow_transcripts* are the manifest's (:func:`write_manifest`): a condition whose output exists resumes only
+    when the panel recorded it under the same inputs, and each finished condition records them
+    (:data:`CONDITION_RECORD`)."""
+    previous_path = Path(cfg.outdir) / "manifest.json"
+    previous = json.loads(previous_path.read_text()) if previous_path.is_file() else None
     gdna_axis = _gdna_axis(cfg.gdna)
     genomic_refs = _genomic_refs(cfg.gdna)
     od_axis = _overdispersion_axis(cfg.gdna)
@@ -476,12 +561,19 @@ def run_condition_grid(
                 f"capture={capture.label}",
                 flush=True,
             )
+            identity = condition_identity(
+                manifest_record(cfg, [entry], index=index or {}, n_shadow_transcripts=n_shadow_transcripts),
+                entry["name"],
+            )
+            if _output(cfg, entry).exists():
+                refuse_a_stale_resume(outdir, entry["name"], identity, previous)
             entry["oracle_bam"] = _simulate_condition(
                 cfg, entry, nascent_transcripts, genomic_refs, samplers[capture.label]
             )
             entry.update(
                 _write_condition_truth(outdir, entry, nascent_transcripts, emit_fastq=cfg.emit_fastq)
             )
+            (outdir / entry["name"] / CONDITION_RECORD).write_text(json.dumps(identity, indent=2))
             conditions.append(entry)
     return conditions
 
@@ -509,9 +601,25 @@ def write_manifest(
     index: dict[str, Any],
     n_shadow_transcripts: int = 0,
 ) -> Path:
-    """Write ``manifest.json`` under ``outdir`` and return its path: the config, the conditions, the absolute input
-    paths and the index the transcriptome comes from. ``index`` is ``{"path", "manifest"}`` as
-    :func:`_index_provenance` returns it; each truth file's path is in its condition's entry."""
+    """Write ``manifest.json`` under ``outdir`` and return its path: :func:`manifest_record`."""
+    manifest = manifest_record(cfg, conditions, index=index, n_shadow_transcripts=n_shadow_transcripts)
+    path = outdir / "manifest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as handle:
+        json.dump(manifest, handle, indent=2)
+    return path
+
+
+def manifest_record(
+    cfg: WholeGenomeSimConfig,
+    conditions: list[dict[str, Any]],
+    *,
+    index: dict[str, Any],
+    n_shadow_transcripts: int = 0,
+) -> dict:
+    """The manifest: the config, the conditions, the absolute input paths and the index the transcriptome comes from.
+    ``index`` is ``{"path", "manifest"}`` as :func:`_index_provenance` returns it; each truth file's path is in its
+    condition's entry."""
     manifest = {
         "version": 1,
         # the index's resolved path and its own manifest: its FASTA and GTF with their sha256, and its build flags
@@ -530,11 +638,7 @@ def write_manifest(
         value = getattr(cfg, key)
         manifest[key] = str(Path(value).resolve()) if value else value
     manifest["strand_specificities"] = _jsonable(cfg.strand_specificities)
-    path = outdir / "manifest.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as handle:
-        json.dump(manifest, handle, indent=2)
-    return path
+    return manifest
 
 
 # ── the run ──────────────────────────────────────────────────────────────────────────────────────
@@ -565,9 +669,10 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         transcripts = merge_shadow_transcripts(transcripts, cfg.shadow_gtf)
 
     has_file_nrna = assign_base_abundances(transcripts, cfg.abundance)
-    conditions = run_condition_grid(cfg, transcripts, has_file_nrna=has_file_nrna)
-    manifest_path = write_manifest(
-        outdir, cfg, conditions, index=index_record, n_shadow_transcripts=len(transcripts) - n_annotated
+    n_shadow = len(transcripts) - n_annotated
+    conditions = run_condition_grid(
+        cfg, transcripts, has_file_nrna=has_file_nrna, index=index_record, n_shadow_transcripts=n_shadow
     )
+    manifest_path = write_manifest(outdir, cfg, conditions, index=index_record, n_shadow_transcripts=n_shadow)
     logger.info("Wrote manifest to %s", manifest_path)
     return conditions

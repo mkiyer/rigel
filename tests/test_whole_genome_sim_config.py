@@ -609,6 +609,93 @@ def test_no_oracle_on_a_config_without_fastqs_is_refused_before_simulating(
     assert not outdir.exists()
 
 
+def test_a_condition_simulated_under_another_config_is_never_resumed(tiny_reference, tmp_path):
+    """A condition whose output exists is skipped, and the manifest is rewritten from the config in hand, so a rerun
+    under another fragment-length law kept the old reads under a manifest that names the new law. A condition resumes
+    only when the panel's own record of it matches what this config would simulate; otherwise the run refuses before
+    simulating anything, and names the directory to delete.
+
+    Perturbation: resuming on the output file's existence alone runs the second config to completion."""
+    genome, gtf, index = tiny_reference
+    outdir = tmp_path / "out"
+    run_simulation(
+        parse_yaml_config(_tiny_config(tmp_path / "sim.yaml", genome, gtf, index, outdir))
+    )
+    before = json.loads((outdir / "manifest.json").read_text())
+
+    moved = _tiny_config(tmp_path / "moved.yaml", genome, gtf, index, outdir)
+    moved.write_text(moved.read_text().replace("frag_mean: 150", "frag_mean: 160"))
+    with pytest.raises(SystemExit, match="different config"):
+        run_simulation(parse_yaml_config(moved))
+    assert json.loads((outdir / "manifest.json").read_text()) == before
+
+
+def test_a_condition_resumes_under_the_config_it_was_simulated_with(tiny_reference, tmp_path):
+    """The other side: the same config resumes, and a setting that only divides the work (the worker count) does not
+    block it."""
+    genome, gtf, index = tiny_reference
+    outdir = tmp_path / "out"
+    config = _tiny_config(tmp_path / "sim.yaml", genome, gtf, index, outdir)
+    run_simulation(parse_yaml_config(config))
+    bam = next(outdir.glob("gdna_*/sim_oracle.bam"))
+    stamp = bam.stat().st_mtime_ns
+    config.write_text(
+        config.read_text().replace("  read_length: 50\n", "  read_length: 50\n  n_workers: 2\n")
+    )
+    run_simulation(parse_yaml_config(config))
+    assert bam.stat().st_mtime_ns == stamp, "the condition was simulated again"
+
+
+def test_a_run_that_died_before_its_manifest_resumes_from_each_conditions_record(
+    tiny_reference, tmp_path
+):
+    """The panel's manifest is written last; every finished condition records its own inputs as it finishes, so a run
+    that died before the manifest still resumes what it finished."""
+    from _sim_grid import CONDITION_RECORD
+
+    genome, gtf, index = tiny_reference
+    outdir = tmp_path / "out"
+    config = parse_yaml_config(_tiny_config(tmp_path / "sim.yaml", genome, gtf, index, outdir))
+    run_simulation(config)
+    assert list(outdir.glob(f"gdna_*/{CONDITION_RECORD}"))
+    bam = next(outdir.glob("gdna_*/sim_oracle.bam"))
+    stamp = bam.stat().st_mtime_ns
+    (outdir / "manifest.json").unlink()
+    run_simulation(config)
+    assert bam.stat().st_mtime_ns == stamp, "the condition was simulated again"
+
+
+def test_an_output_no_record_describes_is_refused(tiny_reference, tmp_path):
+    """Output with no record of it, its own or the panel's (a run that died mid-condition, or a directory copied in),
+    says nothing about the config it came from."""
+    from _sim_grid import CONDITION_RECORD
+
+    genome, gtf, index = tiny_reference
+    outdir = tmp_path / "out"
+    config = parse_yaml_config(_tiny_config(tmp_path / "sim.yaml", genome, gtf, index, outdir))
+    run_simulation(config)
+    (outdir / "manifest.json").unlink()
+    for record in outdir.glob(f"gdna_*/{CONDITION_RECORD}"):
+        record.unlink()
+    with pytest.raises(SystemExit, match="no record"):
+        run_simulation(config)
+
+
+def test_a_panel_built_before_the_condition_records_resumes_from_its_manifest(
+    tiny_reference, tmp_path
+):
+    """A complete panel whose conditions carry no record of their own is described by its manifest."""
+    from _sim_grid import CONDITION_RECORD
+
+    genome, gtf, index = tiny_reference
+    outdir = tmp_path / "out"
+    config = parse_yaml_config(_tiny_config(tmp_path / "sim.yaml", genome, gtf, index, outdir))
+    run_simulation(config)
+    for record in outdir.glob(f"gdna_*/{CONDITION_RECORD}"):
+        record.unlink()
+    run_simulation(config)
+
+
 def test_the_length_sampler_is_unbiased_and_its_law_is_exact():
     """A drawn length is the nearest integer to a normal draw, so the law the instruments integrate (`fl_pmf`, the
     rounded normal's mass at each integer, truncated) is the sampler's exactly. A sampler truncating toward zero
