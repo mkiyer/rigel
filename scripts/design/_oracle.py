@@ -137,9 +137,10 @@ def lift_choices(whole, parts, choices: np.ndarray):
     consumed from a per-key queue whose state must be shared across partitions, or two could take the same entry and
     leave another unused. A one-partition caller passes ``[p]``.
 
-    The key is the bank's own canonical sort key, a record's sequence of placements, each the
-    ``DEFERRED_RECORD_FIELDS`` tuple the C++ sorts on, imported rather than restated. :class:`DeferredFragments`
-    guarantees that two records tying on that key are identical, so no tie-break is needed. Identical records have
+    The key is the bank's own canonical sort key, a record's sequence of placements, each its
+    ``DEFERRED_RECORD_FIELDS`` tuple (imported rather than restated), its observed introns, and each of its hypotheses'
+    implied introns and strand, everything the C++ sorts on. :class:`DeferredFragments` guarantees that two records
+    tying on that key are identical, so no tie-break is needed. Identical records have
     identical hypothesis sets (enumeration reads the span and the annotation, never the origin), so a local hypothesis
     index transfers between them.
 
@@ -164,12 +165,34 @@ def lift_choices(whole, parts, choices: np.ndarray):
         )
 
     def _keys(d):
-        per_placement = list(
-            zip(*(np.asarray(getattr(d, f), np.int64).tolist() for f in DEFERRED_RECORD_FIELDS))
-        )
+        scalars = list(zip(*(np.asarray(getattr(d, f), np.int64).tolist() for f in DEFERRED_RECORD_FIELDS)))
+
+        def runs(offsets, values, stride):
+            """Each item's run of ``values``, as a tuple of ``stride``-tuples, under CSR ``offsets``."""
+            off = np.asarray(offsets, np.int64).tolist()
+            flat = np.asarray(values, np.int64).tolist()
+            return [
+                tuple(tuple(flat[k : k + stride]) for k in range(stride * off[i], stride * off[i + 1], stride))
+                for i in range(len(off) - 1)
+            ]
+
+        observed = runs(d.observed_intron_offsets, d.observed_introns, 2)
+        implied = runs(d.hypothesis_intron_offsets, d.hypothesis_introns, 2)
+        hyp_sj = np.asarray(d.hypothesis_sj_strand, np.int64).tolist()
+        hyp_off = np.asarray(d.hypothesis_offsets, np.int64).tolist()
+        # a placement as the native canonical key holds it: its scalar fields, its observed introns, and each of its
+        # hypotheses' implied introns and strand, so records tie only when they are byte-identical
+        placements = [
+            (
+                scalars[q],
+                observed[q],
+                tuple((implied[h], hyp_sj[h]) for h in range(hyp_off[q], hyp_off[q + 1])),
+            )
+            for q in range(len(scalars))
+        ]
         offsets = np.asarray(d.placement_offsets, np.int64)
         return [
-            tuple(per_placement[int(offsets[i]) : int(offsets[i + 1])])
+            tuple(placements[int(offsets[i]) : int(offsets[i + 1])])
             for i in range(d.n_fragments)
         ]
 

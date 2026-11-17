@@ -176,3 +176,81 @@ def test_partitions_holding_more_copies_of_a_key_than_the_whole_raises():
     ch = np.array([0, 1], np.int64)
     with pytest.raises(ValueError, match="more records with key"):
         lift_choices(whole, [_P(_bank([only])), _P(_bank([only]))], ch)
+
+
+def _rich_bank(records):
+    """A one-placement-per-record bank whose records carry their own observed introns and hypotheses: each record is
+    ``(scalars, observed, hypotheses)``, ``scalars`` the seven fields of ``_RECS``, ``observed`` a list of ``(start,
+    end)`` introns and ``hypotheses`` a list of ``(sj_strand, [(start, end), ...])``. Records are taken in the order
+    given, which the caller makes the bank's canonical one."""
+    scal = list(zip(*(r[0] for r in records)))
+    obs_off, obs, hyp_off, hyp_sj, hyp_in_off, hyp_in = [0], [], [0], [], [0], []
+    for _s, observed, hypotheses in records:
+        for a, b in observed:
+            obs += [a, b]
+        obs_off.append(len(obs) // 2)
+        for sj, introns in hypotheses:
+            hyp_sj.append(sj)
+            for a, b in introns:
+                hyp_in += [a, b]
+            hyp_in_off.append(len(hyp_in) // 2)
+        hyp_off.append(len(hyp_sj))
+    n = len(records)
+    return DeferredFragments(
+        placement_offsets=np.arange(0, n + 1, dtype=np.int64),
+        ref=np.asarray(scal[0], np.int64),
+        start=np.asarray(scal[1], np.int64),
+        end=np.asarray(scal[2], np.int64),
+        align_strand=np.asarray(scal[3], np.int64),
+        sj_strand=np.asarray(scal[4], np.int64),
+        observed_intron_offsets=np.asarray(obs_off, np.int64),
+        observed_introns=np.asarray(obs, np.int64),
+        hypothesis_offsets=np.asarray(hyp_off, np.int64),
+        hypothesis_sj_strand=np.asarray(hyp_sj, np.int64),
+        hypothesis_intron_offsets=np.asarray(hyp_in_off, np.int64),
+        hypothesis_introns=np.asarray(hyp_in, np.int64),
+        nm=np.asarray(scal[5], np.int64),
+        clip=np.asarray(scal[6], np.int64),
+    )
+
+
+_SCALARS = (0, 100, 600, 0, 0, 0, 0)
+_UNSPLICED = (0, [])
+
+
+@pytest.mark.parametrize(
+    "first,second",
+    [
+        # the native key's order: no observed intron sorts before one
+        (
+            (_SCALARS, [], [_UNSPLICED, (1, [(300, 400)])]),
+            (_SCALARS, [(150, 200)], [_UNSPLICED, (1, [(300, 400)])]),
+        ),
+        # a hypothesis's introns
+        (
+            (_SCALARS, [], [_UNSPLICED, (1, [(300, 400)])]),
+            (_SCALARS, [], [_UNSPLICED, (1, [(300, 450)])]),
+        ),
+        # a hypothesis's strand
+        (
+            (_SCALARS, [], [_UNSPLICED, (1, [(300, 400)])]),
+            (_SCALARS, [], [_UNSPLICED, (2, [(300, 400)])]),
+        ),
+        # the hypothesis count
+        (
+            (_SCALARS, [], [_UNSPLICED, (1, [(300, 400)])]),
+            (_SCALARS, [], [_UNSPLICED, (1, [(300, 400)]), (1, [(250, 450)])]),
+        ),
+    ],
+    ids=["observed-introns", "hypothesis-introns", "hypothesis-strand", "hypothesis-count"],
+)
+def test_records_that_differ_only_in_introns_or_hypotheses_keep_their_own_choices(first, second):
+    """The native canonical key orders a record's placements on their observed introns and their hypotheses (each one's
+    implied introns, then its strand, then their count) as well as the scalar fields, so two records that differ only
+    there are distinct, not a tie. Pooled under one key, the record split into the second partition would replay the
+    first's choice: a hypothesis index read against another record's hypotheses."""
+    whole = _P(_rich_bank([first, second]))
+    ch = np.array([0, 1], np.int64)
+    lifted, ambiguous = lift_choices(whole, [_P(_rich_bank([second])), _P(_rich_bank([first]))], ch)
+    assert ambiguous == 0, ambiguous
+    assert int(lifted[0][0]) == 1 and int(lifted[1][0]) == 0, lifted
