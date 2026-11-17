@@ -30,8 +30,10 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -264,6 +266,34 @@ def origin_slot_counts(index, oracle_cache: Path, condition: str, payload, lift:
     return truth, counts, int(n_amb_strand)
 
 
+def genomic_ref_ids(manifest: dict, condition: str, ref_name_to_id: Mapping[str, int]) -> np.ndarray:
+    """The reference ids *condition* drew gDNA from: the manifest's ``gdna.genomic_refs``, an input to the simulator
+    and never an inference from where gDNA landed, or none at all when the condition simulated no gDNA.
+
+    A condition the manifest does not list, or a genomic reference the index does not hold, is refused: either means
+    the manifest and the index describe different panels.
+    """
+    entry = {c["name"]: c for c in manifest["conditions"]}.get(condition)
+    if entry is None:
+        raise KeyError(f"condition {condition!r} is not in the panel's manifest")
+    if int(entry["n_gdna"]) == 0:
+        return np.zeros(0, np.int64)
+    names = manifest["gdna"].get("genomic_refs") or []
+    unknown = sorted(set(names) - set(ref_name_to_id))
+    if unknown:
+        raise ValueError(f"the manifest's genomic references {unknown} are not in the index")
+    return np.array(sorted(int(ref_name_to_id[n]) for n in names), np.int64)
+
+
+def gdna_scope_verdicts(capture_on: bool, n_g, eff_g, label, ref, gdna_refs) -> list[dict]:
+    """Where gDNA may be: uniform over each genomic reference (capture-OFF), and exactly zero on every other one (the
+    spike-in backbone, and every reference in a zero-gDNA condition)."""
+    return [
+        *uniformity_verdicts(capture_on, n_g, eff_g, label, ref, gdna_refs),
+        gate_zero(n_g, ~np.isin(ref, gdna_refs), "gdna outside genomic refs"),
+    ]
+
+
 def uniformity_verdicts(capture_on: bool, n_g, eff_g, label, ref, gdna_refs) -> list[dict]:
     """gdna-field-uniformity on every reference that carries gDNA; not applicable under capture, vacuous where there
     is no gDNA."""
@@ -301,7 +331,8 @@ def derive(index, suite: Path, condition: str) -> tuple[dict, list[dict]]:
     n_g, n_n, n_m = c["n_gdna"], c["n_nrna"], c["n_mrna"]
     ref = slot_refs(chain, region_arrays)
     eff_g = np.asarray(geom.eff_gdna, np.float64)
-    gdna_refs = np.array(sorted({int(r) for r in ref[n_g > 0]}), np.int64)
+    manifest = json.loads((Path(suite) / "manifest.json").read_text())
+    gdna_refs = genomic_ref_ids(manifest, condition, index.ref_name_to_id)
 
     verdicts = [
         gate_partition(c["count"], n_g, n_n, n_m),
@@ -311,10 +342,7 @@ def derive(index, suite: Path, condition: str) -> tuple[dict, list[dict]]:
          "gdna_spliced_leak": truth.gdna_spliced_leak,
          "n_ambiguous_origins": int(truth.n_ambiguous),
          "n_ambiguous_strands": n_amb_strand},
-        *uniformity_verdicts(capture_label(condition) == "on", n_g, eff_g, label, ref, gdna_refs),
-        # refs that carry no gDNA at all must be exactly zero (the ERCC backbone, and every ref in a zero-gDNA
-        # condition)
-        gate_zero(n_g, ~np.isin(ref, gdna_refs), "gdna outside genomic refs"),
+        *gdna_scope_verdicts(capture_label(condition) == "on", n_g, eff_g, label, ref, gdna_refs),
         gate_nascent_scope(n_n, np.asarray(statics.free_pos, bool) | np.asarray(statics.free_neg, bool)),
     ]
     mass = n_g + n_n + n_m
@@ -416,6 +444,20 @@ def self_test() -> int:
     z[3] = 1e-9
     check("1e-9 of forbidden mass fires the zero gate", not gate_zero(z, ~admissible, "t")["ok"])
     check("zero gate on empty selection is VACUOUS", gate_zero(z, np.zeros(n, bool), "t")["vacuous"])
+
+    # gDNA on a reference the manifest calls RNA-only: the genomic set is the manifest's, not the counts'
+    names = {"genome": 0, "spike_in": 1}
+    manifest = {"gdna": {"genomic_refs": ["genome"]}, "conditions": [{"name": "c", "n_gdna": 1}]}
+    on_ref = np.arange(n) % 2
+    planted = n_g + (on_ref == 1)
+
+    def outside(field):
+        refs = genomic_ref_ids(manifest, "c", names)
+        return [v for v in gdna_scope_verdicts(True, field, eff, cls, on_ref, refs)
+                if v["gate"].endswith("gdna outside genomic refs")][0]
+
+    check("gDNA confined to the genomic references passes", outside(np.where(on_ref == 0, n_g, 0.0))["ok"])
+    check("gDNA planted on an RNA-only reference fires", not outside(planted)["ok"])
 
     print(f"\n   self-test: {ok} passed, {fail} failed")
     return 1 if fail else 0
