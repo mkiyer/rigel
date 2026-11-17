@@ -1122,3 +1122,15 @@ def test_the_simulators_transcripts_carry_the_aliases_the_index_recorded(tmp_pat
     assert sorted(aliases) in (["T1"], ["T1dup"])
     (kept,) = aliases
     assert aliases[kept] == (({"T1", "T1dup"} - {kept}).pop(),)
+
+
+def test_the_probe_writer_refuses_a_bed_target_before_writing(tmp_path):
+    """The panel is written twice, a TSV at the target and a BED12 beside it (``<target>.bed``). A ``.bed`` target is
+    its own sibling, so two handles would write one file; the writer refuses it and leaves the file as it was."""
+    target = tmp_path / "test_probes.bed"
+    target.write_text("rendered\n")
+    with pytest.raises(ValueError, match=r"\.bed"):
+        write_random_capture_probes(
+            [_transcript("T1", [(0, 1200)])], target, capture_fraction=1.0, probe_length=120, seed=7
+        )
+    assert target.read_text() == "rendered\n"

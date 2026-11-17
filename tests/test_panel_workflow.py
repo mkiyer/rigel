@@ -209,6 +209,54 @@ def test_the_shipped_panel_configs_all_load(tmp_path):
         assert p.dir.name and p.index.name, f"{c.name} produced an empty path"
 
 
+# ── the build stage ──────────────────────────────────────────────────────────────────────────────
+
+
+def _built_reference(tmp_path, **over):
+    cfg = _config(tmp_path, **over)
+    p = panel.Panel(cfg)
+    p.genome.touch()
+    p.gtf.touch()
+    return cfg, p
+
+
+def test_build_force_never_redesigns_a_rendered_bed_panel(tmp_path, monkeypatch):
+    """The test chromosome's probes are a BED its renderer draws to a design (`build_test_reference.py`); the probe
+    designer writes a TSV with its BED beside it, so handed a `.bed` target it would replace the rendered panel with a
+    random one, through two handles on one file. `build --force` rebuilds the index and leaves the BED alone."""
+    probes = tmp_path / "rendered" / "test_probes.bed"
+    probes.parent.mkdir()
+    probes.write_text("rendered\n")
+    cfg, p = _built_reference(
+        tmp_path, capture={"configs": [{"label": "on", "probes": str(probes)}]}
+    )
+    issued = []
+    monkeypatch.setattr(panel, "run", lambda cmd, *, what: issued.append([str(c) for c in cmd]))
+    assert panel.cmd_build(p, _args(cfg, "build", "--force")) == 0
+    assert not any("design_suite_probes" in c for cmd in issued for c in cmd), issued
+    assert probes.read_text() == "rendered\n"
+
+
+def test_build_refuses_a_missing_rendered_bed_naming_its_renderer(tmp_path, monkeypatch):
+    probes = tmp_path / "rendered" / "test_probes.bed"
+    cfg, p = _built_reference(
+        tmp_path, capture={"configs": [{"label": "on", "probes": str(probes)}]}
+    )
+    monkeypatch.setattr(panel, "run", lambda cmd, *, what: None)
+    with pytest.raises(SystemExit, match="build_test_reference"):
+        panel.cmd_build(p, _args(cfg, "build", "--force"))
+
+
+def test_build_force_redesigns_a_designed_tsv_panel(tmp_path, monkeypatch):
+    """The ladder's `capture_panel.tsv` is the designer's own output, so `--force` redesigns it."""
+    cfg, p = _built_reference(tmp_path)
+    issued = []
+    monkeypatch.setattr(panel, "run", lambda cmd, *, what: issued.append([str(c) for c in cmd]))
+    assert panel.cmd_build(p, _args(cfg, "build", "--force")) == 0
+    (design,) = [cmd for cmd in issued if any("design_suite_probes" in c for c in cmd)]
+    assert design[design.index("-o") + 1] == str(p.probes) and p.probes.suffix == ".tsv"
+
+
 # ── the cache stage ──────────────────────────────────────────────────────────────────────────────
 
 

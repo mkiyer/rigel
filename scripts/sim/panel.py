@@ -221,7 +221,16 @@ def cmd_build(p: Panel, args) -> int:
         )
     else:
         print(f"   ✔ index exists: {p.index}  (--force to rebuild)")
-    if not p.probes.is_file() or args.force:
+    if p.probes.suffix == ".bed":
+        # a rendered panel (the test chromosome's), drawn to a design by its substrate's renderer: the designer
+        # writes a TSV with its BED beside it, so it never owns a `.bed` target, even under --force
+        need(
+            p.probes.is_file(),
+            f"the rendered probe panel ({p.probes})",
+            f"python {SIM / 'build_test_reference.py'}",
+        )
+        print(f"   ✔ probes are rendered, not designed here: {p.probes}")
+    elif not p.probes.is_file() or args.force:
         run(
             [
                 sys.executable,

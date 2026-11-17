@@ -222,6 +222,9 @@ def write_random_capture_probes(
     if not 0.0 <= probe_density <= 1.0:
         raise ValueError("probe_density must be between 0 and 1")
     bed_path = path.with_suffix(".bed")
+    if bed_path == path:
+        # the BED12 is written beside the TSV, so a `.bed` target is its own sibling: two handles on one file
+        raise ValueError(f"the panel's target is its TSV, and {path} is a .bed: the BED12 is written beside it")
     path.parent.mkdir(parents=True, exist_ok=True)
 
     by_gene = _eligible_by_gene(transcripts, probe_length)
