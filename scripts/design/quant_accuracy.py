@@ -64,6 +64,8 @@ from _shared import (  # noqa: E402
     add_set_option,
     capture_config,
     capture_label,
+    code_revision,
+    config_overrides,
     configured,
     oracle_cache_dir,
     panel_conditions,
@@ -76,7 +78,6 @@ from _shared import (  # noqa: E402
 )
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
-from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import run_pipeline  # noqa: E402
 from _scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
@@ -624,6 +625,26 @@ def install_condition_arm(arm: str, suite: Path, index, condition: str, pipeline
     return install_arm(arm, oracle)
 
 
+def row_stamp(arm: str, condition: str, pipeline_config, bam_name: str) -> dict:
+    """What every row of one arm on one condition carries, so the config a number was scored under travels with it
+    and the report reads it from the row, never from the shipped defaults at render time: the ``--set`` overrides
+    (every field that differs from the shipped config), the message policy whatever set it, the assignment mode,
+    the EM seed, the input BAM and the code revision."""
+    return {
+        "arm": arm,
+        "condition": condition,
+        "settings": config_overrides(pipeline_config),
+        "message_policy": pipeline_config.calibration.message_policy,
+        "em_seed": int(pipeline_config.em.seed),
+        # so a fractional run cannot be reported as a sampled one
+        "assignment_mode": pipeline_config.em.assignment_mode,
+        # and the input it read, so an aligner's rows cannot be read as the simulator's
+        "bam": bam_name,
+        # provenance, never a refusal: an A/B of a `src/` change is two revisions by design
+        "revision": code_revision(),
+    }
+
+
 def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
                   oracle_cache: Path | None,
                   bam_name: str = ORACLE_BAM) -> list[dict]:
@@ -653,12 +674,7 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     seconds = time.perf_counter() - start
 
     quant = result.estimator.get_counts_df(index)
-    common = {"arm": arm, "condition": condition, "seconds": seconds,
-              "em_seed": int(pipeline_config.em.seed),
-              # stamped on every row, so a fractional run cannot be reported as a sampled one
-              "assignment_mode": pipeline_config.em.assignment_mode,
-              # and the input it read, so an aligner's rows cannot be read as the simulator's
-              "bam": bam_name}
+    common = {**row_stamp(arm, condition, pipeline_config, bam_name), "seconds": seconds}
     if arm in _RULER_ARMS:
         # how far the arm moved the EM's lengths and how far the truth sits from the shipped ruler, in bp on the
         # worst transcript, so the arm's reach is readable from the output
@@ -783,13 +799,14 @@ def _stratum_name(st, gap: str = "  ") -> str:
 def _md_header(primary: dict, pname: str, conds: list[str], path: Path) -> list[str]:
     """The title, what was scored and when, and how to read the report."""
     modes = {r.get("assignment_mode") for r in primary.values()}
+    policy, settings, revision = _stamps(primary.values())
     stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(Path(path).stat().st_mtime))
     return [
         "# Rigel — end-to-end accuracy on the gDNA ladder",
         "",
         f"**Arm** `{pname}` · **{len(conds)} conditions** · **assignment** "
-        f"`{'/'.join(sorted(str(m) for m in modes))}` · **calibration** "
-        f"`message_policy={CalibrationConfig().message_policy!r}` · **scored** {stamp}",
+        f"`{'/'.join(sorted(str(m) for m in modes))}` · **calibration** `{policy}` · **--set** `{settings}` · "
+        f"**revision** `{revision}` · **scored** {stamp}",
         "",
         "Every number is scored against the simulator's own REALISED per-fragment truth — each fragment "
         "counted exactly once, never a pre-capture molar abundance — so a difference is a fragment the "
@@ -908,7 +925,7 @@ _POOL_FIELDS = ("gdna_est", "gdna_true", "nrna_est", "nrna_true", "mrna_est", "m
 
 
 def _check_comparable(arms: list[tuple[dict, str]]) -> None:
-    """Refuse arms scored under different assignment modes or over different row sets."""
+    """Refuse arms scored under different assignment modes or config stamps, or over different row sets."""
     modes = {(name, r.get("assignment_mode")) for a, name in arms for r in a.values()}
     if len({m for _n, m in modes}) > 1:
         # `--set em.assignment_mode=fractional` moves every count, so a mix would report the mode's effect as
@@ -917,6 +934,15 @@ def _check_comparable(arms: list[tuple[dict, str]]) -> None:
             f"⛔ the arms were scored under different assignment modes {sorted(modes, key=str)} — "
             "compare arms run under one mode."
         )
+    stamps = {(name, json.dumps([r.get("settings"), r.get("message_policy")], sort_keys=True))
+              for a, name in arms for r in a.values()}
+    if len({st for _n, st in stamps}) > 1:
+        # a pair is one difference, the arm: a second config under the same comparison would be reported as the
+        # arm's effect. A row with no stamp reads as its own config, not as agreement.
+        raise SystemExit(
+            f"⛔ the arms carry different config stamps (--set overrides, message policy): "
+            f"{sorted(stamps, key=str)} — compare arms scored under one config."
+        )
     keys = set(arms[0][0])
     for a, name in arms[1:]:
         if set(a) != keys:
@@ -924,6 +950,29 @@ def _check_comparable(arms: list[tuple[dict, str]]) -> None:
                 f"⛔ {name} has a different row set ({len(a)} vs {len(keys)}) — an arm that is "
                 "missing conditions must not be aggregated against one that is not."
             )
+
+
+def _stamps(rows) -> tuple[str, str, str]:
+    """``(message policy, --set overrides, revisions)`` as the rows stamp them, each value they carry once."""
+    def one(field, render):
+        vals = sorted({render(r.get(field)) for r in rows})
+        return " / ".join(vals)
+
+    return (
+        one("message_policy", lambda v: f"message_policy={v!r}" if v is not None else "unstamped"),
+        one("settings", lambda v: " ".join(f"{k}={x}" for k, x in sorted(v.items())) or "the shipped defaults"
+            if v is not None else "unstamped"),
+        one("revision", lambda v: str(v) if v is not None else "unstamped"),
+    )
+
+
+def _stamp_lines(arms) -> list[str]:
+    """Per arm, the config its rows were scored under and the code they ran on, read from the rows."""
+    out = []
+    for a, name in arms:
+        policy, settings, revision = _stamps(a.values())
+        out.append(f"{name}: calibration {policy} · --set {settings} · revision {revision}")
+    return out
 
 
 def _print_sums(arms, conds, title: str, field: str, axis: str = "transcript") -> None:
@@ -1076,8 +1125,9 @@ def report(paths: list[Path]) -> None:
     print()
     print("=" * 112)
     print("  ⭐⭐⭐ TRANSCRIPT-LEVEL ACCURACY, end to end, scored against the REALISED fragment truth")
-    print(f"  {len(conds)} conditions   arms: {', '.join(n for _a, n in arms)}"
-          f"   calibration: the shipped defaults (message_policy={CalibrationConfig().message_policy!r})")
+    print(f"  {len(conds)} conditions   arms: {', '.join(n for _a, n in arms)}")
+    for line in _stamp_lines(arms):
+        print(f"  {line}")
     print("=" * 112)
 
     _print_sums(arms, conds, "① TOTAL MISASSIGNED FRAGMENTS  Σ|count_est − count_true|  ·  TRANSCRIPT level",

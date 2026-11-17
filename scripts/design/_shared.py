@@ -4,9 +4,9 @@ An instrument runs as ``python scripts/design/<name>.py``, so ``scripts/design/`
 sibling cannot be imported by name: ``sibling("_oracle_arms.py")`` loads the file beside this one once and
 shares the module. The module also holds the data root and the panels' paths, a panel's conditions and its
 oracle cache, ``set_field`` (the one ``SECTION.FIELD=VALUE`` parser behind every ``--set``), the option
-that feeds it and the refusal of one the run would never read (``refuse_unconsumed``), the override fields, the
-strata and the release scope, the pool ledger, the subprocess sharder behind every ``--jobs`` and the self-tests'
-refusal check.
+that feeds it and the refusal of one the run would never read (``refuse_unconsumed``), the stamp a row carries
+(``config_overrides``, ``code_revision``), the override fields, the strata and the release scope, the pool
+ledger, the subprocess sharder behind every ``--jobs`` and the self-tests' refusal check.
 
 Usage::
 
@@ -237,6 +237,46 @@ def add_set_option(ap, help: str) -> None:
     """The repeatable ``--set SECTION.FIELD=VALUE`` option, collected into ``args.settings``."""
     ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
                     help=help)
+
+
+def config_overrides(cfg) -> dict:
+    """Every field of *cfg*, a ``PipelineConfig``, that differs from the shipped one, keyed as ``--set`` spells it
+    (``SECTION.FIELD``; a field outside every section by its own name), valued as JSON can carry it: what a row
+    stamps, so the config a number was scored under travels with it."""
+    from rigel.config import PipelineConfig
+
+    def jsonable(v):
+        return v if isinstance(v, (bool, int, float, str, type(None))) else str(v)
+
+    out = {}
+    shipped = PipelineConfig()
+    for f in dataclasses.fields(cfg):
+        mine, theirs = getattr(cfg, f.name), getattr(shipped, f.name)
+        if dataclasses.is_dataclass(mine):
+            for g in dataclasses.fields(mine):
+                if getattr(mine, g.name) != getattr(theirs, g.name):
+                    out[f"{f.name}.{g.name}"] = jsonable(getattr(mine, g.name))
+        elif mine != theirs:
+            out[f.name] = jsonable(mine)
+    return out
+
+
+def code_revision() -> str:
+    """The revision of the ``rigel`` this process imports: the commit of the checkout it lives in, ``+dirty`` when
+    that package's sources differ from it, else its version where it is no checkout (an installed wheel)."""
+    import rigel
+
+    pkg = Path(rigel.__file__).resolve().parent
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(pkg), *args], capture_output=True, text=True, check=True).stdout
+
+    try:
+        sha = git("rev-parse", "HEAD").strip()
+        dirty = bool(git("status", "--porcelain", "--untracked-files=no", "--", ".").strip())
+    except (OSError, subprocess.CalledProcessError):
+        return f"rigel {rigel.__version__} (no checkout)"
+    return sha + ("+dirty" if dirty else "")
 
 
 def refuse_unconsumed(settings, consumed, instrument: str, *, varied: frozenset[str] = frozenset()) -> None:
