@@ -36,9 +36,13 @@ for robustness, so a number measured at the panel's nascent share is a stress re
   rows fall, the switch row still about four times the no-capture line (`docs/ROADMAP.md`). This tree is the baseline.
 - The validation of ec996bba beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
   (`docs/ROADMAP.md`).
-- **No preview ships.** A pre-release waits for the capture reader and a review of the open issues.
-- The next work is the **capture reader**, developed together with the owner. Its working memory is
-  `docs/dev/CAPTURE_IDEAS.md`.
+- **No preview ships.** 0.8.0 waits for every `release-blocker` issue in the milestone; the milestone's other issues
+  ship stated in the MANUAL.
+- **The order of work** (`docs/ROADMAP.md`, Next): proof tools → crashes, inputs and outputs, with the instruments and
+  gates beside them → one scan phase → the unstranded introns → the capture reader → the annotated pool against
+  0.7.1 → the release. One `src/` writer at a time, in the main checkout.
+- The unstranded introns and the **capture reader** are developed together with the owner, each bounded at two
+  sessions. The capture reader's working memory is `docs/dev/CAPTURE_IDEAS.md`.
 - Everything retired at the 2026-11-03 reset is in `$RIGEL_RUNS/archive/cleanup_2026-11-03/`.
 
 ## The 0.8.0 scope

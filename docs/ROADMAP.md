@@ -49,14 +49,20 @@ but those marked closed:
 - annotation omission: unannotated unspliced RNA booked gDNA, and retained genes damaged ×1.4–3.0
   (issue #12).
 
-No preview ships (the owner's ruling, 2026-11-04): a pre-release waits for the capture reader and a review of the open
-issues. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_preview_validation/`.
+Against 0.7.1 re-scored on the same reads (2026-11-16), HEAD's transcript and gene errors are lower on every in-scope
+rung of the ladder, on both inputs. At 5 % gDNA and above, four stranded capture-ON rows call more of the library
+annotated than 0.7.1 does: the simulator's g05, g50 and g98, and STAR's g50 (issue #76). The release holds for them
+(`DESIGN.md` §0b).
+
+No preview ships (the owner's ruling, 2026-11-04): 0.8.0 waits for every `release-blocker` issue, in the order under
+Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_preview_validation/`, and the re-score's in
+`$RIGEL_RUNS/prototypes/2026-11-16_v071_rescore/`.
 
 ## Claims that hold
 
 | claim | re-derived by |
 |---|---|
-| HEAD beats 0.7.1 on the ladder's three in-scope strata, on both inputs | `quant_accuracy.py` per stratum, pinned and fractional, `--bam` for the STAR rung, beside the tag |
+| HEAD beats 0.7.1 on transcripts and genes on the ladder's three in-scope strata, on both inputs | `quant_accuracy.py` per stratum, pinned and fractional, `--bam` for the STAR rung, beside the tag |
 | HEAD's source probabilities beat 0.7.1's by the proper score on identical reads, and most of the exchange is compatible with approximately calibrated source uncertainty at the resolution tested | the validation's `paired.py`, outside the tree (issue #36) |
 | Scarce gDNA at 1/10 and 1/100 depth shows no blow-up, and dense probe panels hold | `quant_accuracy.py` on the test chromosome's depth and probe panels |
 | Calibration's library gDNA is near truth on the in-scope strata; its per-locus count errs both ways, mostly its own error rather than the pooled share | `calibration_vs_oracle.py`, `prior_vs_oracle.py` |
@@ -67,11 +73,25 @@ issues. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_prev
 
 ## Next
 
-1. **The capture-reader session, developed with the owner.** It starts from what the capture weight leaves,
-   issue #1 and issue #2, with issue #3, issue #4, issue #5 and issue #6 read beside it. Its A/Bs need the paired
-   proper score in the tree (issue #36). The trade-off between strata is the owner's to set.
-2. **A review of the open issues**, each read for a problem a pre-release cannot carry.
-3. **The pre-release**, with its supported uses and its stated failures: issue #4, issue #3, issue #1, issue #2,
-   issue #10, issue #5, issue #12, as the capture reader leaves them; before any tag, issue #11.
+The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the release fixes or states; its
+`release-blocker` label is what it fixes. In order:
 
-After that, the rest of the `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1), in issue order.
+1. **Proof tools:** issue #66 and issue #74, then the identity references re-frozen.
+2. **Crashes, inputs and outputs**, in the main checkout, one at a time: issue #60 first, then issue #50 with
+   issue #58, issue #52, issue #51, issue #54, issue #59 and issue #15; then issue #55, issue #53, issue #38's EM and
+   post-EM items, issue #56 and issue #57. Beside them, the instruments and gates: issue #67 through issue #73,
+   issue #75, and issue #36's paired proper score and its `oracle_ruler` arm under capture.
+3. **One scan phase:** retire the splice blacklist (issue #49, issue #63, issue #64), then issue #38's scan items, one
+   cache rebuild, then issue #62 (prune within each place).
+4. **The unstranded introns, bounded at two sessions, with the owner:** issue #26 and issue #77. Find which messages
+   carry the intron error under transfer on unstranded capture-OFF g98, fix them, then try the intron abundance
+   model. If transfer still loses to silent there, issue #26 ships stated.
+5. **The capture reader, bounded at two sessions, with the owner:** issue #61, issue #65 and issue #6, then issue #1
+   against a pass bar the owner sets before any candidate runs. If no candidate passes, issue #1 ships stated.
+6. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5. Dissect the largest
+   gap first, the simulator's stranded capture-ON g50, and bring the dissection to the owner before fixing.
+7. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
+   issue #10, issue #12, issue #13, issue #23 and issue #46, and for issue #1 or issue #26 if either falls back; the
+   CHANGELOG; then issue #11.
+
+After that, the open issues outside the milestone, in issue order.

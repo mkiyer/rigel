@@ -55,7 +55,7 @@ the direction. `deconvolve` is a different verb: gDNA is deconvolved off, RNA is
 The version on disk is `0.7.1` (`pyproject.toml`). 0.8.0 is a release of the TOOL: validation
 sets its supported uses and limitations, its known failures are reported beside its gains, and a claim of robustness
 across inputs stays unsupported while a known instability persists (issue #1).
-No preview ships: a pre-release waits for the capture reader and a review of the open issues.
+No preview ships: 0.8.0 waits for every `release-blocker` issue (`ROADMAP.md`, Next).
 
 | the question | the number | the instrument |
 |---|---|---|
@@ -88,6 +88,18 @@ at κ = ½ the gDNA fraction cancels from the strand mean. Every score is read p
   likelihood's, never the prior's (§9.3). A number at the panel's nascent share is a stress reading, never a design
   driver; state its unit, since a span covers a gene while a mature transcript is spliced. A background pooled over
   intergenic and intron slots is safe on real data, not on the panel.
+- **The release holds for the annotated pool.** At 5 % gDNA and above, 0.8.0 does not ship while an in-scope row's
+  annotated error exceeds 0.7.1's on the same reads (`SUCCESS.md`, bar 5; issue #76, issue #9). This bar has no
+  stated-limitation fallback.
+- **One message policy.** `transfer` ships on every stratum. A row where it loses to `silent` is a defect in the
+  messages, repaired there, never a reason to switch policy by stratum (issue #26, issue #77).
+- **The splice blacklist retires before 0.8.0, in its current form** (issue #49, issue #63, issue #64). The
+  recommended STAR settings report a genomic fragment's contiguous reading beside its spliced one, which is the
+  protection the blacklist gave; what they do not cover is stated (issue #7). A blacklist brought back later is
+  regenerated at those settings first. Until the retirement lands, §3.1's override describes the code.
+- **Ruled, not yet built.** A multimapper's candidates are pruned within each place, never across places, so no place
+  is orphaned and the EM decides between places (issue #62; §9.4). An efficiency of exactly 1 gives RNA's own length,
+  and only the excess over 1 is carried (issue #65; §9.2).
 
 ---
 

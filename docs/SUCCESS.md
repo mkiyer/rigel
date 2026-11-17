@@ -91,18 +91,28 @@ chromosome's three probe designs at stranded capture-ON (`test_reference.yaml` a
 
 ## 0.8.0 is done when
 
-Each bar names its quantity, its strata and its truth; the numeric threshold on each is the owner's call.
+Each bar names its quantity, its strata and its truth. The thresholds are the owner's rulings.
 
-1. **`P − O` is small on the three in-scope strata**, and the residual is attributed: to the assembler
-   (`prior_vs_oracle.py`'s `O − S`), to the composition, or to a node class (`policy_benchmark.py --by-class`).
+1. **`P − O` is small on the three in-scope strata**: on every in-scope row at 5 % gDNA and above, |`P − O`| is at
+   most 5 % of the library's gDNA. A row below 5 % gDNA is read in fragments against the no-capture line. The residual
+   is attributed: to the assembler (`prior_vs_oracle.py`'s `O − S`), to the composition, or to a node class
+   (`policy_benchmark.py --by-class`).
 2. **The zero controls read zero**: the `g00` rung, on every instrument that reads it. A stratum can read healthy on
    every contaminated row and still claim gDNA in a library holding none.
 3. **The capture-contracted length is right because the composition is**, never patched: at `g00`, where no gDNA
    measures capture, it reads 1 (`em_effective_length` equals `effective_length`), and elsewhere it tracks the
-   simulator's yield (`ruler_vs_truth.py --scale`). A separate correction of the length is a defect, not a fix.
+   simulator's yield (`ruler_vs_truth.py --scale`). "Tracks the yield" is held to the within-gene spread of
+   log(L / Y), which must not grow; the gap between the class means has no threshold of its own and is judged by
+   bar 5. A separate correction of the length is a defect, not a fix: that is a factor applied to the built length,
+   such as a class correction or a clamp. The capture weight and the junction cap act on the capture reading before
+   the length is built, and stand.
 4. **The three in-scope strata improve, or at worst hold, on the transcript table**, in a pinned A/B pair decomposed
    by the arms, with the deferred stratum and the rest of the screen (the fl-gap panels, the low-gDNA panel, the
    probe designs) reported beside them.
+5. **At 5 % gDNA and above, the annotated pool is no worse than 0.7.1's.** On every in-scope row at 5 % gDNA and
+   above, on the ladder on both inputs and on both fl-gap panels, the |net| annotated error is at most that of 0.7.1
+   re-scored on the same reads (`$RIGEL_RUNS/prototypes/2026-11-16_v071_rescore/tables_v071.md`), with bar 4 still
+   holding.
 
 The accumulator's own correctness (fidelity to the specification, worker-order independence, conservation) is a
 closed regression check, gated in the suite (`TESTING.md` §5).
