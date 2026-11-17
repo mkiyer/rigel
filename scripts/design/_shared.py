@@ -3,9 +3,10 @@
 An instrument runs as ``python scripts/design/<name>.py``, so ``scripts/design/`` is not a package and a
 sibling cannot be imported by name: ``sibling("_oracle_arms.py")`` loads the file beside this one once and
 shares the module. The module also holds the data root and the panels' paths, a panel's conditions and its
-oracle cache, ``set_field`` (the one ``SECTION.FIELD=VALUE`` parser behind every ``--set``) and the option
-that feeds it, the override fields, the strata and the release scope, the pool ledger, the subprocess
-sharder behind every ``--jobs`` and the self-tests' refusal check.
+oracle cache, ``set_field`` (the one ``SECTION.FIELD=VALUE`` parser behind every ``--set``), the option
+that feeds it and the refusal of one the run would never read (``refuse_unconsumed``), the override fields, the
+strata and the release scope, the pool ledger, the subprocess sharder behind every ``--jobs`` and the self-tests'
+refusal check.
 
 Usage::
 
@@ -236,6 +237,25 @@ def add_set_option(ap, help: str) -> None:
     """The repeatable ``--set SECTION.FIELD=VALUE`` option, collected into ``args.settings``."""
     ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
                     help=help)
+
+
+def refuse_unconsumed(settings, consumed, instrument: str, *, varied: frozenset[str] = frozenset()) -> None:
+    """Refuse a ``--set`` spec the run would apply to a config nothing reads.
+
+    *consumed* names the ``PipelineConfig`` sections this run hands to the code it measures; a spec on any other
+    section would be accepted, printed, and then never read, so the run would report the shipped numbers under the
+    override's name. *varied* names ``SECTION.FIELD`` keys the instrument sets per arm itself, which a ``--set``
+    would silently overwrite on every arm. Checked before any I/O, so a refused run costs nothing."""
+    for spec in settings:
+        dotted = spec.partition("=")[0]
+        section = dotted.partition(".")[0]
+        if section not in consumed:
+            raise SystemExit(
+                f"⛔ --set {spec}: {instrument} hands only {sorted(consumed)} to the code it measures, so a "
+                f"{section!r} value would be printed and never read"
+            )
+        if dotted in varied:
+            raise SystemExit(f"⛔ --set {spec}: {instrument} sets {dotted} itself, once per arm")
 
 
 def configured(settings, base=None):

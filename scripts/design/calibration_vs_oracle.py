@@ -45,6 +45,7 @@ from _shared import (  # noqa: E402
     oracle_cache_dir,
     panel_conditions,
     pool_ledger,
+    refuse_unconsumed,
     refuses,
     run_json_shards,
     scope,
@@ -56,6 +57,9 @@ from _shared import (  # noqa: E402
 )
 
 OA = sibling("_oracle_arms.py")
+
+#: the `PipelineConfig` sections this instrument hands to the code it measures: `calibrate` alone, on a cached scan
+CONSUMED_SECTIONS = frozenset({"calibration"})
 
 from rigel.calibration import calibrate  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
@@ -538,6 +542,7 @@ def main() -> int:
 
     if args.self_test:
         return self_test()
+    refuse_unconsumed(args.settings, CONSUMED_SECTIONS, "calibration_vs_oracle.py")
 
     names = panel_conditions(args.suite, args.conditions)
     if not names:

@@ -44,13 +44,18 @@ from rigel.config import CalibrationConfig, PipelineConfig
 from rigel.index import TranscriptIndex
 from _scan_cache import calibration_inputs, read_scan_cache
 
-from _shared import PANELS, add_set_option, configured, sibling, strandedness
+from _shared import PANELS, add_set_option, configured, refuse_unconsumed, sibling, strandedness
 
 #: policy name -> the `CalibrationConfig` fields that install it
 POLICIES = {
     "silent": dict(message_policy="silent"),
     "transfer": dict(message_policy="transfer"),
 }
+
+#: the `PipelineConfig` sections this instrument hands to the code it measures: `calibrate` alone, on a cached scan
+CONSUMED_SECTIONS = frozenset({"calibration"})
+#: the keys every policy sets itself; a `--set` of one would make every row the same policy
+VARIED_KEYS = frozenset(f"calibration.{k}" for fields in POLICIES.values() for k in fields)
 
 
 def _slot_classes(truth: dict, payload, boundary_flags) -> np.ndarray:
@@ -217,6 +222,7 @@ def main() -> int:
     add_set_option(ap, "override one config field on top of every policy's fields, typed from the field; "
                        "repeatable (e.g. --set calibration.sweep_logodds_step=0.1)")
     args = ap.parse_args()
+    refuse_unconsumed(args.settings, CONSUMED_SECTIONS, "policy_benchmark.py", varied=VARIED_KEYS)
 
     for name in args.policies:
         if name not in POLICIES:

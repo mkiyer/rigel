@@ -60,7 +60,16 @@ from scipy.special import ndtr  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
 
-from _shared import ORACLE_BAM, PANELS, add_set_option, capture_config, configured, refuses, sibling  # noqa: E402
+from _shared import (  # noqa: E402
+    ORACLE_BAM,
+    PANELS,
+    add_set_option,
+    capture_config,
+    configured,
+    refuse_unconsumed,
+    refuses,
+    sibling,
+)
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import (  # noqa: E402
     fit_junction_cap,
@@ -563,11 +572,19 @@ def run_sweep(args, index, region_arrays, index_dir, panel_dir, config, arms) ->
     print("   columns per arm: probed within ±0.1 / n · unprobed median / n · partial median / n")
 
 
+def consumed_sections(scale: bool) -> frozenset[str]:
+    """The `PipelineConfig` sections a run hands to the code it measures: the arms calibrate a cached scan, and
+    ``--scale`` runs the pipeline from the BAM to the prior assembly, through the scan and the fragment scoring,
+    and stops before the EM."""
+    return frozenset({"scan", "scoring", "calibration"} if scale else {"calibration"})
+
+
 def main() -> int:
     args = _parse_args()
     if args.self_test:
         return self_test()
 
+    refuse_unconsumed(args.settings, consumed_sections(args.scale), "ruler_vs_truth.py")
     index_dir, panel_dir = PANELS[args.panel]
     if args.panel_dir is not None:
         panel_dir = args.panel_dir
