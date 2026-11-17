@@ -93,10 +93,11 @@ from _scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
 #:       |-- transcript_capture_eff_lengths()  <- the ruler arms substitute here: `effective_lengths_em`
 #:       |-- assemble_priors()                 <- every prior arm wraps this: `LocusPriors`
 #:
-#: ``oracle_ruler`` hands the EM ``fl × factor``, the simulator's capture factor per transcript anchored so the fully
-#: probed class reads 1 (``anchor_capture_factor``), never clipped; the priors and the locus gDNA length stay as
-#: shipped. Probes can make capture isoform-specific and isoforms split by the ratio of their lengths, so this arm
-#: prices the ruler end to end; capture-OFF it is the identity.
+#: ``oracle_ruler`` hands the EM ``fl × factor``, the simulator's capture factor per transcript on the shipped scale,
+#: where the uncaptured bulk reads 1 (``anchor_capture_factor``), never clipped; the priors and the locus gDNA length
+#: stay as shipped. Probes can make capture isoform-specific and isoforms split by the ratio of their lengths, so this arm
+#: prices the ruler end to end. Capture-OFF its factor is exactly 1, so it hands the EM RNA's own length, ``fl``; where
+#: the shipped ruler returns another length with every efficiency at 1, the arm prices that difference too.
 _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
 ARMS = ("base", "noop", "oracle", "oracle_alloc_seed", "no_capture") + tuple(_RULER_ARMS)
@@ -437,17 +438,19 @@ def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
 
 
 def anchor_capture_factor(factor, probed_frac, plain_length) -> np.ndarray:
-    """The simulator's capture factor on the reference's scale, where a fully captured object reads 1.
+    """The simulator's capture factor on the shipped scale, where the uncaptured bulk reads 1.
 
-    Divides by the median over the fully probed class (probed fraction ≥ 0.9), or over every transcript when no
-    such class exists (capture-OFF); the identity where the factor is undefined (no plain length).
-    ``ruler_vs_truth.score`` reads its errors against the same anchor."""
+    The shipped efficiencies are yields against the bulk, so the EM's lengths put an unprobed transcript at its plain
+    length and a probed one above it, on the scale of the locus gDNA length the ruler arm leaves as shipped. The
+    simulator's factor carries the off-target weight in both its counts, so it is already on that scale; it is divided
+    by the median over the unprobed class (probed fraction 0), which reads 1 where the simulator's convention holds,
+    and kept as it is when every transcript is probed. The identity where the factor is undefined (no plain length).
+    ``ruler_vs_truth.score`` compares shapes, blind to a global scale, and anchors its errors on its own."""
     f = np.asarray(factor, dtype=np.float64)
     ok = np.isfinite(f) & (f > 0.0) & (np.asarray(plain_length, dtype=np.float64) > 0.0)
     logf = np.where(ok, np.log(np.where(ok, f, 1.0)), 0.0)
-    probed = ok & (np.asarray(probed_frac, dtype=np.float64) >= 0.9)
-    pool = probed if probed.any() else ok
-    scale = float(np.median(logf[pool])) if pool.any() else 0.0
+    bulk = ok & (np.asarray(probed_frac, dtype=np.float64) == 0.0)
+    scale = float(np.median(logf[bulk])) if bulk.any() else 0.0
     return np.where(ok, np.exp(logf - scale), 1.0)
 
 
@@ -524,8 +527,8 @@ def install_ruler_arm(arm: str, factor: np.ndarray):
 
 def check_ruler_arm(condition: str, arm: str, fired: dict) -> None:
     """Refuse a ruler arm that could not have measured what it names: the ruler must have run, the substituting
-    arm must move the EM's lengths wherever the truth differs from the shipped ones (capture-OFF it does not, and
-    the identity is the answer), and the noop must move nothing."""
+    arm must move the EM's lengths wherever the truth differs from the shipped ones (where it does not, the identity
+    is the answer), and the noop must move nothing."""
     if fired["ruler"] == 0:
         raise RuntimeError(
             f"{condition} [{arm}]: the ruler never ran, so this arm substituted nothing the EM read."

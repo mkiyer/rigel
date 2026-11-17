@@ -604,18 +604,28 @@ def test_the_no_capture_arm_reaches_the_result_and_its_guard_refuses_one_it_did_
             qa.check_no_capture("toy", dataclasses.replace(cal, gdna_capture_saturation=3.0))
 
 
-def test_the_capture_truth_is_anchored_on_the_fully_probed_class():
-    """The shipped ruler's convention puts a fully probed transcript at 1 and every other below it, so the simulator's
-    factor is divided by the fully probed class's median; a transcript with no length is the identity; and with no
-    probed class (capture-OFF) every factor is exactly 1. The fixture's median over every transcript differs from the
-    probed class's, so an anchor read off the wrong pool shows."""
-    factor = np.array([10.0, 10.0, 12.0, 1.0, 2.0, 3.0, np.nan])
-    probed = np.array([1.0, 0.95, 0.92, 0.0, 0.1, 0.2, 0.0])
-    plain = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 0.0])
+def test_the_capture_truth_reads_1_at_the_uncaptured_bulk():
+    """The shipped efficiencies are yields against the uncaptured bulk, so the EM's lengths put an unprobed transcript
+    at its plain length and a probed one above it, on the scale of the locus gDNA length the arm leaves as shipped. The
+    simulator's factor is anchored on the same class: the unprobed transcripts' median reads 1, and a probed one keeps
+    its whole yield above them. Anchored on the fully probed class instead, every unprobed transcript's length shrank by
+    the saturation against the shipped gDNA length, and the arm read several times the RNA truth under capture. A
+    transcript with no length is the identity; capture-OFF every factor is 1."""
+    factor = np.array([1000.0, 1000.0, 1200.0, 2.0, 2.0, 2.0, 50.0, np.nan])
+    probed = np.array([1.0, 0.95, 0.92, 0.0, 0.0, 0.0, 0.1, 0.0])
+    plain = np.array([100.0] * 7 + [0.0])
     got = qa.anchor_capture_factor(factor, probed, plain)
-    np.testing.assert_allclose(got, [1.0, 1.0, 1.2, 0.1, 0.2, 0.3, 1.0], rtol=1e-12)
+    np.testing.assert_allclose(got, [500.0, 500.0, 600.0, 1.0, 1.0, 1.0, 25.0, 1.0], rtol=1e-12)
     off = qa.anchor_capture_factor(np.full(4, 3.0), np.zeros(4), np.full(4, 100.0))
     assert np.array_equal(off, np.ones(4))
+
+
+def test_a_panel_that_probes_every_transcript_keeps_the_simulators_own_scale():
+    """With no uncaptured transcript there is no class to read the bulk off; the simulator's factor carries the
+    off-target weight in both its counts, so it is already a yield against the bulk and is kept as it is."""
+    factor = np.array([1000.0, 800.0, 20.0])
+    got = qa.anchor_capture_factor(factor, np.array([1.0, 0.9, 0.05]), np.full(3, 100.0))
+    np.testing.assert_allclose(got, factor, rtol=1e-12)
 
 
 # ── Gate 8: arms scored under different assignment modes are refused, never compared ──────────────
