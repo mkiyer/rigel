@@ -243,18 +243,30 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     e = m["count"].to_numpy(np.float64)
     expressed = t > 0.0
 
-    # truth TPM uses the tool's own effective length, so the length model cancels and the row measures assignment
-    eff = np.maximum(m["effective_length"].to_numpy(np.float64), 1.0)
-    rate = t / eff
-    tpm_true = rate / rate.sum() * 1e6 if rate.sum() > 0 else np.zeros_like(rate)
-    tpm_est = m["tpm"].to_numpy(np.float64)
+    # truth TPM uses the tool's own effective length, so the length model cancels and the row measures assignment.
+    # A transcript with no effective length has no rate: a shadow transcript the tool does not hold, or one it holds
+    # at length 0. It carries no TPM on either side, so it is out of both vectors and both denominators; its
+    # fragments are reported apart, never hidden, and the length-free count rows still score them.
+    eff = m["effective_length"].to_numpy(np.float64)
+    has_len = eff > 0.0
+    rate = np.where(has_len, t / np.where(has_len, eff, 1.0), 0.0)
+    tpm_true = _per_million(rate)
+    tpm_est = _per_million(np.where(has_len, m["tpm"].to_numpy(np.float64), 0.0))
     rel = np.abs((e - t)[expressed]) / t[expressed] if expressed.any() else np.array([])
     return {
         **_count_scores(t, e),
         "median_rel_err": float(np.median(rel)) if rel.size else float("nan"),
         "tpm_abs_err": float(np.abs(tpm_est - tpm_true).sum()),
         "tpm_fp": float(tpm_est[~expressed].sum()),
+        "n_no_length": int((~has_len).sum()),
+        "no_length_fragments": float(t[~has_len].sum()),
     }
+
+
+def _per_million(x: np.ndarray) -> np.ndarray:
+    """``x`` scaled to sum to one million, or zeros when it sums to nothing."""
+    total = x.sum()
+    return x / total * 1e6 if total > 0 else np.zeros_like(x)
 
 
 def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
@@ -989,7 +1001,8 @@ def _print_sums(arms, conds, title: str, field: str, axis: str = "transcript") -
     for label, sel in stratum_selections(conds):
         vals = []
         for a, _n in arms:
-            sub = [a[(c, axis)][field] for c in conds if sel(c) and (c, axis) in a]
+            # a field a row never recorded reads nan, never 0
+            sub = [a[(c, axis)].get(field, float("nan")) for c in conds if sel(c) and (c, axis) in a]
             vals.append(sum(sub) if sub else float("nan"))
         row = f"    {label:<26}"
         for v in vals:
@@ -1140,6 +1153,8 @@ def report(paths: list[Path]) -> None:
                 "fp_mass")
     _print_sums(arms, conds, "③ FALSE-NEGATIVE MASS — real RNA the tool assigned nowhere", "fn_mass")
     _print_sums(arms, conds, "④ TPM error, Σ|Δ| out of 1e6 (assignment only — see the docstring)", "tpm_abs_err")
+    _print_sums(arms, conds, "④n   … the true fragments on transcripts with no effective length, which carry no TPM "
+                "on either side (a shadow transcript the tool does not hold)", "no_length_fragments")
     _print_rank(arms, conds)
     _print_pools(arms, conds)
     _print_pools_per_condition(arms, conds)
