@@ -293,42 +293,63 @@ def test_the_kernel_refuses_a_policy_code_it_does_not_know(sweep_inputs, monkeyp
         SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy())
 
 
-def test_the_backbone_does_not_know_what_a_message_is_about():
-    """The backbone owns the shape of the solve and the two assertions; every message-composition choice belongs to a
-    policy. If one of these concepts appeared in ``sweep.py``, an operator would have leaked into the backbone.
+#: The message-composition concepts that belong to a policy, never to the backbone, spelled as an identifier would carry
+#: them: identifiers are read lower-cased, so a word with a capital or a space could never match one.
+_POLICY_CONCEPTS = (
+    "splice_in",
+    "reframe",
+    "pin",
+    "enrichment",
+    "splice_out",
+    "flank",
+    "damp",
+    "mismatch",
+    "level",
+    "lane",
+)
 
-    The test checks identifiers from the AST, not the file's text, since a text search would match a docstring naming
-    these words to say they are absent. Hybrid capture appears nowhere either: the instruments' record is named
-    ``diagnostics``, never ``capture``.
-    """
+
+def _identifiers(source: str) -> set[str]:
+    """Every name, argument and attribute a module's source spells, lower-cased: its identifiers from the AST, not its
+    text, since a text search would match a docstring naming a word to say it is absent."""
     import ast
-    import inspect
 
-    tree = ast.parse(inspect.getsource(SW))
     ident: set[str] = set()
-    for region in ast.walk(tree):
+    for region in ast.walk(ast.parse(source)):
         for attr in ("id", "name", "arg", "attr"):
             v = getattr(region, attr, None)
             if isinstance(v, str):
                 ident.add(v.lower())
-    banned = (
-        "SPLICE IN",
-        "reframe",
-        "pin",
-        "enrichment",
-        "SPLICE OUT",
-        "flank",
-        "damp",
-        "mismatch",
-        "level",
-        "lane",
+    return ident
+
+
+def _leaked(source: str) -> dict[str, list[str]]:
+    """The policy concepts, and hybrid capture, that *source*'s identifiers carry."""
+    ident = _identifiers(source)
+    leaked = {w: sorted(i for i in ident if w in i) for w in (*_POLICY_CONCEPTS, "capture")}
+    return {w: hits for w, hits in leaked.items() if hits}
+
+
+def test_the_backbone_does_not_know_what_a_message_is_about():
+    """The backbone owns the shape of the solve and the two assertions; every message-composition choice belongs to a
+    policy. If one of these concepts appeared in ``sweep.py``, an operator would have leaked into the backbone.
+
+    Hybrid capture appears nowhere either: the instruments' record is named ``diagnostics``, never ``capture``.
+    """
+    import inspect
+
+    leaked = _leaked(inspect.getsource(SW))
+    assert not leaked, (
+        f"policy concepts or hybrid capture leaked into the backbone's identifiers: {leaked}"
     )
-    leaked = {w: sorted(i for i in ident if w in i) for w in banned}
-    assert not any(leaked.values()), (
-        f"policy concepts leaked into the backbone's identifiers: {leaked}"
-    )
-    cap = sorted(i for i in ident if "capture" in i)
-    assert not cap, f"hybrid capture leaked into the backbone's identifiers: {cap}"
+
+
+@pytest.mark.parametrize("word", _POLICY_CONCEPTS + ("capture",))
+def test_every_banned_concept_is_seen_where_it_is_planted(word):
+    """Each banned word must be able to match an identifier; a word spelled as no identifier can be (a capital, a
+    space) passes every source, the backbone's included."""
+    planted = f"def {word}_rate(x):\n    return x\n"
+    assert word in _leaked(planted), planted
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════

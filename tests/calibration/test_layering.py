@@ -11,6 +11,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+import pytest
+
 from rigel.calibration._layers import LAYERS, layer_of
 
 PKG = pathlib.Path(__file__).resolve().parents[2] / "src" / "rigel" / "calibration"
@@ -21,23 +23,45 @@ def _name(p: pathlib.Path) -> str:
     return rel.replace("/__init__", "").replace("__init__", "<pkg>")
 
 
+#: The package's absolute name: an import that spells it reaches a sibling as surely as a relative one.
+_PACKAGE = "rigel.calibration"
+
+
+def _is_type_checking(test: ast.expr) -> bool:
+    """``TYPE_CHECKING`` or ``typing.TYPE_CHECKING`` exactly: the one test whose body never runs."""
+    return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+    )
+
+
 def _runtime_imports(p: pathlib.Path) -> set[str]:
-    """Sibling modules imported at runtime. Imports inside ``if TYPE_CHECKING:`` are excluded: an annotation cannot form
-    a cycle and does not constrain the layering (``capture_eff_length`` annotates a type from layer 7 this way).
+    """Sibling modules imported at runtime, relative or absolute (``from rigel.calibration.x import …``, ``import
+    rigel.calibration.x``), anywhere in the module. Only the body of an ``if TYPE_CHECKING:`` is excluded: an annotation
+    cannot form a cycle and does not constrain the layering (``capture_eff_length`` annotates a type from layer 7 this
+    way). Its ``else`` branch, and an ``if not TYPE_CHECKING:`` body, run.
     """
     tree = ast.parse(p.read_text())
     guarded: set[int] = set()
     for n in ast.walk(tree):
-        if isinstance(n, ast.If) and "TYPE_CHECKING" in ast.unparse(n.test):
-            for sub in ast.walk(n):
-                guarded.add(id(sub))
+        if isinstance(n, ast.If) and _is_type_checking(n.test):
+            for stmt in n.body:
+                for sub in ast.walk(stmt):
+                    guarded.add(id(sub))
     out: set[str] = set()
     for n in ast.walk(tree):
-        if id(n) in guarded or not isinstance(n, ast.ImportFrom) or not n.level:
+        if id(n) in guarded:
             continue
-        if n.module:
-            out.add(n.module.split(".")[-1])
-        out.update(a.name for a in n.names)
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name.startswith(_PACKAGE + "."):
+                    out.add(a.name.split(".")[-1])
+        elif isinstance(n, ast.ImportFrom):
+            absolute = n.level == 0 and n.module is not None
+            if absolute and not (n.module == _PACKAGE or n.module.startswith(_PACKAGE + ".")):
+                continue
+            if n.module and n.module != _PACKAGE:
+                out.add(n.module.split(".")[-1])
+            out.update(a.name for a in n.names)
     return out
 
 
@@ -114,3 +138,57 @@ def test_the_layering_is_not_vacuous():
         f"only {crossing} downward boundaries cross a layer boundary — the layering would be satisfied by "
         f"almost any assignment, so it is not constraining anything."
     )
+
+
+# ── the import reader sees every runtime import, whatever its spelling ──────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from .calibrate import calibrate\n",
+        "from rigel.calibration.calibrate import calibrate\n",
+        "from rigel.calibration import calibrate\n",
+        "import rigel.calibration.calibrate\n",
+        "import rigel.calibration.calibrate as C\n",
+        "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n    from .calibrate import calibrate\n",
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    pass\nelse:\n    from .calibrate import calibrate\n",
+        "def f():\n    from rigel.calibration.calibrate import calibrate\n",
+    ],
+    ids=[
+        "relative",
+        "absolute-from",
+        "absolute-package",
+        "import",
+        "import-as",
+        "not-type-checking",
+        "else",
+        "in-a-function",
+    ],
+)
+def test_a_runtime_import_is_seen_whatever_its_spelling(tmp_path, source):
+    planted = tmp_path / "planted.py"
+    planted.write_text(source)
+    assert "calibrate" in _runtime_imports(planted), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from .calibrate import CalibrationResult\n",
+        "import typing\nif typing.TYPE_CHECKING:\n    from rigel.calibration.calibrate import CalibrationResult\n",
+    ],
+    ids=["type-checking", "typing-dot-type-checking"],
+)
+def test_an_annotation_only_import_is_not_a_runtime_import(tmp_path, source):
+    planted = tmp_path / "planted.py"
+    planted.write_text(source)
+    assert "calibrate" not in _runtime_imports(planted), source
+
+
+def test_an_import_outside_the_package_is_not_a_sibling(tmp_path):
+    planted = tmp_path / "planted.py"
+    planted.write_text(
+        "from rigel.config import CONSTANTS\nimport numpy as np\nfrom rigel import calibration\n"
+    )
+    assert not (_runtime_imports(planted) & set(SHORT)), _runtime_imports(planted)

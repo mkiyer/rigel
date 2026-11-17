@@ -32,7 +32,7 @@ from _scenarios import (
 #: not, so the alignment rate, the negative control's strand reference and the gDNA error bound are looser here.
 build_and_run = partial(_scenarios.build_and_run, aligned=True)
 assert_alignment = partial(_scenarios.assert_alignment, min_rate=0.70)
-assert_negative_control = partial(_scenarios.assert_negative_control, reference_ss=0.9)
+assert_negative_control = _scenarios.assert_negative_control
 assert_gdna_accuracy = partial(_scenarios.assert_gdna_accuracy, max_rel_err=0.55)
 
 pytestmark = pytest.mark.skipif(

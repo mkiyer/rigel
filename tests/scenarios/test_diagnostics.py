@@ -15,6 +15,11 @@ from _benchmark import run_benchmark, simulated_truth
 from _scenarios import sim_config, gdna_config, SIM_SEED, PIPELINE_SEED
 
 N_FRAGMENTS = 1000
+
+#: How many binomial standard deviations of the antisense share a strand-noise bound allows: a one-sided 3-sigma excess,
+#: about one draw in 740, so a sweep's handful of arms fails by chance about once in a few hundred runs, and the seeds
+#: are fixed besides.
+STRAND_NOISE_Z = 3.0
 GENOME_LENGTH = 10_000
 TRANSCRIPT_ABUNDANCE = 100.0  # Dominant transcript
 
@@ -117,7 +122,14 @@ class TestUnsplicedLowStrand:
     """
 
     def test_ss_gradient_unspliced(self, tmp_path):
-        """Sweep SS for unspliced gene: pipeline should retain reads at SS>=0.9."""
+        """Sweep SS for an unspliced gene in a library with no gDNA: at every SS it keeps its reads, to within what the
+        strand channel's sampling noise could misread as gDNA.
+
+        RNA's antisense rate is ``p = 1 − SS`` and gDNA's is ½, so ``n`` fragments whose antisense share sits ``z``
+        binomial standard deviations above ``p`` read as a gDNA share of ``z·sqrt(p(1 − p)/n) / (½ − p)``. That is
+        the most a zero-gDNA library can lose to a phantom gDNA call at ``z = STRAND_NOISE_Z``: about a quarter of the
+        gene at SS 0.65, a twentieth at 0.9, and nothing at 1.0, where the strand channel has no noise.
+        """
         sc = Scenario("ss_grad", genome_length=5000, seed=SIM_SEED, work_dir=tmp_path / "ss_grad")
         sc.add_gene(
             "g1",
@@ -153,10 +165,13 @@ class TestUnsplicedLowStrand:
             )
             bench = run_benchmark(result, pr, scenario_name=f"ss_{ss}")
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
-            if ss >= 0.9:
-                assert t1.observed >= gt.get("t1", 0) * 0.5, (
-                    f"t1 too low at ss={ss}: {t1.observed:.0f} vs truth {gt.get('t1', 0)}"
-                )
+            n = gt.get("t1", 0)
+            p = 1.0 - ss
+            phantom = STRAND_NOISE_Z * (p * (1.0 - p) / n) ** 0.5 / (0.5 - p)
+            assert t1.observed >= n * (1.0 - phantom) - 1.0, (
+                f"t1 too low at ss={ss}: {t1.observed:.0f} vs truth {n}; strand noise allows a "
+                f"{phantom:.1%} phantom gDNA share"
+            )
 
         sc.cleanup()
 

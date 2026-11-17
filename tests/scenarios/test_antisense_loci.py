@@ -20,6 +20,7 @@ from _scenarios import (
     assert_accountability,
     assert_negative_control,
     assert_gdna_accuracy,
+    split_noise,
 )
 
 
@@ -94,7 +95,11 @@ class TestOverlappingAntisense:
                 min_exp = bench.total_expected * (1.0 - max_loss)
                 assert bench.total_rna_observed >= min_exp
             else:
-                assert_gdna_accuracy(bench, gdna, max_rel_err=1.0)
+                assert_gdna_accuracy(
+                    bench,
+                    gdna,
+                    max_rel_err=split_noise(bench.n_fragments) / max(bench.n_gdna_expected, 1),
+                )
         finally:
             sc.cleanup()
 
@@ -229,7 +234,11 @@ class TestContainedAntisense:
                 min_exp = bench.total_expected * (1.0 - max_loss)
                 assert bench.total_rna_observed >= min_exp
             else:
-                assert_gdna_accuracy(bench, gdna, max_rel_err=1.0)
+                assert_gdna_accuracy(
+                    bench,
+                    gdna,
+                    max_rel_err=split_noise(bench.n_fragments) / max(bench.n_gdna_expected, 1),
+                )
         finally:
             sc.cleanup()
 

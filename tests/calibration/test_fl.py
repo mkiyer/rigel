@@ -143,22 +143,10 @@ def test_build_fl_small_pool_shrinks_toward_global_no_cliff():
     fl = fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=gdna, max_size=1000
     )
-    # Smooth shrinkage (no threshold): with pool_total=1 ≪ ρ_ess=1000 the global
+    # Smooth shrinkage (no threshold): with pool_total=1 ≪ the prior's effective size the global
     # anchor (bin 100) dominates the lone gDNA fragment (bin 300).
     assert fl.gdna_pmf[100] > fl.gdna_pmf[300]
     assert fl.gdna_pmf[300] > 0.0  # but the empirical fragment still nudges its bin
-
-
-def test_build_fl_just_below_5000_is_not_a_cliff():
-    # 4999 vs 5001 differ only marginally: there is no threshold jump.
-    glob = _spike(100, 1.0e6)
-    lo = fl_models_from_histograms(
-        global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 4999.0), max_size=1000
-    )
-    hi = fl_models_from_histograms(
-        global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 5001.0), max_size=1000
-    )
-    np.testing.assert_allclose(lo.gdna_pmf[300], hi.gdna_pmf[300], rtol=1e-3)
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +225,21 @@ def _models(**kw):
     )
 
 
+def _eb_weight(m) -> float:
+    """The empirical-Bayes weight the build gave gDNA's own law, read off what the build did to its pmf, not restated:
+    the shrinkage is ``gdna_pmf = w·law + (1 − w)·anchor`` at every length, asserted here, so ``w`` is one number the
+    variance must carry too."""
+    law = m.gdna_counts / m.gdna_counts.sum()
+    gap = law - m.global_pmf
+    at = int(np.argmax(np.abs(gap)))
+    w = float((m.gdna_pmf[at] - m.global_pmf[at]) / gap[at])
+    np.testing.assert_allclose(
+        m.gdna_pmf, w * law + (1.0 - w) * m.global_pmf, rtol=1e-9, atol=1e-15
+    )
+    assert 0.0 < w < 1.0, w
+    return w
+
+
 # ── the field exists and is never None: the scorer must be able to read it unconditionally ───────
 
 
@@ -245,7 +248,7 @@ def test_gdnas_pmf_carries_its_raw_laws_variance_at_its_eb_weight_squared():
     count, and the EB step shrinks the variance with the law."""
     m = _models()
     law = m.gdna_counts / m.gdna_counts.sum()
-    weight = m.n_gdna / (m.n_gdna + 1000.0)
+    weight = _eb_weight(m)
     np.testing.assert_allclose(
         m.gdna_pmf_var, weight * weight * law * law / m.gdna_counts, rtol=1e-12
     )
@@ -276,6 +279,7 @@ def test_more_evidence_carries_proportionally_less_variance():
     )
 
     def raw_var(m):
+        # gDNA's law is its anchor's here, so no shrinkage shows: the weight is read from the code's own constant
         weight = m.n_gdna / (m.n_gdna + CONSTANTS.fragment_length.pool_prior_ess)
         return m.gdna_pmf_var / (weight * weight)
 
@@ -289,7 +293,7 @@ def test_the_contrasts_own_variance_is_carried_at_its_eb_weight():
     rng = np.random.default_rng(4)
     supplied = rng.random(101) * 1e-6
     m = _models(gdna_var=supplied)
-    weight = m.n_gdna / (m.n_gdna + 1000.0)
+    weight = _eb_weight(m)
     np.testing.assert_allclose(m.gdna_pmf_var, weight * weight * supplied, rtol=1e-12)
 
 

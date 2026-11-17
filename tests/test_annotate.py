@@ -243,12 +243,12 @@ def winner_kinds_scenario(tmp_path):
     sc.cleanup()
 
 
-@pytestmark_scenario
 def _record_key(r):
     """A BAM record's identity, qname, flag, reference and position, so duplicates count even when tags differ."""
     return (r.query_name, int(r.flag), int(r.reference_id), int(r.reference_start))
 
 
+@pytestmark_scenario
 class TestAnnotatedBamIntegration:
     """End-to-end: scenario → run_pipeline with annotated_bam_path."""
 

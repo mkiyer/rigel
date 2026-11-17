@@ -207,23 +207,28 @@ class TestNrnaDoubleCounting:
     # Focused: nRNA pool accuracy across strand specificities
     # -----------------------------------------------------------------
 
-    @pytest.mark.parametrize("ss", SS_LEVELS, ids=[f"ss_{int(s * 100)}" for s in SS_LEVELS])
     @pytest.mark.parametrize("nrna", [30, 70], ids=[f"nrna_{n}" for n in [30, 70]])
-    def test_nrna_strand_inversion(self, scenario, nrna, ss):
+    def test_nrna_strand_inversion(self, scenario, nrna):
         """Higher strand specificity must not degrade nRNA accuracy.
 
         The inversion this gates is paradoxical and therefore easy to miss: a strand model that
         double-counts nascent RNA gets worse as the strand signal gets stronger, so a sweep that only
-        looked at the near-random arm would read the defect as noise.
+        looked at the near-random arm would read the defect as noise. The property is across arms, so
+        every arm runs here and each higher one is held to every lower one: its nRNA error may exceed
+        the lower arm's by no more than the nascent count's own Poisson spread, ``sqrt(expected)``,
+        while a double count moves it by a large fraction of the count itself.
         """
-        bench = build_and_run(
-            scenario,
-            n_fragments=N_FRAGMENTS,
-            nrna_abundance=nrna,
-            strand_specificity=ss,
-            scenario_name=f"nrna_inversion_n{nrna}_s{int(ss * 100)}",
-        )
-        if bench.n_nrna_expected > 10:
+        errors = {}
+        for ss in sorted(SS_LEVELS):
+            bench = build_and_run(
+                scenario,
+                n_fragments=N_FRAGMENTS,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                scenario_name=f"nrna_inversion_n{nrna}_s{int(ss * 100)}",
+            )
+            if bench.n_nrna_expected <= 10:
+                continue
             nrna_ratio = bench.n_nrna_pipeline / bench.n_nrna_expected
             # At near-random SS the strand model provides almost no signal and nRNA detection may
             # fail outright, the nascent fragments leaking to gDNA; at higher SS the signal is clear.
@@ -234,6 +239,17 @@ class TestNrnaDoubleCounting:
                 f"(pipeline={bench.n_nrna_pipeline:.0f}, "
                 f"expected={bench.n_nrna_expected}, ss={ss})"
             )
+            errors[ss] = (abs(bench.n_nrna_pipeline - bench.n_nrna_expected), bench.n_nrna_expected)
+        assert len(errors) == len(SS_LEVELS), (
+            f"an arm carried no nascent RNA to score: {sorted(errors)}"
+        )
+        for lo in errors:
+            for hi in (s for s in errors if s > lo):
+                spread = errors[hi][1] ** 0.5
+                assert errors[hi][0] <= errors[lo][0] + spread, (
+                    f"nRNA error grows with strand specificity: {errors[hi][0]:.0f} at ss={hi} against "
+                    f"{errors[lo][0]:.0f} at ss={lo} (noise {spread:.0f})"
+                )
 
     # -----------------------------------------------------------------
     # Focused: mRNA should be unaffected by nRNA presence
