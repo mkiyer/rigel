@@ -60,6 +60,15 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
 - Gene annotation GTF (GENCODE format recommended; `exon` records required)
 - Every transcript on `+` or `-`: `rigel index` refuses one with strand `.` or `?` (StringTie writes `.` for a
   transcript it could not strand), and `--gtf-parse-mode warn-skip` drops it with a warning
+- Every exon with a `gene_id`: `rigel index` refuses one without, and `--gtf-parse-mode warn-skip` drops it with a
+  warning
+- Every gene on one reference: `rigel index` refuses a `gene_id` whose transcripts sit on more than one (a
+  pseudoautosomal gene annotated on X and Y under one id, or a gene repeated on an alternate contig or a patch),
+  since the annotation does not say which copy is the gene's own. `--gtf-parse-mode warn-skip` keeps the copy on the
+  longest reference, the earlier in the FASTA among equals, and its warning names each gene, the reference kept and
+  those dropped. A dropped copy's transcripts are not in the index: where nothing else is annotated, an unspliced
+  alignment there can only be gDNA and a spliced one is dropped (a read pair with another alignment keeps it). To
+  quantify every copy, give each its own `gene_id`, or use a genome without alternate contigs
 - Optional: an **alignable Zarr store** built by the companion `alignable` tool for the
   same genome + aligner, the source of the splice-artifact blacklist (see
   [Mappability](#mappability-and-the-splice-artifact-blacklist))
@@ -77,7 +86,9 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
   it can place nor gDNA. An alignment that fails is dropped; a read pair left with none is withheld, counted in
   `summary.json` and written to the annotated BAM as unresolved
 - **Name-sorted or collated** — a BAM whose header says `SO:coordinate` is refused, since its mates are not
-  adjacent
+  adjacent. One sorted by coordinate whose header does not say so, or one whose mates were removed record by record,
+  shows as read pairs lacking a mate their records call mapped (FLAG 0x8 unset): `rigel quant` warns with their
+  count, and reads each such pair without its mate
 - **Aligned to the index's genome** — references are matched by name: a BAM none of whose references is in the
   index, or one holding a reference at another length, is refused; references beyond the index (decoys,
   alternates, spike-ins) are named in a warning, and an alignment there is dropped, since Rigel can place nothing
@@ -170,7 +181,7 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a sj to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
 | `--nascent-tolerance N` | `20` | Max distance (bp) for clustering multi-exon transcripts' start and end sites into the shared synthetic spans that model their nascent RNA |
 | `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID; `transcript_aliases` maps each collapsed ID to the one kept). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
-| `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them. Malformed: a line that cannot be parsed, a feature that ends before it starts, an exon without a `transcript_id`, an exon off its transcript's reference, strand or gene, an exon overlapping another of its transcript, and a transcript on a reference the FASTA lacks or past its end. Exons with no base between them are one exon. |
+| `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them. Malformed: a line that cannot be parsed, a feature that ends before it starts, an exon without a `transcript_id` or a `gene_id`, an exon off its transcript's reference, strand or gene, an exon overlapping another of its transcript, a transcript on neither `+` nor `-`, and a transcript on a reference the FASTA lacks or past its end. Exons with no base between them are one exon. A gene with transcripts on more than one reference is refused by `strict`; `warn-skip` keeps its copy on the longest reference ([Reference](#reference)). |
 | `--feather-compression {lz4,zstd,uncompressed}` | `lz4` | Feather compression for index files |
 | `--no-tsv` | off | Skip writing TSV mirrors of index files |
 

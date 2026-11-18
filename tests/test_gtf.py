@@ -6,6 +6,7 @@ and the choice reaches `Transcript.read_gtf` rather than stopping at the parser.
 """
 
 import logging
+import re
 from pathlib import Path
 
 import pytest
@@ -176,13 +177,18 @@ def test_an_ensembl_gene_biotype_is_the_gene_type(tmp_path: Path):
     assert t.g_type == "lncRNA"
 
 
-def _fasta(tmp_path: Path, length: int, refs: tuple[str, ...] = ("chr1",)) -> Path:
+def _fasta_of(tmp_path: Path, lengths: dict[str, int]) -> Path:
+    """A FASTA of the named references, in the dict's order, each at its own length."""
     import pysam
 
     fasta = tmp_path / "genome.fa"
-    fasta.write_text("".join(f">{ref}\n" + "A" * length + "\n" for ref in refs))
+    fasta.write_text("".join(f">{ref}\n" + "A" * length + "\n" for ref, length in lengths.items()))
     pysam.faidx(str(fasta))
     return fasta
+
+
+def _fasta(tmp_path: Path, length: int, refs: tuple[str, ...] = ("chr1",)) -> Path:
+    return _fasta_of(tmp_path, dict.fromkeys(refs, length))
 
 
 @pytest.mark.parametrize(
@@ -292,11 +298,10 @@ def test_rigel_index_holds_no_gene_without_a_gene_id(tmp_path: Path):
     assert index.g_df["g_id"].notna().all()
 
 
-def test_a_gene_on_two_references_follows_the_parse_mode(tmp_path: Path, caplog):
+def test_strict_parsing_refuses_a_gene_on_two_references(tmp_path: Path):
     """A gene's row takes one reference and strand and spans its transcripts' extremes, so a `gene_id` with
-    transcripts on two references would be one gene on one reference spanning coordinates of both. Strict refuses it
-    by name; warn-and-skip drops the gene, since the annotation cannot say which reference is its own, and builds the
-    rest."""
+    transcripts on two references would be one gene on one reference spanning coordinates of both. The annotation
+    does not say which copy is the gene's own, so strict parsing refuses it by name."""
     from rigel.index import TranscriptIndex
 
     fasta = _fasta(tmp_path, 1000, refs=("chr1", "chr2"))
@@ -311,9 +316,64 @@ def test_a_gene_on_two_references_follows_the_parse_mode(tmp_path: Path, caplog)
     )
     with pytest.raises(ValueError, match=r"g1 .*chr1.*chr2"):
         TranscriptIndex.build(fasta, gtf, tmp_path / "strict", gtf_parse_mode="strict")
+
+
+def test_warn_and_skip_keeps_a_gene_on_its_longest_reference(tmp_path: Path, caplog):
+    """Under warn-and-skip a gene on two references keeps the copy on the longer one: an alternate contig, a patch or
+    an unplaced scaffold is a short stand-in for part of a chromosome. The shorter reference here comes first in the
+    FASTA, in the GTF and by name, and holds two of the gene's three transcripts, so only length picks the other. The
+    gene's row is the kept copy's, a gene on one reference is untouched, and the warning names the gene, the
+    reference kept and the one dropped."""
+    from rigel.index import TranscriptIndex
+
+    fasta = _fasta_of(tmp_path, {"chrA": 1000, "chrB": 2000})
+    gtf = _write(
+        tmp_path,
+        [
+            _exon(100, 300, ref="chrA"),
+            _exon(500, 700, ref="chrA"),
+            _exon(100, 400, transcript="t2", ref="chrA"),
+            _exon(1100, 1300, transcript="t3", ref="chrB"),
+            _exon(100, 300, gene="g2", transcript="t4", ref="chrA", strand="-"),
+        ],
+    )
     with caplog.at_level(logging.WARNING):
         TranscriptIndex.build(fasta, gtf, tmp_path / "skip", gtf_parse_mode="warn-skip")
     index = TranscriptIndex.load(tmp_path / "skip")
     annotated = index.t_df[~index.t_df["is_synthetic"]]
+    assert set(annotated["t_id"]) == {"t3", "t4"}
+    g1 = index.g_df[index.g_df["g_id"] == "g1"].iloc[0]
+    assert (g1["ref"], g1["start"], g1["end"]) == ("chrB", 1099, 1300)
+    assert re.search(r"g1 kept on chrB, dropped on chrA", caplog.text)
+    assert "2 transcript(s)" in caplog.text
+
+
+def test_equal_references_keep_the_copy_earlier_in_the_fasta(tmp_path: Path):
+    """Between references of one length the gene keeps the copy on the one earlier in the FASTA. That reference here
+    comes second in the GTF and by name, and holds one of the gene's three transcripts, so only the FASTA's order
+    picks it."""
+    from rigel.index import TranscriptIndex
+
+    fasta = _fasta_of(tmp_path, {"chr2": 1000, "chr1": 1000})
+    gtf = _write(
+        tmp_path,
+        [
+            _exon(100, 300),
+            _exon(500, 700, transcript="t2"),
+            _exon(100, 300, transcript="t3", ref="chr2"),
+        ],
+    )
+    TranscriptIndex.build(fasta, gtf, tmp_path / "skip", gtf_parse_mode="warn-skip")
+    index = TranscriptIndex.load(tmp_path / "skip")
+    annotated = index.t_df[~index.t_df["is_synthetic"]]
     assert set(annotated["t_id"]) == {"t3"}
-    assert "g1" in caplog.text
+
+
+def test_a_reader_without_the_fasta_refuses_a_gene_on_two_references(tmp_path: Path):
+    """Which copy to keep is read off the FASTA's lengths, so a reader given none refuses the gene by name under
+    warn-and-skip too, rather than choose by a rule the index would not."""
+    from rigel.index import read_transcripts
+
+    gtf = _write(tmp_path, [_exon(100, 300), _exon(100, 300, transcript="t2", ref="chr2")])
+    with pytest.raises(ValueError, match=r"g1 on chr1, chr2.*FASTA"):
+        read_transcripts(gtf, gtf_parse_mode="warn-skip")

@@ -345,10 +345,15 @@ def _on_the_fasta(
     return [t for t in transcripts if id(t) not in dropped]
 
 
-def _one_reference_per_gene(transcripts: list[Transcript], gtf_parse_mode: str) -> list[Transcript]:
-    """The transcripts whose gene lies on one reference. A gene's row takes one reference and strand and spans its
-    transcripts' extremes, so a gene on two references would span coordinates of both. Strict parsing refuses such a
-    gene by name; warn-and-skip drops it with a warning, since the annotation cannot say which reference is its own."""
+def _one_reference_per_gene(
+    transcripts: list[Transcript], ref_lengths: dict[str, int] | None, gtf_parse_mode: str
+) -> list[Transcript]:
+    """The transcripts of each gene's one reference. A gene's row takes one reference and strand and spans its
+    transcripts' extremes, so a gene on two references would span coordinates of both, and the annotation does not
+    say which copy is the gene's own. Strict parsing refuses such a gene by name. Warn-and-skip keeps the copy on the
+    longest reference, the earlier in the FASTA among equals, and drops the others with a warning: an alternate
+    contig, a patch or an unplaced scaffold is a short stand-in for part of a chromosome. The choice is read off the
+    FASTA's lengths, so a reader given none refuses in either mode."""
     refs: dict[str, list[str]] = {}
     for t in transcripts:
         on = refs.setdefault(t.g_id, [])
@@ -358,19 +363,39 @@ def _one_reference_per_gene(transcripts: list[Transcript], gtf_parse_mode: str) 
     if not split:
         return transcripts
     k = CONSTANTS.qc.report_examples
-    names = "; ".join(f"{g_id} on {', '.join(on)}" for g_id, on in list(split.items())[:k]) + (
-        f"; and {len(split) - k:,} more" if len(split) > k else ""
-    )
-    if gtf_parse_mode == "strict":
-        raise ValueError(
-            f"{len(split):,} gene(s) have transcripts on more than one reference: {names}"
+    shown = list(split.items())[:k]
+    more = f"; and {len(split) - k:,} more" if len(split) > k else ""
+    if gtf_parse_mode == "strict" or ref_lengths is None:
+        names = "; ".join(f"{g_id} on {', '.join(on)}" for g_id, on in shown) + more
+        why = (
+            ""
+            if gtf_parse_mode == "strict"
+            else ". Which copy to keep is read off the FASTA's reference lengths, and this reader was given none"
         )
+        raise ValueError(
+            f"{len(split):,} gene(s) have transcripts on more than one reference: {names}{why}"
+        )
+    fasta_order = {ref: i for i, ref in enumerate(ref_lengths)}
+    kept = {
+        g_id: min(on, key=lambda ref: (-ref_lengths[ref], fasta_order[ref]))
+        for g_id, on in split.items()
+    }
+    on_kept = [t for t in transcripts if kept.get(t.g_id, t.ref) == t.ref]
+    names = (
+        "; ".join(
+            f"{g_id} kept on {kept[g_id]}, dropped on {', '.join(ref for ref in on if ref != kept[g_id])}"
+            for g_id, on in shown
+        )
+        + more
+    )
     logger.warning(
-        "Skipping %s gene(s) with transcripts on more than one reference: %s",
+        "%s gene(s) have transcripts on more than one reference. Each keeps its copy on the longest of them (the "
+        "earlier in the FASTA among equals); skipping the %s transcript(s) on the others: %s",
         f"{len(split):,}",
+        f"{len(transcripts) - len(on_kept):,}",
         names,
     )
-    return [t for t in transcripts if t.g_id not in split]
+    return on_kept
 
 
 def read_transcripts(
@@ -393,14 +418,17 @@ def read_transcripts(
         Transcripts with identical exon structure raise ``ValueError`` when ``False`` (the default), and are collapsed
         by :func:`_collapse_duplicate_transcripts` when ``True``.
     ref_lengths : dict, optional
-        The FASTA's references and lengths. A transcript on a reference it lacks, or running past one's end, follows
-        ``gtf_parse_mode``: strict refuses it by name, warn-and-skip drops it with a warning.
+        The FASTA's references and lengths, in the FASTA's order. A transcript on a reference it lacks, or running
+        past one's end, follows ``gtf_parse_mode``: strict refuses it by name, warn-and-skip drops it with a warning.
+        A gene with transcripts on more than one reference is refused by name under strict parsing; warn-and-skip
+        keeps its copy on the longest reference (:func:`_one_reference_per_gene`).
 
     Raises
     ------
     ValueError
-        On duplicate transcripts when ``collapse_duplicate_transcripts`` is ``False``, or, under strict parsing, on a
-        transcript off the FASTA or a gene with transcripts on more than one reference.
+        On duplicate transcripts when ``collapse_duplicate_transcripts`` is ``False``; under strict parsing, on a
+        transcript off the FASTA; and on a gene with transcripts on more than one reference, under strict parsing or
+        when ``ref_lengths`` is not given.
     """
     transcripts = Transcript.read_gtf(
         str(gtf_file),
@@ -408,7 +436,7 @@ def read_transcripts(
     )
     if ref_lengths is not None:
         transcripts = _on_the_fasta(transcripts, ref_lengths, gtf_parse_mode)
-    transcripts = _one_reference_per_gene(transcripts, gtf_parse_mode)
+    transcripts = _one_reference_per_gene(transcripts, ref_lengths, gtf_parse_mode)
 
     if collapse_duplicate_transcripts:
         transcripts = _collapse_duplicate_transcripts(transcripts)
