@@ -99,7 +99,7 @@ def quant_command(args: argparse.Namespace) -> int:
         pipeline_config = build_pipeline_config(args)
     except ValueError as exc:
         sys.exit(f"Error: {exc}")
-    _check_annotated_bam_target(pipeline_config.annotated_bam_path)
+    _check_annotated_bam_target(pipeline_config.annotated_bam_path, bam_path)
 
     logging.info(f"[START] Loading index from {index_dir}")
     try:
@@ -144,11 +144,18 @@ def _quant_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     return bam_path, index_dir, Path(args.output_dir)
 
 
-def _check_annotated_bam_target(annotated) -> None:
-    """Refuse, before the run, an annotated BAM the second pass could not write: that pass runs after the
-    quantification, so the failure would otherwise come only at the end."""
+def _check_annotated_bam_target(annotated, bam_path: Path) -> None:
+    """Refuse, before the run, an annotated BAM the second pass could not write, or one that is the input BAM: that
+    pass runs after the quantification, so the failure would otherwise come only at the end, and over the input it
+    would destroy it."""
+    from .pipeline import BamInputError, check_annotated_bam_path
+
     if annotated is None:
         return
+    try:
+        check_annotated_bam_path(bam_path, annotated)
+    except BamInputError as exc:
+        sys.exit(f"Error: {exc}")
     target_dir = Path(annotated).resolve().parent
     if not target_dir.is_dir() or not os.access(target_dir, os.W_OK):
         sys.exit(

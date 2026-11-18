@@ -145,3 +145,27 @@ def test_the_cli_reports_a_refused_bam_as_an_error(built, tmp_path):
     assert str(exited.value.code).startswith("Error: ") and "sorted by coordinate" in str(
         exited.value.code
     )
+
+
+@pytest.mark.parametrize("hard_link", [False, True], ids=["same-path", "hard-link"])
+def test_an_annotated_bam_that_is_the_input_is_refused_before_the_scan(built, tmp_path, hard_link):
+    """`run_pipeline` refuses it too, for a caller that is not the CLI: the annotation pass would truncate the input
+    it reads, and its check against the scan would then delete it. The input keeps its bytes."""
+    import os
+    import shutil
+
+    bam = tmp_path / "in.bam"
+    shutil.copyfile(built.bam_path, bam)
+    before = bam.read_bytes()
+    annotated = bam
+    if hard_link:
+        annotated = tmp_path / "linked.bam"
+        os.link(bam, annotated)
+    config = PipelineConfig(
+        em=EMConfig(seed=SEED),
+        scan=BamScanConfig(sj_strand_tag="ts"),
+        annotated_bam_path=annotated,
+    )
+    with pytest.raises(BamInputError, match="is the input BAM"):
+        run_pipeline(bam, built.index, config=config)
+    assert bam.read_bytes() == before

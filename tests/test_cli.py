@@ -221,6 +221,33 @@ def test_quant_refuses_an_annotated_bam_it_could_not_write_before_the_run(tmp_pa
     assert message.startswith("Error: --annotated-bam") and "missing" in message
 
 
+@pytest.mark.parametrize("name", ["the same path", "a hard link", "a symbolic link"])
+def test_quant_refuses_an_annotated_bam_that_is_the_input_before_loading_the_index(tmp_path, name):
+    """The annotation pass opens its output after its input, so an annotated BAM that is the input BAM would truncate
+    the input as it is read, and the check against the scan would then delete it. The input under any name is
+    refused before the index loads, its bytes untouched and no output written."""
+    import os
+
+    bam = tmp_path / "in.bam"
+    target = {
+        "the same path": bam,
+        "a hard link": tmp_path / "hard.bam",
+        "a symbolic link": tmp_path / "soft.bam",
+    }[name]
+    args = _quant_with_empty_inputs(tmp_path, "--annotated-bam", str(target))
+    bam.write_bytes(b"the input")
+    if name == "a hard link":
+        os.link(bam, target)
+    elif name == "a symbolic link":
+        os.symlink(bam, target)
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    message = str(exited.value.code)
+    assert message.startswith(f"Error: The annotated BAM {target} is the input BAM {bam}"), message
+    assert bam.read_bytes() == b"the input"
+    assert not any((tmp_path / "out").iterdir())
+
+
 def test_quant_reports_an_index_it_cannot_load_as_an_error(tmp_path):
     args = _quant_with_empty_inputs(tmp_path)
     with pytest.raises(SystemExit) as exited:

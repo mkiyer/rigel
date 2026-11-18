@@ -281,6 +281,20 @@ class BamInputError(ValueError):
     """A BAM the scan would read wrong, refused before its records are trusted; the message names the remedy."""
 
 
+def check_annotated_bam_path(bam_path, annotated_bam_path) -> None:
+    """Refuse an annotated BAM that is the input BAM, under its own name or another (a hard or symbolic link): the
+    annotation pass opens its output after its input, so it would truncate the BAM it is reading, and its check against
+    the scan would then delete it."""
+    if annotated_bam_path is None:
+        return
+    target, bam = Path(annotated_bam_path), Path(bam_path)
+    if target.exists() and bam.exists() and target.samefile(bam):
+        raise BamInputError(
+            f"The annotated BAM {annotated_bam_path} is the input BAM {bam_path}: writing it would destroy the "
+            "input. Name another path."
+        )
+
+
 def _check_bam_header(bam_path: str, index: TranscriptIndex) -> None:
     """Refuse, from its header alone, a BAM the scan would read wrong.
 
@@ -1048,6 +1062,7 @@ def run_pipeline(
     if config is None:
         config = PipelineConfig()
     bam_path = str(bam_path)
+    check_annotated_bam_path(bam_path, config.annotated_bam_path)
     scan = config.scan
     stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
     with buffer:
