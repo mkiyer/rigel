@@ -280,9 +280,13 @@ class Scenario:
             if src is None:
                 continue  # a synthetic entity: no mature molecules of its own
             row.abundance = float(src.abundance or 0.0)
-            if len(row.exons) > 1 and row.abundance > 0:
+            if len(row.exons) > 1:
+                # a transcript's own nascent abundance is independent of its mature one; the build's override names
+                # the nascent abundance of every expressed multi-exon transcript
                 own = float(src.nrna_abundance or 0.0)
-                per_contributor[i] = nrna_abundance if nrna_abundance > 0 else own
+                per_contributor[i] = (
+                    (nrna_abundance if row.abundance > 0 else 0.0) if nrna_abundance > 0 else own
+                )
         assign_nrna_to_entities(rows, per_contributor)
         return fasta_path, gtf_path, index_dir, TranscriptIndex.load(index_dir), rows
 
