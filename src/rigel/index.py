@@ -330,6 +330,34 @@ def _on_the_fasta(
     return [t for t in transcripts if id(t) not in dropped]
 
 
+def _one_reference_per_gene(transcripts: list[Transcript], gtf_parse_mode: str) -> list[Transcript]:
+    """The transcripts whose gene lies on one reference. A gene's row takes one reference and strand and spans its
+    transcripts' extremes, so a gene on two references would span coordinates of both. Strict parsing refuses such a
+    gene by name; warn-and-skip drops it with a warning, since the annotation cannot say which reference is its own."""
+    refs: dict[str, list[str]] = {}
+    for t in transcripts:
+        on = refs.setdefault(t.g_id, [])
+        if t.ref not in on:
+            on.append(t.ref)
+    split = {g_id: on for g_id, on in refs.items() if len(on) > 1}
+    if not split:
+        return transcripts
+    k = CONSTANTS.qc.report_examples
+    names = "; ".join(f"{g_id} on {', '.join(on)}" for g_id, on in list(split.items())[:k]) + (
+        f"; and {len(split) - k:,} more" if len(split) > k else ""
+    )
+    if gtf_parse_mode == "strict":
+        raise ValueError(
+            f"{len(split):,} gene(s) have transcripts on more than one reference: {names}"
+        )
+    logger.warning(
+        "Skipping %s gene(s) with transcripts on more than one reference: %s",
+        f"{len(split):,}",
+        names,
+    )
+    return [t for t in transcripts if t.g_id not in split]
+
+
 def read_transcripts(
     gtf_file: str | Path,
     *,
@@ -356,8 +384,8 @@ def read_transcripts(
     Raises
     ------
     ValueError
-        On duplicate transcripts when ``collapse_duplicate_transcripts`` is ``False``, or on a transcript off the
-        FASTA under strict parsing.
+        On duplicate transcripts when ``collapse_duplicate_transcripts`` is ``False``, or, under strict parsing, on a
+        transcript off the FASTA or a gene with transcripts on more than one reference.
     """
     transcripts = Transcript.read_gtf(
         str(gtf_file),
@@ -365,6 +393,7 @@ def read_transcripts(
     )
     if ref_lengths is not None:
         transcripts = _on_the_fasta(transcripts, ref_lengths, gtf_parse_mode)
+    transcripts = _one_reference_per_gene(transcripts, gtf_parse_mode)
 
     if collapse_duplicate_transcripts:
         transcripts = _collapse_duplicate_transcripts(transcripts)

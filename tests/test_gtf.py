@@ -176,11 +176,11 @@ def test_an_ensembl_gene_biotype_is_the_gene_type(tmp_path: Path):
     assert t.g_type == "lncRNA"
 
 
-def _fasta(tmp_path: Path, length: int) -> Path:
+def _fasta(tmp_path: Path, length: int, refs: tuple[str, ...] = ("chr1",)) -> Path:
     import pysam
 
     fasta = tmp_path / "genome.fa"
-    fasta.write_text(">chr1\n" + "A" * length + "\n")
+    fasta.write_text("".join(f">{ref}\n" + "A" * length + "\n" for ref in refs))
     pysam.faidx(str(fasta))
     return fasta
 
@@ -251,3 +251,69 @@ def test_rigel_index_refuses_a_transcript_with_no_strand(tmp_path: Path):
     t_df = TranscriptIndex.load(tmp_path / "skip").t_df
     assert "t2" not in set(t_df["t_id"])
     assert set(t_df.loc[~t_df["is_synthetic"], "strand"]) == {1}
+
+
+def test_an_exon_without_a_gene_id_follows_the_parse_mode(tmp_path: Path):
+    """An exon with no `gene_id` is judged like one with no `transcript_id`: every such transcript would otherwise
+    share one gene, keyed `None`, whatever its reference or strand. Strict names it; warn-and-skip drops it."""
+    path = _write(
+        tmp_path,
+        [
+            _exon(100, 200),
+            'chr1\ttest\texon\t300\t400\t.\t+\t.\ttranscript_id "t2";\n',
+            'chr2\ttest\texon\t300\t400\t.\t-\t.\ttranscript_id "t3";\n',
+        ],
+    )
+    with pytest.raises(ValueError, match="t2.*no gene_id"):
+        Transcript.read_gtf(path, parse_mode="strict")
+    tx = Transcript.read_gtf(path, parse_mode="warn-skip")
+    assert [t.t_id for t in tx] == ["t1"]
+
+
+def test_rigel_index_holds_no_gene_without_a_gene_id(tmp_path: Path):
+    """The issue's case end to end: two transcripts with no `gene_id`, on chr1(+) and chr2(-), are refused by the
+    build under strict parsing, and under warn-and-skip neither is indexed and the gene table has no `None` gene."""
+    from rigel.index import TranscriptIndex
+
+    fasta = _fasta(tmp_path, 1000, refs=("chr1", "chr2"))
+    gtf = _write(
+        tmp_path,
+        [
+            _exon(100, 300),
+            'chr1\ttest\texon\t500\t700\t.\t+\t.\ttranscript_id "t2";\n',
+            'chr2\ttest\texon\t500\t700\t.\t-\t.\ttranscript_id "t3";\n',
+        ],
+    )
+    with pytest.raises(ValueError, match="gene_id"):
+        TranscriptIndex.build(fasta, gtf, tmp_path / "strict", gtf_parse_mode="strict")
+    TranscriptIndex.build(fasta, gtf, tmp_path / "skip", gtf_parse_mode="warn-skip")
+    index = TranscriptIndex.load(tmp_path / "skip")
+    assert set(index.t_df["t_id"]) == {"t1"}
+    assert index.g_df["g_id"].notna().all()
+
+
+def test_a_gene_on_two_references_follows_the_parse_mode(tmp_path: Path, caplog):
+    """A gene's row takes one reference and strand and spans its transcripts' extremes, so a `gene_id` with
+    transcripts on two references would be one gene on one reference spanning coordinates of both. Strict refuses it
+    by name; warn-and-skip drops the gene, since the annotation cannot say which reference is its own, and builds the
+    rest."""
+    from rigel.index import TranscriptIndex
+
+    fasta = _fasta(tmp_path, 1000, refs=("chr1", "chr2"))
+    gtf = _write(
+        tmp_path,
+        [
+            _exon(100, 300),
+            _exon(500, 700),
+            _exon(100, 300, transcript="t2", ref="chr2"),
+            _exon(100, 300, gene="g2", transcript="t3", ref="chr2", strand="-"),
+        ],
+    )
+    with pytest.raises(ValueError, match=r"g1 .*chr1.*chr2"):
+        TranscriptIndex.build(fasta, gtf, tmp_path / "strict", gtf_parse_mode="strict")
+    with caplog.at_level(logging.WARNING):
+        TranscriptIndex.build(fasta, gtf, tmp_path / "skip", gtf_parse_mode="warn-skip")
+    index = TranscriptIndex.load(tmp_path / "skip")
+    annotated = index.t_df[~index.t_df["is_synthetic"]]
+    assert set(annotated["t_id"]) == {"t3"}
+    assert "g1" in caplog.text

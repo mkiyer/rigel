@@ -168,6 +168,10 @@ class Transcript:
             if t_id is None:
                 _malformed_exon(parse_mode, f"{where} has no transcript_id")
                 continue
+            # genes are keyed by gene_id: every transcript without one would join one gene, whatever its reference
+            if _first_attr(f.attrs.get("gene_id")) is None:
+                _malformed_exon(parse_mode, f"{where} of transcript {t_id} has no gene_id")
+                continue
             # The scorer reads a stranded fragment against its transcript's strand, and calibration's partition holds
             # stranded transcripts only, so a strandless one's RNA would be booked as gDNA
             if f.strand not in ("+", "-"):
