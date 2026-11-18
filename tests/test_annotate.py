@@ -6,8 +6,7 @@ and the category a transcript's win is stamped with. Then the writer, through a 
 transcript's win must read annotated or nascent as the output tables do, its per-class counts must
 agree with the run's own, and it must preserve every input record and its collation, multimappers
 included, because an annotated BAM that silently drops records is not the same library the numbers
-describe. The blacklist tag is gated for presence, for the blacklisted case and for its absence on
-a filtered passthrough.
+describe; a filtered passthrough record carries none of its tags.
 """
 
 import shutil
@@ -572,134 +571,10 @@ class TestAnnotatedBamIntegration:
             "Multimapper annotated BAM is not collated"
         )
 
-    # =================================================================
-    # ZB:i — per-record splice-artifact tag
-    # =================================================================
-
-    def test_zb_tag_schema_always_present(self, scenario, tmp_path):
-        """Every annotated record carries ZB:i, and its value is >= 0.
-
-        This scenario has no blacklist loaded, so every ZB should be 0.
-        """
-        import pysam
-        from rigel.sim import ReadSimConfig
-        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
-        from rigel.pipeline import run_pipeline
-
-        sim_config = ReadSimConfig(
-            frag_mean=200,
-            frag_std=30,
-            frag_min=80,
-            frag_max=450,
-            read_length=100,
-            strand_specificity=1.0,
-            seed=42,
-        )
-        result = scenario.build(n_fragments=200, sim_config=sim_config)
-
-        annotated_bam = tmp_path / "annotated_zb.bam"
-        run_pipeline(
-            result.bam_path,
-            result.index,
-            config=PipelineConfig(
-                em=EMConfig(seed=42),
-                scan=BamScanConfig(sj_strand_tag="ts"),
-                annotated_bam_path=annotated_bam,
-            ),
-        )
-
-        with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
-            records = list(fout.fetch(until_eof=True))
-        assert len(records) > 0
-
-        # Every record that receives any annotation tag must also have ZB,
-        # and its value must be a non-negative int.
-        for rec in records:
-            tags = {t[0] for t in rec.get_tags()}
-            if "ZT" in tags:  # record was annotated by rigel
-                assert "ZB" in tags, f"Record {rec.query_name} missing ZB tag"
-                zb = rec.get_tag("ZB")
-                assert isinstance(zb, int)
-                assert zb >= 0
-                # No blacklist loaded in this scenario → ZB must be 0
-                assert zb == 0, f"ZB={zb} with no blacklist loaded (expected 0)"
-
-    def test_zb_tag_marks_blacklisted_sj(self, scenario, tmp_path):
-        """Injecting a targeted blacklist entry produces ZB>=1 on the
-        matching reads, and the sum of ZB across the output BAM equals
-        the Pass-1 scanner stat ``n_sj_blacklisted`` (Pass-1/Pass-2
-        parity invariant).
-        """
-        import pandas as pd
-        import pysam
-        from rigel.sim import ReadSimConfig
-        from _index_builder import rebuild_with_splice_blacklist
-        from rigel.index import TranscriptIndex
-        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
-        from rigel.pipeline import run_pipeline
-
-        sim_config = ReadSimConfig(
-            frag_mean=200,
-            frag_std=30,
-            frag_min=80,
-            frag_max=450,
-            read_length=100,
-            strand_specificity=1.0,
-            seed=42,
-        )
-        result = scenario.build(n_fragments=500, sim_config=sim_config)
-
-        # Inject a blacklist covering gene g1's sj (1000, 1500)
-        # with huge anchor envelopes so every spliced read over it is
-        # dropped.  The scenario's ref name equals scenario.name by default.
-        ref = scenario.ref_name
-        bl_df = pd.DataFrame(
-            {
-                "ref": [ref],
-                "start": pd.array([1000], dtype="int32"),
-                "end": pd.array([1500], dtype="int32"),
-                "max_anchor_left": pd.array([1000], dtype="int32"),
-                "max_anchor_right": pd.array([1000], dtype="int32"),
-            }
-        )
-        rebuild_with_splice_blacklist(result.index_dir, bl_df)
-
-        # Reload so the C++ resolver picks up the new blacklist
-        reloaded_index = TranscriptIndex.load(result.index_dir)
-
-        annotated_bam = tmp_path / "annotated_zb_bl.bam"
-        pr = run_pipeline(
-            result.bam_path,
-            reloaded_index,
-            config=PipelineConfig(
-                em=EMConfig(seed=42),
-                scan=BamScanConfig(sj_strand_tag="ts"),
-                annotated_bam_path=annotated_bam,
-            ),
-        )
-
-        with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
-            records = list(fout.fetch(until_eof=True))
-
-        zb_values = [rec.get_tag("ZB") for rec in records if rec.has_tag("ZB")]
-        n_marked = sum(1 for v in zb_values if v > 0)
-        zb_sum = sum(zb_values)
-
-        assert n_marked > 0, (
-            "Expected at least one record with ZB>0 after injecting a blacklist, got none."
-        )
-
-        # Pass-1 / Pass-2 parity: the sum of ZB over the annotated BAM
-        # equals the scanner's n_sj_blacklisted stat.
-        assert pr.stats.n_sj_blacklisted > 0, "Pass-1 stat n_sj_blacklisted should be > 0"
-        assert zb_sum == pr.stats.n_sj_blacklisted, (
-            f"ZB sum ({zb_sum}) != Pass-1 n_sj_blacklisted ({pr.stats.n_sj_blacklisted})"
-        )
-
-    def test_zb_tag_absent_on_filtered_passthrough(self, scenario, tmp_path):
+    def test_a_filtered_passthrough_record_carries_no_tag(self, scenario, tmp_path):
         """Filtered pass-through records (QCFAIL etc.) receive no Z*
-        tags, including no ZB.  Augment the input BAM with a QCFAIL
-        record and verify the output preserves it verbatim without tags.
+        tags.  Augment the input BAM with a QCFAIL record and verify
+        the output preserves it verbatim without tags.
         """
         import pysam
         from rigel.sim import ReadSimConfig
@@ -748,7 +623,7 @@ class TestAnnotatedBamIntegration:
         assert len(qc_out) == 1, f"QCFAIL sentinel not preserved: found {len(qc_out)} copies"
         tags = {t[0] for t in qc_out[0].get_tags()}
         # Filtered pass-through records get no rigel annotations
-        for tag in ("ZT", "ZG", "ZF", "ZB"):
+        for tag in ("ZT", "ZG", "ZF"):
             assert tag not in tags, f"Filtered pass-through record carries {tag}; should not"
 
     # =================================================================
@@ -1046,7 +921,6 @@ class TestAnnotatedBamWriterRobustness:
     _DOCUMENTED_ZS = {
         "spliced_annot",
         "spliced_implicit",
-        "splice_artifact",
         "unspliced",
         "unknown",
     }

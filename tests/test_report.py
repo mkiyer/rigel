@@ -43,7 +43,7 @@ from rigel.report.substrate import SUMMARY_KEYS, SubstrateError, SummaryReader, 
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 #: The ``summary.json`` schema the synthesized substrate mirrors, and the one the real writer must write.
-_SCHEMA = 9
+_SCHEMA = 10
 
 #: The output convention's four pools, as the report names them.
 _POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic gDNA")
@@ -81,13 +81,9 @@ def _write_substrate(d: Path) -> Path:
             "intergenic": intergenic,
             "with_annotated_sj": 400,
             "splice": {
-                "unspliced": 270,
+                "unspliced": 275,
                 "spliced_annotated": 400,
                 "spliced_implicit": 25,
-                "splice_artifact": 5,
-                "sj_blacklisted": 3,
-                "sj_blacklist_size": 1200,
-                "sj_blacklist_loaded": True,
             },
         },
         "strand_model": {
@@ -235,12 +231,9 @@ def test_view_model_shape(tmp_path):
     assert all("fmt" in v for v in vm["verdicts"])
     # the read fate is every read pair, each counted once
     assert sum(seg["value"] for seg in vm["alignment"]["fate"]) == 750
-    # the splice bar: the four splice types, one spliced (every junction annotated)
+    # the splice bar: the three splice types, one spliced (every junction annotated)
     labels = [s["label"] for s in vm["fragments"]["splice"]]
-    assert labels == ["Unspliced", "Annotated", "Implicit", "Artifact"]
-    # the blacklist's provenance, so a zero-artifact bar reads as detection on or off
-    assert vm["fragments"]["blacklisted"] == 3
-    assert vm["fragments"]["blacklist"] == {"size": 1200, "loaded": True}
+    assert labels == ["Unspliced", "Annotated", "Implicit"]
     # strand contamination gap surfaced
     assert vm["strand"]["contamination_gap"] == 0.05
     # the fragment-length table keeps the categories in the order summary.json lists them

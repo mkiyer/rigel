@@ -311,27 +311,6 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="schema"):
             read_scan_cache(cache_dir, scanned[0])
 
-    def test_a_cache_scanned_under_another_splice_blacklist_is_refused(self, scanned, tmp_path):
-        """The scan strips every junction the index's splice blacklist names and holds back a fragment whose every
-        junction it rejects, so a blacklist is part of the tally. `graph_hash`, the reach digest, the schema digest
-        and the scan settings all stay byte-identical when it changes."""
-        cache_dir, _cache = round_trip(scanned, tmp_path)
-        manifest = json.loads((cache_dir / "manifest.json").read_text())
-        manifest["splice_blacklist_digest"] = "0" * 16
-        (cache_dir / "manifest.json").write_text(json.dumps(manifest))
-        with pytest.raises(ScanCacheKeyError, match="blacklist"):
-            read_scan_cache(cache_dir, scanned[0])
-
-    def test_a_cache_with_no_blacklist_record_is_refused(self, scanned, tmp_path):
-        """Absent must not read as "no blacklist": a manifest without the entry says nothing about the
-        blacklist the scan ran under."""
-        cache_dir, _cache = round_trip(scanned, tmp_path)
-        manifest = json.loads((cache_dir / "manifest.json").read_text())
-        del manifest["splice_blacklist_digest"]
-        (cache_dir / "manifest.json").write_text(json.dumps(manifest))
-        with pytest.raises(ScanCacheKeyError, match="blacklist"):
-            read_scan_cache(cache_dir, scanned[0])
-
     def test_the_schema_digest_moves_when_a_payload_field_moves(self):
         """Teeth on the digest itself: it must be a function of the field list, not a constant."""
 

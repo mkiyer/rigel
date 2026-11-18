@@ -371,15 +371,12 @@ TemplateJudgment judge_template(std::vector<ParsedAlignment>& records, int64_t f
 void resolve_hit(const Hit& hit, const FragmentResolver& resolver, ResolverScratch& scratch, AssembledFragment& frag,
                  ResolvedFragment& resolved) {
     frag = build_fragment(hit);
-    int32_t blacklisted = 0;
-    for (const ParsedAlignment* r : {hit.r1, hit.r2})
-        if (r) blacklisted += r->n_sj_blacklisted;
     int32_t footprint = -1;
     if (!frag.exons.empty()) {
         const std::pair<int32_t, int32_t> extent = fragment_extent(frag.exons);
         footprint = extent.second - extent.first;
     }
-    resolver.resolve(frag.exons, frag.introns, footprint, blacklisted, resolved, scratch);
+    resolver.resolve(frag.exons, frag.introns, footprint, resolved, scratch);
 }
 
 int32_t template_nh(const std::vector<ParsedAlignment>& records) {

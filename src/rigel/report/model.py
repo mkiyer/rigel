@@ -207,7 +207,7 @@ def _fragments(summary: SummaryReader) -> dict:
     genic = f["genic"]
     inter = f["intergenic"]
     sp = summary["fragment_stats.splice"]
-    spliced = sum(sp[k] for k in ("spliced_annotated", "spliced_implicit", "splice_artifact"))
+    spliced = sum(sp[k] for k in ("spliced_annotated", "spliced_implicit"))
 
     ctx = [
         {"label": "Genic", "value": genic, "cls": _C[1]},
@@ -217,7 +217,6 @@ def _fragments(summary: SummaryReader) -> dict:
         {"label": "Unspliced", "value": sp["unspliced"], "cls": "fmuted"},
         {"label": "Annotated", "value": sp["spliced_annotated"], "cls": _C[1]},
         {"label": "Implicit", "value": sp["spliced_implicit"], "cls": _C[2]},
-        {"label": "Artifact", "value": sp["splice_artifact"], "cls": _C[6]},
     ]
     kpis = [
         {"l": "Fragments", "v": total, "fmt": "count"},
@@ -225,16 +224,7 @@ def _fragments(summary: SummaryReader) -> dict:
         {"l": "Intergenic", "v": _pct(inter, total), "fmt": "pct"},
         {"l": "Spliced", "v": spliced, "fmt": "count"},
     ]
-    # Blacklist provenance so a 0-artifact bar can be read correctly:
-    #   loaded is False → no blacklist in the index; detection is OFF
-    #   loaded is True  → detection ON; `size` junctions active
-    return {
-        "kpis": kpis,
-        "ctx": ctx,
-        "splice": splice_bar,
-        "blacklisted": sp["sj_blacklisted"],
-        "blacklist": {"size": sp["sj_blacklist_size"], "loaded": sp["sj_blacklist_loaded"]},
-    }
+    return {"kpis": kpis, "ctx": ctx, "splice": splice_bar}
 
 
 def _strand(summary: SummaryReader) -> dict:

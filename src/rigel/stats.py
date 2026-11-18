@@ -70,9 +70,8 @@ class PipelineStats:
     n_multimapper_groups: int = 0
     n_multimapper_alignments: int = 0
 
-    # --- Splice-artifact blacklist (per-read, across all alignments) ---
+    # --- CIGAR junctions (per read, across all alignments) ---
     n_sj_observed: int = 0
-    n_sj_blacklisted: int = 0
 
     # --- The junction-strand tag on each spliced record (``sj_strand_tag``; read per record) ---
     n_sj_tag_tagged: int = 0  # spliced records given a strand
@@ -132,7 +131,6 @@ class PipelineStats:
     n_census_unspliced: int = 0
     n_census_spliced_annot: int = 0
     n_census_spliced_implicit: int = 0
-    n_census_splice_artifact: int = 0
 
     @property
     def mismatch_rate(self) -> float | None:

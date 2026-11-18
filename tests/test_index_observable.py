@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
+import types
 
 import numpy as np
 import pandas as pd
@@ -21,7 +23,6 @@ import pytest
 from _index_builder import MINI_GTF, StandInStore, stand_in_store
 
 import rigel.observable as OBS
-import rigel.splice_blacklist as SB
 from rigel.index import MANIFEST_JSON, UNOBSERVABLE_FEATHER, IndexLoadError, TranscriptIndex
 from rigel.observable import unknown_bases
 
@@ -166,26 +167,12 @@ def _merged(runs):
 
 @pytest.fixture
 def store_build(tmp_path, monkeypatch):
-    """Build with a stand-in store; the blacklist comes back empty, as a store without artifacts gives it."""
+    """Build with a stand-in store."""
     store_dir = tmp_path / "store"
     store_dir.mkdir()
     (store_dir / "zarr.json").write_text(
         "{}"
     )  # the manifest digests the store's path as a real build's does
-    blacklist = pd.DataFrame(
-        {
-            c: pd.Series([], dtype=t)
-            for c, t in (
-                ("ref", object),
-                ("start", np.int32),
-                ("end", np.int32),
-                ("max_anchor_left", np.int32),
-                ("max_anchor_right", np.int32),
-                ("count", np.int64),
-            )
-        }
-    )
-    monkeypatch.setattr(SB, "load_splice_blacklist_from_zarr", lambda path, min_count=2: blacklist)
 
     def build(store, out):
         stand_in_store(monkeypatch, store)
@@ -237,10 +224,12 @@ def test_the_window_moves_no_run(window, tmp_path, monkeypatch):
     "store_kw, refusal",
     [
         ({"lengths": {"chr1": 1999, "chr2": 1000}}, "another length"),
+        ({"lengths": {"1": 2000, "2": 1000}}, "None of the FASTA's"),
         ({"status": "partial"}, "not 'complete'"),
     ],
+    ids=["another-assembly", "other-names", "unfinished"],
 )
-def test_a_store_for_another_assembly_or_unfinished_is_refused_before_any_write(
+def test_a_store_for_another_genome_or_unfinished_is_refused_before_any_write(
     store_kw, refusal, tmp_path, store_build
 ):
     out = tmp_path / "idx"
@@ -252,6 +241,22 @@ def test_a_store_for_another_assembly_or_unfinished_is_refused_before_any_write(
         store_build(_store(**store_kw), out)
     # refused before the first write: the index it would have replaced still loads, unchanged
     assert _rows(TranscriptIndex.load(out)) == before
+
+
+def test_a_store_that_cannot_be_read_refuses_the_build_and_keeps_the_index(tmp_path, monkeypatch):
+    """The store is read before the first write, so a mistyped path refuses the build and leaves the working index
+    in place, rather than failing after its manifest is deleted and leaving one that cannot be loaded. The refusal is
+    the index's own, whatever the companion package would make of the path: here it would open anything."""
+    fasta, gtf = _write_genome(tmp_path)
+    out = tmp_path / "idx"
+    TranscriptIndex.build(fasta, gtf, out, write_tsv=False)
+    monkeypatch.setitem(
+        sys.modules, "alignable", types.SimpleNamespace(open=lambda path, **_: _store())
+    )
+    with pytest.raises(FileNotFoundError, match="no_such_store"):
+        TranscriptIndex.build(fasta, gtf, out, alignable_zarr_path=tmp_path / "no_such_store")
+    assert (out / MANIFEST_JSON).exists()
+    TranscriptIndex.load(out)
 
 
 # ── at load ───────────────────────────────────────────────────────────────────────────────────────

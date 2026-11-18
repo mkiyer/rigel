@@ -33,10 +33,7 @@
 #     f_gdna  0 %        5 %      50 %    98 %
 #     n_rna   10.0 M    9.50 M    5.0 M   0.20 M
 #
-# The index is built `--no-mappability`. Calibration does not read mappability, so the alignable store's only
-# effect would be the junction artifact blacklist, which drops a junction when either anchor sits inside the
-# envelope. On a simulated panel there are no artifacts to catch, so the blacklist could only reclassify truly
-# spliced reads as unspliced, perturbing the spliced / unspliced split this panel measures.
+# The index is built `--no-mappability`, so its unobservable genome is the FASTA's N runs.
 #
 # Build the inputs first (shared reference and probes):
 #   python scripts/sim/build_suite_reference.py --fasta genome_controls.fasta.bgz \

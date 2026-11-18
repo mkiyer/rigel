@@ -253,7 +253,6 @@ def _scan(**key):
         "graph_hash": "a" * 16,
         "reach_digest": "b" * 16,
         "payload_schema_digest": "c" * 16,
-        "splice_blacklist_digest": "none",
         "transcript_model_digest": "d" * 16,
         "scan_config": {"sj_strand_tag": "auto"},
         "bam": {"blake2b": "e" * 16},

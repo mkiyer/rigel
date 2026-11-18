@@ -21,11 +21,9 @@ ZC    Z     input-ambiguity class: ``unambig``, ``ambig_same_strand``, ``ambig_o
             ``off_index``, ``chimeric``, ``unannotated_splice`` or ``unpaired``
 ZH    i     1 on the winning placement's records, 0 otherwise
 ZN    i     number of EM candidate components
-ZS    Z     splice type of the record's own placement (``unspliced``, ``spliced_annot``,
-            ``spliced_implicit``, ``splice_artifact``), or ``unknown`` on a record that is no usable alignment
+ZS    Z     splice type of the record's own placement (``unspliced``, ``spliced_annot`` or
+            ``spliced_implicit``), or ``unknown`` on a record that is no usable alignment
 ZL    i     locus ID (``-1`` if none)
-ZB    i     junctions in this record's CIGAR that matched the splice-artifact blacklist and were scored as
-            unspliced; per record, not per fragment, and 0 when no blacklist is loaded
 ====  ====  ==============================================================================================
 """
 

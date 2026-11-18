@@ -5,11 +5,11 @@ A fragment's splice type depends on its junctions alone:
 - UNSPLICED: no splice junction;
 - SPLICED_ANNOT: junctions, every one held by one annotated transcript. It is the only spliced type, because the scan
   withholds a hit whose junctions no one annotated transcript holds (the annotated-path rule);
-- SPLICED_IMPLICIT: the mate gap spans an annotated intron of a candidate;
-- SPLICE_ARTIFACT: a CIGAR junction the splice blacklist rejected.
+- SPLICED_IMPLICIT: the mate gap spans an annotated intron of a candidate.
 
-Exonic overlap is recorded per candidate (the resolver's ``exon_bp``), not here. Count
-arrays have 8 columns, 4 splice types × 2 strands (sense, antisense); the output sums the two strands.
+Every junction the aligner reports is read as it reported it. Exonic overlap is recorded per candidate (the
+resolver's ``exon_bp``), not here. Count arrays have 6 columns, 3 splice types × 2 strands (sense, antisense); the
+output sums the two strands.
 """
 
 from enum import IntEnum
@@ -20,9 +20,8 @@ class SpliceType(IntEnum):
 
     UNSPLICED = 0
     SPLICED_ANNOT = 1
-    # the two derived classes — neither is a CIGAR splice:
+    # the derived class — not a CIGAR splice:
     SPLICED_IMPLICIT = 2  # PE gap spans an annotated intron of any candidate
-    SPLICE_ARTIFACT = 3  # CIGAR sj was rejected by the SJ blacklist
 
 
 def census_field(stype: SpliceType) -> str:
@@ -45,8 +44,6 @@ class SpliceStrandCol(IntEnum):
     SPLICED_ANNOT_ANTISENSE = 3
     SPLICED_IMPLICIT_SENSE = 4
     SPLICED_IMPLICIT_ANTISENSE = 5
-    SPLICE_ARTIFACT_SENSE = 6
-    SPLICE_ARTIFACT_ANTISENSE = 7
 
     @property
     def category(self) -> SpliceType:

@@ -96,15 +96,13 @@ struct RecordCounts {
     SJTagCounts sj_tags;   // on each spliced record
     IntTagCounts nm_tag;   // on each record
     IntTagCounts nh_tag;   // on each record
-    int64_t n_sj_observed = 0;     // CIGAR junctions, per read, across all alignments
-    int64_t n_sj_blacklisted = 0;  // of them, the splice-artifact blacklist dropped
+    int64_t n_sj_observed = 0;  // CIGAR junctions, per read, across all alignments
 
     void merge_from(const RecordCounts& o) {
         sj_tags.merge_from(o.sj_tags);
         nm_tag.merge_from(o.nm_tag);
         nh_tag.merge_from(o.nh_tag);
         n_sj_observed += o.n_sj_observed;
-        n_sj_blacklisted += o.n_sj_blacklisted;
     }
 };
 
@@ -112,14 +110,11 @@ struct RecordCounts {
 // A parsed record
 // ================================================================
 
-/// A CIGAR splice junction with its anchors: on each side, the reference-advancing CIGAR bases between the junction
-/// and the nearest clip or alignment end. The artifact blacklist tests both.
+/// A CIGAR splice junction: the N's reference span, and the strand the record's junction-strand tag gives it.
 struct SJCigarEntry {
     int32_t start;
     int32_t end;
     int32_t strand;
-    int32_t anchor_left;
-    int32_t anchor_right;
 };
 
 /// Every field of one record the passes read, so nothing downstream touches a bam1_t and no raw record crosses a
@@ -129,14 +124,11 @@ struct ParsedAlignment {
     int32_t tid = -1;  // the BAM's reference id
     int32_t ref_start;
     uint16_t flag;
-    // CIGAR junctions the splice-artifact blacklist dropped from this record: summed per fragment for the resolver's
-    // SPLICE_ARTIFACT promotion, and written as the annotated BAM's ZB tag. Sits in the padding after `flag`.
-    uint16_t n_sj_blacklisted = 0;
     int32_t nm;  // NM tag (edit distance), 0 if absent
     int32_t nh;  // NH tag, 1 if absent
 
     std::vector<std::pair<int32_t, int32_t>> exons;  // the CIGAR's aligned blocks, (start, end)
-    std::vector<SJCigarEntry> sjs;                   // its junctions, the blacklisted ones dropped
+    std::vector<SJCigarEntry> sjs;                   // its junctions
 
     // The soft clips at the CIGAR's two ends, which the pair validator walks from the read's 5' end
     int32_t clip_lead = 0;
@@ -156,7 +148,7 @@ struct ParsedAlignment {
 };
 
 /// One BAM's records parsed as both passes read them: on the index's reference ids, with the junction-strand tag read
-/// under one mode and the splice-artifact blacklist applied.
+/// under one mode.
 class RecordParser {
 public:
     RecordParser(const bam_hdr_t* hdr, const FragmentResolver& resolver, SJTagMode sj_tag_mode);
@@ -166,7 +158,6 @@ public:
 
 private:
     std::vector<int32_t> tid_to_ref_id_;
-    const FragmentResolver* resolver_;
     SJTagMode sj_tag_mode_;
 };
 

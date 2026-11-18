@@ -15,21 +15,21 @@ namespace rigel {
 // The index
 // ================================================================
 
-int32_t FragmentResolver::get_or_create_ref_id(const std::string& ref) {
-    auto it = ref_to_id_.find(ref);
-    if (it != ref_to_id_.end()) return it->second;
-    const int32_t id = static_cast<int32_t>(id_to_ref_.size());
-    ref_to_id_[ref] = id;
-    id_to_ref_.push_back(ref);
-    return id;
-}
-
 void FragmentResolver::set_ref_names(const std::vector<std::string>& ref_names) {
     ref_to_id_.clear();
     id_to_ref_.clear();
     ref_to_id_.reserve(ref_names.size());
     id_to_ref_.reserve(ref_names.size());
-    for (const auto& name : ref_names) get_or_create_ref_id(name);
+    for (const auto& name : ref_names)
+        if (ref_to_id_.emplace(name, static_cast<int32_t>(id_to_ref_.size())).second) id_to_ref_.push_back(name);
+}
+
+int32_t FragmentResolver::installed_ref_id(const std::string& ref, const char* builder) const {
+    const auto it = ref_to_id_.find(ref);
+    if (it == ref_to_id_.end())
+        throw std::invalid_argument(std::string(builder) + ": reference '" + ref +
+                                    "' is not one set_ref_names installed");
+    return it->second;
 }
 
 void FragmentResolver::build_overlap_index(const std::vector<std::string>& refs, const std::vector<int32_t>& starts,
@@ -37,7 +37,7 @@ void FragmentResolver::build_overlap_index(const std::vector<std::string>& refs,
                                            const std::vector<int32_t>& tset_data,
                                            const std::vector<int32_t>& tset_offsets) {
     const size_t n = refs.size();
-    for (const auto& ref : refs) get_or_create_ref_id(ref);
+    for (const auto& ref : refs) installed_ref_id(ref, "build_overlap_index");
 
     cr_ = cr_init();
     for (size_t i = 0; i < n; i++) cr_add(cr_, refs[i].c_str(), starts[i], ends[i], static_cast<int32_t>(i));
@@ -54,20 +54,8 @@ void FragmentResolver::build_sj_map(const std::vector<std::string>& refs, const 
                                     const std::vector<int32_t>& tset_data, const std::vector<int32_t>& tset_offsets) {
     sj_map_data_ = tset_data;
     for (size_t i = 0; i < refs.size(); i++) {
-        const SJKey key{get_or_create_ref_id(refs[i]), starts[i], ends[i], strands[i]};
+        const SJKey key{installed_ref_id(refs[i], "build_sj_map"), starts[i], ends[i], strands[i]};
         sj_map_[key] = {tset_offsets[i], tset_offsets[i + 1] - tset_offsets[i]};
-    }
-}
-
-void FragmentResolver::build_sj_blacklist_map(const std::vector<std::string>& refs,
-                                              const std::vector<int32_t>& starts, const std::vector<int32_t>& ends,
-                                              const std::vector<int32_t>& max_anchor_left,
-                                              const std::vector<int32_t>& max_anchor_right) {
-    sj_blacklist_.clear();
-    sj_blacklist_.reserve(refs.size());
-    for (size_t i = 0; i < refs.size(); i++) {
-        const SJBlacklistKey key{get_or_create_ref_id(refs[i]), starts[i], ends[i]};
-        sj_blacklist_[key] = {max_anchor_left[i], max_anchor_right[i]};
     }
 }
 
@@ -90,11 +78,6 @@ int32_t FragmentResolver::ref_id(const char* name) const {
 
 int32_t FragmentResolver::transcript_strand(int32_t t) const {
     return (t >= 0 && t < static_cast<int32_t>(t_strand_arr_.size())) ? t_strand_arr_[t] : STRAND_NONE;
-}
-
-const SJBlacklistEntry* FragmentResolver::sj_blacklist_lookup(int32_t ref_id, int32_t start, int32_t end) const {
-    const auto it = sj_blacklist_.find(SJBlacklistKey{ref_id, start, end});
-    return it == sj_blacklist_.end() ? nullptr : &it->second;
 }
 
 // ================================================================
@@ -356,8 +339,7 @@ int32_t FragmentResolver::validate_pair(int32_t ref_id, const PairMate& f, const
 // ================================================================
 
 void FragmentResolver::resolve(const std::vector<ExonBlock>& exons, const std::vector<IntronBlock>& introns,
-                               int32_t genomic_footprint, int32_t n_sj_blacklisted, ResolvedFragment& out,
-                               ResolverScratch& scratch) const {
+                               int32_t genomic_footprint, ResolvedFragment& out, ResolverScratch& scratch) const {
     if (exons.empty()) throw std::invalid_argument("resolve: a fragment needs at least one aligned block");
     scratch.reset_per_fragment();
     out.genomic_footprint = genomic_footprint;
@@ -366,8 +348,6 @@ void FragmentResolver::resolve(const std::vector<ExonBlock>& exons, const std::v
     add_nascent_spans(exons, scratch);
     read_junctions(introns, out, scratch);
     choose_candidates(!introns.empty(), out, scratch);
-    // A fragment not otherwise spliced whose CIGAR junctions the artifact blacklist dropped is held out of calibration.
-    if (n_sj_blacklisted > 0 && out.splice_type != SPLICE_SPLICED_ANNOT) out.splice_type = SPLICE_ARTIFACT;
     candidate_exon_bp(out, scratch);
     out.ambig_strand = candidates_on_both_strands(out.t_inds) ? 1 : 0;
 

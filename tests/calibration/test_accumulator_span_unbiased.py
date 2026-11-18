@@ -3,14 +3,13 @@
 That distinction makes the two density estimators agree, and each test holds one case of it: an unspliced pair becomes
 one [min, max] span with the mate gap filled, so the boundary-crossing estimator recovers the same uniform density as
 the exact contained estimator; an implicitly spliced pair (the sj in the unsequenced gap, so no CIGAR N) routes to the
-sj axis with the intron skipped rather than filled; and an artifact splice is held out of the tally, because its true
-span is unrecoverable. Each scenario is small and seeded so the suite can afford a real sim-scan per test.
+sj axis with the intron skipped rather than filled. Each scenario is small and seeded so the suite can afford a real
+sim-scan per test.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from _bam_builder import R1_FWD, R2_REV, record, write_bam
 
 from rigel.calibration.effective_length import (
     UNBOUNDED_REACH,
@@ -149,70 +148,3 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
                 bounding[e] = True
     intron_unspliced = float(contained[intron].sum() + crossing[bounding].sum())
     assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not cut)"
-
-
-def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
-    """``SPLICE_ARTIFACT`` fragments (a blacklisted CIGAR-N sj) are held out of the accumulator entirely (no contained
-    or boundary mass) while other fragments deposit normally, so total mass == n_deposited, artifacts excluded.
-
-    Construction: 20 plain unspliced pairs (positive control) plus 50 pairs spanning an annotated sj. Without a
-    blacklist all 70 deposit (the 50 as spliced); blacklisting that sj turns the 50 into artifacts (sj removed →
-    n_sj_blacklisted > 0 → SPLICE_ARTIFACT), which must then deposit nothing.
-    """
-    import pandas as pd
-
-    from _index_builder import build_index, rebuild_with_splice_blacklist
-    from rigel.index import TranscriptIndex
-
-    # 2-exon transcript → annotated sj at 0-based [200, 300).
-    gtf = (
-        'chr1\tsrc\texon\t1\t200\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
-        'chr1\tsrc\texon\t301\t500\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
-    )
-    idx = build_index(tmp_path, gtf, {"chr1": 4000})
-    idx_dir = idx.index_dir
-
-    reads = []
-    for i in range(20):  # unspliced positive control (exon 1)
-        reads += [
-            record(f"u{i:03d}", R1_FWD, 20, "100M", 120),
-            record(f"u{i:03d}", R2_REV, 120, "80M", 20),
-        ]
-    for i in range(50):  # span the annotated sj [200, 300)
-        reads += [
-            record(f"r{i:03d}", R1_FWD, 150, "50M100N50M", 350, xs="+"),
-            record(f"r{i:03d}", R2_REV, 350, "80M", 150),
-        ]
-    bam = write_bam(tmp_path / "art.bam", reads, {"chr1": 4000})
-
-    def total_mass(payload) -> float:
-        """Every deposit on every axis. ``region_start_count`` is the fragment tally, one per accepted fragment, and is
-        what "mass == n_deposited" means, mass being a count."""
-        return float(np.asarray(payload.region_start_count, np.int64).sum())
-
-    cfg = BamScanConfig(sj_strand_tag="XS")
-
-    # Control: no blacklist → all 70 deposit (the 50 as annotated splices).
-    s0, _, _, pl0 = scan_and_buffer(str(bam), idx, cfg)
-    assert s0.n_sj_blacklisted == 0
-    assert s0.n_with_annotated_sj == 50
-    assert total_mass(pl0) > 65.0  # 20 contained + ~50 spliced crossing mass
-
-    # Blacklist the annotated sj → the 50 become SPLICE_ARTIFACT → held out.
-    rebuild_with_splice_blacklist(
-        idx_dir,
-        pd.DataFrame(
-            {
-                "ref": ["chr1"],
-                "start": np.array([200], np.int32),
-                "end": np.array([300], np.int32),
-                "max_anchor_left": np.array([10000], np.int32),
-                "max_anchor_right": np.array([10000], np.int32),
-            }
-        ),
-    )
-    idx2 = TranscriptIndex.load(str(idx_dir))
-    s1, _, _, pl1 = scan_and_buffer(str(bam), idx2, cfg)
-    assert s1.n_sj_blacklisted == 50, "blacklist did not flag the sj"
-    # Only the 20 non-artifact unspliced controls remain → mass == n_deposited.
-    assert total_mass(pl1) == 20.0, f"artifacts not held out (mass={total_mass(pl1)})"

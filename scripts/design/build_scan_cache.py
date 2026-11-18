@@ -3,7 +3,7 @@
 Re-running calibration should cost seconds, not a re-scan, so this script runs the single-pass scan on each
 condition's oracle BAM (or on one BAM) and writes the payload and strand model to a scan-cache directory
 (`_scan_cache.py`). Each cache is keyed against its index (`graph_hash`, a reach digest that no other hash covers,
-the scan config and the splice blacklist) and its BAM's identity, and is refused at load if either has moved, so
+the transcript models and the scan config) and its BAM's identity, and is refused at load if either has moved, so
 one condition can be rebuilt without touching the others. An existing cache is skipped only when it still
 matches; a stale one is re-scanned. Every cache is read straight back after it is written, so an unloadable
 cache fails here. The key hashes the accumulator's deposit rule, not the fragment construction, so a change to

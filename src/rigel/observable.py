@@ -112,6 +112,8 @@ def mask_from_fasta(fasta_file: str | Path, ref_lengths: Mapping[str, int]) -> p
 
 def open_alignable_store(path: str | Path):
     """The alignable store at *path*, through the companion package's public API (``alignable.open``)."""
+    if not Path(path).exists():
+        raise FileNotFoundError(f"No alignable store at {path}")
     try:
         import alignable
     except ImportError as exc:  # pragma: no cover - environment guard
@@ -149,7 +151,8 @@ def mask_from_store(
     being what the manifest keeps of the store's measure.
 
     Refused, before anything is written: a store that is not complete (a chunk never computed reads as unmappable
-    everywhere it lies) and one that holds a reference at another length (another assembly).
+    everywhere it lies), one that holds a reference at another length (another assembly) and one that holds none of
+    the FASTA's references (another genome, or other names).
     """
     store = open_alignable_store(store_path)
     status = str(store.status)
@@ -171,6 +174,12 @@ def mask_from_store(
             f"({shown}): it was built for another assembly."
         )
     absent = [r for r in ref_lengths if r not in chroms]
+    if len(absent) == len(ref_lengths):
+        raise ValueError(
+            f"None of the FASTA's {len(ref_lengths):,} references is in the alignable store {store_path} "
+            f"({CONSTANTS.qc.examples(list(ref_lengths))}, against {CONSTANTS.qc.examples(list(chroms))}): the store "
+            "was built for another genome or names its references differently."
+        )
     if absent:
         logger.warning(
             "%s of the FASTA's %s references are not in the alignable store (%s): their unobservable runs are "

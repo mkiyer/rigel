@@ -225,7 +225,6 @@ class TestBuildFlags:
         flags = manifest["build_flags"]
         assert flags["collapse_duplicate_transcripts"] is False
         assert flags["gtf_parse_mode"] == "strict"
-        assert flags["splice_blacklist_min_count"] == 2
 
 
 class TestTheVersionKeysAreRecorded:

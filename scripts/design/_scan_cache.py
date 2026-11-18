@@ -8,7 +8,7 @@ scan's two outputs, the accumulator payload and the strand model. What the index
 boundary flags, the sj geometry) and the fragment-length pmfs are rebuilt on load, so no stored copy can go stale; the
 length histograms are payload fields and are cached with it.
 
-The key has six parts:
+The key has five parts:
 
 * ``graph_hash``: the region partition plus the sj CSR, carried by the payload;
 * the payload-schema digest (:func:`payload_schema_digest`): the accumulator's and the strand model's fields, and what
@@ -17,8 +17,7 @@ The key has six parts:
 * the transcript-model digest (:func:`transcript_model_digest`): every transcript's reference, strand and exons, which
   resolution reads to decide which transcripts hold a fragment, and which two annotations can differ in with the
   graph and the reaches byte-identical;
-* the scan settings that can change a tally;
-* the splice blacklist the scan applied, since it strips junctions and holds back fragments.
+* the scan settings that can change a tally.
 
 A table derived from a cache (`calibration_oracle.py`'s ``slot_truth.npz``) records :func:`scan_cache_key`, the whole
 key with the BAM's digest, and is refused against any other scan.
@@ -130,26 +129,11 @@ def scan_cache_key(manifest: dict) -> str:
             "reach_digest",
             "payload_schema_digest",
             "transcript_model_digest",
-            "splice_blacklist_digest",
         )
     }
     key["scan_settings"] = _scan_config_digest(manifest["scan_config"])
     key["bam"] = (manifest.get("bam") or {}).get("blake2b")
     return _digest(json.dumps(key, sort_keys=True).encode())
-
-
-def splice_blacklist_digest(index: TranscriptIndex) -> str:
-    """The digest of the splice blacklist this index applies, ``"none"`` when it applies none.
-
-    `TranscriptIndex.load` computes it from exactly the rows it hands the resolver. An index built any other way
-    has none, and is refused here rather than read as "no blacklist".
-    """
-    digest = getattr(index, "sj_blacklist_digest", None)
-    if digest is None:
-        raise ScanCacheKeyError(
-            "the index records no splice-blacklist digest; load it with TranscriptIndex.load"
-        )
-    return digest
 
 
 def bam_identity(bam: str | Path) -> dict:
@@ -476,7 +460,6 @@ def write_scan_cache(
         "scan_config": dataclasses.asdict(scan_config)
         if dataclasses.is_dataclass(scan_config)
         else dict(scan_config),
-        "splice_blacklist_digest": splice_blacklist_digest(index),
         # ── provenance: what this cache is of ────────────────────────────────────────────────────
         "bam": bam_identity(bam),
         "payload_scalars": scalars,
@@ -497,8 +480,8 @@ def check_scan_cache(
     is given, was scanned under those settings.
 
     These are the checks :func:`read_scan_cache` makes before it reads the arrays: the reach, the payload schema, the
-    transcript models, the splice blacklist, the graph hash, the BAM and the scan settings. *bam* names the BAM the caller will use; without
-    it the BAM at the recorded path is compared, if it is still there. A caller that holds settings should pass them,
+    transcript models, the graph hash, the BAM and the scan settings. *bam* names the BAM the caller will use; without it
+    the BAM at the recorded path is compared, if it is still there. A caller that holds settings should pass them,
     or a cache scanned under other settings reads as valid.
     """
     manifest = json.loads((Path(cache_dir) / MANIFEST_JSON).read_text())
@@ -516,8 +499,7 @@ def _check_manifest(
 
 
 def _check_index_key(manifest: dict, index: TranscriptIndex) -> None:
-    """The reach, the payload schema, the transcript models, the splice blacklist and the graph hash the cache was
-    keyed by."""
+    """The reach, the payload schema, the transcript models and the graph hash the cache was keyed by."""
     expected_reach = reach_digest(index)
     if manifest["reach_digest"] != expected_reach:
         raise ScanCacheKeyError(
@@ -544,14 +526,6 @@ def _check_index_key(manifest: dict, index: TranscriptIndex) -> None:
             f"{expected_models!r}. Resolution reads which transcripts hold a fragment's blocks and junctions, and the "
             f"graph and the reaches can stay byte-identical when the transcript models move. Re-scan against this "
             f"index."
-        )
-
-    expected_blacklist = splice_blacklist_digest(index)
-    if manifest.get("splice_blacklist_digest") != expected_blacklist:
-        raise ScanCacheKeyError(
-            f"cache splice-blacklist digest {manifest.get('splice_blacklist_digest')!r} != index "
-            f"{expected_blacklist!r}. The scan strips the junctions a blacklist names and holds back the fragments "
-            f"it rejects, so this tally was taken under another blacklist. Re-scan against this index."
         )
 
     if manifest["payload_scalars"]["graph_hash"] != manifest["graph_hash"]:

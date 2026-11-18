@@ -70,8 +70,7 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
   alignment there can only be gDNA and a spliced one is dropped (a read pair with another alignment keeps it). To
   quantify every copy, give each its own `gene_id`, or use a genome without alternate contigs
 - Optional: an **alignable Zarr store** built by the companion `alignable` tool for the
-  same genome + aligner, the source of the splice-artifact blacklist (see
-  [Mappability](#mappability-and-the-splice-artifact-blacklist))
+  same genome + aligner, the source of the unobservable genome (see [Mappability](#mappability))
 
 ### BAM
 
@@ -176,9 +175,8 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--fasta` | required | Genome FASTA (must have a `.fai` index) |
 | `--gtf` | required | Annotation GTF (GENCODE recommended; `exon` records required) |
 | `-o`, `--output-dir` | required | Output directory for index files |
-| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist (applied at BAM-scan time) and the unobservable genome: the bases at which no read pair the store tiled was placed back, at its longest read length, N runs included (see Mappability below). Required unless `--no-mappability` is set. Read before anything is written, so a store that cannot be read, that is unfinished, that holds a reference at another length than the FASTA's, or whose blacklist names none of the FASTA's references, refuses the build and leaves an existing index in place. |
-| `--no-mappability` | off | Explicitly opt out of the alignable store and its splice blacklist (synthetic genomes, stranded-only benchmarks); the unobservable genome is then the FASTA's N runs. Mutually exclusive with `--alignable-zarr`. |
-| `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a sj to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
+| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the unobservable genome: the bases at which no read pair the store tiled was placed back, at its longest read length, N runs included (see Mappability below). Required unless `--no-mappability` is set. Read before anything is written, so a store that cannot be read, that is unfinished, that holds a reference at another length than the FASTA's, or that holds none of the FASTA's references, refuses the build and leaves an existing index in place. |
+| `--no-mappability` | off | Explicitly opt out of the alignable store (synthetic genomes, stranded-only benchmarks); the unobservable genome is then the FASTA's N runs. Mutually exclusive with `--alignable-zarr`. |
 | `--nascent-tolerance N` | `20` | Max distance (bp) for clustering multi-exon transcripts' start and end sites into the shared synthetic spans that model their nascent RNA |
 | `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID; `transcript_aliases` maps each collapsed ID to the one kept). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
 | `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them. Malformed: a line that cannot be parsed, a feature that ends before it starts, an exon without a `transcript_id` or a `gene_id`, an exon off its transcript's reference, strand or gene, an exon overlapping another of its transcript, a transcript on neither `+` nor `-`, and a transcript on a reference the FASTA lacks or past its end. Exons with no base between them are one exon. A gene with transcripts on more than one reference is refused by `strict`; `warn-skip` keeps its copy on the longest reference ([Reference](#reference)). |
@@ -186,8 +184,7 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--no-tsv` | off | Skip writing TSV mirrors of index files |
 
 **Index artifacts** (Feather, plus `.tsv` mirrors unless `--no-tsv`):
-`transcripts`, `intervals`, `ref_lengths`, `sj`, `splice_blacklist` (each junction's anchors and
-the alignable count behind it), `transcript_aliases` (`dropped_t_id → kept_t_id` for every
+`transcripts`, `intervals`, `ref_lengths`, `sj`, `transcript_aliases` (`dropped_t_id → kept_t_id` for every
 transcript `--collapse-duplicate-transcripts` folded into an identical one; empty otherwise),
 `unobservable` (the unobservable genome's runs, see Mappability below), `manifest.json`, and the two
 calibration partitions — `regions.feather` (the genome partition into intergenic / intron / exon
@@ -259,7 +256,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--sweep-block-slots N` | `1000` | Calibration's working set: the chain is solved one locus block at a time, the pieces between intergenic regions merged up to this many slots per block. Performance only — the answer is the same for every value; smaller blocks use less memory per sweep. |
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning, in [0, 1). Lower keeps more candidates; `0` disables pruning. |
-| `--intron-overhang-tolerance K` | `3` | Intron-overhang tolerance (bp) at annotated introns: how many bases an aligned read end may lie inside an intron, at the edge of a gap the reads did not sequence or at a fragment's outer end, as when an aligner runs a read a base or two across a splice site. An annotated intron in an unsequenced gap may overlap up to K aligned bases at either end and still count as lying in the gap, and a transcript is contradicted only by an intron holding more than K aligned bases. Along a witness transcript it decides whether two mates are one molecule; it also shapes the candidates' lengths and the gap hypotheses calibration arbitrates, so it changes calibration's tally. Junctions are matched exactly, and it is not the splice blacklist's anchor test, which it never changes. |
+| `--intron-overhang-tolerance K` | `3` | Intron-overhang tolerance (bp) at annotated introns: how many bases an aligned read end may lie inside an intron, at the edge of a gap the reads did not sequence or at a fragment's outer end, as when an aligner runs a read a base or two across a splice site. An annotated intron in an unsequenced gap may overlap up to K aligned bases at either end and still count as lying in the gap, and a transcript is contradicted only by an intron holding more than K aligned bases. Along a witness transcript it decides whether two mates are one molecule; it also shapes the candidates' lengths and the gap hypotheses calibration arbitrates, so it changes calibration's tally. Junctions are matched exactly. |
 | `--emit-locus-stats` / `--no-emit-locus-stats` | off | Write per-locus EM convergence profiling (iteration counts, timing, equivalence-class stats) to `locus_stats.feather` |
 
 ### rigel sim
@@ -335,8 +332,7 @@ rigel report results/sample/ -o qc.html --title "Sample 42"
 | `-o`, `--output` | `<output_dir>/report.html` | Destination HTML path |
 | `--title` | `Rigel QC · <sample>` | Document title |
 
-The report covers alignment fates, fragment composition (including the splice-artifact
-blacklist status), the strand model, per-category fragment-length distributions, the split of
+The report covers alignment fates, fragment composition, the strand model, per-category fragment-length distributions, the split of
 the fragments into annotated transcripts, nascent RNA, gDNA (EM) and intergenic
 gDNA, calibration's capture answer (the gDNA bulk density and the saturated
 level over it), a genome-wide gDNA-density track, and
@@ -347,35 +343,30 @@ omitted.
 
 ---
 
-## Mappability and the splice-artifact blacklist
+## Mappability
 
-Real genomes have regions where reads cannot map uniquely, and aligners emit
-recurrent spurious splice junctions there. Rigel can ingest a Zarr store built
+Real genomes have regions where reads cannot map uniquely. Rigel can ingest a Zarr store built
 by the companion `alignable` tool (not yet on PyPI or Bioconda: install it from a checkout with
 `pip install -e /path/to/alignable`) for the *same*
 genome and aligner, at index time via `--alignable-zarr`. From it the index
-records two things:
-
-- a **splice-junction artifact blacklist**: those spurious sj are treated as
-  unspliced during scoring, which the annotated BAM reports per record via the
-  `ZB` tag;
-- the **unobservable genome**: every base at which no read pair the store tiled
-  over it was placed back, at the store's longest read length — the reference's
-  N runs and the repeats an aligner cannot place. No fragment is observed there,
-  so wherever Rigel divides a count by the number of places a fragment could
-  have come from — gDNA's opportunity and every transcript's effective length —
-  it counts only the places that avoid these bases; read over them, an N-filled
-  region looks like an empty one and drags the library's gDNA estimate down.
-  `summary.json`'s `observable_genome` block reports the mask each run read. A reference the store does not hold falls back to its N runs,
-  with a warning. Partial mappability (bases an aligner places only some of the
-  time) is not read.
+records the **unobservable genome**: every base at which no read pair the store tiled over it was
+placed back, at the store's longest read length — the reference's N runs and the repeats an aligner
+cannot place. No fragment is observed there, so wherever Rigel divides a count by the number of
+places a fragment could have come from — gDNA's opportunity and every transcript's effective length
+— it counts only the places that avoid these bases; read over them, an N-filled region looks like an
+empty one and drags the library's gDNA estimate down. `summary.json`'s `observable_genome` block
+reports the mask each run read. A reference the store does not hold falls back to its N runs, with a
+warning. Partial mappability (bases an aligner places only some of the time) is not read.
 
 For synthetic genomes, stranded-only benchmarks, or any setting where
 running `alignable` is unnecessary, pass `--no-mappability` (mutually
 exclusive with `--alignable-zarr`); the unobservable genome is then the
-reference's N runs. The one advanced knob,
-`--splice-blacklist-min-count`, sets the support a junction needs to enter the
-blacklist; it is ignored under `--no-mappability`.
+reference's N runs.
+
+Every junction the aligner reports is read as it reported it. An aligner can splice
+plain genomic DNA; at the recommended STAR settings (input requirements) it reports
+that fragment's contiguous reading as well, and both readings reach calibration and
+the EM, which weigh them on the whole likelihood.
 
 ---
 
@@ -591,7 +582,7 @@ the current version is **8**. Top-level keys:
 | `observable_genome` | The observable genome the run read: what the index's unobservable mask is and where it came from, and the bases a fragment can and cannot be observed on, over the genome and per reference (see below) |
 | `alignment_stats` | The alignment records: `total_reads`; `mapped_reads`, `unmapped_reads`, `secondary_reads`, `supplementary_reads`, `duplicate_reads`, `qc_fail_reads`, each the records carrying its flag; and `proper_pairs`, the primary records flagged as a proper pair. A `records` sub-block gives each record one status, summing to `total_reads`: `filtered` (unmapped, QC-failed, or a duplicate when duplicates are skipped), `used` (an alignment of a read pair's placement), `unused` (in a placed read pair but in none of its usable alignments: one the pair rule rejected, one that pairs with nothing, a supplementary record) and `unplaced` (in a read pair withheld or excluded by `--no-include-multimap`). An `sj_strand_tag` sub-block counts the spliced records the scan read (secondary and supplementary included) by what their junction-strand tags gave: `tagged` (a strand), `untagged` (none) and `conflicting` (XS and ts disagree, read as ambiguous), with `invalid` the tag values that were neither `+` nor `-`, each read as absent. `nm_tag` and `nh_tag` count the records without the tag (`missing`) and with it held as anything but an integer (`invalid`), each read as absent (`NM` 0, `NH` 1); `nm_tag.conflicting` counts the alignments whose records disagree on `NM`, each read with the largest |
 | `read_pairs` | One outcome per read pair (a read name's records), summing to `total`, decided in this order: `excluded` (every record filtered, as a pair whose mates are both unmapped is); `withheld`, with no usable alignment, by reason: `off_index` when one of its alignments lies on a reference the index does not hold, else `chimeric` when one of its alignments has a mate aligned in pieces, else `unannotated_splice` when one of its alignments is a molecule whose junctions no one annotated transcript holds, else `unpaired`, which `unpaired_by_reason` splits by the furthest check of the pair rule any of its alignments reached (`missing_mate`, `reference`, `strand`, `outward`, `length`); `excluded_by_option` (`--no-include-multimap`: more than one usable alignment); and `placed`, `unique` (one usable alignment) or `multimapping` (more). The report's read-fate bar shows every read pair by outcome |
-| `fragment_stats` | The fragments (the placed read pairs): total, genic and intergenic counts; the annotated SJ count; a `splice` sub-block with the splice-type breakdown, one count per usable hit, a multimapper's hits one by one (`unspliced`, `spliced_annotated`, `spliced_implicit`, `splice_artifact`; a spliced fragment's junctions are always annotated) plus `sj_blacklisted` (blacklisted junctions × records, multimapper records included: the annotated BAM's `ZB` summed), and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found"); `hits_rejected`, the pairings of an R1 alignment with an R2 alignment tried and dropped, by reason (`missing_mate`, `reference`, `strand`, `outward`, `length`: the two mates are not one molecule; `contradictory`, `novel_junction`, `unsupported`: no one annotated transcript overlapping both mates holds the junctions it observes; `off_index`: both mates on one reference the index does not hold; `chimeric`: a mate aligned in pieces); `nh_above_reported`, the read pairs whose `NH` exceeds the records reported for a mate (a truncated output, whose multiplicity is read from the alignments present); and `mismatch_rate`, the library's mismatch rate read on its unique unspliced alignments (`rate`, `null` with none; `mismatches`, their summed `NM`; `bases`, the read bases they align), at which a multimapper's alignments are priced against each other |
+| `fragment_stats` | The fragments (the placed read pairs): total, genic and intergenic counts; the annotated SJ count; a `splice` sub-block with the splice-type breakdown, one count per usable hit, a multimapper's hits one by one (`unspliced`, `spliced_annotated`, `spliced_implicit`; a spliced fragment's junctions are always annotated); `hits_rejected`, the pairings of an R1 alignment with an R2 alignment tried and dropped, by reason (`missing_mate`, `reference`, `strand`, `outward`, `length`: the two mates are not one molecule; `contradictory`, `novel_junction`, `unsupported`: no one annotated transcript overlapping both mates holds the junctions it observes; `off_index`: both mates on one reference the index does not hold; `chimeric`: a mate aligned in pieces); `nh_above_reported`, the read pairs whose `NH` exceeds the records reported for a mate (a truncated output, whose multiplicity is read from the alignments present); and `mismatch_rate`, the library's mismatch rate read on its unique unspliced alignments (`rate`, `null` with none; `mismatches`, their summed `NM`; `bases`, the read bases they align), at which a multimapper's alignments are priced against each other |
 | `strand_model` | Protocol (`R1-sense` / `R1-antisense`, and `read1_sense`), strand specificity, `p_r1_sense`, training count, the per-junction strand table's QC (`sj`: `n_sj`, `n_observations` and the junctions' depth, `depth_median`, `depth_p90`, `depth_p99`, `depth_max`), posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments; `null` where the strand channel is dead, since the classes are not identified at κ = ½ and `genuine` then equals `pooled`, the κ calibration reads), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_em_effective_length` | Summary of the loci table's column of that name: its `min`, `median`, `p95`, `max` |
@@ -663,7 +654,7 @@ it as nascent RNA, so the gDNA fraction is underestimated. Stranded capture libr
 without capture, do not share this.
 
 The **`observable_genome`** block is the index's unobservable mask as the run read it (see
-[Mappability](#mappability-and-the-splice-artifact-blacklist)): every count Rigel divides by the places a fragment
+[Mappability](#mappability)): every count Rigel divides by the places a fragment
 could have come from, gDNA's and every transcript's alike, counts only the places that avoid these bases.
 
 ```jsonc
@@ -732,9 +723,8 @@ an error, so the input BAM must not change between the two passes.
 | `ZC` | string | Input-ambiguity class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, or `.` for a fragment the EM never scored; `unused_alignment` on a placed read pair's record that is in none of its usable alignments (one the pair rule rejected, one that pairs with nothing, a supplementary record), with the fragment's other tags; for a read pair withheld with no usable alignment (`ZF` 0), `off_index` when one of its alignments lies on a reference the index does not hold, else `chimeric` when one of its alignments has a mate aligned in pieces, else `unannotated_splice` when one of its alignments is a molecule whose junctions no one annotated transcript holds, else `unpaired` |
 | `ZH` | int | Primary-hit flag: `1` on the records of the winning placement, `0` otherwise (reflects rigel's EM assignment, which may differ from the aligner's primary FLAG); a multimapper with an alignment in a gene that is given to gDNA names no placement, so all its records are `0` |
 | `ZN` | int | Number of competing candidate components |
-| `ZS` | string | The splice type of the record's own placement: `spliced_annot`, `spliced_implicit`, `splice_artifact` or `unspliced`; `unknown` on a record that is no usable alignment |
+| `ZS` | string | The splice type of the record's own placement: `spliced_annot`, `spliced_implicit` or `unspliced`; `unknown` on a record that is no usable alignment |
 | `ZL` | int | Locus ID (`-1` if no locus) |
-| `ZB` | int | Number of SJs in **this record's CIGAR** matched to the splice-artifact blacklist and treated as unspliced during scoring. Record-local. Always `0` when no blacklist is loaded. Summed over the BAM it equals `summary.json`'s `fragment_stats.splice.sj_blacklisted`. |
 
 #### ZF assignment flags
 
@@ -1011,9 +1001,8 @@ set by its neighbours and the library-wide gDNA-density prior. There is no stran
 the protocol preserves strand is decided from the junctions (`summary.json`'s `strand_model.strand_live`).
 
 **Do I need the alignable Zarr store?**
-For real genomes it is recommended — it provides the splice-artifact blacklist
-and the unobservable genome (its zero-mappability set; partial mappability is not
-read). For synthetic genomes or stranded-only benchmarks, pass `--no-mappability`
+For real genomes it is recommended — it provides the unobservable genome (its
+zero-mappability set; partial mappability is not read). For synthetic genomes or stranded-only benchmarks, pass `--no-mappability`
 at index time, and the unobservable genome is the reference's N runs.
 
 **How much memory does Rigel use?**

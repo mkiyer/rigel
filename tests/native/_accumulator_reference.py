@@ -492,10 +492,10 @@ class Tally:
     #: uint32[n_sj, 2]: both genome-strand columns are kept for aligner-artifact detection. A sj is stranded by its
     #: splicing motif, so the strand of the fragments on it looks redundant, and every consumer sums the two.
     #:
-    #: Aligners emit false-positive ``N`` CIGAR ops from plain genomic DNA, and ``rigel.splice_blacklist``'s coordinate
-    #: list is far from complete. In a stranded library a real sj inherits the global strand specificity while an
-    #: artifact deposits on both strands, so this split is an empirical detector; a clean sj and an artifactual one
-    #: carry the same total. Unstranded data cannot use it (κ = ½ leaves nothing to deviate from).
+    #: Aligners emit false-positive ``N`` CIGAR ops from plain genomic DNA. In a stranded library a real sj inherits
+    #: the global strand specificity while an artifact deposits on both strands, so this split is an empirical
+    #: detector; a clean sj and an artifactual one carry the same total. Unstranded data cannot use it (κ = ½ leaves
+    #: nothing to deviate from).
     sj_count: np.ndarray
     #: float64[n_sj]: ``second_pass.py`` scores a held fragment's sj evidence with it.
     sj_inv_length_sum: np.ndarray

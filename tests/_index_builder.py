@@ -2,10 +2,10 @@
 
 `build_index` turns a GTF string into a loaded `TranscriptIndex` under a directory, writing a FASTA of known sequence
 for the requested references beside it (`write_fasta`, which every test that builds an index writes its genome with),
-and `build_test_index` does it in a fresh temporary directory;
-`rebuild_with_splice_blacklist` gives an existing index a splice blacklist the way a real build does. It lives in its
-own module rather than in `conftest.py` because it is a plain builder, not a fixture: a test that needs a bespoke
-index imports and calls it, and importing a conftest by module name is ambiguous once a sub-directory has its own.
+and `build_test_index` does it in a fresh temporary directory; `StandInStore` is the alignable store's surface the
+index reads. It lives in its own module rather than in `conftest.py` because it is a plain builder, not a fixture: a
+test that needs a bespoke index imports and calls it, and importing a conftest by module name is ambiguous once a
+sub-directory has its own.
 """
 
 from __future__ import annotations
@@ -14,9 +14,7 @@ import textwrap
 from collections.abc import Mapping
 from pathlib import Path
 
-import pandas as pd
-
-from rigel.index import REF_LENGTHS_FEATHER, TranscriptIndex, load_manifest, load_ref_lengths
+from rigel.index import TranscriptIndex
 
 
 # ---------------------------------------------------------------------------
@@ -139,37 +137,3 @@ def stand_in_store(monkeypatch, store: StandInStore) -> StandInStore:
 
     monkeypatch.setattr(rigel.observable, "open_alignable_store", lambda path: store)
     return store
-
-
-def rebuild_with_splice_blacklist(index_dir: str | Path, blacklist: pd.DataFrame) -> None:
-    """Rebuild the index in *index_dir* from the sources and flags its manifest records, now with
-    *blacklist* as its splice blacklist.
-
-    The blacklist goes through `build`'s own alignable-store path, so the manifest records its source
-    as a real build's does. The store loader is patched to return *blacklist* (the persisted columns:
-    ``ref``, ``start``, ``end``, ``max_anchor_left``, ``max_anchor_right``), the store's mask is a
-    :class:`StandInStore` that places every base back, and the store is an empty stand-in directory beside the
-    index, so the suite needs neither the ``alignable`` package nor a store.
-    """
-    import pytest
-
-    import rigel.splice_blacklist
-
-    index_dir = Path(index_dir)
-    manifest = load_manifest(index_dir)
-    store = index_dir.parent / f"{index_dir.name}_alignable_stand_in"
-    store.mkdir(exist_ok=True)
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(
-            rigel.splice_blacklist,
-            "load_splice_blacklist_from_zarr",
-            lambda store_path, *, min_count: blacklist,
-        )
-        stand_in_store(mp, StandInStore(load_ref_lengths(index_dir / REF_LENGTHS_FEATHER)))
-        TranscriptIndex.build(
-            manifest["sources"]["fasta"]["path"],
-            manifest["sources"]["gtf"]["path"],
-            index_dir,
-            alignable_zarr_path=store,
-            **manifest["build_flags"],
-        )

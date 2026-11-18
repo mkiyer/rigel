@@ -27,7 +27,6 @@ using rigel::STRAND_NEG;
 using rigel::SPLICE_UNSPLICED;
 using rigel::SPLICE_SPLICED_ANNOT;
 using rigel::SPLICE_IMPLICIT;
-using rigel::SPLICE_ARTIFACT;
 using rigel::vec_to_ndarray;
 using rigel::FRAG_UNAMBIG;
 using rigel::FRAG_AMBIG_SAME_STRAND;
@@ -181,13 +180,12 @@ class NativeFragmentScorer {
 
     /// Whether gDNA can have produced an alignment, for a single fragment and every hit of a multimapper alike:
     ///   UNSPLICED      yes.
-    ///   ARTIFACT       yes: the blacklist rejected every junction it carried, so it is unspliced.
     ///   IMPLICIT       yes: its mate gap is unobserved, so gDNA reads it unbroken at the footprint and a transcript
     ///                  at its own length, and the fragment length tells them apart.
-    ///   SPLICED_ANNOT  no: a sequenced junction survived the blacklist.
+    ///   SPLICED_ANNOT  no: it carries a sequenced junction.
     /// Whether gDNA then competes is the likelihood's to decide (`gdna_competes`).
     inline bool gdna_can_explain(int stype) const {
-        return stype == SPLICE_UNSPLICED || stype == SPLICE_ARTIFACT || stype == SPLICE_IMPLICIT;
+        return stype == SPLICE_UNSPLICED || stype == SPLICE_IMPLICIT;
     }
 
     /// The locus's gDNA candidate is kept when its likelihood is within `max_ll_delta_` of the unit's best RNA

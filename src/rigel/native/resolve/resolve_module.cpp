@@ -15,22 +15,18 @@ NB_MODULE(_resolve_impl, m) {
     nb::class_<FragmentResolver>(m, "FragmentResolver")
         .def(nb::init<>(), "Create an empty resolve context.")
         .def("set_ref_names", &FragmentResolver::set_ref_names, nb::arg("ref_names"),
-             "Seed the ref-name -> ID space in canonical index.ref_names order.\n\n"
-             "Call it before build_overlap_index so the resolver's ref ids\n"
-             "match index.ref_name_to_id (the space used by t_df, region_df and the\n"
-             "calibration accumulator partition).")
+             "Install the ref-name -> ID space in canonical index.ref_names order.\n\n"
+             "Call it first, so the resolver's ref ids match index.ref_name_to_id\n"
+             "(the space used by t_df, region_df and the calibration accumulator\n"
+             "partition). The builders refuse a reference it did not install.")
         .def("build_overlap_index", &FragmentResolver::build_overlap_index, nb::arg("refs"), nb::arg("starts"),
              nb::arg("ends"), nb::arg("iv_types"), nb::arg("tset_data"), nb::arg("tset_offsets"),
-             "Build the main overlap interval index from collapsed data.")
+             "Build the main overlap interval index from collapsed data.\n\n"
+             "Raises ValueError for an interval on a reference set_ref_names did not install.")
         .def("build_sj_map", &FragmentResolver::build_sj_map, nb::arg("refs"), nb::arg("starts"), nb::arg("ends"),
              nb::arg("strands"), nb::arg("tset_data"), nb::arg("tset_offsets"),
-             "Build the splice-junction exact-match lookup map.")
-        .def("build_sj_blacklist_map", &FragmentResolver::build_sj_blacklist_map, nb::arg("refs"),
-             nb::arg("starts"), nb::arg("ends"), nb::arg("max_anchor_left"), nb::arg("max_anchor_right"),
-             "Build the splice-junction artifact blacklist map.\n\n"
-             "Entries are keyed by (ref, start, end) without strand.\n"
-             "A CIGAR sj is rejected when either its left or right\n"
-             "anchor is <= the blacklist maximum for that sj.")
+             "Build the splice-junction exact-match lookup map.\n\n"
+             "Raises ValueError for a junction on a reference set_ref_names did not install.")
         .def("set_metadata", &FragmentResolver::set_metadata, nb::arg("n_transcripts"),
              "Set the transcript count, which sizes each scan worker's scratch.")
         .def("set_transcript_strands", &FragmentResolver::set_transcript_strands, nb::arg("t_strand"),

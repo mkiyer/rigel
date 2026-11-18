@@ -240,14 +240,14 @@ def test_the_schema_version_is_one_constant_the_writer_and_the_report_share(quan
     def schema_warnings(run_dir):
         return [w for w in load_substrate(run_dir).warnings if "schema_version" in w]
 
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 9
+    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 10
     assert schema_warnings(out) == []
     bumped = tmp_path / "bumped"
     bumped.mkdir()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
         cli.write_quant_outputs(pr, result.index, bumped, args)
-        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 10
+        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 11
         assert schema_warnings(bumped) == [] and schema_warnings(out) != []
 
 
@@ -294,21 +294,11 @@ def test_the_length_block_is_stats_only_and_the_companion_table_reconciles(quant
         assert abs(fsum - fl[cat]["n_observations"]) < 0.5
 
 
-def test_the_splice_breakdown_carries_the_blacklist_provenance(quant_run):
-    """Implicit, artifact and blacklisted counts beside the blacklist's size and whether one was loaded; this
-    fixture's index has none, so detection is off."""
+def test_the_splice_breakdown_is_the_three_splice_types(quant_run):
+    """The census's three classes, implicit included, which the ``with_*_sj`` counters omit; every junction the
+    aligner reported is read, so no class holds rejected junctions."""
     splice = quant_run[4]["fragment_stats"]["splice"]
-    assert set(splice) == {
-        "unspliced",
-        "spliced_annotated",
-        "spliced_implicit",
-        "splice_artifact",
-        "sj_blacklisted",
-        "sj_blacklist_size",
-        "sj_blacklist_loaded",
-    }
-    assert splice["sj_blacklist_loaded"] is False
-    assert splice["sj_blacklist_size"] == 0
+    assert set(splice) == {"unspliced", "spliced_annotated", "spliced_implicit"}
 
 
 def test_the_sj_strand_tag_counts_are_the_scans(quant_run):

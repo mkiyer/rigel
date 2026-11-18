@@ -37,7 +37,7 @@ nb::object resolve_fragment(const FragmentResolver& resolver, nb::object frag) {
     sort_unique_junctions(introns);
     ResolverScratch scratch(resolver.n_transcripts());
     ResolvedFragment out;
-    resolver.resolve(exons, introns, nb::cast<int32_t>(frag.attr("genomic_footprint")), 0, out, scratch);
+    resolver.resolve(exons, introns, nb::cast<int32_t>(frag.attr("genomic_footprint")), out, scratch);
     return nb::cast(std::move(out));
 }
 
@@ -111,7 +111,6 @@ void bind_testing(nb::module_ m) {
     m.attr("SPLICE_UNSPLICED") = SPLICE_UNSPLICED;
     m.attr("SPLICE_SPLICED_ANNOT") = SPLICE_SPLICED_ANNOT;
     m.attr("SPLICE_IMPLICIT") = SPLICE_IMPLICIT;
-    m.attr("SPLICE_ARTIFACT") = SPLICE_ARTIFACT;
 }
 
 }  // namespace rigel

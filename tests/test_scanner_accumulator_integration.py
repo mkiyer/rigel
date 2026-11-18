@@ -53,77 +53,6 @@ def oracle(tmp_path):
     sc.cleanup()
 
 
-@pytest.fixture
-def blacklisted_oracle(tmp_path):
-    """The same scenario twice: its index without a splice blacklist, and with one that names
-    **every sj the simulator wrote**.
-
-    This exists so the ``SPLICE_ARTIFACT`` term of the census identity is exercised rather than
-    asserted over a zero: a gate that only ever sees 0 on the term it was built for checks nothing.
-    """
-    import pandas as pd
-    import pysam
-
-    from _index_builder import rebuild_with_splice_blacklist
-    from rigel.index import TranscriptIndex
-
-    sc = Scenario("bl_int", genome_length=5000, seed=SEED, work_dir=tmp_path / "bl_int")
-    sc.add_gene(
-        "g1",
-        "+",
-        [{"t_id": "t1", "exons": [(200, 400), (600, 800)], "abundance": 50}],
-    )
-    sc.add_gene(
-        "g2",
-        "-",
-        [{"t_id": "t2", "exons": [(2500, 2700), (3000, 3200)], "abundance": 30}],
-    )
-    sim_config = ReadSimConfig(
-        frag_mean=200,
-        frag_std=30,
-        frag_min=80,
-        frag_max=450,
-        read_length=100,
-        strand_specificity=1.0,
-        seed=SEED,
-    )
-    result = sc.build_oracle(n_fragments=200, sim_config=sim_config)
-
-    # The sj are read back out of the BAM rather than derived from the exon list above, so
-    # the fixture cannot silently blacklist nothing if the simulator's coordinate convention moves.
-    introns: set[tuple[str, int, int]] = set()
-    with pysam.AlignmentFile(str(result.bam_path), "rb") as bam:
-        for rec in bam:
-            if not rec.cigartuples:
-                continue
-            pos = rec.reference_start
-            for op, ln in rec.cigartuples:
-                if op == 3:  # CIGAR N
-                    introns.add((rec.reference_name, pos, pos + ln))
-                if op in (0, 2, 3, 7, 8):
-                    pos += ln
-    assert introns, "the fixture simulated no spliced reads, so it cannot make an artifact"
-
-    rows = sorted(introns)
-    # Anchors far larger than the 100 bp reads, so every crossing read is blacklisted and the
-    # promotion is not a function of where the fragment happened to start.
-    rebuild_with_splice_blacklist(
-        result.index_dir,
-        pd.DataFrame(
-            {
-                "ref": [r[0] for r in rows],
-                "start": np.asarray([r[1] for r in rows], dtype=np.int32),
-                "end": np.asarray([r[2] for r in rows], dtype=np.int32),
-                "max_anchor_left": np.full(len(rows), 500, dtype=np.int32),
-                "max_anchor_right": np.full(len(rows), 500, dtype=np.int32),
-            }
-        ),
-    )
-
-    yield result, TranscriptIndex.load(result.index_dir)
-    sc.cleanup()
-
-
 def _scan_full(result, index=None):
     """The scan's ``(stats, payload)`` — the two QC objects the census identity spans."""
     config = PipelineConfig(
@@ -211,17 +140,12 @@ class TestFragmentLengthAnchor:
     from the scanner would measure fragment length by another rule over another population, so
     accumulator-frame pools would be shrunk toward a scanner-frame anchor.
 
-    These tests use the blacklist fixture on purpose: on the plain oracle a perfect BAM with no
-    ambiguity makes the competing definitions agree, so a value gate there passes whichever anchor
-    is wired in.
+    The oracle classifies fragments the accumulator does not deposit (those whose mate gap may hold an
+    annotated intron are held for the second pass), so the competing definitions disagree on it and a
+    value gate tells them apart.
     """
 
-    @staticmethod
-    def _scan_raw(bam_path, index):
-        config = PipelineConfig(em=EMConfig(seed=SEED), scan=BamScanConfig(sj_strand_tag="auto"))
-        return scan_and_buffer(str(bam_path), index, config.scan)
-
-    def test_the_anchor_is_the_accumulators_own_deposited_histogram(self, blacklisted_oracle):
+    def test_the_anchor_is_the_accumulators_own_deposited_histogram(self, oracle):
         """The anchor is ``deposited_lengths``, over exactly the population the pools are drawn from.
 
         "Unconditional given deposit": an anchor over a wider population would re-create the frame
@@ -229,11 +153,13 @@ class TestFragmentLengthAnchor:
         everything the scanner classified.
         """
         from rigel.pipeline import library_fl_models
+        from rigel.splice import SpliceType, census_field
 
-        result, index = blacklisted_oracle
-        _, _, _, payload = self._scan_raw(result.bam_path, index)
+        stats, payload = _scan_full(oracle)
+        classified = sum(int(getattr(stats, census_field(st))) for st in SpliceType)
+        assert classified > payload.qc.deposited, "every classified fragment deposited: no teeth"
 
-        fl = library_fl_models(payload, index)
+        fl = library_fl_models(payload, oracle.index)
         np.testing.assert_array_equal(fl.global_counts, np.asarray(payload.deposited_lengths))
         assert float(fl.global_counts.sum()) == float(payload.qc.deposited)
         np.testing.assert_allclose(
@@ -270,7 +196,7 @@ class TestSpliceCensus:
     only the fragments that contributed a length observation, a population gated by the
     transcript-space unanimity test and by the single-block rule on the intergenic path. The counts
     belong where the classification is made, and nothing is routed through the accumulator to obtain
-    them: its subject is fragment length, the scanner's is what it saw and what it held out.
+    them: its subject is fragment length, the scanner's is what it saw.
     """
 
     def test_every_splice_type_is_censused(self, oracle):
@@ -291,21 +217,13 @@ class TestSpliceCensus:
             )
 
     def test_the_census_accounts_for_every_fragment_offered_to_the_accumulator(self, oracle):
-        """The invariant: every censused fragment either deposited, was named as a rejection, was
-        held for the second pass, or was named as a hold-out. Nothing is lost between the two
-        subsystems.
+        """The invariant: every censused fragment either deposited, was named as a rejection, or was
+        held for the second pass. Nothing is lost between the two subsystems.
 
-            Σ census − census[SPLICE_ARTIFACT]
-                == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap
+            Σ census == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap
 
         Every fragment of this fixture has one placement, so the census, which counts placements,
         and the ``qc`` counters, which count fragments, count the same fragments.
-
-        ``SPLICE_ARTIFACT`` is subtracted because it is censused and then **held out by the
-        scanner**: a blacklisted CIGAR-N sj may be a real-but-rejected sj or a wholly
-        incorrect alignment, so the span that would be deposited is derived from an alignment the
-        scanner has already refused to believe. Identifying and filtering those is the scanner's
-        job, and the census is where that decision becomes visible.
 
         This is the same externally-checkable form as ``sum(deposited_lengths) == qc.deposited`` and
         a different statement: that one says every deposited fragment was binned by length, this one
@@ -325,9 +243,8 @@ class TestSpliceCensus:
             + int(qc.dropped_strand_undefined)
             + int(qc.deferred_undetermined_gap)
         )
-        assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted, (
-            f"census {census} (artifacts held out: {census[SpliceType.SPLICE_ARTIFACT]}) does not "
-            f"reconcile with deposited={qc.deposited} dropped=("
+        assert offered == accounted, (
+            f"census {census} does not reconcile with deposited={qc.deposited} dropped=("
             f"too_long={qc.dropped_too_long}, empty={qc.dropped_empty}, "
             f"strand_undefined={qc.dropped_strand_undefined}, "
             f"deferred_undetermined_gap={qc.deferred_undetermined_gap})"
@@ -346,77 +263,7 @@ class TestSpliceCensus:
             f"increment in the others: {census}"
         )
 
-    def test_the_identity_holds_when_fragments_are_held_out_as_artifacts(self, blacklisted_oracle):
-        """The identity, on a library where the hold-out term is the dominant one.
-
-        Without this the ``− census[SPLICE_ARTIFACT]`` term is asserted only over zero, and any
-        mistake in it (counting artifacts as deposited, as not-offered, or not at all) is invisible.
-        """
-        from rigel.splice import SpliceType, census_field
-
-        result, index = blacklisted_oracle
-        stats, payload = _scan_full(result, index)
-        census = {st: int(getattr(stats, census_field(st))) for st in SpliceType}
-        qc = payload.qc
-
-        assert census[SpliceType.SPLICE_ARTIFACT] > 0, (
-            "the blacklist held nothing out, so this test proves nothing about artifacts"
-        )
-        offered = sum(census.values())
-        accounted = (
-            int(qc.deposited)
-            + int(qc.dropped_too_long)
-            + int(qc.dropped_empty)
-            + int(qc.dropped_strand_undefined)
-            + int(qc.deferred_undetermined_gap)
-        )
-        assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted
-
-    def test_the_artifact_census_is_confirmed_by_the_deposit_total(
-        self, oracle, blacklisted_oracle
-    ):
-        """The artifact count, derived a second way, from a subsystem that has never heard of an
-        artifact.
-
-        The same BAM is scanned twice against the same annotation, differing only in whether the
-        index carries a splice blacklist. Blacklisting relabels fragments ``SPLICED_ANNOT →
-        SPLICE_ARTIFACT``; the scanner then holds exactly those out. So the accumulator's own
-        ``qc.deposited``, which knows nothing of splice types, blacklists or artifacts, must fall
-        by **exactly** the artifact census:
-
-            deposited(no blacklist) − deposited(blacklisted) == census[SPLICE_ARTIFACT]
-
-        This crosses a subsystem boundary, so a census placed after the hold-out return, reading a
-        confident zero for the very category the report names, cannot survive it.
-
-        The two supporting equalities are asserted as well, because the subtraction is only
-        attributable to the relabel if nothing else moved: the census total is unchanged (the same
-        fragments were classified), and the artifacts came out of ``SPLICED_ANNOT``.
-        """
-        from rigel.splice import SpliceType, census_field
-
-        clean_stats, clean_payload = _scan_full(oracle)
-        result, index = blacklisted_oracle
-        bl_stats, bl_payload = _scan_full(result, index)
-
-        clean = {st: int(getattr(clean_stats, census_field(st))) for st in SpliceType}
-        bl = {st: int(getattr(bl_stats, census_field(st))) for st in SpliceType}
-
-        assert sum(bl.values()) == sum(clean.values()), (
-            f"the blacklist changed how many fragments were CLASSIFIED ({sum(bl.values())} vs "
-            f"{sum(clean.values())}); the deposit difference is then not attributable to the relabel"
-        )
-        n_artifact = bl[SpliceType.SPLICE_ARTIFACT]
-        assert n_artifact > 0
-        assert clean[SpliceType.SPLICED_ANNOT] - bl[SpliceType.SPLICED_ANNOT] == n_artifact, (
-            f"artifacts did not come out of SPLICED_ANNOT: {clean} -> {bl}"
-        )
-        assert int(clean_payload.qc.deposited) - int(bl_payload.qc.deposited) == n_artifact, (
-            f"the scanner censused {n_artifact} artifacts but the accumulator's deposit total fell "
-            f"by {int(clean_payload.qc.deposited) - int(bl_payload.qc.deposited)}"
-        )
-
     # The census is a superset of the fragment-length observation population, and no separate
     # observation counter exists to compare it against; the population statement is the identity
-    # above: every censused fragment either deposits, is a named rejection, is held for the second
-    # pass, or is a named hold-out.
+    # above: every censused fragment either deposits, is a named rejection, or is held for the second
+    # pass.

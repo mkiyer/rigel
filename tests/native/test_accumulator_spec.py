@@ -325,12 +325,11 @@ def test_the_sj_strand_split_is_retained_for_aligner_artifact_detection():
     fragments on it looks redundant, and every consumer sums the two columns; the split is kept for aligner-artifact
     detection.
 
-    Aligners emit false-positive ``N`` CIGAR ops from plain genomic DNA. ``rigel.splice_blacklist`` catches those
-    already listed by coordinate, which is far from complete. In a stranded library real sj inherit the library's strand
-    specificity, while alignment artifacts deposit onto both strands and deviate from it, so the per-sj split by aligned
-    strand is an empirical detector. Unstranded data cannot use it (with κ = ½ there is nothing to deviate from), but
-    that is a property of the detector. The clean and the artifactual sj below carry the same total, so only the split
-    tells them apart.
+    Aligners emit false-positive ``N`` CIGAR ops from plain genomic DNA. In a stranded library real sj inherit the
+    library's strand specificity, while alignment artifacts deposit onto both strands and deviate from it, so the per-sj
+    split by aligned strand is an empirical detector. Unstranded data cannot use it (with κ = ½ there is nothing to
+    deviate from), but that is a property of the detector. The clean and the artifactual sj below carry the same total,
+    so only the split tells them apart.
     """
     # a clean sj: every fragment on one aligned strand, as a stranded library produces
     clean = _acc(sj=[SJ])

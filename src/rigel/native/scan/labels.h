@@ -14,7 +14,6 @@ inline const char* splice_type_label(int32_t code) {
         case SPLICE_UNSPLICED:       return "unspliced";
         case SPLICE_SPLICED_ANNOT:   return "spliced_annot";
         case SPLICE_IMPLICIT:        return "spliced_implicit";
-        case SPLICE_ARTIFACT:        return "splice_artifact";
         default:                     return "unknown";
     }
 }

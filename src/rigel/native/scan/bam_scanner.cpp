@@ -390,9 +390,6 @@ void BamScanner::Worker::collect_placement(const AssembledFragment& f, const Res
     // The splice census counts first, before any gate: one observation per hit reaching this adapter.
     if (r.splice_type >= 0 && static_cast<size_t>(r.splice_type) < stats.splice_census.size())
         stats.splice_census[r.splice_type]++;
-    // Artifact splices (blacklisted CIGAR N) stay out of the accumulator entirely, with no deposit and no length pool:
-    // a blacklisted junction may be a real one or a wrong alignment, so its true span is unrecoverable.
-    if (r.splice_type == SPLICE_ARTIFACT) return;
 
     // The introns the CIGAR stated are cut under every hypothesis, so are no part of the hypothesis set: `deposit`
     // unions them with each hypothesis's implied introns. All lie on the hit's reference, as `Accumulator::deposit`

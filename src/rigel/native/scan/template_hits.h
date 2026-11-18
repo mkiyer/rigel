@@ -93,7 +93,7 @@ struct AssembledFragment {
 };
 
 /// One usable hit's fragment and its resolution, as both passes resolve it: the fragment assembled and resolved
-/// against the annotation, its records' blacklisted junctions counted so the resolver can call it a splice artifact.
+/// against the annotation.
 void resolve_hit(const Hit& hit, const FragmentResolver& resolver, ResolverScratch& scratch, AssembledFragment& frag,
                  ResolvedFragment& resolved);
 

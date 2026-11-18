@@ -394,11 +394,6 @@ class IndexConfig:
     #: which models their nascent RNA (``index.create_nrna_transcripts``).
     nascent_tolerance: int = 20
 
-    #: Fewest unique fragments per (chromosome, intron, read length) for a junction to enter the
-    #: splice-artifact blacklist from the alignable store. 2 matches the alignable tool's own threshold; 1 admits
-    #: singleton artifacts, higher keeps only the most reproducible.
-    splice_blacklist_min_count: int = 2
-
     def __post_init__(self) -> None:
         if self.feather_compression not in ("lz4", "zstd", "uncompressed"):
             raise ValueError(f"Unknown Feather compression: {self.feather_compression!r}")
@@ -407,10 +402,6 @@ class IndexConfig:
         if self.nascent_tolerance < 0:
             raise ValueError(
                 f"IndexConfig.nascent_tolerance must be >= 0; got {self.nascent_tolerance}."
-            )
-        if self.splice_blacklist_min_count < 1:
-            raise ValueError(
-                f"IndexConfig.splice_blacklist_min_count must be >= 1; got {self.splice_blacklist_min_count}."
             )
 
 

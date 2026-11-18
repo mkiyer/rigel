@@ -182,8 +182,7 @@ nb::dict AnnotationPass::run() {
         }
         if (records_.empty()) name_hash_ = runs.name_hash();
         raw_.emplace_back(bam_dup1(b.get()));
-        // The scan's own parser, the blacklist included, so the annotated BAM sees the evidence the scan saw; its drop
-        // count is the per-record ZB:i tag.
+        // The scan's own parser, so the annotated BAM sees the evidence the scan saw
         records_.push_back(parser_.parse(b.get(), nullptr));
     }
     if (read_ret < -1) throw read_error(bam_path_, read_ret, n_records_written_);
@@ -306,13 +305,11 @@ FragmentTags AnnotationPass::tags_of(int64_t frag_id, bool& annotated) const {
     return tags;
 }
 
-/// Stamp the records at ``indices`` (the splice-artifact drop count ZB, then the fragment's tags, the hit's ZH and ZS)
-/// and write them, in order.
+/// Stamp the records at ``indices`` (the fragment's tags, then the hit's ZH and ZS) and write them, in order.
 void AnnotationPass::write_records(const std::vector<size_t>& indices, const FragmentTags& tags, int32_t primary,
                                    const char* splice_label) {
     for (const size_t i : indices) {
         bam1_t* r = raw_[i].get();
-        set_tag_int(r, "ZB", static_cast<int>(records_[i].n_sj_blacklisted));
         set_tag_str(r, "ZT", tags.transcript);
         set_tag_str(r, "ZG", tags.gene);
         set_tag_str(r, "ZR", tags.gene_name);

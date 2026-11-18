@@ -26,15 +26,15 @@ class ScoredFragments:
         (log-penalty × overhang bases); a multimapper's candidate also carries its hit's sequence price (NM and
         soft-clipped bases) and its place weight (``native/scoring.cpp``).
     count_cols : np.ndarray
-        uint8[n_candidates] — ``SpliceStrandCol`` index per candidate (0–7).
+        uint8[n_candidates] — ``SpliceStrandCol`` index per candidate (0–5).
     coverage_weights : np.ndarray
         float32[n_candidates] — coverage weight per candidate.
     is_spliced : np.ndarray
         bool[n_units] — True when the unit has no gDNA reading, at its locus or intergenic: gDNA can explain
-        none of its alignments (each carries a sequenced junction the blacklist kept; the scorer's
-        ``gdna_can_explain``), or its locus gDNA term fell outside the pruning bound of the unit's best RNA
-        candidate (``gdna_competes``) and it has no intergenic place. An unspliced, artifact or implicit unit
-        is True only in the second case.
+        none of its alignments (each carries a sequenced junction; the scorer's ``gdna_can_explain``), or
+        its locus gDNA term fell outside the pruning bound of the unit's best RNA candidate
+        (``gdna_competes``) and it has no intergenic place. An unspliced or implicit unit is True only in
+        the second case.
     gdna_log_liks : np.ndarray
         float32[n_units] — the unit's gDNA log-likelihood, summed over its places in the locus; -inf where the
         locus's gDNA is no candidate.

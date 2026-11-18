@@ -21,14 +21,12 @@ from __future__ import annotations
 
 from functools import partial
 
-import pandas as pd
 import pysam
 import pytest
 from _bam_builder import R1_FWD, R1_REV, R2_FWD, R2_REV, SECONDARY, record, write_bam
 from _index_builder import build_index
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
-from rigel.index import TranscriptIndex
 from rigel.pipeline import run_pipeline, scan_and_buffer
 
 GENOME = 20_000
@@ -949,40 +947,6 @@ def test_a_template_with_a_molecule_the_rule_withheld_is_an_unannotated_splice(i
     stats = _scan(tmp_path, index, records)
     assert _rejected(stats)["length"] == 1 and _rejected(stats)["novel_junction"] == 1
     assert _withheld(stats) == {"unpaired": 0, "unannotated_splice": 1}
-
-
-@pytest.fixture(scope="module")
-def index_blacklist(tmp_path_factory):
-    """The toy index with a splice blacklist of two junctions no transcript has, each at anchors up to 50."""
-    from _index_builder import rebuild_with_splice_blacklist
-
-    index_dir = _index(tmp_path_factory.mktemp("pairs_blacklist")).index_dir
-    rebuild_with_splice_blacklist(
-        index_dir,
-        pd.DataFrame(
-            {
-                "ref": ["chr1", "chr1"],
-                "start": [15050, 10240],
-                "end": [15150, 10340],
-                "max_anchor_left": [50, 50],
-                "max_anchor_right": [50, 50],
-            }
-        ),
-    )
-    return TranscriptIndex.load(index_dir)
-
-
-def test_the_rule_reads_the_junctions_the_blacklist_keeps(index_blacklist, tmp_path):
-    """The blacklist erases a junction before the rule reads it: a pair whose only junction is blacklisted is
-    unspliced, and a pair with a blacklisted junction and T1's is decided by T1's."""
-    alone = _scan(
-        tmp_path, index_blacklist, _pair("alone", 15000, "50M100N50M", 15200, "100M", xs="+")
-    )
-    assert sum(_rejected(alone).values()) == 0 and alone.n_fragments == 1
-    kept = _scan(
-        tmp_path, index_blacklist, _pair("kept", 10100, "10M100N10M", 10220, "20M100N20M", xs="+")
-    )
-    assert sum(_rejected(kept).values()) == 0 and kept.n_fragments == 1
 
 
 def test_the_annotated_bam_labels_an_unannotated_splice(index, tmp_path):

@@ -93,10 +93,9 @@ at κ = ½ the gDNA fraction cancels from the strand mean. Every score is read p
   stated-limitation fallback.
 - **One message policy.** `transfer` ships on every stratum. A row where it loses to `silent` is a defect in the
   messages, repaired there, never a reason to switch policy by stratum (issue #26, issue #77).
-- **The splice blacklist retires before 0.8.0, in its current form** (issue #49, issue #63, issue #64). The
-  recommended STAR settings report a genomic fragment's contiguous reading beside its spliced one, which is the
-  protection the blacklist gave; what they do not cover is stated (issue #7). A blacklist brought back later is
-  regenerated at those settings first. Until the retirement lands, §3.1's override describes the code.
+- **The splice blacklist is retired** (issue #49, issue #63, issue #64). The recommended STAR settings report a
+  genomic fragment's contiguous reading beside its spliced one, which is the protection the blacklist gave; what they
+  do not cover is stated (issue #7). A blacklist brought back later is regenerated at those settings first.
 - **Ruled, not yet built.** A multimapper's candidates are pruned within each place, never across places, so no place
   is orphaned and the EM decides between places (issue #62; §9.4). An efficiency of exactly 1 gives RNA's own length,
   and only the excess over 1 is carried (issue #65; §9.2).
@@ -134,8 +133,7 @@ to the gates `_solve_impl.testing`'s `JEFFREYS_REF` and `OWN_EVIDENCE_EPS`); `te
 ## 2. The index
 
 `rigel index` writes format 11 (`INDEX_FORMAT_VERSION`; a load refuses any other): the splice graph
-(`regions.feather`, `edges.feather`; `calibration/splice_graph.py`), the transcript table, the splice blacklist and the
-unobservable mask, with `manifest.json` recording the sources. The build is deterministic.
+(`regions.feather`, `edges.feather`; `calibration/splice_graph.py`), the transcript table and the unobservable mask, with `manifest.json` recording the sources. The build is deterministic.
 
 > The genome is a graph. Regions are intervals; boundaries connect them. A fragment is a path. A region counts the
 > fragments contained in it; a boundary counts the fragments crossing it.
@@ -183,11 +181,11 @@ A paired-end BAM, name-sorted or collated, from STAR at the recommended settings
 > **Rigel reads what the aligner reported.** A hit is a reported alignment, checked: the scan reads, validates,
 > withholds and counts, and never chooses between a template's hits; the EM does.
 
-Rigel moves no base and forms no alignment the aligner did not report — a scope kept on the tool's main defects, with
-genome information inside Rigel open to discussion on evidence. One override stands: the splice blacklist
-(`splice_blacklist`, from an `alignable` store) rejects a CIGAR junction whose anchor lies inside the envelope where the
-aligner splices plain genomic DNA, and the fragment is a `SPLICE_ARTIFACT`, read as unspliced
-(issue #7). A read pair's multiplicity is its usable hits; NH only flags a truncated output.
+Rigel moves no base, forms no alignment the aligner did not report and rejects no junction it did — a scope kept on
+the tool's main defects, with genome information inside Rigel open to discussion on evidence. Both readings of a
+genomic fragment the aligner splices reach calibration and the EM, which weigh them on the whole likelihood; one whose
+contiguous reading the aligner does not report is read as spliced RNA (issue #7). A read pair's multiplicity is its
+usable hits; NH only flags a truncated output.
 
 ### 3.2 A template's hits
 
@@ -653,12 +651,12 @@ gDNA. A candidate's terms are its length table, strand, coverage weight and per-
 (`FragmentScoringConfig.overhang_alpha`), plus a place weight and sequence on a multimapper; one under
 `pruning_min_posterior` of the unit's best is pruned (issue #32).
 
-> **gDNA can explain an alignment it can produce: unspliced, implicit (a pair whose gap could hold an annotated
-> intron) and artifact. A multimapper can be gDNA if any of its alignments can; a sequenced junction that survived the
-> blacklist cannot. gDNA then COMPETES as an RNA candidate does** (`scoring.cpp`'s `gdna_can_explain`, `gdna_competes`).
+> **gDNA can explain an alignment it can produce: unspliced, and implicit (a pair whose gap could hold an annotated
+> intron). A multimapper can be gDNA if any of its alignments can; a sequenced junction cannot. gDNA then COMPETES as
+> an RNA candidate does** (`scoring.cpp`'s `gdna_can_explain`, `gdna_competes`).
 
 gDNA's term is the unspliced term at the genomic footprint whatever the label, and a footprint its length law cannot
-produce is pruned with no length cut of its own. Calibration holds artifact fragments out of its sample.
+produce is pruned with no length cut of its own.
 
 ### 9.2 The capture-contracted length — one shared rule
 
@@ -784,4 +782,4 @@ spans), `loci.feather`, `fragment_lengths.feather`, `calibration_track.feather`,
 - **The annotated BAM** (`--annotated-bam`) re-judges every pair with the scan's code and stamps each record
   (`annotate.py` is the schema): the winner (ZT, ZG, ZR, ZI, ZJ), the outcome bitfield (ZF), the posterior (ZW), the
   ambiguity class or a withheld pair's reason (ZC), the winning placement (ZH), the candidates (ZN), the record's own
-  splice type (ZS), the locus (ZL) and its blacklisted junctions (ZB).
+  splice type (ZS) and the locus (ZL).

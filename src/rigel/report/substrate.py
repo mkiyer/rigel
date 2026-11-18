@@ -52,10 +52,6 @@ SUMMARY_KEYS: dict[str, dict] = {
         "unspliced": 0,
         "spliced_annotated": 0,
         "spliced_implicit": 0,
-        "splice_artifact": 0,
-        "sj_blacklisted": 0,
-        "sj_blacklist_size": None,
-        "sj_blacklist_loaded": None,
     },
     "strand_model": {
         "protocol": "?",

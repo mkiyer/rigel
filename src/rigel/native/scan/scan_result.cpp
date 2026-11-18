@@ -39,7 +39,6 @@ nb::dict BamScanStats::to_dict() const {
     out["n_multimapper_groups"] = n_multimapper_groups;
     out["n_multimapper_alignments"] = n_multimapper_alignments;
     out["n_sj_observed"] = records.n_sj_observed;
-    out["n_sj_blacklisted"] = records.n_sj_blacklisted;
     out["n_sj_tag_tagged"] = records.sj_tags.tagged;
     out["n_sj_tag_untagged"] = records.sj_tags.untagged;
     out["n_sj_tag_conflicting"] = records.sj_tags.conflicting;

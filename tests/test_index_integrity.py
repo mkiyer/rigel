@@ -306,6 +306,22 @@ class TestFragmentResolver:
         assert hasattr(mini_index, "resolver")
         assert mini_index.resolver is not None
 
+    def test_the_builders_name_only_the_references_the_index_installed(self):
+        """The reference ids are the index's (`set_ref_names`), and a BAM reference outside them maps to -1, off the
+        index. A builder that minted an id for a reference it named would give that reference a place no partition
+        holds, so an interval or a junction on one is an index defect, and refused."""
+        from rigel.native import FragmentResolver
+
+        resolver = FragmentResolver()
+        resolver.set_ref_names(["chr1"])
+        with pytest.raises(ValueError, match="chrDecoy"):
+            resolver.build_overlap_index(
+                ["chr1", "chrDecoy"], [0, 0], [10, 10], [0, 0], [0, 0], [0, 1, 2]
+            )
+        with pytest.raises(ValueError, match="chrDecoy"):
+            resolver.build_sj_map(["chrDecoy"], [10], [20], [1], [0], [0, 1])
+        resolver.build_sj_map(["chr1"], [10], [20], [1], [0], [0, 1])
+
 
 # ═════════════════════════════════════════════════════════════════════
 # Round-trip: build → load consistency
@@ -572,18 +588,16 @@ def test_load_does_not_need_the_alias_table(tmp_path: Path):
     "setting, refusal",
     [
         ({"nascent_tolerance": -5}, "nascent_tolerance must be >= 0; got -5"),
-        ({"splice_blacklist_min_count": 0}, "splice_blacklist_min_count must be >= 1; got 0"),
         ({"feather_compression": "gzip"}, "Unknown Feather compression: 'gzip'"),
         ({"gtf_parse_mode": "lenient"}, "Unknown GTF parse mode: 'lenient'"),
     ],
-    ids=["negative-tolerance", "zero-blacklist-count", "compression", "parse-mode"],
+    ids=["negative-tolerance", "compression", "parse-mode"],
 )
 def test_build_refuses_a_setting_its_config_refuses_before_writing(
     tmp_path: Path, setting, refusal
 ):
     """`build` validates its settings as one `IndexConfig`, for every caller: a negative tolerance would cluster as 0
-    does while the manifest records it as given, and a blacklist count below 1 would be recorded whenever no store
-    is."""
+    does while the manifest records it as given."""
     fasta, gtf = _mini_sources(tmp_path)
     idx_dir = tmp_path / "idx"
 
@@ -622,24 +636,11 @@ def test_a_reference_longer_than_an_int32_coordinate_is_refused_by_name(tmp_path
 
 
 def test_an_empty_gtf_rebuild_leaves_the_existing_index_loadable(tmp_path: Path):
-    """The refusal comes before any old file is deleted, the manifest and the splice blacklist among
-    them, so a rebuild refused for an empty GTF leaves the index it would have replaced untouched and
-    loadable."""
-    from _index_builder import rebuild_with_splice_blacklist
-
+    """The refusal comes before any old file is deleted, the manifest among them, so a rebuild refused
+    for an empty GTF leaves the index it would have replaced untouched and loadable."""
     fasta, gtf = _mini_sources(tmp_path)
     idx_dir = tmp_path / "idx"
     TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
-    blacklist = pd.DataFrame(
-        {
-            "ref": ["chr1"],
-            "start": np.asarray([200], dtype=np.int32),
-            "end": np.asarray([299], dtype=np.int32),
-            "max_anchor_left": np.asarray([10], dtype=np.int32),
-            "max_anchor_right": np.asarray([10], dtype=np.int32),
-        }
-    )
-    rebuild_with_splice_blacklist(idx_dir, blacklist)
     files_before = {p.name: p.read_bytes() for p in idx_dir.iterdir()}
     n_transcripts = TranscriptIndex.load(idx_dir).num_transcripts
 
@@ -649,9 +650,7 @@ def test_an_empty_gtf_rebuild_leaves_the_existing_index_loadable(tmp_path: Path)
         TranscriptIndex.build(fasta, empty, idx_dir, write_tsv=False)
 
     assert {p.name: p.read_bytes() for p in idx_dir.iterdir()} == files_before
-    reloaded = TranscriptIndex.load(idx_dir)
-    assert reloaded.num_transcripts == n_transcripts
-    assert reloaded.sj_blacklist_size == len(blacklist)
+    assert TranscriptIndex.load(idx_dir).num_transcripts == n_transcripts
 
 
 def test_an_interrupted_rebuild_leaves_no_manifest(tmp_path: Path, monkeypatch):

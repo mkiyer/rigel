@@ -9,8 +9,6 @@ optional TSV mirrors, to an output directory:
     regions.feather            — the splice graph's regions (the calibration partition)
     edges.feather              — the splice graph's boundaries: contiguous and splice-junction
     sj.feather                 — annotated splice junctions from transcript introns
-    splice_blacklist.feather   — (optional) splice-artifact sj derived
-                                 from the alignable Zarr store
     unobservable.feather       — the unobservable mask: with the alignable store, its zero-
                                  mappability runs at its longest read length; without, the
                                  FASTA's N runs (`rigel.observable`)
@@ -62,9 +60,6 @@ BOUNDARIES_TSV = "boundaries.tsv"
 
 SJ_FEATHER = "sj.feather"
 SJ_TSV = "sj.tsv"
-
-SJ_BLACKLIST_FEATHER = "splice_blacklist.feather"
-SJ_BLACKLIST_TSV = "splice_blacklist.tsv"
 
 #: The unobservable mask: the runs of the reference no read pair is observed at (`rigel.observable`).
 UNOBSERVABLE_FEATHER = "unobservable.feather"
@@ -133,44 +128,6 @@ def source_record(path: str | Path) -> dict:
         "bytes": resolved.stat().st_size,
         "sha256": _sha256_of_file(resolved),
     }
-
-
-def _blacklist_digest(columns) -> str:
-    """A content hash of the splice blacklist exactly as the resolver receives it: the columns `load` passes to
-    `build_sj_blacklist_map`, in its argument order and the rows' stored order. Gate:
-    `tests/test_splice_blacklist.py`."""
-    import hashlib
-
-    refs, *positions = columns
-    h = hashlib.blake2b(digest_size=8)
-    h.update("\x00".join(refs).encode())
-    for values in positions:
-        h.update(np.asarray(values, dtype=np.int32).tobytes())
-    return h.hexdigest()
-
-
-def _check_blacklist_references(bl_df: pd.DataFrame, ref_lengths: dict[str, int], store) -> None:
-    """A splice blacklist names its junctions by reference. One whose references the FASTA does not hold matches
-    nothing, while the index would report splice-artifact detection on, so it refuses the build; references beyond the
-    FASTA (decoys, alternates) are named in a warning."""
-    if bl_df.empty:
-        return
-    refs = list(dict.fromkeys(bl_df["ref"].astype(str)))
-    beyond = [r for r in refs if r not in ref_lengths]
-    some = CONSTANTS.qc.examples
-    if len(beyond) == len(refs):
-        raise ValueError(
-            f"None of the {len(refs):,} references in the splice blacklist of the alignable store {store} is in the "
-            f"FASTA ({some(refs)}, against {some(list(ref_lengths))}): the store was built for another genome or "
-            "names its references differently."
-        )
-    if beyond:
-        logger.warning(
-            "%s of the splice blacklist's %s references are not in the FASTA (%s); their junctions match nothing.",
-            f"{len(beyond):,}",
-            f"{len(refs):,}",
-            some(beyond),
-        )
 
 
 class IndexLoadError(RuntimeError):
@@ -883,11 +840,10 @@ class _TableWriter:
 
 @dataclass(frozen=True, slots=True)
 class _GenomeInputs:
-    """What the build reads of the genome: the references, the splice-artifact blacklist (``None`` without an
-    alignable store) and the unobservable mask with the manifest's record of what it is (`rigel.observable`)."""
+    """What the build reads of the genome: the references and the unobservable mask with the manifest's record of
+    what it is (`rigel.observable`)."""
 
     ref_lengths: dict[str, int]
-    blacklist: pd.DataFrame | None
     mask: pd.DataFrame
     mask_record: dict
 
@@ -900,27 +856,13 @@ class _GenomeInputs:
         return int(sum(self.ref_lengths.values()))
 
 
-def _read_genome(
-    fasta_file: str | Path,
-    alignable_zarr_path: str | Path | None,
-    splice_blacklist_min_count: int,
-) -> _GenomeInputs:
-    """The references, the blacklist and the mask, each read and checked before the first write: a store that cannot
-    be read, is incomplete, or was built for other references or another assembly refuses the build and leaves the
-    index it would replace intact."""
+def _read_genome(fasta_file: str | Path, alignable_zarr_path: str | Path | None) -> _GenomeInputs:
+    """The references and the mask, each read and checked before the first write: a store that cannot be read, is
+    incomplete, or was built for other references or another assembly refuses the build and leaves the index it would
+    replace intact."""
     logger.info(f"[START] Loading references from {fasta_file}")
     ref_lengths = load_reference_lengths(fasta_file)
     logger.info(f"[DONE] Read {len(ref_lengths)} references")
-
-    blacklist = None
-    if alignable_zarr_path is not None:
-        from .splice_blacklist import load_splice_blacklist_from_zarr
-
-        blacklist = load_splice_blacklist_from_zarr(
-            alignable_zarr_path,
-            min_count=splice_blacklist_min_count,
-        )
-        _check_blacklist_references(blacklist, ref_lengths, alignable_zarr_path)
 
     from .observable import mask_from_fasta, mask_from_store
 
@@ -931,7 +873,7 @@ def _read_genome(
     else:
         logger.info(f"[START] Recording the unobservable mask from {alignable_zarr_path}")
         mask, record = mask_from_store(alignable_zarr_path, ref_lengths, fasta_file)
-    genome = _GenomeInputs(ref_lengths, blacklist, mask, record)
+    genome = _GenomeInputs(ref_lengths, mask, record)
     logger.info(
         f"[DONE] {len(mask):,} unobservable runs: {genome.masked_bases:,} of {genome.genome_bases:,} bp"
     )
@@ -967,12 +909,7 @@ def _write_annotation_tables(
 
 
 def _write_genome_tables(write: _TableWriter, genome: _GenomeInputs) -> None:
-    """The splice blacklist, when there is a store (one left by an earlier build is removed first, so a rebuild
-    without a store leaves none behind), and the unobservable mask."""
-    (write.output_dir / SJ_BLACKLIST_FEATHER).unlink(missing_ok=True)
-    (write.output_dir / SJ_BLACKLIST_TSV).unlink(missing_ok=True)
-    if genome.blacklist is not None:
-        write(genome.blacklist, SJ_BLACKLIST_FEATHER, SJ_BLACKLIST_TSV)
+    """The unobservable mask."""
     write(genome.mask, UNOBSERVABLE_FEATHER, UNOBSERVABLE_TSV)
 
 
@@ -1010,8 +947,7 @@ def _write_manifest(
 # Load steps
 # ---------------------------------------------------------------------------
 
-#: The files every index has, checked before any is read. The splice blacklist is read only when the manifest
-#: records its store, and the alias table never.
+#: The files every index has, checked before any is read. The alias table is never read.
 _REQUIRED_FILES = (
     REF_LENGTHS_FEATHER,
     TRANSCRIPTS_FEATHER,
@@ -1186,43 +1122,6 @@ def _sj_map_csr(sj_map: dict[tuple, frozenset[int]]) -> tuple[list, list, list, 
     return refs, starts, ends, strands, t_flat, t_offsets
 
 
-def _install_blacklist(resolver, index_dir: str, manifest: dict) -> tuple[int, str]:
-    """Install the splice-artifact blacklist, used only when the manifest records the store it was built from;
-    returns the active junctions' count (0 is detection off) and the digest of the rows handed to the resolver
-    (``"none"`` when none are), which the scan cache's key reads, because the blacklist changes what a scan tallies.
-    A blacklist with no store recorded, or a recorded store with no blacklist, leaves artifact detection off with no
-    other sign, so the load warns."""
-    blacklist_path = os.path.join(index_dir, SJ_BLACKLIST_FEATHER)
-    store = manifest.get("sources", {}).get("alignable_zarr")
-    has_blacklist = os.path.exists(blacklist_path)
-    if store is not None and has_blacklist:
-        logger.debug("Loading splice-artifact blacklist")
-        bl_df = pd.read_feather(blacklist_path)
-        columns = (
-            bl_df["ref"].astype(str).tolist(),
-            bl_df["start"].astype(np.int32).tolist(),
-            bl_df["end"].astype(np.int32).tolist(),
-            bl_df["max_anchor_left"].astype(np.int32).tolist(),
-            bl_df["max_anchor_right"].astype(np.int32).tolist(),
-        )
-        resolver.build_sj_blacklist_map(*columns)
-        logger.info(f"Splice artifact blacklist: {len(bl_df):,} sj active")
-        return int(len(bl_df)), _blacklist_digest(columns)
-    if has_blacklist:
-        logger.warning(
-            f"{SJ_BLACKLIST_FEATHER} is not applied: this index's manifest records no alignable "
-            "store it was built from, so splice-artifact detection is off. Rebuild the index "
-            "with --alignable-zarr to use a blacklist."
-        )
-    elif store is not None:
-        logger.warning(
-            f"This index was built from the alignable store {store['path']}, but its "
-            f"{SJ_BLACKLIST_FEATHER} is missing, so splice-artifact detection is off. "
-            "Rebuild the index."
-        )
-    return 0, "none"
-
-
 def _nrna_parents(t_df: pd.DataFrame) -> np.ndarray:
     """Each transcript's synthetic span, by ``t_index``, -1 where its span entity is no synthetic. Synthetics are absent
     from the interval table (see :func:`_gen_transcript_intervals`), so the resolver derives each synthetic candidate
@@ -1264,15 +1163,6 @@ class TranscriptIndex:
         # Splice-junction exact-match map  (ref, start, end, strand) → frozenset[int]
         self.sj_map: dict | None = None
 
-        # Splice-artifact blacklist size, set at load():
-        #   None → not loaded
-        #   0    → no blacklisted sj active (artifact detection is off)
-        #   >0   → number of blacklisted sj active (detection is on)
-        self.sj_blacklist_size: int | None = None
-        # The digest of the blacklist rows handed to the resolver, "none" when none are: set at load(), and read
-        # by the scan cache's key, because the blacklist changes what a scan tallies.
-        self.sj_blacklist_digest: str | None = None
-
         # Per-transcript exon intervals for coverage-weight model.
         # Maps t_index → (n_exons, 2) int32 array of [start, end) intervals
         # sorted by genomic start position.
@@ -1313,8 +1203,8 @@ class TranscriptIndex:
         cannot go stale against the Feather files.
 
         It is not a scan's key. The scan reads more of the index than the region bounds: resolution reads which
-        transcripts hold a fragment's blocks and junctions, and the junctions and the splice blacklist decide what
-        it offers, so two indexes that share this hash can tally one BAM differently. ``edges.feather`` can change
+        transcripts hold a fragment's blocks and junctions, and the junctions decide what it offers, so two indexes
+        that share this hash can tally one BAM differently. ``edges.feather`` can change
         while every region stays byte-identical too; :attr:`graph_hash` adds the junction axis.
         """
         import hashlib
@@ -1338,8 +1228,7 @@ class TranscriptIndex:
         stay byte-identical, so this hashes ``partition_hash``'s inputs plus the sj CSR that crosses into ``set_sj``:
         the donor offsets, the acceptor region-bound indices and the annotated strands. A payload records it, so a
         cached tally can be checked against the index it is read with. It is not all a scan depends on: the
-        transcript models resolution reads, the splice blacklist and the scan settings are not in it. Computed on
-        demand, never stored.
+        transcript models resolution reads and the scan settings are not in it. Computed on demand, never stored.
         """
         import hashlib
 
@@ -1370,7 +1259,6 @@ class TranscriptIndex:
         collapse_duplicate_transcripts: bool = IndexConfig.collapse_duplicate_transcripts,
         nascent_tolerance: int = IndexConfig.nascent_tolerance,
         alignable_zarr_path: str | Path | None = None,
-        splice_blacklist_min_count: int = IndexConfig.splice_blacklist_min_count,
     ) -> None:
         """Build the rigel reference index and write to disk.
 
@@ -1404,16 +1292,8 @@ class TranscriptIndex:
             Max distance (bp) for clustering multi-exon transcripts' start
             and end sites into the synthetic spans that model their nascent RNA.
         alignable_zarr_path : path, optional
-            Path to an alignable Zarr store built for the same genome+
-            aligner.  When provided, the splice-junction artifact
-            blacklist is derived by
-            :func:`rigel.splice_blacklist.load_splice_blacklist_from_zarr` and persisted as
-            ``splice_blacklist.feather`` in the index.  When ``None``,
-            no blacklist is written and one left by an earlier build is removed.
-            :meth:`load` applies the blacklist only when the manifest records the store.
-        splice_blacklist_min_count : int
-            Minimum per-row count for a (chrom, intron, read_length)
-            artifact to enter the blacklist.  Default ``2``.
+            Path to an alignable Zarr store built for the same genome and aligner, whose zero set is the
+            unobservable mask (`rigel.observable`).  When ``None``, the mask is the FASTA's unknown runs.
         """
         IndexConfig(
             feather_compression=feather_compression,
@@ -1421,12 +1301,11 @@ class TranscriptIndex:
             gtf_parse_mode=gtf_parse_mode,
             collapse_duplicate_transcripts=collapse_duplicate_transcripts,
             nascent_tolerance=nascent_tolerance,
-            splice_blacklist_min_count=splice_blacklist_min_count,
         )
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        genome = _read_genome(fasta_file, alignable_zarr_path, splice_blacklist_min_count)
+        genome = _read_genome(fasta_file, alignable_zarr_path)
         logger.info(f"[START] Reading transcripts from {gtf_file}")
         transcripts = read_transcripts(
             gtf_file,
@@ -1460,7 +1339,6 @@ class TranscriptIndex:
                 "feather_compression": feather_compression,
                 "gtf_parse_mode": gtf_parse_mode,
                 "nascent_tolerance": nascent_tolerance,
-                "splice_blacklist_min_count": splice_blacklist_min_count,
                 "write_tsv": write_tsv,
             },
             genome,
@@ -1515,7 +1393,7 @@ class TranscriptIndex:
         self = cls()
         self.index_dir = index_dir
         self._retain_lookup_maps = retain_lookup_maps
-        manifest = _checked_manifest(index_dir)
+        _checked_manifest(index_dir)
 
         self.ref_lengths = load_ref_lengths(os.path.join(index_dir, REF_LENGTHS_FEATHER))
         self.ref_names = list(self.ref_lengths.keys())
@@ -1561,11 +1439,11 @@ class TranscriptIndex:
         logger.debug("Building splice junction exact-match map")
         self.sj_map = _sj_exact_match_map(sj_df)
 
-        self.resolver = self._build_resolver(overlap_index, manifest)
+        self.resolver = self._build_resolver(overlap_index)
         logger.debug("Built native FragmentResolver for C++ resolution")
         return self
 
-    def _build_resolver(self, overlap_index: tuple, manifest: dict):
+    def _build_resolver(self, overlap_index: tuple):
         """The native ``FragmentResolver``: every index fact fragment resolution reads, installed once, so every use
         of the resolver has them, a scan or not. It owns the junction map afterwards, so the Python copy is freed
         unless the index retains its lookup maps."""
@@ -1580,9 +1458,6 @@ class TranscriptIndex:
         resolver.build_sj_map(*_sj_map_csr(self.sj_map))
         if not self._retain_lookup_maps:
             self.sj_map = None
-        self.sj_blacklist_size, self.sj_blacklist_digest = _install_blacklist(
-            resolver, self.index_dir, manifest
-        )
         # Each candidate's introns, for its path through the gaps and its length. build_exon_csr() is the one owner of
         # this CSR (scoring reads it too), and it frees ``_t_exon_intervals`` unless retain_lookup_maps.
         exon_offsets, exon_starts_flat, exon_ends_flat, _ = self.build_exon_csr()

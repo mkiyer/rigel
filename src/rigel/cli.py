@@ -69,7 +69,6 @@ def index_command(args: argparse.Namespace) -> int:
             collapse_duplicate_transcripts=args.collapse_duplicate_transcripts,
             nascent_tolerance=args.nascent_tolerance,
             alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
-            splice_blacklist_min_count=args.splice_blacklist_min_count,
         )
     # a malformed annotation, an unreadable store, references that disagree
     except (ValueError, OSError) as exc:
@@ -197,7 +196,7 @@ def build_pipeline_config(args: argparse.Namespace) -> PipelineConfig:
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
 #: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name;
 #: ``length_tables`` is the EM's two length tables and the decision behind them.
-SUMMARY_SCHEMA_VERSION = 9
+SUMMARY_SCHEMA_VERSION = 10
 
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
@@ -493,7 +492,7 @@ def _fragment_summary(stats, index) -> dict:
             "off_index": stats.n_hits_rejected_off_index,
             "chimeric": stats.n_hits_rejected_chimeric,
         },
-        "splice": _splice_summary(stats, index),
+        "splice": _splice_summary(stats),
         # The library's mismatch rate, read on its unique unspliced hits (their NM over the read bases they align):
         # the price of a multimapper's hit's mismatches and soft-clipped bases; null with no such hit
         "mismatch_rate": {
@@ -504,26 +503,18 @@ def _fragment_summary(stats, index) -> dict:
     }
 
 
-def _splice_summary(stats, index) -> dict:
+def _splice_summary(stats) -> dict:
     """The splice-type breakdown: the scanner's per-fragment census, which counts every fragment it offers the
-    accumulator (and closes against the accumulator's qc block), plus the blacklist tally. It reports the
-    ``spliced_implicit`` and ``splice_artifact`` classes the ``with_*_sj`` counters omit. The blacklist's size tells
-    "detection off" (no blacklist in the index: 0) from "detection on, 0 artifacts found"."""
+    accumulator (and closes against the accumulator's qc block). It reports the ``spliced_implicit`` class the
+    ``with_*_sj`` counters omit."""
     from .splice import SpliceType, census_field
 
-    blacklist_size = int(index.sj_blacklist_size)
     census = {
         "unspliced": SpliceType.UNSPLICED,
         "spliced_annotated": SpliceType.SPLICED_ANNOT,
         "spliced_implicit": SpliceType.SPLICED_IMPLICIT,
-        "splice_artifact": SpliceType.SPLICE_ARTIFACT,
     }
-    return {
-        **{label: int(getattr(stats, census_field(stype))) for label, stype in census.items()},
-        "sj_blacklisted": int(stats.n_sj_blacklisted),
-        "sj_blacklist_size": blacklist_size,
-        "sj_blacklist_loaded": bool(blacklist_size),
-    }
+    return {label: int(getattr(stats, census_field(stype))) for label, stype in census.items()}
 
 
 def _strand_model_summary(sm) -> dict:
@@ -1251,9 +1242,8 @@ def _add_index_parser(subparsers) -> None:
         "--alignable-zarr",
         help=(
             "Path to an alignable Zarr store built for the same genome+aligner. "
-            "Provides the splice-junction artifact blacklist (for filtering "
-            "spurious sj at BAM-scan time) and the unobservable genome: the bases "
-            "no read pair can be placed back at, at the store's longest read length. "
+            "Provides the unobservable genome: the bases no read pair can be placed "
+            "back at, at the store's longest read length. "
             "Required unless --no-mappability is set explicitly."
         ),
     )
@@ -1261,22 +1251,10 @@ def _add_index_parser(subparsers) -> None:
         "--no-mappability",
         action="store_true",
         help=(
-            "Explicitly opt out of the alignable store: no splice blacklist, and the "
-            "unobservable genome is the FASTA's N runs alone. Use this for synthetic "
+            "Explicitly opt out of the alignable store: the unobservable genome is the "
+            "FASTA's N runs alone. Use this for synthetic "
             "genomes or any setting where running "
             "'alignable' is unnecessary. Mutually exclusive with --alignable-zarr."
-        ),
-    )
-    idx.add_argument(
-        "--splice-blacklist-min-count",
-        type=int,
-        default=IndexConfig.splice_blacklist_min_count,
-        help=(
-            "(Advanced) Minimum unique-fragment count per (chrom, intron, "
-            "read_length) for a sj to enter the splice-artifact blacklist "
-            "(default: %(default)s, the alignable tool's own threshold). Lower values "
-            "(e.g. 1) admit more singleton artifacts; higher values keep only "
-            "the most reproducible. Ignored when --no-mappability is set."
         ),
     )
     idx.set_defaults(func=index_command)
@@ -1327,7 +1305,7 @@ def _add_quant_io_options(grp) -> None:
     grp.add_argument(
         "--annotated-bam",
         help="Write an annotated BAM with per-fragment assignment tags "
-        "(ZT, ZG, ZR, ZI, ZJ, ZF, ZW, ZC, ZH, ZN, ZS, ZL, ZB) to this path. "
+        "(ZT, ZG, ZR, ZI, ZJ, ZF, ZW, ZC, ZH, ZN, ZS, ZL) to this path. "
         "Requires a second pass over the BAM.",
     )
     grp.add_argument(

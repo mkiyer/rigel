@@ -454,9 +454,9 @@ class AccumulatorPayload:
 
     # -- sj boundaries: one exact donor->acceptor jump. Pure RNA by construction --
     #: uint32[n_sj, 2] — both genome-strand columns are kept although consumers sum them, because the split detects
-    #: aligner artifacts (false-positive ``N`` operations on genomic DNA) that ``rigel.splice_blacklist`` does not
-    #: list. In a stranded library a real sj inherits the library's strand specificity, while an artifact deposits
-    #: on both strands; a clean and an artifactual sj carry the same total, so the information is only in the split.
+    #: aligner artifacts (false-positive ``N`` operations on genomic DNA). In a stranded library a real sj inherits
+    #: the library's strand specificity, while an artifact deposits on both strands; a clean and an artifactual sj
+    #: carry the same total, so the information is only in the split.
     sj_count: np.ndarray
     #: float64[n_sj] — read by ``second_pass`` to score a held fragment's sj evidence.
     sj_inv_length_sum: np.ndarray
