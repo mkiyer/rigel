@@ -96,9 +96,10 @@ at κ = ½ the gDNA fraction cancels from the strand mean. Every score is read p
 - **The splice blacklist is retired** (issue #49, issue #63, issue #64). The recommended STAR settings report a
   genomic fragment's contiguous reading beside its spliced one, which is the protection the blacklist gave; what they
   do not cover is stated (issue #7). A blacklist brought back later is regenerated at those settings first.
-- **Ruled, not yet built.** A multimapper's candidates are pruned within each place, never across places, so no place
-  is orphaned and the EM decides between places (issue #62; §9.4). An efficiency of exactly 1 gives RNA's own length,
-  and only the excess over 1 is carried (issue #65; §9.2).
+- **A multimapper's candidates are pruned within each place, never across places**, so no place is orphaned and the
+  EM decides between places (issue #62; §9.4).
+- **Ruled, not yet built.** An efficiency of exactly 1 gives RNA's own length, and only the excess over 1 is carried
+  (issue #65; §9.2).
 
 ---
 
@@ -649,7 +650,7 @@ components of transcripts linked by shared fragments (`locus.build_multi_loci`),
 annotated and synthetic alike, and one gDNA component. A template no hit of which reaches a transcript is intergenic
 gDNA. A candidate's terms are its length table, strand, coverage weight and per-base overhang penalty
 (`FragmentScoringConfig.overhang_alpha`), plus a place weight and sequence on a multimapper; one under
-`pruning_min_posterior` of the unit's best is pruned (issue #32).
+`pruning_min_posterior` of its place's best is pruned (issue #32; a unique fragment has one place, §9.4).
 
 > **gDNA can explain an alignment it can produce: unspliced, and implicit (a pair whose gap could hold an annotated
 > intron). A multimapper can be gDNA if any of its alignments can; a sequenced junction cannot. gDNA then COMPETES as
@@ -723,7 +724,13 @@ refused (`EQUATIONS.md`, the pseudocounts' odds).
 > is the deposit rule's mass at the reader's efficiencies, `w = Σ_o m_o·c_o`, on every candidate there**
 > (`capture_eff_length.place_log_weights`). **A hit with no transcript candidate is an intergenic place: uncaptured, at
 > calibration's bulk gDNA rate, a per-unit background no locus carries, never pruned** (`em_locus.h`'s
-> `IntergenicTerm`; `EQUATIONS.md`, a multimapper's places).
+> `IntergenicTerm`; `EQUATIONS.md`, a multimapper's places). **Pruning runs within each place, never across places:
+> a place keeps each pool's candidates within the bound of its own best, and its gDNA term within the bound of its
+> own best RNA, or always where it has none** (`scoring.cpp`'s `keep_within_places`).
+
+Every place a fragment was aligned to stays in the EM, so which copy it came from is decided on the whole likelihood
+and the components' abundances: a likelihood ratio of 1e-4 between two paralogous copies is overturned by an
+abundance ratio of 1e4, ordinary between an expressed gene and a silent copy.
 
 Intergenic is uncaptured (`priors.intergenic_gdna_rate`) because an aligner puts captured genic fragments on
 intergenic copies, and their efficiency would turn that artifact into gDNA. The rate is fixed from calibration, never

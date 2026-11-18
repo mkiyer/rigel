@@ -1450,7 +1450,8 @@ def _add_quant_advanced_options(grp, qd: dict) -> None:
     grp.add_argument(
         "--pruning-min-posterior",
         type=float,
-        help="Minimum posterior threshold for candidate pruning, in [0,1) "
+        help="Minimum posterior threshold for candidate pruning, in [0,1), against the best "
+        "candidate at the same alignment; a multimapper's alignments are pruned each on its own "
         f"(default: {qd['pruning_min_posterior']:g}). Lower values keep more candidates "
         "(conservative). Set to 0 to disable pruning entirely.",
     )

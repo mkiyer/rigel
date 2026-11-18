@@ -122,8 +122,9 @@ class FragmentScoringConfig:
         no penalty, and 0 is a hard gate that excludes any candidate with overhang. Its log is the scorer's
         per-base log-penalty (:attr:`overhang_log_penalty`, −inf at the gate).
     pruning_min_posterior : float
-        A candidate whose likelihood falls below this fraction of its fragment's best is pruned, in [0, 1): at 1 a
-        fragment would keep only its tied-best candidates.
+        A candidate whose likelihood falls below this fraction of the best at its place is pruned, in [0, 1): at 1 a
+        place would keep only its tied-best candidates. A multimapper's places are pruned each on its own, so every
+        place stays in the EM.
     """
 
     overhang_alpha: float = 0.1

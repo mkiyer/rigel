@@ -188,9 +188,10 @@ class NativeFragmentScorer {
         return stype == SPLICE_UNSPLICED || stype == SPLICE_IMPLICIT;
     }
 
-    /// The locus's gDNA candidate is kept when its likelihood is within `max_ll_delta_` of the unit's best RNA
-    /// candidate, the bound every RNA candidate meets within its pool. A footprint the gDNA length law cannot produce
-    /// is pruned here, with no length rule of its own. The intergenic term is never pruned (`flush_mm_group`).
+    /// The locus's gDNA candidate is kept when its likelihood is within `max_ll_delta_` of the best RNA candidate at
+    /// its place, the bound every RNA candidate meets within its pool there (a unique fragment has one place). A
+    /// footprint the gDNA length law cannot produce is pruned here, with no length rule of its own. The intergenic
+    /// term is never pruned (`flush_mm_group`).
     inline bool gdna_competes(double gdna_ll, double best_rna_ll) const {
         return best_rna_ll - gdna_ll <= max_ll_delta_;
     }
@@ -368,8 +369,22 @@ private:
         int64_t multimapper = 0;                         // multimapper EM units
     };
 
+    // A multimapper's place: the group's hits whose extents overlap on one reference, chained by extent as
+    // `merge_places` chains one key's hits. The best RNA term there in each pool.
+    struct PlaceBest {
+        double annotated = NEG_INF;
+        double synthetic = NEG_INF;
+        double rna() const { return std::max(annotated, synthetic); }
+    };
+
+    // One term's extent on its reference, for finding the places: `term` indexes the RNA terms, then the gDNA terms.
+    struct TermSpan {
+        int32_t ref, start, end;
+        uint32_t term;
+    };
+
     // The open multimapper group, which persists across chunks: alignments are scored as they arrive, and
-    // flush_mm_group() merges them over places, prunes and emits.
+    // flush_mm_group() prunes them within each place, merges them over places and emits.
     struct MultimapperGroup {
         int64_t fid = -1;
         int     n_members = 0;
@@ -382,9 +397,14 @@ private:
         std::vector<PlaceTerm> gdna_terms;
         std::vector<Candidate> gdna_merged;
         LogSumExp intergenic;
+        // The flush's scratch: each term's place, each place's best, and the terms kept within their place
+        std::vector<TermSpan> spans;
+        std::vector<int32_t> place_of;
+        std::vector<PlaceBest> places;
+        std::vector<PlaceTerm> kept, gdna_kept;
 
         void reset() {
-            terms.clear();  // all four keep their allocation
+            terms.clear();  // every vector keeps its allocation
             merged.clear();
             gdna_terms.clear();
             gdna_merged.clear();
@@ -512,8 +532,17 @@ private:
                                        c.coverage_wt});
     }
 
-    // Writes a unit's candidates to the CSR, pruned by pool: annotated transcripts and synthetic spans are each kept
-    // within `max_ll_delta_` of their own pool's best. Returns the best kept term, -inf when none is kept.
+    // Writes one candidate to the CSR.
+    static void emit(const Candidate& c, FillState& st) {
+        st.ti.push_back(c.key);
+        st.ll.push_back(static_cast<float>(c.log_lik));
+        st.ct.push_back(static_cast<uint8_t>(c.count_col));
+        st.cw.push_back(static_cast<float>(c.coverage_wt));
+        ++st.cand_cur;
+    }
+
+    // Writes a one-place unit's candidates to the CSR, pruned by pool: annotated transcripts and synthetic spans are
+    // each kept within `max_ll_delta_` of their own pool's best. Returns the best kept term, -inf when none is kept.
     double emit_pruned(const Candidate* c, int n, FillState& st) const {
         double annotated_best = NEG_INF;
         double synthetic_best = NEG_INF;
@@ -525,15 +554,56 @@ private:
         for (int j = 0; j < n; ++j) {
             const double pool_best = t_is_synthetic_[c[j].key] ? synthetic_best : annotated_best;
             if (pool_best - c[j].log_lik <= max_ll_delta_) {
-                st.ti.push_back(c[j].key);
-                st.ll.push_back(static_cast<float>(c[j].log_lik));
-                st.ct.push_back(static_cast<uint8_t>(c[j].count_col));
-                st.cw.push_back(static_cast<float>(c[j].coverage_wt));
-                ++st.cand_cur;
+                emit(c[j], st);
                 best_ll = std::max(best_ll, c[j].log_lik);
             }
         }
         return best_ll;
+    }
+
+    // A multimapper's terms pruned within each place, never across places: at a place, each RNA term is kept within
+    // `max_ll_delta_` of its pool's best there, and the gDNA term within it of the place's best RNA, or always where
+    // the place has no RNA. Every place keeps its best, so none is dropped whole, and which place the molecule came
+    // from is the EM's to decide. Fills `mm.kept` and `mm.gdna_kept`.
+    void keep_within_places(MultimapperGroup& mm) const {
+        const auto n_rna = static_cast<uint32_t>(mm.terms.size());
+        mm.spans.clear();
+        for (uint32_t i = 0; i < n_rna; ++i)
+            mm.spans.push_back({t_ref_[mm.terms[i].key], mm.terms[i].start, mm.terms[i].end, i});
+        for (uint32_t i = 0; i < mm.gdna_terms.size(); ++i)
+            mm.spans.push_back({mm.gdna_terms[i].key, mm.gdna_terms[i].start, mm.gdna_terms[i].end, n_rna + i});
+        std::sort(mm.spans.begin(), mm.spans.end(), [](const TermSpan& a, const TermSpan& b) {
+            return a.ref != b.ref ? a.ref < b.ref : a.start < b.start;
+        });
+        mm.place_of.assign(mm.spans.size(), -1);
+        mm.places.clear();
+        int32_t ref = 0, end = 0;
+        for (const TermSpan& s : mm.spans) {
+            if (mm.places.empty() || s.ref != ref || s.start >= end) {
+                mm.places.emplace_back();
+                ref = s.ref;
+                end = s.end;
+            } else {
+                end = std::max(end, s.end);
+            }
+            mm.place_of[s.term] = static_cast<int32_t>(mm.places.size()) - 1;
+        }
+        for (uint32_t i = 0; i < n_rna; ++i) {
+            PlaceBest& best = mm.places[mm.place_of[i]];
+            double& pool = t_is_synthetic_[mm.terms[i].key] ? best.synthetic : best.annotated;
+            pool = std::max(pool, mm.terms[i].log_lik);
+        }
+        mm.kept.clear();
+        for (uint32_t i = 0; i < n_rna; ++i) {
+            const PlaceBest& best = mm.places[mm.place_of[i]];
+            const double pool = t_is_synthetic_[mm.terms[i].key] ? best.synthetic : best.annotated;
+            if (pool - mm.terms[i].log_lik <= max_ll_delta_) mm.kept.push_back(mm.terms[i]);
+        }
+        // A place with no RNA term reads -inf, which every gDNA term competes with.
+        mm.gdna_kept.clear();
+        for (uint32_t i = 0; i < mm.gdna_terms.size(); ++i)
+            if (gdna_competes(mm.gdna_terms[i].log_lik, mm.places[mm.place_of[n_rna + i]].rna()))
+                mm.gdna_kept.push_back(mm.gdna_terms[i]);
     }
 
     // Closes the unit whose candidates were just written: its CSR offset, identity, class and splice type, and its two
@@ -556,8 +626,8 @@ private:
         st.gated_fclass.push_back(static_cast<int8_t>(fclass));
     }
 
-    // Closes the open multimapper group: merges each transcript's terms over its places, prunes them, decides the
-    // group's outcome and resets the accumulators. The outcome is
+    // Closes the open multimapper group: prunes its terms within each place (`keep_within_places`), merges each
+    // transcript's kept terms over its places, decides the group's outcome and resets the accumulators. The outcome is
     //   - an EM unit, when an RNA candidate survives;
     //   - intergenic gDNA, when none does but an intergenic place does: no locus holds it (gDNA at a genic place has
     //     no locus without a candidate);
@@ -565,18 +635,18 @@ private:
     void flush_mm_group(FillState& st) const {
         MultimapperGroup& mm = st.mm;
         if (mm.n_members == 0) return;
-        merge_places(mm.terms, mm.merged);
+        keep_within_places(mm);
+        merge_places(mm.kept, mm.merged);
         const int64_t emit_start = st.cand_cur;
-        const double best_ll = emit_pruned(mm.merged.data(), static_cast<int>(mm.merged.size()), st);
-        // The group's two gDNA terms, each summed over its places: the locus's and the intergenic one; -inf where no
-        // place of the kind survived its gates.
-        const double gdna_ll = sum_over_places(mm.gdna_terms, mm.gdna_merged);
+        for (const Candidate& c : mm.merged) emit(c, st);
+        // The group's two gDNA terms, each summed over its places: the locus's, over the places that kept it, and the
+        // intergenic one; -inf where no place of the kind survived.
+        const double gdna_ll = sum_over_places(mm.gdna_kept, mm.gdna_merged);
         const double ig_ll = mm.intergenic.value();
         if (st.cand_cur > emit_start) {
-            // The locus's gDNA is kept when it competes with the group's best RNA candidate. The intergenic term is
-            // kept whenever a place survived: its rate and the locus's rates and lengths are not in these scores, so
-            // no difference of scores bounds its posterior.
-            close_unit(st, mm.fid, FRAG_MULTIMAPPER, mm.best_stype, gdna_competes(gdna_ll, best_ll), gdna_ll, ig_ll);
+            // The intergenic term is kept whenever a place survived: its rate and the locus's rates and lengths are not
+            // in these scores, so no difference of scores bounds its posterior.
+            close_unit(st, mm.fid, FRAG_MULTIMAPPER, mm.best_stype, gdna_ll > NEG_INF, gdna_ll, ig_ll);
             ++st.stats.multimapper;
         } else if (ig_ll > NEG_INF) {
             st.intergenic_fid.push_back(mm.fid);

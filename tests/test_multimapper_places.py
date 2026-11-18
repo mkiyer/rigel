@@ -589,6 +589,64 @@ def test_a_unique_fragment_is_untouched_by_a_place_weight():
             assert np.array_equal(getattr(plain, name), getattr(weighted, name)), name
 
 
+# ── pruning runs within each place, never across places ──────────────────────────────────────────────
+#
+# A place's candidates are pruned against that place's own best, pool by pool, and its gDNA term against that place's
+# own best RNA (kept always where the place has none). So no place a fragment was aligned to is dropped whole: which
+# copy it came from is the EM's to decide, on the whole likelihood and the components' abundances. Within a place,
+# alternatives are still pruned.
+
+#: The pruning bound, in nats.
+DELTA = -math.log(FragmentScoringConfig().pruning_min_posterior)
+
+
+def test_a_place_keeps_its_candidate_however_much_better_another_place_explains_the_fragment():
+    """Two places, the second 10 nats less likely (its place weight), past the bound: its transcript stays a
+    candidate at its own term, and the first place's is unmoved."""
+    assert 10.0 > DELTA
+    near = _route([[Hit((0,), start=1000), Hit((1,), start=5000)]])
+    far = _route([[Hit((0,), start=1000), Hit((1,), start=5000, log_weight=-10.0)]])
+    assert sorted(far.t_indices.tolist()) == [0, 1]
+    assert _rna(far, 1) == pytest.approx(_rna(near, 1) - 10.0, abs=1e-5)
+    assert _rna(far, 0) == pytest.approx(_rna(near, 0), abs=1e-5)
+    expected = np.logaddexp(_term(250), _term(250) - 10.0)
+    assert float(far.gdna_log_liks[0]) == pytest.approx(expected, abs=1e-5)
+
+
+def test_within_one_place_a_candidate_past_the_bound_is_still_pruned():
+    """Two overlapping hits are one place: the one 10 nats below the place's best is an alternative it prunes."""
+    em = _route([[Hit((0,), start=1000), Hit((1,), start=1020, log_weight=-10.0)]])
+    assert em.t_indices.tolist() == [0]
+
+
+def test_a_places_gdna_is_judged_against_its_own_rna_not_another_places():
+    """A spliced place beside an unspliced one 15 nats less likely: the second place's transcript and its gDNA term
+    are within the bound of each other, so both stay, and the fragment is not certified RNA by the first place's
+    better splice."""
+    em = _route(
+        [[Hit((0,), SpliceType.SPLICED_ANNOT, start=1000), Hit((1,), start=5000, log_weight=-15.0)]]
+    )
+    assert sorted(em.t_indices.tolist()) == [0, 1]
+    assert not em.is_spliced[0]
+    assert float(em.gdna_log_liks[0]) == pytest.approx(_term(250) - 15.0, abs=1e-5)
+
+
+def test_a_place_with_no_rna_keeps_its_gdna():
+    """A place whose transcript is no candidate there (no exonic base) is gDNA's alone, so its gDNA term stays however
+    much better another place's RNA reads."""
+    em = _route(
+        [
+            [
+                Hit((0,), SpliceType.SPLICED_ANNOT, start=1000),
+                Hit((1,), start=5000, exon_bp=0, log_weight=-15.0),
+            ]
+        ]
+    )
+    assert em.t_indices.tolist() == [0]
+    assert not em.is_spliced[0]
+    assert float(em.gdna_log_liks[0]) == pytest.approx(_term(250) - 15.0, abs=1e-5)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 #  3. The place weight: the deposit rule's mass at each object, times its efficiency
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
