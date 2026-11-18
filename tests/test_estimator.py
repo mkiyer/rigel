@@ -958,7 +958,9 @@ class TestWholeCounts:
         assert whole[1] == _rounded_within_the_locus(frac)[1] > 0
 
     def test_a_transcript_expecting_under_half_a_fragment_gets_none(self):
-        units, unambig = [[0, 1]] * 100 + [[0, 2]], ((0, 500.0), (1, 50.0))
+        """Transcript 2 shares one unit with transcript 0. Its 100 deterministic fragments keep it live, so its
+        share of that unit is a real expectation (about 0.14), not a dead component's residue."""
+        units, unambig = [[0, 1]] * 100 + [[0, 2]], ((0, 500.0), (1, 50.0), (2, 100.0))
         frac, _, _, _ = _one_locus(units, mode="fractional", unambig=unambig)
         assert 0.0 < frac[2] < 0.5
         whole, _, _, _ = _one_locus(units, mode="sample", unambig=unambig)
@@ -1654,6 +1656,33 @@ def test_the_em_has_one_warm_start(start):
     test's second start, which the coverage weights now make."""
     with pytest.raises(TypeError, match="warm_start"):
         EMConfig(warm_start=start)
+
+
+# ── A component the EM left at its floor takes nothing at assignment ─────────────────────────────
+
+
+def test_a_component_at_its_floor_is_assigned_exactly_nothing():
+    """Two transcripts share every unit, the second at e^-3 of the first's likelihood, so VBEM's
+    evidence-proportional prior lets it die: the EM ends with its alpha at the floor. The assignment
+    must give it no mass at all. Weighed at ``log(theta + 1e-300)`` it kept a posterior of about 1e-300
+    per unit, and a fractional run wrote it a count of about 1e-299, which a ``count > 0`` filter reads
+    as expressed. With nothing assigned its mean posterior is undefined (NaN), and the live transcript
+    and gDNA still hold every unit."""
+    part = _warm_start_partition(n_units=200, log_liks=(0.0, -3.0), gdna_log_lik=-8.0)
+    est = _warm_start_estimator(2)
+    gdna, _, _ = est.run_batch_locus_em_partitioned(
+        [part],
+        [np.arange(2, dtype=np.int32)],
+        np.array([1.0]),
+        rna_prior_count=np.array([1.0]),
+        em_iterations=2000,
+    )
+    counts = est.em_counts.sum(axis=1)
+    assert counts[1] == 0.0, f"the dead component was assigned {counts[1]!r}"
+    assert counts[0] > 199.0
+    assert counts.sum() + gdna == pytest.approx(200.0, rel=1e-12)
+    mean = est.posterior_mean()
+    assert np.isnan(mean[1]) and 0.0 < mean[0] <= 1.0
 
 
 def test_an_unknown_assignment_mode_code_is_refused_by_the_native_em(monkeypatch):

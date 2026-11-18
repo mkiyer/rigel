@@ -245,7 +245,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 |------|---------|-------------|
 | `--threads N` | 0 (all cores) | Total thread budget. During scan it splits between scan workers and `--scan-bgzf-threads`; locus EM reuses the same budget (stages run serially). |
 | `--scan-bgzf-threads N` | derived | BGZF decompression threads reserved from `--threads` during scan. The default divides the budget by the measured ratio — one decompression thread keeps about eight scan workers fed — so 4 threads spend none on it, 8 spend one and 16 spend two. `0` disables htslib threaded decompression. |
-| `--scan-buffer-size GiB` | `2` | Max scan buffer before chunks spill to disk |
+| `--scan-buffer-size GiB` | `2` | Memory for the scanned fragments held for quantification before the oldest chunks spill to disk. It bounds that buffer only: beside it each scan worker holds up to three chunks (one it is filling, two finished in the scanner's queue), the spill writer up to two until they are written, and the index, the fragments the second pass holds, calibration and the EM take their own |
 | `--tmpdir DIR` | system temp | Directory for buffer spill files |
 | `--scan-fragments-per-chunk N` | `1000000` | Buffered fragments per scan chunk before the native scanner hands off to the Python buffer |
 | `--scan-read-name-batch-size N` | `512` | (Advanced) Read-name groups per native scanner input-queue item |
@@ -481,7 +481,7 @@ synthetic nascent spans are rows of `nascent_quant`.
 | `count_nascent` | Fragment count of the transcript's nascent span (`nascent_id`); `0` when it has none. Every transcript the span models repeats it, so never sum it over isoforms |
 | `tpm` | Transcripts per million, over the annotated transcripts |
 | `tpm_total_rna` | TPM over all RNA, annotated transcripts and nascent spans together; comparable to `tpm_total_rna` in `nascent_quant` |
-| `posterior_mean` | Mean EM posterior over units assigned to this transcript |
+| `posterior_mean` | The EM's mean posterior for the transcript, Σp²/Σp over the fragments the EM weighed it for, p each fragment's posterior there (under `--assignment-mode sample` the fragments drawn to it). `NaN` (an empty field in the TSV) where the EM assigned it nothing: its fragments were all deterministic, it had none, or the EM gave it none |
 
 ### gene_quant.feather / gene_quant.tsv
 
@@ -1017,9 +1017,14 @@ read). For synthetic genomes or stranded-only benchmarks, pass `--no-mappability
 at index time, and the unobservable genome is the reference's N runs.
 
 **How much memory does Rigel use?**
-The scan buffer defaults to 2 GiB (`--scan-buffer-size`); overflow spills to
-disk under `--tmpdir`. Typical paired-end libraries (50–100M read pairs) fit
-within the default.
+The scanned fragments are held for quantification in a buffer of 2 GiB by default
+(`--scan-buffer-size`); past it the oldest chunks spill to disk under `--tmpdir`.
+Typical paired-end libraries (50–100M read pairs) fit within the default. The
+option bounds that buffer only. Beside it each scan worker holds up to three
+chunks of `--scan-fragments-per-chunk` fragments (one it is filling, two finished
+in the scanner's queue), and the spill writer up to two until they are written;
+the index, the fragments the second pass holds, calibration and the EM take their
+own memory.
 
 **Can I run Rigel on a cluster?**
 Yes. Each `rigel quant` is independent. Parallelise at the sample level via

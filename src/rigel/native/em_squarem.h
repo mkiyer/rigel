@@ -242,7 +242,9 @@ struct LocusEM {
         return delta;
     }
 
-    // theta at the converged state, the intergenic slot zeroed, and the locus's data count M beside it.
+    // theta at the converged state, the intergenic slot zeroed, and the locus's data count M beside it. A VBEM
+    // component at the floor is dead (the floor stands in for an alpha of 0), so its share is exactly 0, as a MAP
+    // component's at its floor is.
     void read_out(const std::vector<double>& state, EMResult& out) const {
         const int n = n_locus();
         out.theta.assign(state.begin(), state.end());
@@ -251,7 +253,7 @@ struct LocusEM {
             for (int i = 0; i < n; ++i) total += state[i];
             if (total > 0.0) {
                 double inv = 1.0 / total;
-                for (int i = 0; i < n; ++i) out.theta[i] = state[i] * inv;
+                for (int i = 0; i < n; ++i) out.theta[i] = state[i] > VBEM_SQUAREM_PRIOR_FLOOR ? state[i] * inv : 0.0;
             }
         }
         if (ig.idx >= 0) {

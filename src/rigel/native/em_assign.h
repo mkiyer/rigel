@@ -340,13 +340,14 @@ inline void annotate_unit(const LocusSubProblem& sub, const IntergenicTerm& ig, 
 }
 
 // Assign each unit's posterior at the converged theta and scatter it into the accumulators. The weights are MAP's
-// E-step's at theta, whichever EM ran, with the intergenic term's at the locus's converged data count. rng is this
-// locus's stream (SAMPLE only); `unit_offset` is the locus's first unit in the per-unit annotation.
+// E-step's at theta, whichever EM ran, a dead component's -inf (`converged_log_weights`), with the intergenic term's
+// at the locus's converged data count. rng is this locus's stream (SAMPLE only); `unit_offset` is the locus's first
+// unit in the per-unit annotation.
 inline LocusAssignment assign_posteriors(const LocusSubProblem& sub, const double* theta, const IntergenicTerm& ig,
                                          double data_count, int assignment_mode, SplitMix64& rng,
                                          const AssignmentSinks& out, int unit_offset) {
     std::vector<double> log_weights(sub.n_components);
-    map_log_weights(theta, sub.log_eff_len.data(), sub.n_components, ig, data_count, log_weights.data());
+    converged_log_weights(theta, sub.log_eff_len.data(), sub.n_components, ig, data_count, log_weights.data());
     const std::vector<double> post = unit_posteriors(sub, log_weights);
     const bool fractional = assignment_mode == ASSIGN_FRACTIONAL;
     LocusAssignment res;

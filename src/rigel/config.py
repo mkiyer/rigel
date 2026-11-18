@@ -191,7 +191,10 @@ class BamScanConfig:
     read_name_batch_size : int
         Read-name groups per native scanner input queue item (default 512).
     buffer_size_bytes : int
-        Max scan-buffer memory before disk spill (default 2 GiB).
+        Memory for the buffered fragments before the oldest chunks spill to disk (default 2 GiB). It bounds the
+        buffer only: beside it each scan worker fills one chunk and the scanner's queue holds
+        ``OUTPUT_CHUNKS_PER_WORKER`` finished ones per worker (the native ``constants.h``), and the spill writer up
+        to ``CONSTANTS.resources.spill_queue_chunks``.
     spill_dir : Path, str, or None
         Directory for spilled buffer chunks (default None).
     """

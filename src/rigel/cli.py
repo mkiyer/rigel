@@ -1414,9 +1414,9 @@ def _add_quant_performance_options(grp, qd: dict) -> None:
     grp.add_argument(
         "--scan-buffer-size",
         type=float,
-        help="Maximum scan buffer size in GiB before chunks are spilled "
-        f"to disk (default: {qd['scan_buffer_size']:g}). Increase if you have ample RAM to reduce "
-        "spill I/O.",
+        help="Memory in GiB for the scanned fragments held for quantification before the oldest chunks "
+        f"spill to disk (default: {qd['scan_buffer_size']:g}). It bounds that buffer only, not the "
+        "chunks the scan workers hold in flight. Increase if you have ample RAM to reduce spill I/O.",
     )
     grp.add_argument(
         "--tmpdir",

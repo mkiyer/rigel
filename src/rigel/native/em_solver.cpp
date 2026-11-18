@@ -248,7 +248,8 @@ struct BatchEM {
         prof.assignment = assigned;
         prof.gdna_eff_len = gdna_eff_len[li];
         std::vector<double> lw(static_cast<size_t>(sub.n_components));
-        map_log_weights(em.theta.data(), sub.log_eff_len.data(), sub.n_components, ig, em.data_count, lw.data());
+        converged_log_weights(em.theta.data(), sub.log_eff_len.data(), sub.n_components, ig, em.data_count,
+                              lw.data());
         prof.final_data_loglik = marginal_data_loglik(ec_data, lw.data());
         prof.extract_us = us(t0, t_extract);
         prof.build_ec_us = us(t_extract, t_classes);

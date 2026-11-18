@@ -491,7 +491,10 @@ class AbundanceEstimator:
     # ------------------------------------------------------------------
 
     def posterior_mean(self) -> np.ndarray:
-        """Per-transcript mean posterior at assignment."""
+        """Per-transcript mean posterior at assignment, ``Σp² / Σp`` over the EM units with a candidate at the
+        transcript (in sample mode the units drawn to it), ``p`` each unit's posterior there. ``NaN`` where the EM
+        assigned it nothing: a transcript whose every fragment is deterministic, or that no unit gave any posterior
+        (a component the EM left at zero takes none)."""
         n_assigned = self._em_n_assigned
         if n_assigned is None:
             return np.full(self.num_transcripts, np.nan)
@@ -533,7 +536,8 @@ class AbundanceEstimator:
         count_nascent : the synthetic span's own count (0 when ``nascent_id`` is ".")
         tpm : transcripts per million (annotated transcripts only)
         tpm_total_rna : TPM normalized over all RNA (annotated transcripts + synthetic spans)
-        posterior_mean : mean posterior at EM assignment
+        posterior_mean : mean posterior at EM assignment (:meth:`posterior_mean`), NaN where the EM assigned the
+            transcript nothing
         """
         total = self.t_counts
         unique = self.unambig_counts

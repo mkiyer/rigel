@@ -43,6 +43,16 @@ inline void map_log_weights(const double* theta, const double* log_eff_len, int 
     if (ig.idx >= 0) out[ig.idx] = intergenic_log_weight(ig, data_count);
 }
 
+// The weights at the converged theta, which the assignment reads: MAP's E-step's, but a component at a share of
+// exactly 0 (the EM left it at its floor) is -inf, so it takes no posterior. At log(0 + eps) it would take about eps
+// of every unit it is a candidate of: a count no fragment supports, and a candidate a whole-count draw can be handed.
+inline void converged_log_weights(const double* theta, const double* log_eff_len, int n_locus,
+                                  const IntergenicTerm& ig, double data_count, double* out) {
+    map_log_weights(theta, log_eff_len, n_locus, ig, data_count, out);
+    for (int c = 0; c < n_locus; ++c)
+        if (c != ig.idx && !(theta[c] > 0.0)) out[c] = -std::numeric_limits<double>::infinity();
+}
+
 // One locus's partition: its candidate CSR and per-unit arrays, and its transcripts.
 struct PartitionView {
     const int64_t* offsets;
