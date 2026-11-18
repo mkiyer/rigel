@@ -35,12 +35,18 @@ DEFAULT_ARMS = DEFAULT_SUITE / "arms"
 FLGAP = ("flgap_rna_long", "flgap_rna_short")
 LEVELS = ("g00", "g05", "g50", "g98")
 
-#: the per-axis fields the page renders. ⛔ `fn_mass`/`fn_n` are deliberately absent: a false negative needs an
-#: estimate of exactly zero, which a fractional posterior never is, so the column reads 0 on every condition and
-#: would look like a perfect score for something unmeasured (TRAPS: could-the-arm-have-fired).
-#: `count_over`/`count_under` decompose the total honestly instead.
+#: the per-axis fields the page renders. `fp_mass` is the part of `count_over` on a silent transcript, and `fn_mass`
+#: the part of `count_under` on an expressed transcript the estimate gives exactly zero (one the EM left at its floor).
 AXIS_FIELDS = ("n_expressed", "n_detected", "count_true", "count_abs_err", "count_net_err",
-               "count_over", "count_under", "fp_mass", "fp_n", "mard", "spearman")
+               "count_over", "count_under", "fp_mass", "fp_n", "fn_mass", "fn_n", "mard", "spearman")
+
+
+def shown(path: Path) -> str:
+    """A source as the page prints it: under the data root's name, never this machine's path."""
+    try:
+        return f"$RIGEL_RUNS/{Path(path).resolve().relative_to(RUNS.resolve())}"
+    except ValueError:
+        return Path(path).name
 
 
 def load_instrument():
@@ -159,7 +165,7 @@ def build(args) -> dict:
     arms, sources = args.arms, []
 
     def arm(path: Path):
-        sources.append(str(path))
+        sources.append(shown(path))
         return qa._load(path)
 
     base = arm(arms / "qa_ladder_base.jsonl")
@@ -203,16 +209,16 @@ def build(args) -> dict:
     for panel in ("ladder", *FLGAP):
         path = args.cvo / f"cvo_{panel}.json"
         if path.is_file():
-            sources.append(str(path))
+            sources.append(shown(path))
             calibration[panel] = calibration_rows(path)
 
     vcap = {}
     if args.vcap is not None and args.vcap.is_file():
         q = json.loads(args.vcap.read_text())["quantification"]
         vcap = {"truth": args.vcap_truth, "v071": args.vcap_v071, "rc": q["fraction_gdna"]}
-        sources.append(str(args.vcap))
+        sources.append(shown(args.vcap))
     if args.v071 is not None and args.v071.is_file():
-        sources.append(str(args.v071))
+        sources.append(shown(args.v071))
 
     modes = sorted({str(r.get("assignment_mode")) for r in base.values()})
     if len(modes) > 1:
@@ -225,7 +231,7 @@ def build(args) -> dict:
         "policy": "transfer", "depth": round(sum(p0[k]["true"] for k in p0)),
         "scored": args.scored or time.strftime(
             "%Y-%m-%d", time.localtime((arms / "qa_ladder_base.jsonl").stat().st_mtime)),
-        "baseline": args.baseline, "root": str(RUNS), "sources": sources, "star": star_meta,
+        "baseline": args.baseline, "sources": sources, "star": star_meta,
     }
     if args.suite.is_dir():
         meta.update(index_composition(args.suite, conds[0]))

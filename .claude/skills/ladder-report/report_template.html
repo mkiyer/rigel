@@ -169,46 +169,14 @@ footer code{background:none;padding:0;word-break:break-all}
 </style>
 
 <header class="top"><div class="top-in">
-  <span class="eyebrow">Rigel · 0.8.0 release candidate</span>
+  <span class="eyebrow">Rigel · report card</span>
   <div class="chips" id="chips"></div>
 </div></header>
 
 <div class="wrap">
   <div class="lede">
-    <h1>End-to-end accuracy, release candidate against 0.7.1</h1>
-    <p style="margin-top:10px">Sixteen simulated libraries of <strong>10,000,000 fragments</strong> each,
-    spanning 0–98&nbsp;% genomic-DNA contamination × two strand specificities × capture on and off, then the
-    two fragment-length gap panels, calibration against an oracle calibration, and one real cell-line mix with
-    per-fragment truth. Every simulated figure is scored against the simulator&rsquo;s own <strong>realised
-    per-fragment truth</strong>. The 0.7.1 column is a <strong>ballpark</strong>: the tagged release scored the
-    same way on the panel&rsquo;s previous simulation, not on these reads.</p>
-    <p style="margin-top:10px">Re-simulated on 2026-10-21 with a fairer simulator. No fragment is drawn over sequence
-    the reference does not know: assembly gaps (<code>N</code>) are 18.8&nbsp;% of the panel&rsquo;s genome, and the
-    panel before drew about a fifth of its gDNA there as all-<code>N</code> reads, which no aligner places and the
-    simulator&rsquo;s own alignments placed by truth. Every read now carries substitution errors at 0.2&nbsp;% per
-    base, and fragment lengths follow the configured law exactly. The fair panel exposed a defect the old one hid:
-    Rigel&rsquo;s region lengths counted those unknown bases, so it under-called gDNA by 6&ndash;21&nbsp;% on the
-    contaminated rungs of the three in-scope strata and booked the rest as nascent RNA. Since 2026-10-22 the length law
-    and calibration read only the observable genome (<code>region-lengths-count-unobservable-bases</code>, closed 2026-10-29).
-    Every number here is on the new reads; set beside an earlier card, it compares across simulations.</p>
-    <p style="margin-top:10px">Since 2026-11-13 a splice junction&rsquo;s capture is capped at the level RNA&rsquo;s own
-    spliced fragments support, each junction read against the unspliced RNA of its own exons (the <b>junction cap</b>;
-    the cap was the gDNA landscape&rsquo;s saturated level, which gDNA sets and gDNA never crosses a junction). Only
-    stranded capture-ON rows with gDNA to anchor a junction move: on the simulator&rsquo;s alignments, transcript error
-    by &minus;2.5&nbsp;%, +3.7&nbsp;% and +1.6&nbsp;% and gene error by &minus;6.6&nbsp;%, &minus;20.0&nbsp;% and
-    &minus;6.9&nbsp;% at 98, 50 and 5&nbsp;% gDNA. Every other ladder row on the simulator&rsquo;s alignments is
-    unchanged, and the STAR rung moves by at most 1.2&nbsp;%.</p>
-    <p style="margin-top:10px">Since 2026-11-14 the EM&rsquo;s gDNA share of a locus is read over <b>one tally</b>:
-    calibration&rsquo;s gDNA count over calibration&rsquo;s own count of every fragment it placed there. Before, the count
-    held each multimapper where the second pass drew it and its divisor held none, so on aligned input, where
-    multimappers join most of the library into one locus, the share read 4&ndash;7&nbsp;% too high and was clipped where
-    it passed one. The simulator&rsquo;s alignments hold no multimapper and move by under 1&nbsp;%. The STAR rung moves:
-    on its contaminated in-scope rows transcript error falls by up to 53&nbsp;% and gene error by up to 80&nbsp;%, and
-    its pools now carry the simulator&rsquo;s signs, so the excess of annotated RNA under capture shows on both inputs
-    (stranded capture ON at 98, 50 and 5&nbsp;% gDNA: +30.1&nbsp;k, +35.0&nbsp;k and +12.7&nbsp;k fragments, from
-    &minus;60.7&nbsp;k, &minus;7.7&nbsp;k and &minus;0.1&nbsp;k). Two STAR rows rise: 98&nbsp;% gDNA in the deferred
-    stratum (transcripts +13.9&nbsp;%, genes +15.4&nbsp;%) and 0&nbsp;% gDNA unstranded capture OFF (+3.0&nbsp;%,
-    +7.5&nbsp;%, one duplicated locus).</p>
+    <h1>End-to-end accuracy, HEAD against 0.7.1</h1>
+    <p style="margin-top:10px" id="lede-what"></p>
     <p style="margin-top:10px" id="star-lede"></p>
   </div>
 
@@ -226,10 +194,8 @@ footer code{background:none;padding:0;word-break:break-all}
         the synthetic entity the index makes per merged span; <b>annotated RNA</b> is the transcript table a
         user reads. The split is on <code>is_synthetic</code>.</li>
       <li><b>The ceiling arm</b> runs the same pipeline with the EM handed a perfect gDNA prior
-        (<code>oracle</code>); its distance below the release candidate prices what the prior still costs. The
-        capture-length ceiling (<code>oracle_ruler</code>) is withheld: its anchor predates the shipped capture
-        reader and it reads 476&nbsp;% on the g98 stranded capture-ON row, an instrument defect filed for
-        repair.</li>
+        (<code>oracle</code>); its distance below HEAD prices what the prior still costs. The capture-length
+        ceiling (<code>oracle_ruler</code>) is withheld until its anchor is repaired (issue&nbsp;#36).</li>
       <li><b>An effect is judged by its size</b>, genes and pools read beside the transcript table. Every arm
         runs with the scan pinned (<code>scan.total_threads=1</code>) under fractional assignment, and the locus EM
         gives one answer at any thread count, so it is exactly reproducible.</li>
@@ -248,7 +214,7 @@ footer code{background:none;padding:0;word-break:break-all}
   <section id="roll">
     <div class="sec-h"><span class="sec-n">01</span><h2>Per stratum</h2></div>
     <p class="sec-sub">The headline table. Contaminated rungs summed within a stratum, the 0&nbsp;% control on
-      its own line, and the perfect-prior ceiling beside the release candidate.</p>
+      its own line, and the perfect-prior ceiling beside HEAD.</p>
     <div class="scroll"><table class="mt" id="roll-table"></table></div>
   </section>
 
@@ -264,9 +230,8 @@ footer code{background:none;padding:0;word-break:break-all}
 
   <section id="pools">
     <div class="sec-h"><span class="sec-n">03</span><h2>Pool level — where the fragments went</h2></div>
-    <p class="sec-sub">For each ladder library, its 10&nbsp;M fragments split three ways: the truth, the
-      release candidate, and 0.7.1 (the thin bar), all to one scale, so mass moving between pools is visible
-      directly.</p>
+    <p class="sec-sub">For each ladder library, its fragments split three ways: the truth, HEAD, and 0.7.1 (the
+      thin bar), all to one scale, so mass moving between pools is visible directly.</p>
     <div class="legend">
       <span class="lg"><span class="sw" style="background:var(--gdna)"></span>gDNA <span style="color:var(--muted)">(EM + intergenic)</span></span>
       <span class="lg"><span class="sw" style="background:var(--nascent)"></span>Nascent RNA <span style="color:var(--muted)">(synthetic entities)</span></span>
@@ -303,8 +268,7 @@ footer code{background:none;padding:0;word-break:break-all}
     <div class="sec-h"><span class="sec-n">07</span><h2>Calibration against oracle calibration</h2></div>
     <p class="sec-sub">The number that ranks a calibration mechanism, upstream of the EM. <b>f<sub>gDNA</sub></b> is
       the library gDNA fraction calibration reads (P) against the origin-split truth (O). <b>MWAE</b> is the
-      mass-weighted absolute error of the per-object gDNA split, on regions and on boundaries. It calibrates each
-      condition's cached scan, re-built on 2026-10-29 once the second pass's draw landed.</p>
+      mass-weighted absolute error of the per-object gDNA split, on regions and on boundaries.</p>
     <div class="scroll"><table class="mt" id="calib-table"></table></div>
   </section>
 
@@ -317,7 +281,6 @@ footer code{background:none;padding:0;word-break:break-all}
 
   <footer>
     <span id="f-src"></span>
-    <span>Pool colours are the data-viz reference palette&rsquo;s categorical slots 1–3, in fixed order.</span>
   </footer>
 </div>
 <div id="tip" role="status" aria-live="polite"></div>
@@ -348,9 +311,15 @@ function deltaChip(now, was){
 
 document.getElementById("chips").innerHTML =
   [`commit ${M.head}`, `${M.n} ladder conditions`, `${n0(M.depth)} fragments each`,
-   `assignment ${M.assignment}`, `policy ${M.policy}`, `scored ${M.scored}`, `baseline ${M.baseline}`]
+   `assignment ${M.assignment}`, `policy ${M.policy}`, `scored ${M.scored}`]
   .map(t=>`<span class="chip">${t}</span>`).join("");
-document.getElementById("f-src").innerHTML = "Built from " + M.sources.map(s=>`<code>${M.root ? s.replace(M.root, "$RIGEL_RUNS") : s}</code>`).join(", ") +
+document.getElementById("lede-what").innerHTML =
+  `${M.n} simulated libraries of <strong>${n0(M.depth)} fragments</strong> each, spanning 0–98&nbsp;% genomic-DNA `
+  + `contamination × two strand specificities × capture on and off; then the two fragment-length gap panels, `
+  + `calibration against an oracle calibration, and one real cell-line mix with per-fragment truth. Every simulated `
+  + `figure is scored against the simulator&rsquo;s own <strong>realised per-fragment truth</strong>. `
+  + `The 0.7.1 column is <strong>${M.baseline}</strong>.`;
+document.getElementById("f-src").innerHTML = "Built from " + M.sources.map(s=>`<code>${s}</code>`).join(", ") +
   " by <code>scripts/design/quant_accuracy.py</code> and <code>calibration_vs_oracle.py</code>.";
 
 /* tiles */
@@ -380,7 +349,7 @@ for (const [strand,cap] of STRATA){
 
 /* rollup */
 (function(){
-  const cols = ["stratum","rows","annotated truth","release Σ|Δ| %","0.7.1 %","Δ","oracle prior %",
+  const cols = ["stratum","rows","annotated truth","HEAD Σ|Δ| %","0.7.1 %","Δ","oracle prior %",
                 "genes %","0.7.1 genes %","nascent est / truth","gDNA est / truth"];
   let h = "<thead><tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
   for (const [strand,cap] of STRATA){
@@ -508,7 +477,7 @@ for (const [strand,cap] of STRATA){
     c.append(ch);
     const bars = el("div","bars");
     const pick = w => Object.fromEntries(POOLS.map(([k])=>[k, r.pools[k][w]]));
-    bars.append(bar(pick("true"),"truth"), bar(pick("est"),"0.8.0"));
+    bars.append(bar(pick("true"),"truth"), bar(pick("est"),"HEAD"));
     if (r.v071) bars.append(bar(r.v071.pools,"0.7.1",true));
     c.append(bars);
     let body = "";
@@ -525,7 +494,7 @@ for (const [strand,cap] of STRATA){
       + `<td class="num">${(gf.est-gf.true>=0?"+":"−")+Math.abs(gf.est-gf.true).toFixed(4)}</td>`
       + `<td class="num was">${r.v071?r.v071.gdna_frac.toFixed(4):""}</td></tr>`;
     c.append(el("div","scroll",
-      `<table><thead><tr><th>pool</th><th>0.8.0</th><th>truth</th><th>error</th><th>0.7.1</th></tr></thead><tbody>${body}</tbody></table>`));
+      `<table><thead><tr><th>pool</th><th>HEAD</th><th>truth</th><th>error</th><th>0.7.1</th></tr></thead><tbody>${body}</tbody></table>`));
     cards.append(c);
   }
   g.append(cards); pg.append(g);
@@ -536,7 +505,7 @@ function metricTable(id, axis){
   const isTx = axis==="tx";
   const cols = ["scenario", isTx?"expressed":"expressed genes","detected","Σ|Δ|","% of true","0.7.1 %",
                 "net Δ","over-assigned","under-assigned",
-                "false pos.","on n", isTx?"med. rel err":null,"MARD","Spearman"].filter(Boolean);
+                "false pos.","on n","false neg.","on n", isTx?"med. rel err":null,"MARD","Spearman"].filter(Boolean);
   let h = "<thead><tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
   for (const [strand,cap] of STRATA){
     const rows = inStratum(S,strand,cap);
@@ -555,6 +524,7 @@ function metricTable(id, axis){
         + `<td class="num">${sgn(d.count_net_err)}</td>`
         + `<td class="num">${n0(d.count_over)}</td><td class="num">${n0(d.count_under)}</td>`
         + `<td class="num">${n0(d.fp_mass)}</td><td class="num was">${n0(d.fp_n)}</td>`
+        + `<td class="num">${n0(d.fn_mass)}</td><td class="num was">${n0(d.fn_n)}</td>`
         + (isTx?`<td class="num">${d.median_rel_err.toFixed(3)}</td>`:"")
         + `<td class="num">${d.mard.toFixed(3)}</td><td class="num">${d.spearman.toFixed(4)}</td></tr>`;
     }
@@ -617,7 +587,7 @@ metricTable("gene-table","gene");
 /* VCaP */
 (function(){
   const V = DATA.vcap || {}, box = document.getElementById("vcap");
-  const pts = [["truth", V.truth, "var(--ink)"], ["0.8.0", V.rc, "var(--gdna)"], ["0.7.1", V.v071, "var(--base)"]]
+  const pts = [["truth", V.truth, "var(--ink)"], ["HEAD", V.rc, "var(--gdna)"], ["0.7.1", V.v071, "var(--base)"]]
     .filter(p=>p[1]!==undefined && p[1]!==null);
   if (!pts.length){ box.textContent = "No VCaP run recorded."; return; }
   const lo = 0.22, hi = 0.28, x = v => 100*(v-lo)/(hi-lo);

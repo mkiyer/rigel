@@ -37,14 +37,14 @@ port of STAR, which reads STAR's index and options and matches STAR on 99.9 % of
 python .claude/skills/ladder-report/build_report.py \
     --html <scratchpad>/ladder_report.html \
     --cvo <dir> --vcap <dir>/vcap_rc/summary.json --vcap-truth 0.2518 --vcap-v071 0.263117 \
-    --v071 $RIGEL_RUNS/prototypes/2026-10-05_capture_learning/baseline/release_tag.jsonl \
-    --baseline "v0.7.1, scored 2026-10-05 on the panel before its re-simulation — a ballpark" \
+    --v071 $RIGEL_RUNS/prototypes/2026-11-16_v071_rescore/v071_sim.jsonl \
+    --baseline "v0.7.1, re-scored 2026-11-16 on the current panel, pinned like HEAD" \
     --markdown $RIGEL_RUNS/reports/ladder_accuracy_<DATE>.md
 ```
 
-The 0.7.1 rows were scored on the panel before the re-simulation of 2026-10-21 and stay on the card as a ballpark
-(owner, 2026-10-21): their reads drew gDNA over the `N` runs and carried no errors, so a delta against them crosses
-simulations. Re-score the tagged release on the current panel before reading one.
+The 0.7.1 rows are the tagged release re-scored on the current panel's reads, pinned like HEAD. Re-score the tag
+again whenever a panel is re-simulated: a delta against rows from another simulation crosses simulations. The page
+prints `--baseline` in its opening paragraph, so the label must say what the rows are.
 
 `--vcap-truth` is the mix's DNA-origin share by read name, and `--vcap-v071` 0.7.1's reading of it; `--head` and
 `--scored` default to HEAD and the base arm's date. The markdown comes from `quant_accuracy.py --markdown`, which the
@@ -75,7 +75,7 @@ watched to fail under its own perturbation — if you change the rendering, keep
 | gDNA scored EM-only | `gdna_est` **excludes** intergenic fragments; the truth counts them. The comparable estimate is `gdna_est + n_intergenic`, and off capture the intergenic half is the larger one |
 | a percent error at a truth of zero | The `g00` rung has no gDNA at all. Print `n/a`; the raw count is the whole answer (`TRAPS: a-ratio-cannot-carry-zero`) |
 | the two RNA pools folded together | The split is `is_synthetic`, **never** `is_single_exon`. A single-exon transcript is **annotated** RNA (`TRAPS: nrna-does-not-mean-synthetic`) |
-| a false-negative column | `fn_mass` needs an estimate of *exactly* zero, which a fractional posterior never is — it reads 0 on all 16 conditions and looks like a perfect score for something unmeasured (`TRAPS: could-the-arm-have-fired`). Report `count_under` |
+| a false-negative column of zeros | `fn_mass` is the truth on the expressed transcripts the estimate gives *exactly* zero, and it fires only because a component the EM left at its floor is assigned nothing. Rows scored before that fix read 0 on all 16 conditions, a perfect score for something unmeasured (`TRAPS: could-the-arm-have-fired`), and their `detected` counts nearly every transcript for the same reason. Re-score them; `count_under` is reported beside it |
 | the truth table's row count as a transcript count | The table carries a row per synthetic entity too (6,919 of 15,669 on the current index), zero on **both** sides. Only 2,466 of 9,385 gene rows are real genes. `expressed` and `detected` are the scored sets |
 | the deferred stratum unmarked | Unstranded × capture-ON carries most of the error; unmarked, a reader takes a pooled total for the tool's accuracy (`TRAPS: never-pool-the-strata`) |
 | the STAR rung's gDNA gap read as Rigel's | The aligner leaves a little of the simulated library unplaced: since the re-simulation of 2026-10-21, 1.4 % of the gDNA off capture and 0.07 % on (it was a fifth off capture, drawn over the suite genome's N runs). The rung is scored against the same truth as the simulator's alignments, so the two compare directly; `unaligned` counts what the aligner left out by origin, and the gDNA fraction's truth is read over what it placed (`gdna_frac_true_aligned`) |
