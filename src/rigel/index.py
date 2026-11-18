@@ -1305,16 +1305,17 @@ class TranscriptIndex:
 
     @property
     def partition_hash(self) -> str:
-        """16-hex-char content hash of the partition the scanner sees: a cached scan's key.
+        """16-hex-char content hash of the region partition a scan deposits into: the payload's region axis.
 
         Hashes the ``(boundary_positions, ref_pos_offsets, region_types)`` triple that
         :meth:`rigel.native.BamScanner.set_regions` receives, plus the reference lengths, so two indexes share a
-        hash iff a scan against them yields an identically keyed accumulator payload. Computed on demand, never
-        stored, so it cannot go stale against the Feather files.
+        hash iff they give the accumulator payload the same region axis. Computed on demand, never stored, so it
+        cannot go stale against the Feather files.
 
-        It covers ``regions.feather`` only, because a scan sees the region bounds and nothing else;
-        ``edges.feather`` can change while every region stays byte-identical. A cache of anything derived from the
-        boundaries needs its own key (:attr:`graph_hash`).
+        It is not a scan's key. The scan reads more of the index than the region bounds: resolution reads which
+        transcripts hold a fragment's blocks and junctions, and the junctions and the splice blacklist decide what
+        it offers, so two indexes that share this hash can tally one BAM differently. ``edges.feather`` can change
+        while every region stays byte-identical too; :attr:`graph_hash` adds the junction axis.
         """
         import hashlib
 
@@ -1331,12 +1332,14 @@ class TranscriptIndex:
 
     @property
     def graph_hash(self) -> str:
-        """16-hex-char content hash of everything the accumulator payload depends on: regions and boundaries.
+        """16-hex-char content hash of the accumulator payload's two axes: its regions and its junctions.
 
-        :attr:`partition_hash` keys a cached scan; this keys a cached tally, whose sj axis is meaningless against a
-        different sj CSR, and the boundaries can change while the regions stay byte-identical. So it hashes
-        ``partition_hash``'s inputs plus the sj CSR that crosses into ``set_sj``: the donor offsets, the acceptor
-        region-bound indices and the annotated strands. Computed on demand, never stored.
+        A tally's sj axis is meaningless against a different sj CSR, and the boundaries can change while the regions
+        stay byte-identical, so this hashes ``partition_hash``'s inputs plus the sj CSR that crosses into ``set_sj``:
+        the donor offsets, the acceptor region-bound indices and the annotated strands. A payload records it, so a
+        cached tally can be checked against the index it is read with. It is not all a scan depends on: the
+        transcript models resolution reads, the splice blacklist and the scan settings are not in it. Computed on
+        demand, never stored.
         """
         import hashlib
 
