@@ -41,6 +41,7 @@ using f64_1d = Array1<double>;
 using f64_2d = nb::ndarray<const double, nb::ndim<2>, nb::c_contig>;
 using f64_1d_out = nb::ndarray<double, nb::ndim<1>, nb::c_contig>;
 using f64_2d_out = nb::ndarray<double, nb::ndim<2>, nb::c_contig>;
+using u8_1d = Array1<uint8_t>;
 
 using hrclock = std::chrono::steady_clock;
 
@@ -334,7 +335,8 @@ nb::tuple batch_locus_em_partitioned(
     int n_threads,
     bool emit_locus_stats,
     bool emit_assignments,
-    double intergenic_rate)             // fragments per start in the efficiencies' unit; 0 reads no intergenic term
+    double intergenic_rate,             // fragments per start in the efficiencies' unit; 0 reads no intergenic term
+    u8_1d t_is_synthetic_arr)           // per transcript, or empty: with it, every unit's class masses are returned
 {
     check_assignment_mode(assignment_mode);
     const std::vector<PartitionView> views = read_partitions(partition_tuples, locus_transcript_indices);
@@ -349,6 +351,10 @@ nb::tuple batch_locus_em_partitioned(
         throw std::runtime_error(
             "batch_locus_em_partitioned: t_rna_prior_weight must be empty or of length n_transcripts_total");
     }
+    if (t_is_synthetic_arr.size() != 0 && static_cast<int>(t_is_synthetic_arr.shape(0)) != n_transcripts_total) {
+        throw std::runtime_error(
+            "batch_locus_em_partitioned: t_is_synthetic must be empty or of length n_transcripts_total");
+    }
 
     const int n_cols = n_splice_strand_cols;
     int total_units = 0;
@@ -357,6 +363,9 @@ nb::tuple batch_locus_em_partitioned(
     std::vector<int32_t> winner_tid(annotate ? total_units : 0, EM_WINNER_NONE);
     std::vector<float> winner_post(annotate ? total_units : 0, 0.0f);
     std::vector<int32_t> n_candidates(annotate ? total_units : 0, 0);
+    // Every unit's class masses, in the per-unit annotation's row order, when the caller sorts the transcripts.
+    const bool classes = t_is_synthetic_arr.size() != 0 && total_units > 0;
+    std::vector<double> class_mass(classes ? static_cast<size_t>(N_EM_CLASSES) * total_units : 0, 0.0);
 
     BatchEM batch{views,
                   locus_gdna_prior_count.data(),
@@ -374,7 +383,9 @@ nb::tuple batch_locus_em_partitioned(
                   emit_locus_stats,
                   AssignmentSinks{em_counts_out.data(), posterior_sum_out.data(), n_assigned_out.data(),
                                   n_transcripts_total, n_cols, annotate ? winner_tid.data() : nullptr,
-                                  annotate ? winner_post.data() : nullptr, annotate ? n_candidates.data() : nullptr},
+                                  annotate ? winner_post.data() : nullptr, annotate ? n_candidates.data() : nullptr,
+                                  classes ? class_mass.data() : nullptr,
+                                  classes ? t_is_synthetic_arr.data() : nullptr},
                   std::move(unit_offsets),
                   std::vector<double>(n_loci, 0.0),
                   std::vector<double>(n_loci, 0.0),
@@ -394,9 +405,14 @@ nb::tuple batch_locus_em_partitioned(
     nb::list stats;
     for (const LocusProfile& p : batch.profiles)
         if (p.locus_idx >= 0) stats.append(p.to_dict());
+    nb::object class_masses = nb::none();
+    if (classes) {
+        class_masses = vec_to_ndarray(std::move(class_mass),
+                                      {static_cast<size_t>(total_units), static_cast<size_t>(N_EM_CLASSES)});
+    }
     return nb::make_tuple(total_gdna, vec_to_ndarray(std::move(batch.locus_rna)),
                           vec_to_ndarray(std::move(batch.locus_gdna)), stats, annotation(winner_tid),
-                          annotation(winner_post), annotation(n_candidates), total_ig);
+                          annotation(winner_post), annotation(n_candidates), total_ig, class_masses);
 }
 
 }  // namespace
@@ -446,6 +462,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("emit_locus_stats") = false,
           nb::arg("emit_assignments") = false,
           nb::arg("intergenic_rate") = 0.0,
+          nb::arg("t_is_synthetic"),
           "Run locus EM from per-locus partition data.\n\n"
           "Accepts a list of 8-tuples (one per locus) of partition arrays.\n"
           "Returns (total_gdna_em, locus_rna_total, locus_gdna, locus_stats,\n"
@@ -469,6 +486,13 @@ NB_MODULE(_em_impl, m) {
     m.attr("ASSIGN_FRACTIONAL") = ASSIGN_FRACTIONAL;
     m.attr("ASSIGN_SAMPLE") = ASSIGN_SAMPLE;
     m.attr("EM_WINNER_INTERGENIC") = EM_WINNER_INTERGENIC;
+    nb::list class_names;
+    for (int c = 0; c < N_EM_CLASSES; ++c) class_names.append(nb::none());
+    class_names[EM_CLASS_ANNOTATED] = "annotated";
+    class_names[EM_CLASS_NASCENT] = "nascent";
+    class_names[EM_CLASS_GDNA] = "gdna";
+    class_names[EM_CLASS_INTERGENIC] = "intergenic";
+    m.attr("EM_CLASSES") = nb::tuple(class_names);
 
     rigel::bind_testing(m.def_submodule("testing", "The EM's kernels bound for the tests."));
 }

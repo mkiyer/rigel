@@ -125,6 +125,15 @@ static constexpr int32_t EM_WINNER_NONE       = -1;
 static constexpr int32_t EM_WINNER_GDNA       = -2;
 static constexpr int32_t EM_WINNER_INTERGENIC = -3;
 
+// The columns of a unit's class masses, which the EM returns when asked (`batch_locus_em_partitioned`'s
+// `t_is_synthetic`): its posterior on the annotated transcripts, on the synthetic (nascent) spans, on the locus's gDNA
+// component and on the intergenic term. `_em_impl` exports their names in this order.
+static constexpr int EM_CLASS_ANNOTATED  = 0;
+static constexpr int EM_CLASS_NASCENT    = 1;
+static constexpr int EM_CLASS_GDNA       = 2;
+static constexpr int EM_CLASS_INTERGENIC = 3;
+static constexpr int N_EM_CLASSES        = 4;
+
 // ================================================================
 // The calibration solve (_solve_impl)
 // ================================================================

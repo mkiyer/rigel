@@ -18,6 +18,7 @@ from .config import EMConfig, TranscriptGeometry
 from .native import (
     ASSIGN_FRACTIONAL,
     ASSIGN_SAMPLE,
+    EM_CLASSES,
 )
 from .native import batch_locus_em_partitioned as _batch_locus_em_partitioned
 from .splice import NUM_SPLICE_STRAND_COLS, SPLICED_COLS
@@ -386,6 +387,7 @@ class AbundanceEstimator:
         em_convergence_delta: float = EMConfig.convergence_delta,
         emit_locus_stats: bool = False,
         emit_assignments: bool = False,
+        emit_class_mass: bool = False,
     ) -> tuple[float, np.ndarray, np.ndarray, ...]:
         """Run locus-level EM from pre-partitioned data.
 
@@ -417,13 +419,20 @@ class AbundanceEstimator:
             If True, collect per-locus profiling stats.
         emit_assignments : bool
             If True, return per-unit winner_tid / posterior / n_candidates.
+        emit_class_mass : bool
+            If True, return every unit's posterior mass by class, ``(n_units, 4)`` float64 with the
+            columns ``native.EM_CLASSES`` names (annotated transcripts, synthetic spans, the locus's
+            gDNA, the intergenic term), from the posterior the assignment keeps or draws from: each
+            row sums to 1 (0 for a unit no component can emit), and under fractional assignment
+            the columns add up to the pools. Its rows are the units in the per-unit annotation's
+            order, each locus's units in its partition's order. It changes no count.
 
         Returns
         -------
         tuple
-            (total_gdna_em, locus_rna, locus_gdna[, winner_tid, winner_post, n_candidates]):
-            the EM's total gDNA count, then per locus its RNA count (annotated transcripts
-            plus synthetic nRNA spans) and its gDNA count.
+            (total_gdna_em, locus_rna, locus_gdna[, winner_tid, winner_post, n_candidates][,
+            class_mass]): the EM's total gDNA count, then per locus its RNA count (annotated
+            transcripts plus synthetic nRNA spans) and its gDNA count.
         """
         n_transcripts = self.num_transcripts
         n_loci = len(partition_tuples)
@@ -450,6 +459,7 @@ class AbundanceEstimator:
             locus_stats_raw,
             *assignments,  # each unit's winner, its posterior and its candidate count
             total_intergenic_em,
+            class_mass,
         ) = _batch_locus_em_partitioned(
             partition_tuples,
             locus_transcript_indices,
@@ -473,6 +483,9 @@ class AbundanceEstimator:
             emit_locus_stats,
             emit_assignments,
             float(intergenic_rate),
+            np.ascontiguousarray(self._synthetic_mask, dtype=np.uint8)
+            if emit_class_mass
+            else np.zeros(0, dtype=np.uint8),
         )
         self._gdna_intergenic_em_total += float(total_intergenic_em)
 
@@ -483,7 +496,10 @@ class AbundanceEstimator:
 
         result = (total_gdna_em, np.asarray(locus_rna), np.asarray(locus_gdna))
         if emit_assignments:
-            return (*result, *(np.asarray(a) for a in assignments))
+            result = (*result, *(np.asarray(a) for a in assignments))
+        if emit_class_mass:
+            no_units = np.zeros((0, len(EM_CLASSES)), dtype=np.float64)
+            result = (*result, no_units if class_mass is None else np.asarray(class_mass))
         return result
 
     # ------------------------------------------------------------------

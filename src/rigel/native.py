@@ -56,6 +56,9 @@ from ._em_impl import ASSIGN_SAMPLE
 # the winner code a unit the intergenic term wins carries, beside -2 for the locus's own gDNA
 from ._em_impl import EM_WINNER_INTERGENIC
 
+# the columns of the EM's per-unit class masses, by name, in order
+from ._em_impl import EM_CLASSES
+
 # -- The calibration solve: the sweep's block pipeline and ψ --------------------------------------
 from ._solve_impl import solve_blocks
 from ._solve_impl import psi_solve
@@ -99,6 +102,7 @@ __all__ = [
     "ASSIGN_FRACTIONAL",
     "ASSIGN_SAMPLE",
     "EM_WINNER_INTERGENIC",
+    "EM_CLASSES",
     # The solve
     "solve_blocks",
     "POLICY_SILENT",

@@ -293,7 +293,8 @@ private:
 };
 
 // The accumulators every locus's assignment adds into: the per-transcript count matrix (n_transcripts, n_cols), the
-// posterior sums the confidence metrics read, and the optional per-unit annotation (nullptr when not requested).
+// posterior sums the confidence metrics read, the optional per-unit annotation and the optional per-unit class masses
+// (nullptr when not requested), with the per-transcript flag that sorts a transcript component into a class.
 struct AssignmentSinks {
     double* em_counts;
     double* posterior_sum;
@@ -303,7 +304,30 @@ struct AssignmentSinks {
     int32_t* winner_tid;
     float*   winner_post;
     int32_t* n_candidates;
+    double*  class_mass;          // [unit][N_EM_CLASSES]
+    const uint8_t* t_is_synthetic;
 };
+
+// Each unit's posterior mass by class (`EM_CLASS_*`), from the posterior the assignment keeps (FRACTIONAL) or draws
+// from (SAMPLE): a transcript component is annotated or nascent by its transcript's flag, then the locus's gDNA and
+// the intergenic term. A candidate the accumulators skip (a transcript outside the count matrix) is skipped here too,
+// so under FRACTIONAL the class columns add up to the pools.
+inline void add_class_mass(const LocusSubProblem& sub, const IntergenicTerm& ig, const std::vector<double>& post,
+                           const AssignmentSinks& out, int unit_offset) {
+    for (int ui = 0; ui < sub.n_local_units; ++ui) {
+        double* row = out.class_mass + static_cast<size_t>(N_EM_CLASSES) * static_cast<size_t>(unit_offset + ui);
+        for (int64_t k = sub.offsets[ui]; k < sub.offsets[ui + 1]; ++k) {
+            const int32_t comp = sub.t_indices[k];
+            int cls = comp == ig.idx ? EM_CLASS_INTERGENIC : EM_CLASS_GDNA;
+            if (comp < sub.n_t) {
+                const int32_t global_t = sub.local_to_global_t[comp];
+                if (global_t < 0 || global_t >= out.n_transcripts) continue;
+                cls = out.t_is_synthetic[global_t] ? EM_CLASS_NASCENT : EM_CLASS_ANNOTATED;
+            }
+            row[cls] += post[k];
+        }
+    }
+}
 
 // One locus's assigned mass: its transcript components (annotated transcripts and synthetic spans alike; the caller
 // separates the two), its gDNA, and the intergenic term outside the locus; and SAMPLE's units the draw stranded and
@@ -349,6 +373,7 @@ inline LocusAssignment assign_posteriors(const LocusSubProblem& sub, const doubl
     std::vector<double> log_weights(sub.n_components);
     converged_log_weights(theta, sub.log_eff_len.data(), sub.n_components, ig, data_count, log_weights.data());
     const std::vector<double> post = unit_posteriors(sub, log_weights);
+    if (out.class_mass != nullptr) add_class_mass(sub, ig, post, out, unit_offset);
     const bool fractional = assignment_mode == ASSIGN_FRACTIONAL;
     LocusAssignment res;
     std::vector<int> choice;
