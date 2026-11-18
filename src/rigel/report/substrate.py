@@ -92,6 +92,7 @@ SUMMARY_KEYS: dict[str, dict] = {
         "fraction_nascent": 0.0,
         "fraction_gdna": 0.0,
         "fraction_gdna_em": 0.0,
+        "count_intergenic": 0.0,
         "fraction_intergenic": 0.0,
     },
 }

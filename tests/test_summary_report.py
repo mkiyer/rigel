@@ -240,14 +240,14 @@ def test_the_schema_version_is_one_constant_the_writer_and_the_report_share(quan
     def schema_warnings(run_dir):
         return [w for w in load_substrate(run_dir).warnings if "schema_version" in w]
 
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 8
+    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 9
     assert schema_warnings(out) == []
     bumped = tmp_path / "bumped"
     bumped.mkdir()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
         cli.write_quant_outputs(pr, result.index, bumped, args)
-        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 9
+        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 10
         assert schema_warnings(bumped) == [] and schema_warnings(out) != []
 
 
@@ -423,6 +423,7 @@ def test_every_intergenic_fragment_is_gdna():
         "fraction_nascent",
         "fraction_gdna",
         "fraction_gdna_em",
+        "count_intergenic",
         "fraction_intergenic",
     }
     assert (q["count_gdna"], q["count_gdna_em"]) == (300.0, 200.0)

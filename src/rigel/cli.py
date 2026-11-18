@@ -197,7 +197,7 @@ def build_pipeline_config(args: argparse.Namespace) -> PipelineConfig:
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
 #: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name;
 #: ``length_tables`` is the EM's two length tables and the decision behind them.
-SUMMARY_SCHEMA_VERSION = 8
+SUMMARY_SCHEMA_VERSION = 9
 
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
@@ -791,7 +791,8 @@ def quantification_pools(
     its junctions), so gDNA by construction: ``count_gdna`` is the EM's genic gDNA (``count_gdna_em``) plus the
     intergenic fragments; leaving them out would halve the observed contamination of a library with substantial
     gDNA. The annotated-transcript (``fraction_annotated``), synthetic-span (``fraction_nascent``) and gDNA fractions
-    sum to one; ``fraction_gdna_em`` is the EM's genic part alone, and ``fraction_intergenic`` the intergenic part."""
+    sum to one; ``count_gdna_em`` and ``fraction_gdna_em`` are the EM's genic part alone, and ``count_intergenic`` and
+    ``fraction_intergenic`` the intergenic part, so ``count_gdna = count_gdna_em + count_intergenic``."""
     # The templates that reach no locus (``PipelineStats.n_intergenic``), and the gDNA the EM put at a multimapper's
     # intergenic place: neither is in a locus.
     intergenic = stats.n_intergenic + count_gdna_intergenic_em
@@ -810,6 +811,7 @@ def quantification_pools(
         "fraction_nascent": share(count_nascent),
         "fraction_gdna": share(count_gdna),
         "fraction_gdna_em": share(count_gdna_em),
+        "count_intergenic": round(intergenic, SUMMARY_COUNT_DECIMALS),
         "fraction_intergenic": share(intergenic),
     }
 

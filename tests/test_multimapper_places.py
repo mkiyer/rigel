@@ -1095,6 +1095,7 @@ def test_the_intergenic_terms_mass_joins_the_summarys_intergenic_gdna():
     )
     assert pools["count_gdna_em"] == 80.0
     assert pools["count_gdna"] == 80.0 + 300 + 20.0
+    assert pools["count_intergenic"] == 300 + 20.0
     assert pools["fraction_intergenic"] == pytest.approx(320.0 / 1000.0)
     assert pools["fraction_annotated"] + pools["fraction_nascent"] + pools[
         "fraction_gdna"

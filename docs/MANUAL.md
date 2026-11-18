@@ -428,7 +428,7 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 | `gene_quant.feather` | Per-gene abundance, summed over each gene's annotated transcripts |
 | `nascent_quant.feather` | Nascent RNA: one row per synthetic span Rigel adds to model a multi-exon transcript's unspliced RNA |
 | `loci.feather` | Per-locus EM summary |
-| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 8) |
+| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 9) |
 | `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
 | `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, count_gdna, count_rna, gdna_density, fraction_gdna)` |
 | `calibration_track.bedgraph` | Per-region gDNA density as a genome-browser track (IGV / UCSC) |
@@ -583,7 +583,7 @@ the current version is **8**. Top-level keys:
 
 | Key | Contents |
 |-----|----------|
-| `schema_version` | Manifest schema version (currently `8`) |
+| `schema_version` | Manifest schema version (currently `9`) |
 | `rigel_version`, `timestamp` | Version and run time |
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
@@ -597,7 +597,7 @@ the current version is **8**. Top-level keys:
 | `gdna_em_effective_length` | Summary of the loci table's column of that name: its `min`, `median`, `p95`, `max` |
 | `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna` and the five pools. The raw per-bin histograms are in `fragment_lengths.feather` |
 | `length_tables` | The EM's two fragment-length tables and the decision behind them (see below) |
-| `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` — which no pool holds), and three pools, each a `count_*` beside its `fraction_*` of the three together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans) and `count_gdna` (gDNA: the EM's genic gDNA plus the intergenic gDNA, which reaches no locus and is unspliced, since a spliced alignment is used only when a transcript holds its junctions: the fragments that reach no transcript, and the EM's share of the multimappers at their intergenic alignments), so `fraction_annotated + fraction_nascent + fraction_gdna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, so the intergenic gDNA is `count_gdna − count_gdna_em`, and `fraction_intergenic` its share; `fragment_stats.intergenic` counts the fragments that reach no transcript, so the multimappers' share is `count_gdna − count_gdna_em − fragment_stats.intergenic` |
+| `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` — which no pool holds), and three pools, each a `count_*` beside its `fraction_*` of the three together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans) and `count_gdna` (gDNA: the EM's genic gDNA plus the intergenic gDNA, which reaches no locus and is unspliced, since a spliced alignment is used only when a transcript holds its junctions: the fragments that reach no transcript, and the EM's share of the multimappers at their intergenic alignments), so `fraction_annotated + fraction_nascent + fraction_gdna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, and `count_intergenic` and `fraction_intergenic` the intergenic gDNA, so `count_gdna = count_gdna_em + count_intergenic`; `fragment_stats.intergenic` counts the fragments that reach no transcript, so the multimappers' share is `count_intergenic − fragment_stats.intergenic`. The report's four pools are `count_annotated`, `count_nascent`, `count_gdna_em` and `count_intergenic` |
 
 The **`calibration`** block holds exactly the library-wide calibration
 scalars (it is `null` if calibration did not run):

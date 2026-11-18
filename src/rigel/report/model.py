@@ -283,8 +283,10 @@ def _quant(summary: SummaryReader) -> dict:
     annotated = q["count_annotated"]
     nascent = q["count_nascent"]
     gdna_em = q["count_gdna_em"]
-    # every intergenic fragment is gDNA: unspliced, since a spliced one the scan keeps has a transcript
-    inter = summary["fragment_stats"]["intergenic"]
+    # every intergenic fragment is gDNA: unspliced, since a spliced one the scan keeps has a transcript. The pool is
+    # summary.json's own, which holds the EM's share of the multimappers at their intergenic alignments beside the
+    # fragments that reach no transcript, so the four pools add to its three
+    inter = q["count_intergenic"]
     pools = [
         {"label": "Annotated transcripts", "value": annotated, "cls": _C[1]},
         {"label": "Nascent RNA", "value": nascent, "cls": _C[2]},

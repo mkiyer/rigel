@@ -43,7 +43,7 @@ from rigel.report.substrate import SUMMARY_KEYS, SubstrateError, SummaryReader, 
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 #: The ``summary.json`` schema the synthesized substrate mirrors, and the one the real writer must write.
-_SCHEMA = 8
+_SCHEMA = 9
 
 #: The output convention's four pools, as the report names them.
 _POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic gDNA")
@@ -51,12 +51,9 @@ _POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic gDNA"
 
 def _write_substrate(d: Path) -> Path:
     d.mkdir(parents=True, exist_ok=True)
-    # The pools, as ``rigel quant`` books them: an intergenic fragment is gDNA.
-    annotated, nascent, gdna_em, intergenic = 500.0, 60.0, 20.0, 70
-    every = annotated + nascent + gdna_em + intergenic
-
-    def share(x):
-        return round(x / every, 6)
+    # The pools, as ``rigel quant`` books them: an intergenic fragment is gDNA, and so is the EM's share of the
+    # multimappers at their intergenic alignments, which no fragment count holds
+    annotated, nascent, gdna_em, intergenic, intergenic_em = 500.0, 60.0, 20.0, 70, 5.0
 
     summary = {
         "schema_version": _SCHEMA,
@@ -114,15 +111,9 @@ def _write_substrate(d: Path) -> Path:
             "n_nascent": 30,
             "n_genes": 40,
             "n_loci": 35,
-            "count_annotated": annotated,
-            "count_nascent": nascent,
-            "count_gdna": gdna_em + intergenic,
-            "count_gdna_em": gdna_em,
-            "fraction_annotated": share(annotated),
-            "fraction_nascent": share(nascent),
-            "fraction_gdna": share(gdna_em + intergenic),
-            "fraction_gdna_em": share(gdna_em),
-            "fraction_intergenic": share(intergenic),
+            **cli.quantification_pools(
+                SimpleNamespace(n_intergenic=intergenic), annotated, nascent, gdna_em, intergenic_em
+            ),
         },
         # every category ``rigel quant`` writes, in its order: the anchor, the two modelled pools, and the five
         # pools they are built from (``gdna`` is the two contained pools, ``rna`` the spliced one)
@@ -521,21 +512,27 @@ def test_every_format_tag_the_view_model_emits_is_one_the_front_end_formats(tmp_
 def test_each_pool_is_named_once_and_shows_the_summarys_own_count_and_fraction(tmp_path):
     """The bar, its legend, the donut, the table and the KPIs name each pool the same way, in the output
     convention's words, and show the count and fraction ``summary.json`` holds for it. "Mature", "mRNA" and
-    "nRNA" name nothing the report shows."""
+    "nRNA" name nothing the report shows. The intergenic pool is the intergenic part of ``count_gdna``, the EM's
+    share of the multimappers at their intergenic alignments included, so the four pools add to the three of
+    ``summary.json``: the fixture's EM puts 5 there, which ``fragment_stats.intergenic`` does not count."""
     d = _write_substrate(tmp_path / "run")
     summary = json.loads((d / "summary.json").read_text())
-    q, intergenic = summary["quantification"], summary["fragment_stats"]["intergenic"]
+    q = summary["quantification"]
+    assert q["count_gdna"] - q["count_gdna_em"] != summary["fragment_stats"]["intergenic"]
     quant = build_view_model(load_substrate(d))["quant"]
     expected = {
         "Annotated transcripts": (q["count_annotated"], q["fraction_annotated"]),
         "Nascent RNA": (q["count_nascent"], q["fraction_nascent"]),
         "gDNA (EM)": (q["count_gdna_em"], q["fraction_gdna_em"]),
-        "Intergenic gDNA": (intergenic, q["fraction_intergenic"]),
+        "Intergenic gDNA": (q["count_gdna"] - q["count_gdna_em"], q["fraction_intergenic"]),
     }
     assert set(expected) == set(_POOLS)
     assert {p["label"]: p["value"] for p in quant["pools"]} == {
         k: n for k, (n, _) in expected.items()
     }
+    assert sum(p["value"] for p in quant["pools"]) == (
+        q["count_annotated"] + q["count_nascent"] + q["count_gdna"]
+    )
     assert {row[0]: (row[1], row[2]) for row in quant["table"]} == expected
     kpis = {k["l"]: k["v"] for k in quant["kpis"]}
     assert kpis["Annotated transcripts"] == q["count_annotated"]
