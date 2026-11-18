@@ -105,7 +105,7 @@ class AnnotationTable:
     frag_class : np.ndarray
         int8 — fragment class code (matches buffer FRAG_* constants, -1=intergenic).
     n_candidates : np.ndarray
-        int16 — number of EM candidate components.
+        int32 — number of EM candidate components.
     locus_id : np.ndarray
         int32 — locus id of the EM subproblem (-1 = none, or not yet filled).
     _size : int
@@ -134,7 +134,7 @@ class AnnotationTable:
             tx_flags=np.zeros(capacity, dtype=np.uint8),
             posterior=np.zeros(capacity, dtype=np.float32),
             frag_class=np.full(capacity, -1, dtype=np.int8),
-            n_candidates=np.zeros(capacity, dtype=np.int16),
+            n_candidates=np.zeros(capacity, dtype=np.int32),
             locus_id=np.full(capacity, -1, dtype=np.int32),
         )
 

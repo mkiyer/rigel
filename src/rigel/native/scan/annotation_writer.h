@@ -28,7 +28,7 @@ public:
         InArray<uint8_t> tx_flags;
         InArray<float> posterior;
         InArray<int8_t> frag_class;
-        InArray<int16_t> n_candidates;
+        InArray<int32_t> n_candidates;
         InArray<int32_t> locus_id;
         int64_t size;
     };

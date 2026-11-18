@@ -171,7 +171,7 @@ class FragmentRouter:
                 tx_flags=winner_flags(is_synthetic[tids]),
                 posteriors=np.ones(n, dtype=np.float32),
                 frag_classes=np.full(n, FRAG_UNAMBIG, dtype=np.int8),
-                n_candidates=np.ones(n, dtype=np.int16),
+                n_candidates=np.ones(n, dtype=np.int32),
             )
         n = len(routed.gated_fids)
         if n > 0:
@@ -182,7 +182,7 @@ class FragmentRouter:
                 tx_flags=np.full(n, AF_UNRESOLVED, dtype=np.uint8),
                 posteriors=np.zeros(n, dtype=np.float32),
                 frag_classes=np.asarray(routed.gated_classes, dtype=np.int8),
-                n_candidates=np.zeros(n, dtype=np.int16),
+                n_candidates=np.zeros(n, dtype=np.int32),
             )
         n = len(routed.intergenic_fids)
         if n > 0:
@@ -193,5 +193,5 @@ class FragmentRouter:
                 tx_flags=np.full(n, AF_GDNA_INTERGENIC, dtype=np.uint8),
                 posteriors=np.ones(n, dtype=np.float32),
                 frag_classes=np.full(n, FRAG_MULTIMAPPER, dtype=np.int8),
-                n_candidates=np.zeros(n, dtype=np.int16),
+                n_candidates=np.zeros(n, dtype=np.int32),
             )

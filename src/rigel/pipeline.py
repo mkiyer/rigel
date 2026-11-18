@@ -733,7 +733,7 @@ def populate_em_annotations(
     n = len(frag_ids)
     best_tid = np.asarray(out_winner_tid, dtype=np.int32)
     posteriors = np.asarray(out_winner_post, dtype=np.float32)
-    n_cand = np.asarray(out_n_candidates, dtype=np.int16)
+    n_cand = np.asarray(out_n_candidates, dtype=np.int32)
 
     # Gene index: map valid transcript winners to gene
     valid_t = best_tid >= 0

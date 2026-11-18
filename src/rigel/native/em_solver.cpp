@@ -363,7 +363,7 @@ nb::tuple batch_locus_em_partitioned(
     const bool annotate = emit_assignments && total_units > 0;
     std::vector<int32_t> winner_tid(annotate ? total_units : 0, EM_WINNER_NONE);
     std::vector<float> winner_post(annotate ? total_units : 0, 0.0f);
-    std::vector<int16_t> n_candidates(annotate ? total_units : 0, 0);
+    std::vector<int32_t> n_candidates(annotate ? total_units : 0, 0);
 
     BatchEM batch{views,
                   locus_gdna_prior_count.data(),

@@ -302,7 +302,7 @@ struct AssignmentSinks {
     int n_cols;
     int32_t* winner_tid;
     float*   winner_post;
-    int16_t* n_candidates;
+    int32_t* n_candidates;
 };
 
 // One locus's assigned mass: its transcript components (annotated transcripts and synthetic spans alike; the caller
@@ -326,7 +326,7 @@ inline void annotate_unit(const LocusSubProblem& sub, const IntergenicTerm& ig, 
             }
         }
     }
-    out.n_candidates[at] = static_cast<int16_t>(std::min(seg_len, static_cast<int>(INT16_MAX)));
+    out.n_candidates[at] = seg_len;
     if (winner < 0) {
         out.winner_tid[at] = EM_WINNER_NONE;
         out.winner_post[at] = 0.0f;

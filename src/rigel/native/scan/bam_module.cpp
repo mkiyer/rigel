@@ -301,7 +301,7 @@ void bind_annotation_writer(nb::module_& m) {
              [](const Writer& w, const std::string& bam_path, const std::string& output_path,
                 Writer::InArray<int64_t> frag_ids, Writer::InArray<int32_t> best_tid, Writer::InArray<int32_t> best_gid,
                 Writer::InArray<uint8_t> tx_flags, Writer::InArray<float> posterior,
-                Writer::InArray<int8_t> frag_class, Writer::InArray<int16_t> n_candidates,
+                Writer::InArray<int8_t> frag_class, Writer::InArray<int32_t> n_candidates,
                 Writer::InArray<int32_t> locus_id, int64_t size, const std::vector<std::string>& t_ids,
                 const std::vector<std::string>& g_ids, const std::vector<std::string>& g_names) {
                  const Writer::Annotations annotations{frag_ids,   best_tid,     best_gid, tx_flags, posterior,
