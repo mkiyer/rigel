@@ -33,14 +33,16 @@ for robustness, so a number measured at the panel's nascent share is a stress re
 - `src/`'s numbers are 1f97ff96's (the junction cap and the share over one tally) plus the **capture weight**, landed
   2026-11-15: the capture reading is raised to the share of the library's reads whose own gDNA would show. At 5 % gDNA
   and above no in-scope whole-genome row rises by more than about 1 %; the 0.1 % hole closes on genes; STAR's zero-gDNA
-  rows fall, the switch row still about four times the no-capture line (`docs/ROADMAP.md`). This tree is the baseline.
+  rows fall, the switch row still about four times the no-capture line (`docs/ROADMAP.md`).
+- The **scan phase** landed 2026-11-18: the splice blacklist is retired, and a multimapper's candidates are pruned
+  within each place. The simulator's rows are bit-identical; on the STAR rung the stranded capture-ON rows move,
+  through the one locus that holds most of the row (issue #78). This tree is the baseline.
 - The validation of ec996bba beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
   (`docs/ROADMAP.md`).
 - **No preview ships.** 0.8.0 waits for every `release-blocker` issue in the milestone; the milestone's other issues
   ship stated in the MANUAL.
-- **The order of work** (`docs/ROADMAP.md`, Next): proof tools → crashes, inputs and outputs, with the instruments and
-  gates beside them → one scan phase → the unstranded introns → the capture reader → the annotated pool against
-  0.7.1 → the release. One `src/` writer at a time, in the main checkout.
+- **The order of work** (`docs/ROADMAP.md`, Next): the unstranded introns → the capture reader → the annotated pool
+  against 0.7.1 → the release. One `src/` writer at a time, in the main checkout.
 - The unstranded introns and the **capture reader** are developed together with the owner, each bounded at two
   sessions. The capture reader's working memory is `docs/dev/CAPTURE_IDEAS.md`.
 - Everything retired at the 2026-11-03 reset is in `$RIGEL_RUNS/archive/cleanup_2026-11-03/`.

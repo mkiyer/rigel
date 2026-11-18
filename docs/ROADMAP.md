@@ -29,7 +29,19 @@ depth panels and the one-probe panel, pinned and fractional. Against 1f97ff96, t
 - On three real captured cfRNA libraries the weight is 0.25, 0.95 and 0.32. On the 93 %-gDNA one it calls some DNA RNA
   (issue #2).
 
-The identity references are re-frozen on this tree (`TESTING.md` §6).
+The scan phase landed on 2026-11-18: the splice blacklist is retired (`DESIGN.md` §0b), a leading intron keeps every
+later junction's ends, the splice census counts fragments, and a multimapper's candidates are pruned within each
+place. Pinned and fractional, against the tree before it:
+- On the simulator's alignments nothing moves: the four ladder identity references and the test chromosome's 90 rows
+  are bit-identical.
+- On the STAR rung only the pruning acts. Pools move by under 100 fragments on every row but stranded capture ON, and
+  transcript error by −0.2 % to +1.0 % (it rises on 12 of 16 rows). At stranded capture ON the kept candidates link 19
+  to 40 more loci into the one locus that holds most of the row (issue #78), where the EM stops at its cap
+  (issue #34). What holds at a tighter stop is gDNA −435 (g05) and −693 (g50) fragments, mostly into nascent RNA.
+- On the VCaP mix, whose BAM was aligned at STAR's defaults, the retirement moves 2,398 more DNA fragments into
+  annotated RNA (issue #7); the pruning moves under 250 fragments of either library.
+
+The four ladder identity references hold on this tree, and the VCaP mix's is re-frozen on it (`TESTING.md` §6).
 
 The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
 alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
@@ -76,22 +88,16 @@ Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_previe
 The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the release fixes or states; its
 `release-blocker` label is what it fixes. In order:
 
-1. **Proof tools:** issue #66 and issue #74, then the identity references re-frozen.
-2. **Crashes, inputs and outputs**, in the main checkout, one at a time: issue #60 first, then issue #50 with
-   issue #58, issue #52, issue #51, issue #54, issue #59 and issue #15; then issue #55, issue #53, issue #38's EM and
-   post-EM items, issue #56 and issue #57. Beside them, the instruments and gates: issue #67 through issue #73,
-   issue #75, and issue #36's paired proper score and its `oracle_ruler` arm under capture.
-3. **One scan phase:** retire the splice blacklist (issue #49, issue #63, issue #64), then issue #38's scan items, one
-   cache rebuild, then issue #62 (prune within each place).
-4. **The unstranded introns, bounded at two sessions, with the owner:** issue #26 and issue #77. Find which messages
+1. **The unstranded introns, bounded at two sessions, with the owner:** issue #26 and issue #77. Find which messages
    carry the intron error under transfer on unstranded capture-OFF g98, fix them, then try the intron abundance
    model. If transfer still loses to silent there, issue #26 ships stated.
-5. **The capture reader, bounded at two sessions, with the owner:** issue #61, issue #65 and issue #6, then issue #1
-   against a pass bar the owner sets before any candidate runs. If no candidate passes, issue #1 ships stated.
-6. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5. Dissect the largest
+2. **The capture reader, bounded at two sessions, with the owner:** issue #36's paired proper score in the tree
+   first; then issue #61, issue #65 and issue #6, then issue #1 against a pass bar the owner sets before any
+   candidate runs. If no candidate passes, issue #1 ships stated.
+3. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5. Dissect the largest
    gap first, the simulator's stranded capture-ON g50, and bring the dissection to the owner before fixing.
-7. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
-   issue #10, issue #12, issue #13, issue #23 and issue #46, and for issue #1 or issue #26 if either falls back; the
-   CHANGELOG; then issue #11.
+4. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
+   issue #10, issue #12, issue #13, issue #23, issue #46 and issue #78, and for issue #1 or issue #26 if either falls
+   back; the CHANGELOG; then issue #11.
 
 After that, the open issues outside the milestone, in issue order.
