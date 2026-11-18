@@ -5,6 +5,7 @@ loses rows produces an index nobody can account for. Warn-and-skip continues pas
 and the choice reaches `Transcript.read_gtf` rather than stopping at the parser.
 """
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -203,3 +204,50 @@ def test_a_transcript_off_the_fasta_follows_the_parse_mode(tmp_path: Path, stray
         TranscriptIndex.build(fasta, gtf, tmp_path / "strict", gtf_parse_mode="strict")
     TranscriptIndex.build(fasta, gtf, tmp_path / "skip", gtf_parse_mode="warn-skip")
     assert list(TranscriptIndex.load(tmp_path / "skip").t_df["t_id"])[:1] == ["t1"]
+
+
+@pytest.mark.parametrize("strand", [".", "?", "x"])
+def test_a_transcript_with_no_strand_follows_the_parse_mode(tmp_path: Path, caplog, strand):
+    """Only a `+` or `-` transcript can be quantified: the scorer reads a stranded fragment against its transcript's
+    strand, and calibration's partition holds only stranded transcripts, so a strandless one's exons would be read as
+    intergenic and its RNA booked as gDNA. Strict refuses it and names the option that drops it (StringTie writes `.`
+    for a transcript it cannot strand); warn-and-skip drops it with a warning, and a strand GTF has no word for, like
+    `x`, is skipped the same way rather than stopping the run."""
+    path = _write(
+        tmp_path,
+        [
+            _exon(100, 200),
+            _exon(300, 400),
+            _exon(1000, 1200, gene="g2", transcript="t2", strand=strand),
+            _exon(1500, 1600, gene="g2", transcript="t2", strand=strand),
+        ],
+    )
+    with pytest.raises(ValueError, match=r"t2.*--gtf-parse-mode warn-skip"):
+        Transcript.read_gtf(path, parse_mode="strict")
+    with caplog.at_level(logging.WARNING):
+        tx = Transcript.read_gtf(path, parse_mode="warn-skip")
+    assert [t.t_id for t in tx] == ["t1"]
+    assert f"strand {strand!r}" in caplog.text
+
+
+def test_rigel_index_refuses_a_transcript_with_no_strand(tmp_path: Path):
+    """The issue's case end to end: a two-exon `.` transcript is refused by the build under strict parsing, and is
+    absent from the index under warn-and-skip."""
+    from rigel.index import TranscriptIndex
+
+    fasta = _fasta(tmp_path, 5000)
+    gtf = _write(
+        tmp_path,
+        [
+            _exon(100, 300),
+            _exon(500, 700),
+            _exon(3001, 3300, gene="g2", transcript="t2", strand="."),
+            _exon(3601, 3900, gene="g2", transcript="t2", strand="."),
+        ],
+    )
+    with pytest.raises(ValueError, match="--gtf-parse-mode warn-skip"):
+        TranscriptIndex.build(fasta, gtf, tmp_path / "strict", gtf_parse_mode="strict")
+    TranscriptIndex.build(fasta, gtf, tmp_path / "skip", gtf_parse_mode="warn-skip")
+    t_df = TranscriptIndex.load(tmp_path / "skip").t_df
+    assert "t2" not in set(t_df["t_id"])
+    assert set(t_df.loc[~t_df["is_synthetic"], "strand"]) == {1}

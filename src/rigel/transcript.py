@@ -168,6 +168,15 @@ class Transcript:
             if t_id is None:
                 _malformed_exon(parse_mode, f"{where} has no transcript_id")
                 continue
+            # The scorer reads a stranded fragment against its transcript's strand, and calibration's partition holds
+            # stranded transcripts only, so a strandless one's RNA would be booked as gDNA
+            if f.strand not in ("+", "-"):
+                _malformed_exon(
+                    parse_mode,
+                    f"{where} of transcript {t_id} has strand {f.strand!r}, not '+' or '-'; "
+                    "--gtf-parse-mode warn-skip drops such a transcript",
+                )
+                continue
             if t_id not in transcripts:
                 t = Transcript.from_gtf(f)
                 transcripts[t_id] = t

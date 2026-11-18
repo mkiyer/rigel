@@ -58,6 +58,8 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
 
 - Genome FASTA with `.fai` index (`samtools faidx genome.fa`)
 - Gene annotation GTF (GENCODE format recommended; `exon` records required)
+- Every transcript on `+` or `-`: `rigel index` refuses one with strand `.` or `?` (StringTie writes `.` for a
+  transcript it could not strand), and `--gtf-parse-mode warn-skip` drops it with a warning
 - Optional: an **alignable Zarr store** built by the companion `alignable` tool for the
   same genome + aligner, the source of the splice-artifact blacklist (see
   [Mappability](#mappability-and-the-splice-artifact-blacklist))
