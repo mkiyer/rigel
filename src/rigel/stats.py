@@ -125,7 +125,8 @@ class PipelineStats:
     n_read_pairs_lacking_mate: int = 0
 
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
-    # One observation per placement the scanner hands the accumulator's deposit adapter, intergenic hits included. The
+    # One observation per fragment the scanner offers the accumulator, intergenic ones included, as its first hit with a
+    # candidate, else as its first hit (so ``spliced_annot`` counts what ``n_with_annotated_sj`` counts). The
     # names come from ``rigel.splice.census_field`` and the C++ builds the same keys from ``splice_type_label``;
     # ``pipeline._apply_scan_stats`` refuses a scan key with no field, so a renamed field fails the scan.
     n_census_unspliced: int = 0

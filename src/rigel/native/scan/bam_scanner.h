@@ -115,9 +115,10 @@ struct BamScanStats {
     // elsewhere in the BAM (one not grouped by name) or was removed
     int64_t n_read_pairs_lacking_mate = 0;
 
-    // The splice census, `rigel report`'s splice breakdown: one observation per hit the scanner offers the
-    // accumulator (a multimapper's hits one by one), under the resolver's classification. Indexed by `SpliceType`, so
-    // the increment, the merge and the export cannot miss a category; the names live in `splice_type_label`.
+    // The splice census, `rigel report`'s splice breakdown: one observation per fragment the scanner offers the
+    // accumulator, under the resolver's classification of its first hit with a candidate, else of its first hit.
+    // Indexed by `SpliceType`, so the increment, the merge and the export cannot miss a category; the names live in
+    // `splice_type_label`.
     std::array<int64_t, NUM_SPLICE_TYPES> splice_census{};
 
     /// One record's flags: each counted on every record carrying it, a proper pair on the primary records only.

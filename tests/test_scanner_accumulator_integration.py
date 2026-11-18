@@ -69,6 +69,19 @@ def _scan(result) -> AccumulatorPayload:
     return _scan_full(result)[1]
 
 
+def _accounted(qc) -> int:
+    """Every fragment the accumulator was offered, by its outcome: deposited, dropped by name, or held for the second
+    pass on its gap or on its placements."""
+    return (
+        int(qc.deposited)
+        + int(qc.dropped_too_long)
+        + int(qc.dropped_empty)
+        + int(qc.dropped_strand_undefined)
+        + int(qc.deferred_undetermined_gap)
+        + int(qc.deferred_multiple_placements)
+    )
+
+
 class TestScannerAccumulatorIntegration:
     def test_the_scan_refuses_to_run_without_the_region_partition(self, oracle, monkeypatch):
         """The calibration tally is not optional: a scan whose regions were never installed is refused, not run with
@@ -221,9 +234,10 @@ class TestSpliceCensus:
         held for the second pass. Nothing is lost between the two subsystems.
 
             Σ census == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap
+                    + qc.deferred_multiple_placements
 
-        Every fragment of this fixture has one placement, so the census, which counts placements,
-        and the ``qc`` counters, which count fragments, count the same fragments.
+        Both count fragments: the census counts a template once, whatever its placements, as the accumulator's
+        offer does (:meth:`test_a_multimapper_is_censused_once` holds it where they differ).
 
         This is the same externally-checkable form as ``sum(deposited_lengths) == qc.deposited`` and
         a different statement: that one says every deposited fragment was binned by length, this one
@@ -236,14 +250,7 @@ class TestSpliceCensus:
         qc = payload.qc
 
         offered = sum(census.values())
-        accounted = (
-            int(qc.deposited)
-            + int(qc.dropped_too_long)
-            + int(qc.dropped_empty)
-            + int(qc.dropped_strand_undefined)
-            + int(qc.deferred_undetermined_gap)
-        )
-        assert offered == accounted, (
+        assert offered == _accounted(qc), (
             f"census {census} does not reconcile with deposited={qc.deposited} dropped=("
             f"too_long={qc.dropped_too_long}, empty={qc.dropped_empty}, "
             f"strand_undefined={qc.dropped_strand_undefined}, "
@@ -262,6 +269,61 @@ class TestSpliceCensus:
             f"only one splice category is populated, so this fixture cannot detect a dropped "
             f"increment in the others: {census}"
         )
+
+    def test_a_multimapper_is_censused_once(self, tmp_path):
+        """The census counts fragments, as the accumulator's ``qc`` block does: a template with two usable hits is one
+        fragment, censused once, as its first hit with a candidate (the hit ``with_annotated_sj`` reads), else its
+        first hit. So the census closes against the ``qc`` block with multimappers in the library, and
+        ``spliced_annotated`` and ``with_annotated_sj`` count one unit.
+
+        A two-exon transcript on each of two references; 20 templates spliced on both, 10 unspliced on both, 5 whose
+        first hit is intergenic and second spliced, and 5 unique unspliced pairs: 40 fragments on 75 placements."""
+        from _bam_builder import R1_FWD, R2_REV, SECONDARY, record, write_bam
+        from _index_builder import build_index
+
+        from rigel.splice import SpliceType, census_field
+
+        refs = {"chr1": 4000, "chr2": 4000}
+        gtf = "".join(
+            f'{ref}\tt\texon\t{s}\t{e}\t.\t+\t.\tgene_id "g_{ref}"; transcript_id "t_{ref}";\n'
+            for ref in refs
+            for s, e in ((1001, 1600), (2001, 2200))
+        )
+        index = build_index(tmp_path, gtf, refs)
+
+        def pair(name, ref, hi, f_pos, f_cigar, r_pos, nh=2):
+            extra = SECONDARY if hi == 2 else 0
+            return [
+                record(
+                    name, R1_FWD | extra, f_pos, f_cigar, r_pos, ref=ref, nh=nh, hi=hi, nm=0, xs="+"
+                ),
+                record(
+                    name, R2_REV | extra, r_pos, "100M", f_pos, ref=ref, nh=nh, hi=hi, nm=0, xs="+"
+                ),
+            ]
+
+        reads = []
+        for k in range(20):  # read 1 crosses the intron [1600, 2000) on both references
+            reads += pair(f"spliced{k}", 0, 1, 1550, "50M400N50M", 2050)
+            reads += pair(f"spliced{k}", 1, 2, 1550, "50M400N50M", 2050)
+        for k in range(10):
+            reads += pair(f"unspliced{k}", 0, 1, 1100, "100M", 1300)
+            reads += pair(f"unspliced{k}", 1, 2, 1100, "100M", 1300)
+        for k in range(5):  # the first hit lies past the transcript, so it has no candidate
+            reads += pair(f"mixed{k}", 0, 1, 3000, "100M", 3200)
+            reads += pair(f"mixed{k}", 1, 2, 1550, "50M400N50M", 2050)
+        for k in range(5):
+            reads += pair(f"unique{k}", 0, 1, 1100, "100M", 1300, nh=1)
+        bam = write_bam(tmp_path / "nh2.bam", reads, refs)
+        stats, _, _, payload = scan_and_buffer(str(bam), index, BamScanConfig(total_threads=1))
+
+        census = {st: int(getattr(stats, census_field(st))) for st in SpliceType}
+        assert stats.n_placed_multimapping == 35 and stats.n_placed_unique == 5
+        assert sum(census.values()) == 40, f"the census counted placements: {census}"
+        assert census[SpliceType.SPLICED_ANNOT] == 25 == stats.n_with_annotated_sj
+        assert census[SpliceType.UNSPLICED] == 15
+        assert payload.qc.deferred_multiple_placements > 0, "no template was held on its placements"
+        assert sum(census.values()) == _accounted(payload.qc)
 
     # The census is a superset of the fragment-length observation population, and no separate
     # observation counter exists to compare it against; the population statement is the identity

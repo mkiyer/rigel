@@ -292,6 +292,9 @@ void BamScanner::Worker::place_template(TemplateJudgment& judgment, int64_t frag
     const int32_t num_hits = judgment.n_usable;
     const bool unique_mapper = num_hits == 1;
     stats.n_fragments++;  // one fragment per molecule, not per hit
+    // The splice census counts fragments, as the accumulator's offer does: a template once, as its first hit with a
+    // candidate (the hit `count_resolved` reads), else as its first hit.
+    int32_t census_type = -1, first_type = -1;
     bool any_hit_resolved = false, any_unresolved = false;
     int32_t n_buffered_mm = 0;
     // A multimapper's intergenic hits wait for the last hit: the EM receives them only beside a hit that resolves (a
@@ -306,6 +309,8 @@ void BamScanner::Worker::place_template(TemplateJudgment& judgment, int64_t frag
         r.num_hits = num_hits;
         r.nm = frag.nm;
         r.clip = frag.clip;
+        if (first_type < 0) first_type = r.splice_type;
+        if (census_type < 0 && !r.t_inds.empty()) census_type = r.splice_type;
         if (unique_mapper && frag.introns.empty()) {
             stats.n_unique_unspliced_mismatches += frag.nm;
             stats.n_unique_unspliced_bases += frag.aligned;
@@ -338,6 +343,9 @@ void BamScanner::Worker::place_template(TemplateJudgment& judgment, int64_t frag
         }
     }
     offer_placements();
+    if (census_type < 0) census_type = first_type;
+    if (census_type >= 0 && static_cast<size_t>(census_type) < stats.splice_census.size())
+        stats.splice_census[census_type]++;
 
     // Intergenic only when no hit resolved, counted once: a multimapper with a resolved hit goes through the EM, which
     // allocates its gDNA, so counting it here would count the molecule twice.
@@ -387,10 +395,6 @@ void BamScanner::Worker::train_strand(const ResolvedFragment& r) {
 // an undefined `align_strand` itself.
 
 void BamScanner::Worker::collect_placement(const AssembledFragment& f, const ResolvedFragment& r) {
-    // The splice census counts first, before any gate: one observation per hit reaching this adapter.
-    if (r.splice_type >= 0 && static_cast<size_t>(r.splice_type) < stats.splice_census.size())
-        stats.splice_census[r.splice_type]++;
-
     // The introns the CIGAR stated are cut under every hypothesis, so are no part of the hypothesis set: `deposit`
     // unions them with each hypothesis's implied introns. All lie on the hit's reference, as `Accumulator::deposit`
     // assumes when it normalises by coordinate alone.
