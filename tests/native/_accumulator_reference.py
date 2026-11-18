@@ -428,18 +428,26 @@ def _normalise_introns(introns, start: int, end: int) -> list[tuple[int, int]]:
 
 
 def _segments(start: int, end: int, introns) -> list[tuple[int, int]]:
-    """The path's contiguous genomic segments: ``[start, end)`` with the introns cut out.
+    """The path's contiguous genomic segments: ``[start, end)`` with the introns cut out, one more than the introns.
 
-    ``introns`` must already be sorted and disjoint (:func:`_normalise_introns`).
+    Segment ``i`` lies between introns ``i - 1`` and ``i``, so a junction's two ends are the segments either side of it
+    by index. The first segment is empty when the first intron starts at ``start``, and the last when the last intron
+    ends at ``end``; a segment between two introns never is, since :func:`_normalise_introns` merges abutting ones.
+    ``introns`` must already be sorted, disjoint and clipped to ``[start, end)``.
     """
     out, cursor = [], start
     for intron_start, intron_end in introns:
-        if intron_start > cursor:
-            out.append((cursor, intron_start))
+        out.append((cursor, intron_start))
         cursor = intron_end
-    if end > cursor:
-        out.append((cursor, end))
+    out.append((cursor, end))
     return out
+
+
+def _covered(segments) -> tuple[int, int]:
+    """The path's first and last covered base: the first base of its first non-empty segment and the last of its last.
+    The path has at least one base (a path of none is refused before it deposits)."""
+    covered = [(a, b) for a, b in segments if b > a]
+    return covered[0][0], covered[-1][1] - 1
 
 
 # ---------------------------------------------------------------------------
@@ -907,7 +915,7 @@ class Accumulator:
         # The path's own first and last covered base, not the fragment's extent. With introns [(150,480)] over [150,500)
         # the path is [480,500) and lives in a different region; using the extent would attribute the fragment, and the
         # start count, to a region it never touches.
-        first_base, last_base = segments[0][0], segments[-1][1] - 1
+        first_base, last_base = _covered(segments)
 
         t = self.tally
         region_base, boundary_base = (
@@ -933,6 +941,9 @@ class Accumulator:
         inv_boundary = 1.0 / (length - 1) if length >= 2 else 0.0
         n_crossed, sole_boundary = 0, -1
         for block, (seg_start, seg_end) in enumerate(segments):
+            # an empty first or last segment: no base to book, no boundary inside it
+            if seg_end <= seg_start:
+                continue
             first = int(np.searchsorted(region_bounds, seg_start, side="right"))
             last = int(np.searchsorted(region_bounds, seg_end, side="left"))
             for boundary in range(first, last):

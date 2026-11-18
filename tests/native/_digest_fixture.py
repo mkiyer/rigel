@@ -23,8 +23,8 @@ REGION_TYPES = [0, 2, 2, 1, 2, 2, 1, 2]
 SJ = [(0, 260, 1000, 1), (0, 1120, 2000, 1)]
 
 #: Contained / one boundary / three boundaries / spliced-both-cross / spliced-neither-crosses / two sj
-#: and boundaries / one sj and one boundary. Every branch of the deposit rule appears at least once, so
-#: a change confined to any single branch still moves the digest.
+#: and boundaries / one sj and one boundary / a leading intron, then an sj. Every branch of the deposit rule
+#: appears at least once, so a change confined to any single branch still moves the digest.
 FRAGMENTS = (
     (10, 50, ()),
     (30, 150, ()),
@@ -33,6 +33,7 @@ FRAGMENTS = (
     (210, 1040, ((260, 1000),)),
     (150, 2100, ((260, 1000), (1120, 2000))),
     (1030, 2050, ((1120, 2000),)),
+    (100, 1060, ((100, 150), (260, 1000))),
 )
 
 

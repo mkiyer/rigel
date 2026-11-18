@@ -245,6 +245,14 @@ CASES: list[tuple[str, dict]] = [
         "leading intron -- the path does not begin at `start`",
         dict(start=150, end=500, observed_introns=[(150, 480)]),
     ),
+    (
+        "leading intron, then an annotated sj -- each junction keeps its own two ends",
+        dict(start=150, end=950, observed_introns=[(150, 180), (201, 900)], sj_strand=Strand.POS),
+    ),
+    (
+        "a leading annotated sj -- its mass is on its acceptor side alone",
+        dict(start=100, end=950, observed_introns=[(100, 200), (201, 900)], sj_strand=Strand.POS),
+    ),
     ("trailing intron", dict(start=150, end=500, observed_introns=[(200, 500)])),
     ("zero-length intron", dict(start=150, end=500, observed_introns=[(300, 300)])),
     (

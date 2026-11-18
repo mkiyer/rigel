@@ -285,6 +285,7 @@ def deposit_digest() -> str:
         (210, 1040, ((260, 1000),)),  # spliced; neither block crosses a boundary
         (150, 2100, ((260, 1000), (1120, 2000))),  # two sj and boundaries
         (1030, 2050, ((1120, 2000),)),  # one sj, one boundary
+        (100, 1060, ((100, 150), (260, 1000))),  # a leading intron, then an sj: each junction its own two ends
     ):
         # The native binding has no default for `hypotheses`; an empty set means the unspliced-only set.
         accumulator.deposit(

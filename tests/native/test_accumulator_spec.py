@@ -666,6 +666,36 @@ def test_the_path_starts_where_its_first_covered_base_is_not_where_the_extent_be
     assert int(t.deposited_lengths[20]) == 1
 
 
+def test_a_leading_intron_leaves_every_later_junction_its_own_ends():
+    """Segment ``i`` of a path lies between its introns ``i - 1`` and ``i``, so a junction's mass goes to the two
+    segments it joins. A first intron that starts where the fragment does leaves the path no bases before it; were that
+    empty leading segment dropped, every later segment would read the junction before it as the one after it, and here
+    the annotated junction's donor side would book nothing and the fragment would conserve 0.6 of its 1.
+
+    The path is [200, 300) + [400, 550), L = 250. The junction (300, 400) alone bounds the 100 bases on its donor side
+    (0.4); it shares the 100 bases between its acceptor and boundary 500 with that boundary (0.2 each); the 50 bases
+    after boundary 500 are the boundary's (0.2).
+    """
+    bounds = [0, 100, 200, 300, 400, 500, 600]
+    part = Partition.from_region_bounds(
+        [bounds], region_types=[[0, 2, 1, 2, 1, 2]], sj=[(0, 300, 400, Strand.POS)]
+    )
+    acc = Accumulator(part, max_fragment_length=10_000)
+    outcome = acc.deposit(
+        0, 100, 550, observed_introns=[(100, 200), (300, 400)], sj_strand=Strand.POS
+    )
+    assert outcome == DepositOutcome.DEPOSITED
+    t = acc.tally
+    at_500 = bounds.index(500) - 1
+    sj_mass = float(t.sj_mass[0].sum())
+    boundary_mass = float(t.boundary_spliced_mass[at_500])
+    assert close(sj_mass, 0.6, 4), f"the junction holds {sj_mass}, not 0.6"
+    assert close(boundary_mass, 0.4, 4), f"boundary 500 holds {boundary_mass}, not 0.4"
+    total = float(t.sj_mass.sum() + t.boundary_spliced_mass.sum() + t.boundary_unspliced_mass.sum())
+    assert close(total, 1.0, 4), f"the fragment conserves {total}"
+    assert int(t.region_start_count[bounds.index(200)].sum()) == 1, "the path starts at 200"
+
+
 def test_a_duplicated_intron_credits_its_sj_once():
     """Two mates reporting the same intron is one splice event, not two."""
     acc = _acc(sj=[SJ])

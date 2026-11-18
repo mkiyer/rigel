@@ -53,7 +53,10 @@ inline void normalise_introns(const IntronBlock* observed,
     out.resize(kept);
 }
 
-/// The path's contiguous genomic segments: [start, end) with the (normalised) introns cut out.
+/// The path's contiguous genomic segments: [start, end) with the (normalised) introns cut out, one more than the
+/// introns. Segment i lies between introns i - 1 and i, so a junction's two ends are the segments either side of it by
+/// index. The first segment is empty when the first intron starts at `start`, and the last when the last intron ends
+/// at `end`; a segment between two introns never is, since `normalise_introns` merges abutting ones.
 inline void build_segments(std::int64_t start,
                            std::int64_t end,
                            const std::vector<std::pair<std::int64_t, std::int64_t>>& introns,
@@ -62,10 +65,21 @@ inline void build_segments(std::int64_t start,
     out.clear();
     std::int64_t cursor = start;
     for (const auto& [intron_start, intron_end] : introns) {
-        if (intron_start > cursor) out.emplace_back(cursor, intron_start);
+        out.emplace_back(cursor, intron_start);
         cursor = intron_end;
     }
-    if (end > cursor) out.emplace_back(cursor, end);
+    out.emplace_back(cursor, end);
+}
+
+/// The path's first and last covered base: the first base of its first non-empty segment and the last of its last.
+/// The path has at least one base (a path of none is refused before it deposits).
+inline std::pair<std::int64_t, std::int64_t>
+covered_bases(const std::vector<std::pair<std::int64_t, std::int64_t>>& segments)
+{
+    std::size_t first = 0, last = segments.size() - 1;
+    while (segments[first].second <= segments[first].first) ++first;
+    while (segments[last].second <= segments[last].first) --last;
+    return {segments[first].first, segments[last].second - 1};
 }
 
 /// L: the total length of the path's segments, [start, end) less the observed and the implied introns. ``introns``

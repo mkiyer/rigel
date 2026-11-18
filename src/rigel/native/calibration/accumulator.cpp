@@ -263,8 +263,9 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
 
     // The path's own first and last covered base, not the fragment's extent: introns [(150,480)] over [150,500)
     // put the whole path in [480,500), and the extent would credit a region the path never touches.
-    const std::int64_t first_region = region_of_pos(scratch.segments.front().first);
-    const std::int64_t last_region  = region_of_pos(scratch.segments.back().second - 1);
+    const std::pair<std::int64_t, std::int64_t> covered = covered_bases(scratch.segments);
+    const std::int64_t first_region = region_of_pos(covered.first);
+    const std::int64_t last_region  = region_of_pos(covered.second);
     region_start_count_[static_cast<std::size_t>(first_region) * kNStrandColumns + col] += 1u;
     // The deposited-length histogram moves with the start count and the deposited counter, so all three describe
     // one set of fragments by construction. `length` is already clipped and within the limit.
@@ -308,6 +309,7 @@ std::int64_t Accumulator::deposit_crossings(bool spliced, std::size_t col, std::
     for (std::size_t segment = 0; segment < scratch.segments.size(); ++segment) {
         const std::int64_t seg_start = scratch.segments[segment].first;
         const std::int64_t seg_end = scratch.segments[segment].second;
+        if (seg_end <= seg_start) continue;  // an empty first or last segment: no base to book, no boundary inside it
         const std::pair<std::int64_t, std::int64_t> crossed = crossed_bounds(seg_start, seg_end);
         const std::int64_t first = crossed.first, last = crossed.second;
         for (std::int64_t bound = first; bound < last; ++bound) {
@@ -457,14 +459,16 @@ void Accumulator::placement_masses(const OfferedFragment& fragment, DepositScrat
     for (std::size_t segment = 0; segment < scratch.segments.size(); ++segment) {
         const std::int64_t seg_start = scratch.segments[segment].first;
         const std::int64_t seg_end = scratch.segments[segment].second;
+        if (seg_end <= seg_start) continue;  // an empty first or last segment: no base to book, no boundary inside it
         const std::pair<std::int64_t, std::int64_t> crossed = crossed_bounds(seg_start, seg_end);
         for_each_mass_share(segment, seg_start, seg_end, crossed.first, crossed.second, length, scratch.sj_id_at_gap,
                             [&out](std::int8_t kind, std::int64_t id, double share) {
                                 out.push_back({kind, id, share});
                             });
     }
-    const std::int64_t first_region = region_of_pos(scratch.segments.front().first);
-    const std::int64_t last_region  = region_of_pos(scratch.segments.back().second - 1);
+    const std::pair<std::int64_t, std::int64_t> covered = covered_bases(scratch.segments);
+    const std::int64_t first_region = region_of_pos(covered.first);
+    const std::int64_t last_region  = region_of_pos(covered.second);
     if (!spliced && first_region == last_region) out.push_back({kPlaceRegion, first_region, 1.0});
 
     // One entry per object: a boundary bounds two slices of one segment.
