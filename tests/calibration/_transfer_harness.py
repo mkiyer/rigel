@@ -26,12 +26,18 @@ from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
 from rigel.calibration.simplex_logodds import CubeRows
 from rigel.calibration.strand_balance import strand_discriminability
-from rigel._solve_impl.testing import outside_flank, transfer_pass, transfer_prepare, transfer_solve
+from rigel._solve_impl.testing import (
+    RULE_CODES,
+    outside_flank,
+    transfer_pass,
+    transfer_prepare,
+    transfer_solve,
+)
 
-#: the five kinds of composition rule a directed face can carry (``NONE``: the face has no rule and the level lane
-#: serves it), the kernel's `transfer_rows.h` constants
-NONE, FORWARD, TRANSPORT, SPLICE_OUT, EDGE, LEVEL = range(6)
+#: the five kinds of composition rule a directed face can carry, and ``none`` (the face has no rule and the level lane
+#: serves it), by name; their codes are the kernel's own (`transfer_rows.h`), bound as ``RULE_CODES``
 RULE_NAMES = ("none", "forward", "transport", "splice_out", "edge", "level")
+NONE, FORWARD, TRANSPORT, SPLICE_OUT, EDGE, LEVEL = (RULE_CODES[name] for name in RULE_NAMES)
 
 #: the received tables' three level lanes, by field name, in the kernel's order
 LANES = ("level_gdna", "level_rna_pos", "level_rna_neg")

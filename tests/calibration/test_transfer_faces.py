@@ -115,7 +115,7 @@ def _expected_exon_rows(si, ctx, src, lam, strand_of_si=None):
                 np.interp(lam, le, lam, left=lam[0], right=lam[-1]), lam, row_b - row_b.max()
             )
             v = float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_s + 0.5))
-            half = max(int(np.ceil(4.0 * np.sqrt(v) / dlam)), 1)
+            half = R.blur_radius(v, dlam)
             x = np.arange(-half, half + 1) * dlam
             kern = np.exp(-0.5 * x * x / v)
             kern /= kern.sum()

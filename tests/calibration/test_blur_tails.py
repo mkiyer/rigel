@@ -12,7 +12,7 @@ def blur(row, grid, variance):
     if variance <= 0 or len(row) == 1:
         return row - row.max()
     step = grid[1] - grid[0]
-    half = max(int(np.ceil(4 * np.sqrt(variance) / step)), 1)
+    half = rows.blur_radius(variance, step)
     offsets = np.arange(-half, half + 1) * step
     log_kernel = -0.5 * offsets**2 / variance
     log_kernel -= logsumexp(log_kernel)
@@ -57,7 +57,7 @@ def test_certified_source_keeps_its_low_density_tail(count):
     rate, origin = 1.0, 1.0
     variance = rows.hop_price(count, count / rate, 0.0, 0.0)
     step = grid[1] - grid[0]
-    half = max(int(np.ceil(4 * np.sqrt(variance) / step)), 1)
+    half = rows.blur_radius(variance, step)
     extended = grid[0] + np.arange(-half, len(grid) + half) * step
     mean = count / rate * origin * np.exp(extended)
     source = count * np.log(mean) - mean

@@ -8,8 +8,9 @@ from rigel._solve_impl import testing as rows
 
 
 def poisson_blur(log_density, count, opportunity, variance, step):
-    """Independent discrete convolution with the shipped four-sd kernel, evaluating the source outside any table."""
-    half = max(int(np.ceil(4 * np.sqrt(variance) / step)), 1)
+    """Independent discrete convolution on the shipped kernel's footprint (its radius the kernel's own,
+    ``blur_radius``), evaluating the source outside any table."""
+    half = rows.blur_radius(variance, step)
     offsets = np.arange(-half, half + 1) * step
     log_kernel = -0.5 * offsets**2 / variance
     log_kernel -= logsumexp(log_kernel)

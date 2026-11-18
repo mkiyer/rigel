@@ -16,7 +16,7 @@ namespace transfer_rows {
 
 constexpr double EPS = 1.0e-9;
 constexpr double TINY = 1.0e-300;
-// NONE, or one of the five composition rules a directed face can carry
+// NONE, or one of the five composition rules a directed face can carry; bound by name as `testing.RULE_CODES`
 constexpr int NONE = 0, FORWARD = 1, TRANSPORT = 2, SPLICE_OUT = 3, EDGE = 4, LEVEL = 5;
 
 // ---- scalar pieces ---------------------------------------------------------------------------------
@@ -109,9 +109,12 @@ inline void interp(const double* x, int n, const double* xp, const double* fp, i
 }
 
 // blur_row: the delta-method counting width — a Gaussian blur of variance v along lam on a
-// max-normalised log-row, edge-padded; a non-positive v only re-normalises.
+// max-normalised log-row, edge-padded; a non-positive v only re-normalises. The kernel reaches
+// BLUR_HALF_WIDTH_SD standard deviations each side: the Gaussian mass beyond them is erfc(4/√2) ≈ 6.3e-5.
+constexpr double BLUR_HALF_WIDTH_SD = 4.0;
+// The kernel's half-width in grid steps, at least one.
 inline int blur_radius(double v, double step) {
-    return std::max(static_cast<int>(std::ceil(4.0 * std::sqrt(v) / step)), 1);
+    return std::max(static_cast<int>(std::ceil(BLUR_HALF_WIDTH_SD * std::sqrt(v) / step)), 1);
 }
 
 inline void blur_row_at_step(const double* row, int K, double dlam, double v, double* out,

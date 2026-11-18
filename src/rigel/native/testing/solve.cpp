@@ -6,8 +6,9 @@
 //   transfer_prepare, transfer_pass, transfer_solve
 //                    the transfer policy's three kernels (`transfer_kernel.h`) on tables the call allocates and returns,
 //                    or the harness builds by hand (`tests/calibration/_transfer_harness.py`).
-//   the row constructors of `transfer_rows.h`, the builders' flag predicates and the strand evidence, each returning a
-//   fresh array; and the constants the gates read (EPS, MARGINAL_NODES, OWN_EVIDENCE_EPS, JEFFREYS_REF).
+//   the row constructors of `transfer_rows.h` and the blur's radius, the builders' flag predicates and the strand
+//   evidence, each returning a fresh array; and the constants the gates read (EPS, MARGINAL_NODES, OWN_EVIDENCE_EPS,
+//   JEFFREYS_REF, and RULE_CODES, the composition rules' codes by name).
 
 #include <cstdint>
 #include <stdexcept>
@@ -315,6 +316,8 @@ void bind_rows(nb::module_& t) {
     t.def("trigamma", &trigamma, nb::arg("x"), "zeta(2, x), the counting variance's one home.");
     t.def("count_logvar", &count_logvar, nb::arg("n"));
     t.def("hop_price", &hop_price, nb::arg("n_s"), nb::arg("a_s"), nb::arg("n_x"), nb::arg("a_x"));
+    t.def("blur_radius", &blur_radius, nb::arg("v"), nb::arg("step"),
+          "The blur kernel's half-width in grid steps at variance v: the footprint blur_row convolves over.");
     t.def("blur_row", [](Vec row, Vec lam, double v) {
         return row_of(K_of(row), [&](Scratch& S, double* out) { blur_row(row.data(), K_of(row), lam.data(), v, out, S.blur); });
     }, nb::arg("row"), nb::arg("lam"), nb::arg("v"));
@@ -397,6 +400,14 @@ nb::object flank(int64_t x) { return x < 0 ? nb::none() : nb::cast(x); }
 // The builders' flag predicates on the boundary flags, the strand evidence, and the constants the gates read.
 void bind_predicates(nb::module_& t) {
     t.attr("EPS") = EPS;
+    nb::dict rule_codes;
+    rule_codes["none"] = transfer_rows::NONE;
+    rule_codes["forward"] = transfer_rows::FORWARD;
+    rule_codes["transport"] = transfer_rows::TRANSPORT;
+    rule_codes["splice_out"] = transfer_rows::SPLICE_OUT;
+    rule_codes["edge"] = transfer_rows::EDGE;
+    rule_codes["level"] = transfer_rows::LEVEL;
+    t.attr("RULE_CODES") = rule_codes;
     t.attr("MARGINAL_NODES") = vec_to_ndarray(std::vector<double>(MARGINAL_NODES, MARGINAL_NODES + N_MARGINAL_NODES));
     t.attr("OWN_EVIDENCE_EPS") = rigel::OWN_EVIDENCE_EPS;
     t.attr("JEFFREYS_REF") = P::JEFFREYS_REF;

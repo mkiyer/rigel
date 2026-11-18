@@ -606,6 +606,10 @@ def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_f
     faces = prepared.faces
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
     kinds = {FORWARD, TRANSPORT, SPLICE_OUT, EDGE, LEVEL}
+    # the kernel binds exactly the rules this module names, under distinct codes, so a rule added to or dropped from
+    # the kernel, or a code two rules share, fails here
+    assert set(R.RULE_CODES) == set(RULE_NAMES)
+    assert len(set(R.RULE_CODES.values())) == len(RULE_NAMES)
     seen = set()
     for s, i in faces.pairs():
         assert s == (left[i] if s < i else right[i]), f"({s}, {i}) is not a face"
@@ -618,8 +622,8 @@ def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_f
             assert row is None or (row.shape == (int(ctx.n_grid),) and np.isfinite(row).all())
         if f.kind == TRANSPORT:
             assert f.row is not None and f.n_u > 0.0
-    assert {FORWARD, TRANSPORT, SPLICE_OUT} <= seen, [RULE_NAMES[k] for k in sorted(seen)]
-    assert len(RULE_NAMES) == 6
+    name_of = {code: name for name, code in R.RULE_CODES.items()}
+    assert {FORWARD, TRANSPORT, SPLICE_OUT} <= seen, sorted(name_of[k] for k in seen)
 
 
 def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs):
