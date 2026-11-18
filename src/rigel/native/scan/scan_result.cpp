@@ -54,6 +54,7 @@ nb::dict BamScanStats::to_dict() const {
     for (int32_t v = HIT_USABLE + 1; v < N_HIT_VERDICTS; v++)
         out[("n_hits_rejected_" + std::string(hit_verdict_label(v))).c_str()] = hits_rejected[v];
     out["n_nh_above_reported"] = n_nh_above_reported;
+    out["n_read_pairs_lacking_mate"] = n_read_pairs_lacking_mate;
     for (size_t i = 0; i < splice_census.size(); i++)
         out[("n_census_" + std::string(splice_type_label(static_cast<int32_t>(i)))).c_str()] = splice_census[i];
     return out;

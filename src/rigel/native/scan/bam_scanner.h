@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -110,6 +111,9 @@ struct BamScanStats {
     std::array<int64_t, N_HIT_VERDICTS> hits_rejected{};
     // Templates whose NH exceeds the records reported for either mate: the aligner truncated its output
     int64_t n_nh_above_reported = 0;
+    // Read pairs a record of which calls its mate mapped while the run holds no record of that mate: the mate is
+    // elsewhere in the BAM (one not grouped by name) or was removed
+    int64_t n_read_pairs_lacking_mate = 0;
 
     // The splice census, `rigel report`'s splice breakdown: one observation per hit the scanner offers the
     // accumulator (a multimapper's hits one by one), under the resolver's classification. Indexed by `SpliceType`, so
@@ -136,6 +140,11 @@ struct ScanPartition {
     bool has_sj = false;
 
     std::unique_ptr<accumulator::AccumulatorSet> make_set() const;
+};
+
+/// A record the scan cannot read as paired-end input. Python receives it as `UnpairedRecordError`, a ValueError.
+struct UnpairedRecordError : std::invalid_argument {
+    using std::invalid_argument::invalid_argument;
 };
 
 class BamScanner {

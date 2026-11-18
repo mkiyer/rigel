@@ -7,6 +7,7 @@ like the end of file.
 """
 
 import logging
+import re
 
 import pysam
 import pytest
@@ -169,3 +170,124 @@ def test_an_annotated_bam_that_is_the_input_is_refused_before_the_scan(built, tm
     with pytest.raises(BamInputError, match="is the input BAM"):
         run_pipeline(bam, built.index, config=config)
     assert bam.read_bytes() == before
+
+
+def _rewrite(src, dst, edit):
+    """Copy a BAM with each record passed through ``edit(record)``, which returns it, changed or not, or ``None`` to
+    drop it."""
+    with pysam.AlignmentFile(str(src), "rb") as fin:
+        with pysam.AlignmentFile(str(dst), "wb", header=fin.header) as fout:
+            for r in fin.fetch(until_eof=True):
+                r = edit(r)
+                if r is not None:
+                    fout.write(r)
+
+
+def _first_scanned(r) -> bool:
+    """Whether the scan reads this record past its filter: mapped, not QC-failed, not a duplicate."""
+    return not (r.is_unmapped or r.is_qcfail or r.is_duplicate)
+
+
+def test_an_unpaired_record_is_refused_as_an_error_naming_it(built, tmp_path):
+    """Rigel reads paired-end libraries only. A record the flag calls unpaired stops the scan, and the CLI reports it
+    as an error naming the record, not as a traceback."""
+    from rigel.cli import build_parser
+
+    named: list[str] = []
+
+    def unpair(r):
+        if not named and _first_scanned(r):
+            r.flag &= ~0x1
+            named.append(r.query_name)
+        return r
+
+    unpaired = tmp_path / "unpaired.bam"
+    _rewrite(built.bam_path, unpaired, unpair)
+    with pytest.raises(BamInputError, match=re.escape(named[0])):
+        _run(unpaired, built.index)
+    args = build_parser().parse_args(
+        [
+            "quant",
+            "--bam",
+            str(unpaired),
+            "--index",
+            str(built.index_dir),
+            "-o",
+            str(tmp_path / "out"),
+        ]
+    )
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    message = str(exited.value.code)
+    assert message.startswith("Error: ") and "paired" in message and named[0] in message
+
+
+def _pairs_lacking_a_mate(bam) -> int:
+    """The read pairs (runs of records sharing a name) a record of which calls its mate mapped, while the run holds no
+    record of that mate: counted from the BAM itself, apart from the scan."""
+    n, name, seen, expected = 0, None, 0, 0
+    with pysam.AlignmentFile(str(bam), "rb", check_sq=False) as f:
+        for r in f.fetch(until_eof=True):
+            if r.query_name != name:
+                n += bool(expected & ~seen)
+                name, seen, expected = r.query_name, 0, 0
+            segment = 1 if r.is_read1 else 2 if r.is_read2 else 0
+            seen |= segment
+            if r.is_paired and not r.mate_is_unmapped:
+                expected |= {1: 2, 2: 1}.get(segment, 0)
+    return n + bool(expected & ~seen)
+
+
+def _scan_counts(bam, index):
+    from rigel.pipeline import scan_and_buffer
+
+    stats, _strand_models, buffer, _payload = scan_and_buffer(
+        str(bam), index, BamScanConfig(sj_strand_tag="ts")
+    )
+    buffer.cleanup()
+    return stats
+
+
+def test_a_name_grouped_bam_lacks_no_mate(built, caplog):
+    with caplog.at_level(logging.WARNING):
+        stats = _scan_counts(built.bam_path, built.index)
+    assert stats.n_read_pairs_lacking_mate == 0 == _pairs_lacking_a_mate(built.bam_path)
+    assert "lack" not in caplog.text
+
+
+def _drop_some_second_mates():
+    """An edit for `_rewrite`: every seventh read name, in the BAM's order, loses its second mate's records."""
+    order: dict[str, int] = {}
+
+    def edit(r):
+        k = order.setdefault(r.query_name, len(order))
+        return None if r.is_read2 and k % 7 == 0 else r
+
+    return edit
+
+
+def _unsorted_header_coordinate_order(src, dst, tmp_path):
+    """The BAM sorted by coordinate, its header no longer saying so: the case the header check cannot see."""
+    coordinate = tmp_path / "coordinate.bam"
+    pysam.sort("-o", str(coordinate), str(src))
+    _reheader(coordinate, dst, lambda header: header.get("HD", {}).pop("SO", None))
+
+
+@pytest.mark.parametrize("case", ["mates removed", "sorted by coordinate, unsaid"])
+def test_read_pairs_lacking_a_mate_their_flags_call_mapped_are_counted_and_warned(
+    built, tmp_path, caplog, case
+):
+    """A record whose flag calls its mate mapped, in a run of records holding no record of that mate: the mates are
+    elsewhere in the BAM (sorted by coordinate, with no @HD SO to say so) or were filtered out record by record. The
+    scan counts such read pairs and warns with the count; no threshold decides anything."""
+    bam = tmp_path / "input.bam"
+    if case == "mates removed":
+        _rewrite(built.bam_path, bam, _drop_some_second_mates())
+    else:
+        _unsorted_header_coordinate_order(built.bam_path, bam, tmp_path)
+    expected = _pairs_lacking_a_mate(bam)
+    assert expected > 0
+    with caplog.at_level(logging.WARNING):
+        stats = _scan_counts(bam, built.index)
+    assert stats.n_read_pairs_lacking_mate == expected
+    assert f"{expected:,} of {stats.n_read_pairs:,} read pairs lack a mate" in caplog.text

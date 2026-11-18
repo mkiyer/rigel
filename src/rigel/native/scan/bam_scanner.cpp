@@ -55,6 +55,7 @@ void BamScanStats::merge_from(const BamScanStats& o) {
     n_unique_unspliced_bases += o.n_unique_unspliced_bases;
     for (int32_t v = 0; v < N_HIT_VERDICTS; v++) hits_rejected[v] += o.hits_rejected[v];
     n_nh_above_reported += o.n_nh_above_reported;
+    n_read_pairs_lacking_mate += o.n_read_pairs_lacking_mate;
     for (size_t i = 0; i < splice_census.size(); i++) splice_census[i] += o.splice_census[i];
 }
 
@@ -467,6 +468,28 @@ void BamScanner::Worker::add_place_masses(const AssembledFragment& f, const Reso
 
 namespace {
 
+/// Whether a read pair holds every mate its records call mapped, read from every record's flag, filtered records
+/// included: a record names its own segment (read 1 or read 2) and, unless its mate is flagged unmapped, expects the
+/// other one in the run.
+class MateCheck {
+public:
+    void add(uint16_t flag) {
+        const uint8_t segment = (flag & BAM_FREAD1) ? kRead1 : (flag & BAM_FREAD2) ? kRead2 : 0;
+        seen_ |= segment;
+        if (segment != 0 && (flag & BAM_FPAIRED) && !(flag & BAM_FMUNMAP)) expected_ |= segment ^ (kRead1 | kRead2);
+    }
+    /// Whether the read pair just read lacks a mate one of its records calls mapped; ready for the next one.
+    bool close() {
+        const bool lacking = (expected_ & ~seen_) != 0;
+        seen_ = expected_ = 0;
+        return lacking;
+    }
+
+private:
+    static constexpr uint8_t kRead1 = 1, kRead2 = 2;
+    uint8_t seen_ = 0, expected_ = 0;
+};
+
 /// The first exception any of several threads throws.
 class FirstError {
 public:
@@ -506,11 +529,13 @@ void BamScanner::read_bam(const std::string& bam_path, int n_decomp_threads, int
     };
 
     ReadPairRuns runs;
+    MateCheck mates;
     QnameGroup group;
     int64_t frag_id = 0;
     // Close the read pair just read: one with an eligible record is a group, given the next frag_id; one without is
     // excluded. False when the queue was aborted.
     const auto close_pair = [&]() -> bool {
+        stats_.n_read_pairs_lacking_mate += mates.close();
         if (group.records.empty()) {
             stats_.pairs.n_excluded++;
             return true;
@@ -530,11 +555,15 @@ void BamScanner::read_bam(const std::string& bam_path, int n_decomp_threads, int
             if (pair_open && !close_pair()) return;
             stats_.pairs.n_read_pairs++;
         }
+        mates.add(flag);
         if (is_filtered(flag, skip_duplicates_)) {
             stats_.pairs.filtered++;
             continue;
         }
-        if (!(flag & BAM_FPAIRED)) throw std::runtime_error("Input BAM must be paired-end, but found unpaired read");
+        if (!(flag & BAM_FPAIRED)) {
+            throw UnpairedRecordError("record " + std::string(bam_get_qname(b.get())) +
+                                      " is not paired (its FLAG lacks 0x1): Rigel reads paired-end libraries only");
+        }
         if (group.records.empty()) group.name_hash = runs.name_hash();
         group.records.push_back(parser.parse(b.get(), &stats_.records));
     }

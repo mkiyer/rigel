@@ -121,6 +121,9 @@ class PipelineStats:
     n_withheld_off_index: int = 0  # templates with a hit on a reference outside the index
     n_withheld_chimeric: int = 0  # templates with a chimeric hit, none usable
     n_nh_above_reported: int = 0  # NH above a mate's reported records (a truncated output)
+    # read pairs a record of which calls its mate mapped while the run holds no record of it: the mate is elsewhere
+    # in the BAM (one not grouped by read name) or was removed
+    n_read_pairs_lacking_mate: int = 0
 
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
     # One observation per placement the scanner hands the accumulator's deposit adapter, intergenic hits included. The

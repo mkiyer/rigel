@@ -16,6 +16,9 @@ Every extension carries a ``testing`` submodule, its seams bound for the tests; 
 from ._bam_impl import BamScanner
 from ._bam_impl import BamAnnotationWriter
 
+# a record the scan cannot read as paired-end input (a ValueError)
+from ._bam_impl import UnpairedRecordError
+
 # -- The accumulator: the native class itself, so a caller reads the banks it exports -----------------
 from ._bam_impl import Accumulator
 
@@ -71,6 +74,7 @@ __all__ = [
     # BAM
     "BamScanner",
     "BamAnnotationWriter",
+    "UnpairedRecordError",
     # The accumulator
     "Accumulator",
     "PLACE_REGION",

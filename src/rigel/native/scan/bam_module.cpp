@@ -203,6 +203,7 @@ void bind_accumulator(nb::module_& m) {
 }
 
 void bind_scanner(nb::module_& m) {
+    nb::exception<UnpairedRecordError>(m, "UnpairedRecordError", PyExc_ValueError);
     nb::class_<BamScanner>(m, "BamScanner")
         .def(nb::init<const FragmentResolver&, const std::string&, bool, bool>(), nb::arg("ctx"),
              nb::arg("sj_tag_spec"), nb::arg("skip_duplicates"), nb::arg("include_multimap"),

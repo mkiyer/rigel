@@ -38,6 +38,7 @@ from .frag_length_model import FragmentLengthModel
 from .index import TranscriptIndex
 from .native import EM_WINNER_INTERGENIC
 from .native import BamScanner as _NativeBamScanner
+from .native import UnpairedRecordError
 from .routing import FragmentRouter
 from .scoring import build_scorer, sequence_log_penalties
 from .stats import PipelineStats
@@ -383,6 +384,21 @@ def scan_and_buffer(
     return stats, strand_models, buffer, payload
 
 
+def _warn_lacking_mates(stats: PipelineStats) -> None:
+    """Warn, with the count, of read pairs lacking a mate their own records call mapped. Their mates sit elsewhere in
+    the BAM, which then is not grouped by read name (sorted by coordinate, its header not saying so), or were
+    removed record by record; each such read pair is read without its mate."""
+    if stats.n_read_pairs_lacking_mate:
+        logger.warning(
+            "%s of %s read pairs lack a mate their records call mapped (FLAG 0x8 unset): the mates are elsewhere in "
+            "the BAM or were removed, and each such pair is read without its mate. A BAM sorted by coordinate whose "
+            "header does not say so reads this way; sort it by read name (samtools sort -n) or collate it "
+            "(samtools collate).",
+            f"{stats.n_read_pairs_lacking_mate:,}",
+            f"{stats.n_read_pairs:,}",
+        )
+
+
 def _scan(
     bam_path: str, index: TranscriptIndex, scan: "BamScanConfig", buffer: FragmentBuffer
 ) -> tuple[PipelineStats, StrandModels, "AccumulatorPayload"]:
@@ -401,19 +417,23 @@ def _scan(
             n_bgzf,
             scan.resolved_total_threads(),
         )
-    result = scanner.scan(
-        bam_path,
-        # each chunk a zero-copy dict from C++
-        chunk_callback=lambda raw: buffer.inject_chunk(FinalizedChunk.from_raw(raw)),
-        chunk_size=scan.fragments_per_chunk,
-        n_workers=n_scan,
-        n_decomp_threads=n_bgzf,
-        qname_batch_size=scan.read_name_batch_size,
-    )
+    try:
+        result = scanner.scan(
+            bam_path,
+            # each chunk a zero-copy dict from C++
+            chunk_callback=lambda raw: buffer.inject_chunk(FinalizedChunk.from_raw(raw)),
+            chunk_size=scan.fragments_per_chunk,
+            n_workers=n_scan,
+            n_decomp_threads=n_bgzf,
+            qname_batch_size=scan.read_name_batch_size,
+        )
+    except UnpairedRecordError as exc:
+        raise BamInputError(f"{bam_path}: {exc}") from exc
 
     stats = PipelineStats()
     _apply_scan_stats(stats, result["stats"])
     check_scan_accounting(stats)
+    _warn_lacking_mates(stats)
     strand_models = _strand_models(result["strand_observations"], stats)
     logger.info(
         f"[DONE] Native scan: {stats.n_fragments:,} fragments → "
