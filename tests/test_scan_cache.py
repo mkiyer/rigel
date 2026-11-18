@@ -876,3 +876,87 @@ def test_an_undrained_payload_round_trips_with_drain_none(scanned, tmp_path):
         f"drain came back as {loaded.payload.drain!r}; a JSON round trip must not turn None into a string"
     )
     assert loaded.payload.deferred.n_fragments == payload.deferred.n_fragments
+
+
+# ── the transcript models: what resolution reads beyond the graph ──────────────────────────────────
+
+
+def _models_gtf(models) -> str:
+    return "".join(
+        f'chr1\ttest\texon\t{s}\t{e}\t.\t+\t.\tgene_id "g1"; transcript_id "{tid}";\n'
+        for tid, exons in models
+        for s, e in exons
+    )
+
+
+#: Three exons. Both annotations have one exon union, one junction set, one set of termini and the same reach per
+#: junction, so `graph_hash` and the reach digest are byte-identical; the transcripts that hold each junction differ,
+#: and resolution reads exactly that.
+_E1, _E2, _E3 = (100, 200), (300, 400), (500, 600)
+_MODELS_A = [("t1", [_E1, _E2, _E3]), ("t2", [_E1, _E2]), ("t3", [_E2, _E3])]
+_MODELS_B = [("t1", [_E1, _E2, _E3]), ("t2", [_E2])]
+
+
+@pytest.fixture(scope="module")
+def two_model_sets(tmp_path_factory):
+    """``(index A, index B, a cache of one read pair scanned against A)``."""
+    from _bam_builder import R1_FWD, R2_REV, record, write_bam
+    from _index_builder import build_index
+    from rigel.config import BamScanConfig
+    from rigel.pipeline import scan_and_buffer
+
+    base = tmp_path_factory.mktemp("two_model_sets")
+    (base / "a").mkdir()
+    (base / "b").mkdir()
+    index_a = build_index(base / "a", _models_gtf(_MODELS_A), {"chr1": 2000})
+    index_b = build_index(base / "b", _models_gtf(_MODELS_B), {"chr1": 2000})
+    pair = [record("r1", R1_FWD, 120, "50M", 150), record("r1", R2_REV, 150, "50M", 120)]
+    bam = write_bam(base / "pair.bam", pair, {"chr1": 2000})
+    scan = BamScanConfig()
+    _stats, strand_model, _buffer, payload = scan_and_buffer(bam, index_a, scan)
+    cache_dir = write_scan_cache(
+        base / "cache",
+        payload=payload,
+        strand_model=strand_model,
+        index=index_a,
+        bam=bam,
+        scan_config=scan,
+    )
+    return index_a, index_b, cache_dir
+
+
+class TestTheKeyRefusesMovedTranscriptModels:
+    def test_the_two_annotations_share_every_other_part_of_the_key(self, two_model_sets):
+        index_a, index_b, _cache_dir = two_model_sets
+        assert index_a.graph_hash == index_b.graph_hash
+        assert reach_digest(index_a) == reach_digest(index_b)
+        assert index_a.num_transcripts != index_b.num_transcripts
+
+    def test_a_cache_reads_against_the_models_it_was_scanned_under(self, two_model_sets):
+        index_a, _index_b, cache_dir = two_model_sets
+        read_scan_cache(cache_dir, index_a)
+
+    def test_a_cache_scanned_under_other_transcript_models_is_refused(self, two_model_sets):
+        _index_a, index_b, cache_dir = two_model_sets
+        with pytest.raises(ScanCacheKeyError, match="transcript model"):
+            read_scan_cache(cache_dir, index_b)
+
+    def test_a_cache_with_no_transcript_model_record_is_refused(self, two_model_sets, tmp_path):
+        index_a, _index_b, cache_dir = two_model_sets
+        copy = tmp_path / "cache"
+        shutil.copytree(cache_dir, copy)
+        manifest = json.loads((copy / "manifest.json").read_text())
+        del manifest["transcript_model_digest"]
+        (copy / "manifest.json").write_text(json.dumps(manifest))
+        with pytest.raises(ScanCacheKeyError, match="transcript model"):
+            read_scan_cache(copy, index_a)
+
+    def test_the_scan_key_moves_with_the_transcript_models(self, two_model_sets):
+        """The key a derived table records (`slot_truth.npz`) is the cache's whole key, so it moves with it."""
+        index_a, _index_b, cache_dir = two_model_sets
+        manifest = json.loads((cache_dir / "manifest.json").read_text())
+        moved = dict(manifest, transcript_model_digest="0" * 16)
+        assert scan_cache.scan_cache_key(manifest) != scan_cache.scan_cache_key(moved)
+        assert scan_cache.scan_cache_key(manifest) == scan_cache.scan_cache_key(
+            read_scan_cache(cache_dir, index_a).provenance
+        )

@@ -112,9 +112,10 @@ def score_condition(index, panel_dir, condition, policies, by_class=False, setti
     # the drained frame: `calibration_inputs` drains at the production seed and builds the production fl
     # models, the frame `slot_truth.npz` is certified in, so estimate and truth count the same fragments
     kw = calibration_inputs(cache, index)
-    truth = sibling("_oracle_arms.py").certified_gdna(truth_dir)
+    OA = sibling("_oracle_arms.py")
+    truth = OA.certified_gdna(truth_dir, cache.provenance)
     if by_class:
-        slots = dict(np.load(truth_dir / "slot_truth.npz", allow_pickle=True))
+        slots = OA.slot_truth(truth_dir, cache.provenance)
         classes = _slot_classes(slots, kw["payload"], kw["boundary_flags"])
     rows = {}
     for name in policies:

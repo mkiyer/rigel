@@ -58,7 +58,7 @@ from rigel.calibration.signature import (  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from _scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
+from _scan_cache import calibration_inputs, read_scan_cache, scan_cache_key  # noqa: E402
 
 _EPS = 1.0e-12
 #: |z| above which gdna-field-uniformity flags a slot (~6e-5 false flags per slot); the gate reads the flag rate.
@@ -347,7 +347,10 @@ def derive(index, suite: Path, condition: str) -> tuple[dict, list[dict]]:
     ]
     mass = n_g + n_n + n_m
     table = {
-        "condition": condition, "kind": np.asarray(chain.kind), "obj": np.asarray(chain.obj_idx, np.int64),
+        "condition": condition,
+        # the scan this table was derived from: a reader refuses it against any other (`_oracle_arms.slot_truth`)
+        "scan_key": scan_cache_key(cache.provenance),
+        "kind": np.asarray(chain.kind), "obj": np.asarray(chain.obj_idx, np.int64),
         "stratum": label.astype(str), "ref": ref, "eff_g": eff_g, "eff_r": np.asarray(geom.eff_rna, np.float64),
         **c,
         "true_f_g": np.where(mass > 0, n_g / np.maximum(mass, _EPS), 0.0),

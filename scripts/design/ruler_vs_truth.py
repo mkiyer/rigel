@@ -261,12 +261,15 @@ def load_truth(index: TranscriptIndex, index_dir: Path, panel_dir: Path, conditi
 def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, config):
     """The shipped calibration on the condition's cached payload. Returns the result and the solve's debug bundle:
     the fields of ``CalibrationDiagnostics`` (the last refit's landscape under ``landscape``, ``None`` without a
-    refit; the chain; the belief), the two fragment-length pmfs and the EM's length tables."""
+    refit; the chain; the belief), the two fragment-length pmfs, the EM's length tables and the scan cache's
+    provenance (``scan_provenance``), which keys the certified truth."""
     cache = read_scan_cache(panel_dir / "scan_cache" / condition, index)
     kw = calibration_inputs(cache, index)
     diagnostics = CalibrationDiagnostics()
     cal = calibrate(config=config.calibration, diagnostics=diagnostics, **kw)
     debug = {f.name: getattr(diagnostics, f.name) for f in dataclasses.fields(diagnostics)}
+    # the scan the solve read, which the certified truth must have been derived from
+    debug["scan_provenance"] = cache.provenance
     debug["gdna_fl_pmf"] = kw["gdna_fl_pmf"]
     debug["rna_fl_pmf"] = kw["rna_fl_pmf"]
     # the EM's two length tables as production builds them on this payload: the shipped ruler reads them
@@ -279,7 +282,7 @@ def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, inpu
     shipped reader under a landscape fitted on the truth and raised to the weight the truth gives (the visible share
     of the true counts over the solve's chain, ``inputs`` being ``calibrate_condition``'s bundle): the ideal witness,
     with no estimator noise."""
-    truth = sibling("_oracle_arms.py").certified_gdna(panel_dir / "oracle_cache" / condition)
+    truth = sibling("_oracle_arms.py").certified_gdna(panel_dir / "oracle_cache" / condition, inputs["scan_provenance"])
     m_reg, m_bnd = truth["region"], truth["boundary"]
     chain, statics = inputs["chain"], inputs["statics"]
     at = np.asarray(chain.kind) == REGION

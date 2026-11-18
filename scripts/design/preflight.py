@@ -5,7 +5,8 @@ A broken environment otherwise surfaces hours in, as a wrong number rather than 
 toolchain (the `rigel` conda env, the compiled native extension, the `rigel` CLI), both references (the
 panel's genome, GTF, index and probes; the test chromosome's YAML and its renders), both panels (scan caches
 and oracle caches with every part `panel.py` requires, each keyed against this build and the panel's index by
-the cache module's own check, so a stale cache never reads as present; the certified `slot_truth.npz`) and that
+the cache module's own check, so a stale cache never reads as present; the certified `slot_truth.npz`, keyed on
+the scan it was derived from) and that
 every `scripts/design/` instrument imports. It changes and measures nothing: every check is a read or an
 import, and a failed check prints the command that regenerates the missing or stale artifact. `--full` adds
 every instrument's `--self-test`, each in a subprocess: run it after a deposit-rule change, a default flip,
@@ -217,9 +218,25 @@ def check_panel(rep: Report, root: Path, index_dir: Path, label: str, rebuild: s
         parts = _sim_script("panel").ORACLE_PARTS
         ok, detail = cache_verdict([_first_part_refusal(oracle / c, parts, index) for c in conds])
         rep.add(ok, f"{label}: oracle caches, every part", detail, recache)
-    stamped = [c for c in conds if (oracle / c / "slot_truth.npz").is_file()]
-    rep.add(len(stamped) == len(conds), f"{label}: certified slot_truth", f"{len(stamped)}/{len(conds)}",
-            "python scripts/design/calibration_oracle.py")
+    ok, detail = cache_verdict([(c, _slot_truth_refusal(root, c)) for c in conds])
+    rep.add(ok, f"{label}: certified slot_truth", detail, "python scripts/design/calibration_oracle.py")
+
+
+def _slot_truth_refusal(root: Path, condition: str) -> str:
+    """"" when the condition's `slot_truth.npz` was certified on the scan its scan cache holds, else why not: a
+    re-scan leaves the table behind until it is re-certified, and every reader refuses it then."""
+    import json
+
+    from _shared import sibling
+
+    table, manifest = root / "oracle_cache" / condition / "slot_truth.npz", root / "scan_cache" / condition
+    if not table.is_file():
+        return "missing"
+    return _refusal(
+        lambda: sibling("_oracle_arms.py").slot_truth(
+            table.parent, json.loads((manifest / "manifest.json").read_text())
+        )
+    )
 
 
 def check_instruments(rep: Report, full: bool) -> None:

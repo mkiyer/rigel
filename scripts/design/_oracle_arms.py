@@ -3,7 +3,8 @@ instruments. A helper module, so it has no row on the shelf.
 
 T is the production accumulator run on the BAM split by origin, asserted to sum to the full payload in the drained
 frame. `load_or_build_oracle` is the one place the per-origin caches are built and `oracle_parts` the one place they
-are read; `certified_gdna` reads the per-object gDNA truth `calibration_oracle.py` certifies.
+are read; `certified_gdna` reads the per-object gDNA truth `calibration_oracle.py` certifies, keyed on the scan it
+was derived from.
 
 Gate: ``tests/calibration/test_oracle_arms.py``.
 """
@@ -27,7 +28,7 @@ from _oracle import (  # noqa: E402
 )
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.pipeline import scan_and_buffer  # noqa: E402
-from _scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
+from _scan_cache import ScanCacheKeyError, read_scan_cache, scan_cache_key, write_scan_cache  # noqa: E402
 
 #: The two axes ``CalibrationResult`` deconvolves; the sj axis is pure RNA and has nothing to score.
 AXES = ("region", "boundary")
@@ -125,10 +126,27 @@ def oracle_parts(cache_root, condition: str, index, origins=ORIGINS, scan=None) 
     return {k: read_scan_cache(root / k, index, scan).payload for k in origins}
 
 
-def certified_gdna(oracle_dir: Path) -> dict[str, np.ndarray]:
+def slot_truth(oracle_dir: Path, scan_manifest: dict) -> dict[str, np.ndarray]:
+    """``<oracle_dir>/slot_truth.npz``, the certified per-slot table, refused unless it was derived from the scan
+    *scan_manifest* describes (the cache's provenance, as ``read_scan_cache`` returns it): a re-scan leaves the table
+    behind until ``calibration_oracle.py`` re-certifies it, and read against the new scan it would score the new
+    estimate against the old truth."""
+    path = Path(oracle_dir) / "slot_truth.npz"
+    truth = dict(np.load(path, allow_pickle=False))
+    recorded = str(truth["scan_key"]) if "scan_key" in truth else None
+    expected = scan_cache_key(scan_manifest)
+    if recorded != expected:
+        raise ScanCacheKeyError(
+            f"{path} was certified on scan {recorded!r}, not on this one ({expected!r}). Re-certify it: "
+            f"`calibration_oracle.py --condition {Path(oracle_dir).name}`."
+        )
+    return truth
+
+
+def certified_gdna(oracle_dir: Path, scan_manifest: dict) -> dict[str, np.ndarray]:
     """The certified per-object gDNA fragment counts in ``<oracle_dir>/slot_truth.npz``, by axis (``region``,
-    ``boundary``)."""
-    truth = dict(np.load(Path(oracle_dir) / "slot_truth.npz"))
+    ``boundary``), refused unless the table was derived from the scan *scan_manifest* describes (:func:`slot_truth`)."""
+    truth = slot_truth(oracle_dir, scan_manifest)
     out = {}
     for kind, axis in ((REGION, "region"), (BOUNDARY, "boundary")):
         is_k = np.asarray(truth["kind"]) == kind

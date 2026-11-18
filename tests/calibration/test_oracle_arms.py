@@ -228,3 +228,64 @@ def test_the_directional_split_is_reported_and_the_net_is_their_difference():
         np.array([7.0, 8.0]),
     )
     assert one_way.under_call == 0.0 and one_way.over_call > 0.0
+
+
+# ── the certified table is keyed on the scan it was derived from ──────────────────────────────────
+
+
+def _slot_truth(oracle_dir, **extra):
+    """A two-slot certified table: one region, one boundary."""
+    from rigel.calibration.region_chain import BOUNDARY, REGION
+
+    oracle_dir.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        oracle_dir / "slot_truth.npz",
+        kind=np.array([REGION, BOUNDARY]),
+        obj=np.array([0, 0]),
+        n_gdna=np.array([5.0, 2.0]),
+        **extra,
+    )
+
+
+def _scan(**key):
+    """A scan cache's manifest, the provenance `read_scan_cache` returns and `certified_gdna` is keyed on."""
+    manifest = {
+        "graph_hash": "a" * 16,
+        "reach_digest": "b" * 16,
+        "payload_schema_digest": "c" * 16,
+        "splice_blacklist_digest": "none",
+        "transcript_model_digest": "d" * 16,
+        "scan_config": {"sj_strand_tag": "auto"},
+        "bam": {"blake2b": "e" * 16},
+    }
+    return {**manifest, **key}
+
+
+def test_a_certified_table_reads_against_the_scan_it_was_derived_from(tmp_path):
+    from _scan_cache import scan_cache_key
+
+    scan = _scan()
+    _slot_truth(tmp_path / "c", scan_key=scan_cache_key(scan))
+    truth = _oracle_arms.certified_gdna(tmp_path / "c", scan)
+    assert truth["region"].tolist() == [5.0] and truth["boundary"].tolist() == [2.0]
+
+
+def test_a_certified_table_from_another_scan_is_refused(tmp_path):
+    """A re-scan (a new BAM, an index rebuild, a deposit-rule change) leaves `slot_truth.npz` behind until
+    `calibration_oracle.py` re-certifies it; read against the new scan it would score the new estimate against the
+    old truth."""
+    from _scan_cache import ScanCacheKeyError, scan_cache_key
+
+    _slot_truth(tmp_path / "c", scan_key=scan_cache_key(_scan()))
+    with pytest.raises(ScanCacheKeyError, match="slot_truth"):
+        _oracle_arms.certified_gdna(tmp_path / "c", _scan(graph_hash="f" * 16))
+    with pytest.raises(ScanCacheKeyError, match="slot_truth"):
+        _oracle_arms.certified_gdna(tmp_path / "c", _scan(bam={"blake2b": "0" * 16}))
+
+
+def test_a_certified_table_that_records_no_scan_is_refused(tmp_path):
+    from _scan_cache import ScanCacheKeyError
+
+    _slot_truth(tmp_path / "c")
+    with pytest.raises(ScanCacheKeyError, match="slot_truth"):
+        _oracle_arms.certified_gdna(tmp_path / "c", _scan())

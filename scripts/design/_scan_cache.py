@@ -8,14 +8,20 @@ scan's two outputs, the accumulator payload and the strand model. What the index
 boundary flags, the sj geometry) and the fragment-length pmfs are rebuilt on load, so no stored copy can go stale; the
 length histograms are payload fields and are cached with it.
 
-The key has five parts:
+The key has six parts:
 
 * ``graph_hash``: the region partition plus the sj CSR, carried by the payload;
 * the payload-schema digest (:func:`payload_schema_digest`): the accumulator's and the strand model's fields, and what
   the deposit rule does;
 * the reach digest: the splice-junction reaches calibration reads, which no other hash covers;
+* the transcript-model digest (:func:`transcript_model_digest`): every transcript's reference, strand and exons, which
+  resolution reads to decide which transcripts hold a fragment, and which two annotations can differ in with the
+  graph and the reaches byte-identical;
 * the scan settings that can change a tally;
 * the splice blacklist the scan applied, since it strips junctions and holds back fragments.
+
+A table derived from a cache (`calibration_oracle.py`'s ``slot_truth.npz``) records :func:`scan_cache_key`, the whole
+key with the BAM's digest, and is refused against any other scan.
 
 The BAM is not part of the key, since the caller names it, but the cache records its path, size, modification time and
 a digest of its bytes, and refuses a BAM at the recorded path whose bytes differ. Arrays go to ``.npz`` and scalars and
@@ -91,6 +97,45 @@ def reach_digest(index: TranscriptIndex) -> str:
         parts.append(str(values.dtype).encode())
         parts.append(values.tobytes())
     return _digest(*parts)
+
+
+def transcript_model_digest(index: TranscriptIndex) -> str:
+    """Hash every transcript's model, in ``t_index`` order: its reference, strand and synthetic flag, and its exons
+    as the resolver holds them (the exon CSR the index built at load). Resolution reads which transcripts hold a
+    fragment's blocks and junctions, and two annotations can share every region, boundary, junction and reach while
+    differing in that."""
+    t_df = index.t_df
+    offsets, starts, ends, _cumsum = index.build_exon_csr()
+    parts: list[bytes] = []
+    for name, values in (
+        ("ref", np.asarray(t_df["ref"].astype(str).to_numpy(), dtype=str)),
+        ("strand", np.asarray(t_df["strand"].to_numpy(), dtype=np.int64)),
+        ("is_synthetic", np.asarray(t_df["is_synthetic"].to_numpy(), dtype=bool)),
+        ("exon_offsets", np.asarray(offsets, dtype=np.int64)),
+        ("exon_starts", np.asarray(starts, dtype=np.int64)),
+        ("exon_ends", np.asarray(ends, dtype=np.int64)),
+    ):
+        parts.append(name.encode())
+        parts.append(np.ascontiguousarray(values).tobytes())
+    return _digest(*parts)
+
+
+def scan_cache_key(manifest: dict) -> str:
+    """One digest of a cache's whole key and the BAM it was scanned from, from its manifest: what a table derived
+    from the cache records, so the table is refused against any other scan."""
+    key = {
+        name: manifest.get(name)
+        for name in (
+            "graph_hash",
+            "reach_digest",
+            "payload_schema_digest",
+            "transcript_model_digest",
+            "splice_blacklist_digest",
+        )
+    }
+    key["scan_settings"] = _scan_config_digest(manifest["scan_config"])
+    key["bam"] = (manifest.get("bam") or {}).get("blake2b")
+    return _digest(json.dumps(key, sort_keys=True).encode())
 
 
 def splice_blacklist_digest(index: TranscriptIndex) -> str:
@@ -426,6 +471,7 @@ def write_scan_cache(
         "graph_hash": payload.graph_hash,
         "reach_digest": reach_digest(index),
         "payload_schema_digest": payload_schema_digest(),
+        "transcript_model_digest": transcript_model_digest(index),
         # The scan settings; their part of the key is derived from this record when the cache is checked.
         "scan_config": dataclasses.asdict(scan_config)
         if dataclasses.is_dataclass(scan_config)
@@ -451,7 +497,7 @@ def check_scan_cache(
     is given, was scanned under those settings.
 
     These are the checks :func:`read_scan_cache` makes before it reads the arrays: the reach, the payload schema, the
-    splice blacklist, the graph hash, the BAM and the scan settings. *bam* names the BAM the caller will use; without
+    transcript models, the splice blacklist, the graph hash, the BAM and the scan settings. *bam* names the BAM the caller will use; without
     it the BAM at the recorded path is compared, if it is still there. A caller that holds settings should pass them,
     or a cache scanned under other settings reads as valid.
     """
@@ -470,7 +516,8 @@ def _check_manifest(
 
 
 def _check_index_key(manifest: dict, index: TranscriptIndex) -> None:
-    """The reach, the payload schema, the splice blacklist and the graph hash the cache was keyed by."""
+    """The reach, the payload schema, the transcript models, the splice blacklist and the graph hash the cache was
+    keyed by."""
     expected_reach = reach_digest(index)
     if manifest["reach_digest"] != expected_reach:
         raise ScanCacheKeyError(
@@ -488,6 +535,15 @@ def _check_index_key(manifest: dict, index: TranscriptIndex) -> None:
             f"are not the fields this build reads — a missing one would otherwise surface as a bare "
             f"KeyError far from here, or load at its default. Re-scan; nothing derivable from the index "
             f"needs rebuilding."
+        )
+
+    expected_models = transcript_model_digest(index)
+    if manifest.get("transcript_model_digest") != expected_models:
+        raise ScanCacheKeyError(
+            f"cache transcript model digest {manifest.get('transcript_model_digest')!r} != index "
+            f"{expected_models!r}. Resolution reads which transcripts hold a fragment's blocks and junctions, and the "
+            f"graph and the reaches can stay byte-identical when the transcript models move. Re-scan against this "
+            f"index."
         )
 
     expected_blacklist = splice_blacklist_digest(index)
