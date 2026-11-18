@@ -115,13 +115,10 @@ static constexpr int SQUAREM_BUDGET_DIVISOR = 3;
 // SQUAREM's extrapolation (`backtracked_squarem_step`).
 static constexpr double VBEM_SQUAREM_PRIOR_FLOOR = EM_LOG_EPSILON;
 
-// The mode codes are labels, not quantities. `_em_impl` exports them for rigel.estimator, and
+// The assignment codes are labels, not quantities. `_em_impl` exports them for rigel.estimator, and
 // `batch_locus_em_partitioned` refuses any other value.
-static constexpr int ASSIGN_FRACTIONAL   = 0;  // every candidate keeps its posterior share
-static constexpr int ASSIGN_SAMPLE       = 1;  // count first, then one component per unit
-static constexpr int WARM_START_COVERAGE = 0;  // the coverage-weighted seed
-static constexpr int WARM_START_PRIOR    = 1;  // the prior alone: the seed is zeroed
-static constexpr int WARM_START_UNIFORM  = 2;  // every component equal
+static constexpr int ASSIGN_FRACTIONAL = 0;  // every candidate keeps its posterior share
+static constexpr int ASSIGN_SAMPLE     = 1;  // count first, then one component per unit
 
 // A unit's winner beside a transcript index: none, the locus's own gDNA, or the intergenic term.
 static constexpr int32_t EM_WINNER_NONE       = -1;

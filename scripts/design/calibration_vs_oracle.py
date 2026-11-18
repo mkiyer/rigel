@@ -491,10 +491,8 @@ def _check_set(check) -> None:
     check("--set refuses an unknown section", refuses(set_field, base, "nowhere.sweep_block_slots=1"))
     check("--set refuses a value the field's type cannot take",
           refuses(set_field, base, "calibration.sweep_block_slots=sixty"))
-    # a ``Literal`` field (the EM's mode and warm start) is filled by membership
-    check("--set fills a Literal field by membership",
-          set_field(base, "em.mode=map").em.mode == "map"
-          and set_field(base, "em.warm_start=uniform").em.warm_start == "uniform")
+    # a ``Literal`` field (the EM's mode) is filled by membership
+    check("--set fills a Literal field by membership", set_field(base, "em.mode=map").em.mode == "map")
     check("--set refuses a value outside a Literal field's set", refuses(set_field, base, "em.mode=maximum"))
 
 

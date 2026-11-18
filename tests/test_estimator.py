@@ -3,7 +3,7 @@
 The first block runs the estimator over `ScoredFragments` and a mock index: locus assignment, posterior means,
 multimappers, the output tables, effective lengths, the gDNA component and whole counts. The second calls
 `run_batch_locus_em_partitioned` directly on the production path: structural gDNA eligibility, the aggregate RNA
-prior, and its share to every RNA component in proportion to the evidence. The third gates `EMConfig.warm_start`.
+prior, and its share to every RNA component in proportion to the evidence. The third gates the warm start and the per-transcript RNA prior weight.
 """
 
 from __future__ import annotations
@@ -1490,31 +1490,34 @@ def test_a_zero_evidence_component_is_not_revived_by_the_prior(mode):
 # not invariant to `rna_prior`.
 
 
-# ── ``EMConfig.warm_start``: what the EM's initial ``theta`` is derived from ─────────────────────
+# ── The warm start: what the EM's initial ``theta`` is derived from ─────────────────────
 #
-# The shipped warm start seeds ``theta`` with each component's unambiguous total plus a
+# The EM has one warm start. It seeds ``theta`` with each component's unambiguous total plus a
 # coverage-weighted share of the ambiguous fragments, then projects that seed through the calibration
-# prior. ``warm_start="prior"`` zeroes the seed, so a prior can be tested on its own terms. It needs a
-# per-transcript weight: under the evidence-proportional rule ``out[i]`` is proportional to ``raw[i]``,
-# so an all-zero seed yields an all-zero RNA pool and the whole locus goes to gDNA (``theta = 0`` is
-# absorbing), and a starved locus still converges, so the tests pin both halves. The helpers carry a
-# ``_warm_start_`` prefix because the block above defines its own ``_partition`` / ``_estimator`` /
-# ``_run`` with different defaults.
+# prior. A seed of zero would be no start: under the evidence-proportional rule ``out[i]`` is
+# proportional to ``raw[i]``, so it yields an all-zero RNA pool and the whole locus goes to gDNA
+# (``theta = 0`` is absorbing). The helpers carry a ``_warm_start_`` prefix because the block above
+# defines its own ``_partition`` / ``_estimator`` / ``_run`` with different defaults.
 
 
 def _warm_start_partition(
-    *, n_units: int, log_liks: tuple[float, ...], gdna_log_lik: float = -50.0
+    *,
+    n_units: int,
+    log_liks: tuple[float, ...],
+    gdna_log_lik: float = -50.0,
+    coverage: tuple[float, ...] | None = None,
 ):
     """``gdna_log_lik`` defaults to a finite (but hopeless) value on purpose. With ``-inf`` no unit
     carries a gDNA candidate, and ``apply_grouped_prior_update`` then discards the RNA prior along with
-    the gDNA one, so a fixture built that way measures a prior that was never applied."""
+    the gDNA one, so a fixture built that way measures a prior that was never applied. ``coverage`` is
+    every unit's coverage weight per transcript (1 each by default)."""
     n_t = len(log_liks)
     offsets = np.arange(n_units + 1, dtype=np.int64) * n_t
     return (
         offsets,
         np.tile(np.arange(n_t, dtype=np.int32), n_units),
         np.tile(np.asarray(log_liks, dtype=np.float32), n_units),
-        np.ones(n_units * n_t, dtype=np.float32),
+        np.tile(np.asarray(coverage or (1.0,) * n_t, dtype=np.float32), n_units),
         np.zeros(n_units * n_t, dtype=np.uint8),
         np.zeros(n_units, dtype=np.uint8),
         np.full(n_units, gdna_log_lik, dtype=np.float32),
@@ -1522,7 +1525,7 @@ def _warm_start_partition(
     )
 
 
-def _warm_start_estimator(n_t: int, *, warm_start: str = "coverage", mode: str = "vbem"):
+def _warm_start_estimator(n_t: int, *, mode: str = "vbem"):
     est = AbundanceEstimator(
         num_transcripts=n_t,
         em_config=EMConfig(
@@ -1531,7 +1534,6 @@ def _warm_start_estimator(n_t: int, *, warm_start: str = "coverage", mode: str =
             convergence_delta=1e-10,
             assignment_mode="fractional",
             seed=0,
-            warm_start=warm_start,
         ),
     )
     return est
@@ -1561,27 +1563,7 @@ def _warm_start_run(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# The default is untouched
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def test_the_shipped_default_is_coverage_and_is_byte_identical_to_no_switch():
-    """The control: the shipped default is ``coverage``, and naming it changes nothing."""
-    assert EMConfig().warm_start == "coverage"
-    part = _warm_start_partition(n_units=100, log_liks=(0.0, -0.4), gdna_log_lik=-1.0)
-    a = _warm_start_run(_warm_start_estimator(2), part, [0, 1], rna_prior=30.0, gdna_prior=10.0)
-    b = _warm_start_run(
-        _warm_start_estimator(2, warm_start="coverage"),
-        part,
-        [0, 1],
-        rna_prior=30.0,
-        gdna_prior=10.0,
-    )
-    np.testing.assert_array_equal(a, b)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# theta starts from the prior alone
+# The per-transcript RNA prior weight, and the coverage seed
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -1619,25 +1601,24 @@ def test_the_split_is_monotone_in_the_weight_ratio():
     assert got[0] < 1.0 < got[2] < got[3]
 
 
-def test_the_prior_only_warm_start_changes_the_seed_but_not_a_unique_fixed_point():
-    """Zeroing the warm start changes where the EM starts, not where it ends: when the fixed point is
-    unique the two seeds converge to the same answer. So the switch is shown on the iteration: truncated
-    to a single pass the two seeds give visibly different answers, and at convergence they agree. A
-    test that only compared converged values could not tell a live switch from a dead one.
+def test_the_coverage_weights_change_the_seed_but_not_a_unique_fixed_point():
+    """The coverage weights change where the EM starts, not where it ends: when the fixed point is
+    unique, seeds from two sets of weights converge to the same answer. So the weights are shown on the
+    iteration: truncated to a single pass the two seeds give visibly different answers, and at
+    convergence they agree. A test that only compared converged values could not tell weights that reach
+    the seed from weights that do not, and the start-independence gate makes its starts through them.
     """
-    part = _warm_start_partition(n_units=100, log_liks=(0.0, -0.7))
     kw = dict(weight=[3.0, 1.0], rna_prior=40.0, gdna_prior=5.0)
 
-    def _one(ws, iters):
-        return _warm_start_run(
-            _warm_start_estimator(2, warm_start=ws), part, [0, 1], iterations=iters, **kw
-        )
+    def _one(coverage, iters):
+        part = _warm_start_partition(n_units=100, log_liks=(0.0, -0.7), coverage=coverage)
+        return _warm_start_run(_warm_start_estimator(2), part, [0, 1], iterations=iters, **kw)
 
-    early_cov, early_pri = _one("coverage", 1), _one("prior", 1)
-    assert not np.allclose(early_cov, early_pri), "the warm-start switch never reached the solver"
+    early_flat, early_tilted = _one((1.0, 1.0), 1), _one((1.0, 9.0), 1)
+    assert not np.allclose(early_flat, early_tilted), "the coverage weights never reached the seed"
 
-    late_cov, late_pri = _one("coverage", 500), _one("prior", 500)
-    np.testing.assert_allclose(late_cov, late_pri, rtol=1e-6)
+    late_flat, late_tilted = _one((1.0, 1.0), 500), _one((1.0, 9.0), 500)
+    np.testing.assert_allclose(late_flat, late_tilted, rtol=1e-6)
 
 
 def test_the_rna_prior_reaches_a_locus_with_no_gdna_candidate():
@@ -1665,43 +1646,31 @@ def test_the_rna_prior_reaches_a_locus_with_no_gdna_candidate():
     assert shipped[0] == pytest.approx(shipped[1], rel=1e-9)
 
 
-def test_an_unknown_warm_start_is_refused():
-    """``Literal`` is a type-checker annotation, not a runtime constraint — so a typo must be refused
-    explicitly, or it silently falls through to the shipped path."""
-    with pytest.raises(ValueError, match="Unknown warm start"):
-        EMConfig(warm_start="zero")
+@pytest.mark.parametrize("start", ["prior", "uniform"])
+def test_the_em_has_one_warm_start(start):
+    """The EM starts from the coverage seed and from nothing else, so a config that names a start is
+    refused rather than run from another. A prior-only seed started every RNA component at exactly zero,
+    which is absorbing, so a locus of unspliced fragments went wholly to gDNA; a uniform seed was only a
+    test's second start, which the coverage weights now make."""
+    with pytest.raises(TypeError, match="warm_start"):
+        EMConfig(warm_start=start)
 
 
-@pytest.mark.parametrize(
-    "codes, name, parameter",
-    [
-        ("ASSIGNMENT_MODE_CODES", "fractional", "assignment_mode"),
-        ("WARM_START_CODES", "coverage", "warm_start_mode"),
-    ],
-)
-def test_an_unknown_mode_code_is_refused_by_the_native_em(monkeypatch, codes, name, parameter):
-    """The mode codes have one definition, in ``_em_impl``: the estimator maps the config's names onto the
-    codes it reads from there, and the binding refuses a code it does not define rather than indexing the
-    draw only sample mode fills or running the coverage seed. The config refuses an unknown name first, so
-    the unknown code is planted in the estimator's own map."""
+def test_an_unknown_assignment_mode_code_is_refused_by_the_native_em(monkeypatch):
+    """The assignment-mode codes have one definition, in ``_em_impl``: the estimator maps the config's
+    names onto the codes it reads from there, and the binding refuses a code it does not define rather
+    than indexing the draw only sample mode fills. The config refuses an unknown name first, so the
+    unknown code is planted in the estimator's own map."""
     import rigel.estimator as estimator_mod
     from rigel import native
 
-    assert estimator_mod.ASSIGNMENT_MODE_CODES == {
-        "fractional": native.ASSIGN_FRACTIONAL,
-        "sample": native.ASSIGN_SAMPLE,
-    }
-    assert estimator_mod.WARM_START_CODES == {
-        "coverage": native.WARM_START_COVERAGE,
-        "prior": native.WARM_START_PRIOR,
-        "uniform": native.WARM_START_UNIFORM,
-    }
+    table = estimator_mod.ASSIGNMENT_MODE_CODES
+    assert table == {"fractional": native.ASSIGN_FRACTIONAL, "sample": native.ASSIGN_SAMPLE}
     part = _warm_start_partition(n_units=20, log_liks=(0.0, -0.4))
     _warm_start_run(_warm_start_estimator(2), part, [0, 1])  # the control: a defined code runs
-    table = getattr(estimator_mod, codes)
     for unknown in (max(table.values()) + 1, -1):
-        monkeypatch.setitem(table, name, unknown)
-        with pytest.raises(ValueError, match=f"{parameter} must be") as refused:
+        monkeypatch.setitem(table, "fractional", unknown)
+        with pytest.raises(ValueError, match="assignment_mode must be") as refused:
             _warm_start_run(_warm_start_estimator(2), part, [0, 1])
         assert str(refused.value).endswith(f"got {unknown}")
 

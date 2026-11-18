@@ -76,24 +76,12 @@ class EMConfig:
     ``1`` → sequential.
     Any positive value → cap at that many threads (the EM's own thread pool).
     """
-    warm_start: Literal["coverage", "prior", "uniform"] = "coverage"
-    """What the EM's initial ``theta`` is derived from.
-
-    ``"coverage"`` (the default) seeds each component with its unambiguous total plus a coverage-weighted share of
-    the ambiguous fragments, then projects the seed through the calibration prior. ``"uniform"`` seeds every
-    component equally, so the EM's landing point depends on the likelihood alone: the control that tells a bad seed
-    from a bad objective. ``"prior"`` zeroes the seed, so ``theta`` starts proportional to the prior. It is meaningful
-    only with a per-transcript weight: under the default evidence-proportional rule an all-zero seed leaves the RNA
-    pool at zero and hands the locus to gDNA."""
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
-        # `Literal` is not checked at run time: an unknown value would silently run the default path
-        if self.warm_start not in ("coverage", "prior", "uniform"):
-            raise ValueError(f"Unknown warm start: {self.warm_start!r}")
         # `None` would seed the draw from OS entropy, and one input would stop giving one answer; the draw's generator
         # refuses a negative seed
         _check_integer("EMConfig.seed", self.seed, 0)

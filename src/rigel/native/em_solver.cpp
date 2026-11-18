@@ -144,19 +144,12 @@ std::vector<PartitionView> read_partitions(nb::list partition_tuples, nb::list l
     return views;
 }
 
-// An undefined mode code is refused: an unknown assignment code would index the per-unit draw only ASSIGN_SAMPLE
-// fills, and an unknown warm start would silently run the coverage seed.
-void check_mode_codes(int assignment_mode, int warm_start_mode) {
+// An undefined assignment code is refused: it would index the per-unit draw only ASSIGN_SAMPLE fills.
+void check_assignment_mode(int assignment_mode) {
     if (assignment_mode != ASSIGN_FRACTIONAL && assignment_mode != ASSIGN_SAMPLE) {
         throw std::invalid_argument(
             "batch_locus_em_partitioned: assignment_mode must be ASSIGN_FRACTIONAL or ASSIGN_SAMPLE; got " +
             std::to_string(assignment_mode));
-    }
-    if (warm_start_mode != WARM_START_COVERAGE && warm_start_mode != WARM_START_PRIOR &&
-        warm_start_mode != WARM_START_UNIFORM) {
-        throw std::invalid_argument(
-            "batch_locus_em_partitioned: warm_start_mode must be WARM_START_COVERAGE, WARM_START_PRIOR or "
-            "WARM_START_UNIFORM; got " + std::to_string(warm_start_mode));
     }
 }
 
@@ -193,7 +186,7 @@ struct BatchEM {
     const double* t_eff_len;       // per transcript
     const double* t_rna_prior_weight;  // per transcript, or nullptr: the RNA prior follows the evidence
     std::vector<double> t_unambig_totals;   // per transcript, over its count columns
-    int warm_start_mode, max_iterations, assignment_mode;
+    int max_iterations, assignment_mode;
     double convergence_delta;
     bool use_vbem;
     uint64_t rng_seed;
@@ -227,7 +220,7 @@ struct BatchEM {
                                                                           : sub.component_rna_prior_weight.data()};
         std::vector<double> init_counts(sub.n_components);
         compute_grouped_warm_start(ec_data, sub.unambig_totals.data(), prior, init_counts.data(), sub.n_components,
-                                   warm_start_mode, ig.idx);
+                                   ig.idx);
         const auto t_warm = now();
         const EMResult em = run_squarem(ec_data, sub.log_eff_len.data(), sub.unambig_totals.data(), prior,
                                         init_counts.data(), sub.n_components, max_iterations, convergence_delta,
@@ -327,7 +320,6 @@ nb::tuple batch_locus_em_partitioned(
     f64_2d unambig_counts,              // per transcript and count column
     f64_1d t_eff_lens_arr,              // per transcript, the EM's capture-contracted effective length
     f64_1d t_rna_prior_weight_arr,      // per transcript, or empty: the RNA prior follows the current evidence
-    int warm_start_mode,
     f64_2d_out em_counts_out,           // the accumulators, added into
     f64_1d_out posterior_sum_out,
     f64_1d_out n_assigned_out,
@@ -343,7 +335,7 @@ nb::tuple batch_locus_em_partitioned(
     bool emit_assignments,
     double intergenic_rate)             // fragments per start in the efficiencies' unit; 0 reads no intergenic term
 {
-    check_mode_codes(assignment_mode, warm_start_mode);
+    check_assignment_mode(assignment_mode);
     const std::vector<PartitionView> views = read_partitions(partition_tuples, locus_transcript_indices);
     const size_t n_loci = views.size();
     check_length(locus_gdna_eff_lens, n_loci, "locus_gdna_eff_lens");
@@ -372,7 +364,6 @@ nb::tuple batch_locus_em_partitioned(
                   t_eff_lens_arr.data(),
                   t_rna_prior_weight_arr.size() == 0 ? nullptr : t_rna_prior_weight_arr.data(),
                   unambig_totals(unambig_counts, n_transcripts_total, n_cols),
-                  warm_start_mode,
                   max_iterations,
                   assignment_mode,
                   convergence_delta,
@@ -440,7 +431,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("unambig_counts"),
           nb::arg("t_eff_lens"),
           nb::arg("t_rna_prior_weight"),
-          nb::arg("warm_start_mode"),
           nb::arg("em_counts_out").noconvert(),
           nb::arg("posterior_sum_out").noconvert(),
           nb::arg("n_assigned_out").noconvert(),
@@ -474,12 +464,9 @@ NB_MODULE(_em_impl, m) {
           "comp_u_flat) where the CSR pairs (offsets, flat) give sorted\n"
           "transcript indices and unit indices for each component.");
 
-    // The mode codes, the one definition rigel.estimator reads; batch_locus_em_partitioned refuses any other.
+    // The assignment codes, the one definition rigel.estimator reads; batch_locus_em_partitioned refuses any other.
     m.attr("ASSIGN_FRACTIONAL") = ASSIGN_FRACTIONAL;
     m.attr("ASSIGN_SAMPLE") = ASSIGN_SAMPLE;
-    m.attr("WARM_START_COVERAGE") = WARM_START_COVERAGE;
-    m.attr("WARM_START_PRIOR") = WARM_START_PRIOR;
-    m.attr("WARM_START_UNIFORM") = WARM_START_UNIFORM;
     m.attr("EM_WINNER_INTERGENIC") = EM_WINNER_INTERGENIC;
 
     rigel::bind_testing(m.def_submodule("testing", "The EM's kernels bound for the tests."));

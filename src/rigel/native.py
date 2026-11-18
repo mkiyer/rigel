@@ -49,12 +49,9 @@ from ._em_impl import scatter_units_f32
 from ._em_impl import scatter_units_i64
 from ._em_impl import scatter_units_u8
 
-# the EM's assignment and warm-start codes, which rigel.estimator reads; the EM refuses any other
+# the EM's assignment codes, which rigel.estimator reads; the EM refuses any other
 from ._em_impl import ASSIGN_FRACTIONAL
 from ._em_impl import ASSIGN_SAMPLE
-from ._em_impl import WARM_START_COVERAGE
-from ._em_impl import WARM_START_PRIOR
-from ._em_impl import WARM_START_UNIFORM
 
 # the winner code a unit the intergenic term wins carries, beside -2 for the locus's own gDNA
 from ._em_impl import EM_WINNER_INTERGENIC
@@ -101,9 +98,6 @@ __all__ = [
     "scatter_units_u8",
     "ASSIGN_FRACTIONAL",
     "ASSIGN_SAMPLE",
-    "WARM_START_COVERAGE",
-    "WARM_START_PRIOR",
-    "WARM_START_UNIFORM",
     "EM_WINNER_INTERGENIC",
     # The solve
     "solve_blocks",

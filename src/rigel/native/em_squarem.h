@@ -39,43 +39,36 @@ inline double digamma(double x) {
     return result;
 }
 
-// The warm start's counts, projected by the grouped prior. WARM_START_COVERAGE seeds the deterministic counts plus
-// each ambiguous unit's coverage-weighted shares. WARM_START_PRIOR zeroes the seed, so theta starts from the prior
-// alone; it needs an allocation weight, since under evidence weights an all-zero seed gives an all-zero RNA pool.
-// WARM_START_UNIFORM starts every component equal, so where the EM lands is a property of the likelihood, not of the
-// seed. The intergenic slot, which SQUAREM seeds itself, starts at 0 and takes no share.
+// The warm start's counts, projected by the grouped prior: each component's deterministic count plus each ambiguous
+// unit's coverage-weighted shares. The intergenic slot, which SQUAREM seeds itself, starts at 0 and takes no share.
 inline void compute_grouped_warm_start(
     const std::vector<EmEquivClass>& ec_data,
     const double* unambig_totals,
     const AggregatePrior& aggregate_prior,
     double*       warm_counts_out,
     int           n_components_all,
-    int           warm_mode,
     int           ig_idx)
 {
     const int n_components = ig_idx >= 0 ? ig_idx : n_components_all;
     std::fill(warm_counts_out, warm_counts_out + n_components_all, 0.0);
     std::vector<double> warm_raw(static_cast<size_t>(n_components_all), 0.0);
-    if (warm_mode == WARM_START_UNIFORM) std::fill(warm_raw.begin(), warm_raw.end(), 1.0);
-    if (warm_mode == WARM_START_COVERAGE) {
-        std::copy(unambig_totals, unambig_totals + n_components, warm_raw.begin());
-        for (const auto& ec : ec_data) {
-            const int k = ec.k;
-            const int32_t* cidx = ec.comp_idx.data();
-            const double* wt = ec.wt_flat.data();
-            for (int i = 0; i < ec.n; ++i) {
-                // the coverage weights normalised within the candidate set
-                double row_sum = 0.0;
-                for (int j = 0; j < k; ++j) {
-                    if (cidx[j] == ig_idx) continue;
-                    row_sum += wt[i * k + j];
-                }
-                if (row_sum == 0.0) row_sum = 1.0;
-                double inv_row_sum = 1.0 / row_sum;
-                for (int j = 0; j < k; ++j) {
-                    if (cidx[j] == ig_idx) continue;
-                    warm_raw[cidx[j]] += wt[i * k + j] * inv_row_sum;
-                }
+    std::copy(unambig_totals, unambig_totals + n_components, warm_raw.begin());
+    for (const auto& ec : ec_data) {
+        const int k = ec.k;
+        const int32_t* cidx = ec.comp_idx.data();
+        const double* wt = ec.wt_flat.data();
+        for (int i = 0; i < ec.n; ++i) {
+            // the coverage weights normalised within the candidate set
+            double row_sum = 0.0;
+            for (int j = 0; j < k; ++j) {
+                if (cidx[j] == ig_idx) continue;
+                row_sum += wt[i * k + j];
+            }
+            if (row_sum == 0.0) row_sum = 1.0;
+            double inv_row_sum = 1.0 / row_sum;
+            for (int j = 0; j < k; ++j) {
+                if (cidx[j] == ig_idx) continue;
+                warm_raw[cidx[j]] += wt[i * k + j] * inv_row_sum;
             }
         }
     }

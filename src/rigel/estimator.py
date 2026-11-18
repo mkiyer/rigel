@@ -1,6 +1,6 @@
 """The abundance estimator: per-transcript and per-gene counts from the deterministic path and the locus EM.
 
-The EM starts from the warm start ``EMConfig.warm_start`` names and adds a gDNA-vs-RNA prior per locus: ``a_g`` on
+The EM starts from a coverage-weighted seed and adds a gDNA-vs-RNA prior per locus: ``a_g`` on
 gDNA and ``a_r`` on the RNA pool, shared among the RNA components in proportion to their current EM count unless
 ``rna_prior_weight`` names the shares (``apply_grouped_prior_update`` in em_solver.cpp). Production passes no
 weights, so the distribution within the RNA pool is the data's.
@@ -18,9 +18,6 @@ from .config import EMConfig, TranscriptGeometry
 from .native import (
     ASSIGN_FRACTIONAL,
     ASSIGN_SAMPLE,
-    WARM_START_COVERAGE,
-    WARM_START_PRIOR,
-    WARM_START_UNIFORM,
 )
 from .native import batch_locus_em_partitioned as _batch_locus_em_partitioned
 from .splice import NUM_SPLICE_STRAND_COLS, SPLICED_COLS
@@ -29,11 +26,6 @@ logger = logging.getLogger(__name__)
 
 #: ``EMConfig``'s mode names → the codes the native EM defines (it refuses any other code).
 ASSIGNMENT_MODE_CODES = {"fractional": ASSIGN_FRACTIONAL, "sample": ASSIGN_SAMPLE}
-WARM_START_CODES = {
-    "coverage": WARM_START_COVERAGE,
-    "prior": WARM_START_PRIOR,
-    "uniform": WARM_START_UNIFORM,
-}
 
 
 # ======================================================================
@@ -467,7 +459,6 @@ class AbundanceEstimator:
             self.unambig_counts,
             t_eff_lens,
             t_rna_prior_weight,
-            WARM_START_CODES[self.em_config.warm_start],
             self.em_counts,
             self._em_posterior_sum,
             self._em_n_assigned,
