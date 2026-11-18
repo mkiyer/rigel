@@ -6,14 +6,14 @@ trip, and the refusal of an unknown YAML key by `rigel quant` and `rigel sim`. A
 reads is invisible at runtime, so each is checked against the resolved config, not the parser's namespace.
 """
 
-import textwrap
-
 import json
+import re
+import textwrap
 
 import pytest
 
 from rigel.cli import build_parser, resolve_quant_args, build_quant_defaults
-from rigel.config import BamScanConfig
+from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +207,97 @@ def test_a_pruning_threshold_in_zero_to_one_is_accepted(value):
     from rigel.config import FragmentScoringConfig
 
     assert FragmentScoringConfig(pruning_min_posterior=value).pruning_min_posterior == value
+
+
+_AFTER_THE_SCAN = {
+    # the draw's generator refuses a negative seed, once the scan and the calibration are done
+    "a negative EM seed": (lambda: EMConfig(seed=-1), ValueError, "EMConfig.seed"),
+    "a negative second-pass seed": (
+        lambda: PipelineConfig(second_pass_seed=-1),
+        ValueError,
+        "PipelineConfig.second_pass_seed",
+    ),
+    # the EM always takes one accelerated step, so a budget below one is never what runs
+    "no EM iterations": (lambda: EMConfig(iterations=0), ValueError, "EMConfig.iterations"),
+    "negative EM iterations": (lambda: EMConfig(iterations=-5), ValueError, "EMConfig.iterations"),
+    # YAML reads 1e3 as a string; the native EM would refuse it as a TypeError after the scan
+    "a string of EM iterations": (
+        lambda: EMConfig(iterations="1e3"),
+        TypeError,
+        "EMConfig.iterations",
+    ),
+    # NaN or a negative threshold is never crossed, so it silently runs the whole budget; infinity stops at once
+    "a NaN convergence delta": (
+        lambda: EMConfig(convergence_delta=float("nan")),
+        ValueError,
+        "EMConfig.convergence_delta",
+    ),
+    "an infinite convergence delta": (
+        lambda: EMConfig(convergence_delta=float("inf")),
+        ValueError,
+        "EMConfig.convergence_delta",
+    ),
+    "a negative convergence delta": (
+        lambda: EMConfig(convergence_delta=-1e-6),
+        ValueError,
+        "EMConfig.convergence_delta",
+    ),
+    "a string convergence delta": (
+        lambda: EMConfig(convergence_delta="1e-6"),
+        ValueError,
+        "EMConfig.convergence_delta",
+    ),
+    # read as all cores, as 0 is, which is not what a negative count asks for
+    "negative EM threads": (lambda: EMConfig(n_threads=-1), ValueError, "EMConfig.n_threads"),
+    # the router's progress log divides by it
+    "logging every 0 fragments": (
+        lambda: BamScanConfig(log_every=0),
+        ValueError,
+        "BamScanConfig.log_every",
+    ),
+    "logging every -1 fragments": (
+        lambda: BamScanConfig(log_every=-1),
+        ValueError,
+        "BamScanConfig.log_every",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_AFTER_THE_SCAN))
+def test_a_setting_the_run_would_refuse_only_after_the_scan_is_refused_on_construction(case):
+    make, error, name = _AFTER_THE_SCAN[case]
+    with pytest.raises(error, match=re.escape(name)):
+        make()
+
+
+def test_the_least_of_each_setting_is_accepted():
+    """0 keeps its meaning where it has one: the first seed, every iteration run (a threshold no change falls
+    below), all cores."""
+    em = EMConfig(seed=0, iterations=1, convergence_delta=0.0, n_threads=0)
+    assert (em.seed, em.iterations, em.convergence_delta, em.n_threads) == (0, 1, 0.0, 0)
+    assert BamScanConfig(log_every=1).log_every == 1
+    assert PipelineConfig(second_pass_seed=0).second_pass_seed == 0
+
+
+@pytest.mark.parametrize("extra", [["--seed", "-1"], ["--em-iterations", "0"]])
+def test_quant_refuses_a_setting_the_run_would_refuse_after_the_scan_before_loading_the_index(
+    tmp_path, extra
+):
+    args = _quant_with_empty_inputs(tmp_path, *extra)
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    assert str(exited.value.code).startswith("Error: EMConfig."), exited.value.code
+
+
+def test_quant_reports_a_yaml_setting_of_the_wrong_type_as_an_error(tmp_path):
+    """YAML reads ``1e3`` as a string. It is refused as an error before the index loads, not a traceback after the
+    scan."""
+    config = tmp_path / "config.yaml"
+    config.write_text("em_iterations: 1e3\n")
+    args = _quant_with_empty_inputs(tmp_path, "--config", str(config))
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    assert str(exited.value.code).startswith("Error: EMConfig.iterations must be an integer")
 
 
 def test_quant_refuses_an_annotated_bam_it_could_not_write_before_the_run(tmp_path):

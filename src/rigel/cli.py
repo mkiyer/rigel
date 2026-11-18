@@ -97,7 +97,8 @@ def quant_command(args: argparse.Namespace) -> int:
         if isinstance(args.sj_strand_tag, str):
             args.sj_strand_tag = [args.sj_strand_tag]
         pipeline_config = build_pipeline_config(args)
-    except ValueError as exc:
+    # a TypeError is a setting of the wrong type, as YAML's string `1e3` for an integer
+    except (ValueError, TypeError) as exc:
         sys.exit(f"Error: {exc}")
     _check_annotated_bam_target(pipeline_config.annotated_bam_path, bam_path)
 

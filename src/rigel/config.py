@@ -25,6 +25,17 @@ if TYPE_CHECKING:
     import numpy as np
 
 
+def _check_integer(where: str, value, least: int) -> None:
+    """Refuse on construction an integer setting the run would otherwise refuse only after the scan, or read as another
+    value: one that is not an integer (YAML reads ``1e3`` as a string), or one below ``least``."""
+    try:
+        operator.index(value)
+    except TypeError:
+        raise TypeError(f"{where} must be an integer; got {value!r}.") from None
+    if value < least:
+        raise ValueError(f"{where} must be >= {least}; got {value}.")
+
+
 # ======================================================================
 # EM algorithm configuration
 # ======================================================================
@@ -83,11 +94,24 @@ class EMConfig:
         # `Literal` is not checked at run time: an unknown value would silently run the default path
         if self.warm_start not in ("coverage", "prior", "uniform"):
             raise ValueError(f"Unknown warm start: {self.warm_start!r}")
-        # `None` would seed the draw from OS entropy, and one input would stop giving one answer
-        try:
-            operator.index(self.seed)
-        except TypeError:
-            raise TypeError(f"EMConfig.seed must be an integer; got {self.seed!r}.") from None
+        # `None` would seed the draw from OS entropy, and one input would stop giving one answer; the draw's generator
+        # refuses a negative seed
+        _check_integer("EMConfig.seed", self.seed, 0)
+        # the EM always takes one accelerated step, so a budget below one is never what runs
+        _check_integer("EMConfig.iterations", self.iterations, 1)
+        # 0 is every core; a negative count would be read as 0
+        _check_integer("EMConfig.n_threads", self.n_threads, 0)
+        # 0 runs the whole budget, as no change falls below it; NaN or a negative threshold would too, silently, and
+        # infinity would stop at the first step
+        delta = self.convergence_delta
+        if (
+            isinstance(delta, bool)
+            or not isinstance(delta, (int, float))
+            or not 0.0 <= delta < math.inf
+        ):
+            raise ValueError(
+                f"EMConfig.convergence_delta must be a finite number >= 0; got {delta!r}."
+            )
 
 
 # ======================================================================
@@ -239,6 +263,8 @@ class BamScanConfig:
                 f"BamScanConfig.intron_overhang_tolerance must be >= 0; "
                 f"got {self.intron_overhang_tolerance}."
             )
+        # the router's progress log divides by it
+        _check_integer("BamScanConfig.log_every", self.log_every, 1)
         # the scanner's tag modes; anything else is refused here rather than reinterpreted by the scanner
         tags = self.sj_strand_tag
         spec = ",".join(tags) if isinstance(tags, (list, tuple)) else tags
@@ -419,6 +445,10 @@ class PipelineConfig:
     second_pass_seed: int = 0
     annotated_bam_path: str | Path | None = None
     emit_locus_stats: bool = False
+
+    def __post_init__(self) -> None:
+        # the second pass's generator refuses a negative seed
+        _check_integer("PipelineConfig.second_pass_seed", self.second_pass_seed, 0)
 
     def to_dict(self) -> dict:
         """JSON-serializable dict of all configuration fields."""
