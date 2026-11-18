@@ -402,6 +402,7 @@ class WholeGenomeSimulator:
         drawn_lengths: np.ndarray,
         weights_at: Callable[[int], np.ndarray],
         rng: np.random.Generator,
+        pool: str,
     ) -> tuple[np.ndarray, list[np.ndarray], np.ndarray]:
         """Re-allocate a pre-capture length draw in proportion to capture-weighted opportunity:
         ``f_post(w) = f_pre(w) · total_eff(w) / Z``, the one place this is written, shared by every pool.
@@ -414,6 +415,8 @@ class WholeGenomeSimulator:
 
         Returns ``(widths, weights_per_width, counts_per_width)``: the ascending distinct lengths, each one's
         unnormalised per-template weights, and its new fragment count; ``counts.sum() == len(drawn_lengths)``.
+        Raises when no template of the ``pool`` named can hold any drawn length: writing none of the requested
+        fragments must raise, or the truth would agree with itself and hide it.
         """
         widths, drawn_counts = np.unique(drawn_lengths, return_counts=True)
         weights = [weights_at(int(width)) for width in widths]
@@ -421,7 +424,11 @@ class WholeGenomeSimulator:
         posterior = drawn_counts * totals
         total = float(posterior.sum())
         if total <= 0.0:
-            return widths, weights, np.zeros(len(widths), dtype=np.int64)
+            raise ValueError(
+                f"{len(drawn_lengths)} {pool} fragments requested but no {pool} template can hold one: every "
+                f"template's weight is 0 at every drawn length ({int(widths.min())}–{int(widths.max())} bp), as when "
+                "no row has an abundance or every template is shorter than the fragments"
+            )
         counts = rng.multinomial(int(drawn_counts.sum()), posterior / total)
         logger.debug(
             "post-capture length marginal: mean %.2f -> %.2f over %d lengths",
@@ -465,7 +472,7 @@ class WholeGenomeSimulator:
             return np.concatenate([self._mrna_abund * eff, self._nrna_abund * eff])
 
         widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
-            frag_lengths, weights_at, rng
+            frag_lengths, weights_at, rng, "RNA"
         )
 
         for width, weights, fc in zip(widths, weights_per_width, counts_per_width):
@@ -510,7 +517,7 @@ class WholeGenomeSimulator:
 
         # Reallocate the length marginal (`_post_capture_length_allocation`); the per-reference draw follows.
         widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
-            frag_lengths, weights_at, rng
+            frag_lengths, weights_at, rng, "gDNA"
         )
 
         for width, chrom_eff, fc in zip(widths, weights_per_width, counts_per_width):

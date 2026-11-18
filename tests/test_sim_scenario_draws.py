@@ -1,7 +1,9 @@
 """What a scenario's rows ask for is what the simulator draws.
 
 A transcript's own nascent abundance (``add_gene``'s ``nrna_abundance``) is independent of its mature one, so a
-transcript with no mature molecules still has nascent ones. Each gate carries the control it is read against.
+transcript with no mature molecules still has nascent ones. And a draw that can place none of the fragments it was
+asked for raises, in every pool, rather than writing a library without them: the manifest would still record them,
+and the truth would agree with itself and hide it. Each gate carries the control it is read against.
 """
 
 from __future__ import annotations
@@ -9,9 +11,13 @@ from __future__ import annotations
 from collections import Counter
 
 import pysam
+import pytest
 
 from rigel.sim import ReadSimConfig, Scenario
+from rigel.sim.genome import MutableGenome
 from rigel.sim.read_name import parse_origin
+from rigel.sim.wgs_config import GDNASimConfig, SimulationParams
+from rigel.sim.wgs_engine import WholeGenomeSimulator
 
 _SIM = ReadSimConfig(frag_mean=150, frag_std=20, frag_min=80, frag_max=250, read_length=50, seed=3)
 
@@ -68,3 +74,48 @@ def test_a_transcript_with_no_mature_molecules_keeps_its_own_nascent_ones(tmp_pa
     result = sc.build_oracle(n_rna_fragments=400, sim_config=_SIM, nrna_abundance=30.0)
     by_span = _nascent_by_span(result)
     assert set(by_span) == {3500}, by_span
+
+
+def test_rna_asked_of_a_scenario_with_no_abundance_is_refused(tmp_path):
+    """No row has a mature or nascent abundance, so no RNA fragment can be drawn: 500 asked for must raise before
+    a BAM is written. The control: the same scenario with an abundance writes all 500."""
+    sc = _scenario(tmp_path / "none", abundance=0.0, nrna_abundance=0.0, other=0.0)
+    with pytest.raises(ValueError, match="500 RNA fragments"):
+        sc.build_oracle(n_rna_fragments=500, sim_config=_SIM)
+
+    sc = _scenario(tmp_path / "some", abundance=100.0, nrna_abundance=0.0)
+    kinds = _origins(sc.build_oracle(n_rna_fragments=500, sim_config=_SIM).bam_path)
+    assert kinds == {"mrna": 500}, kinds
+
+
+@pytest.mark.parametrize("length, raises", [(100, True), (1000, False)])
+def test_gdna_asked_of_a_reference_too_short_to_hold_a_fragment_is_refused(
+    tmp_path, length, raises
+):
+    """The gDNA pool shares the allocation: a genomic reference shorter than every fragment length has no start for
+    any of them, so 50 gDNA fragments asked of it must raise. The control: a reference long enough writes all 50."""
+    genome = MutableGenome(length=length, seed=7, name="ref")
+    fasta = genome.write_fasta(tmp_path)
+    sim = WholeGenomeSimulator(
+        fasta,
+        [],
+        SimulationParams(
+            sim_seed=19, frag_mean=150, frag_std=1, frag_min=150, frag_max=150, read_length=50
+        ),
+        GDNASimConfig(frag_mean=150, frag_std=1, frag_min=150, frag_max=150),
+        genomic_refs=["ref"],
+        strand_specificity=0.5,
+    )
+    try:
+        if raises:
+            with pytest.raises(ValueError, match="50 gDNA fragments"):
+                sim.simulate_and_write(
+                    tmp_path / "out", n_rna=0, n_gdna=50, oracle_bam=True, n_workers=1
+                )
+        else:
+            _, _, bam = sim.simulate_and_write(
+                tmp_path / "out", n_rna=0, n_gdna=50, oracle_bam=True, n_workers=1
+            )
+            assert _origins(bam) == {"gdna": 50}
+    finally:
+        sim.close()
