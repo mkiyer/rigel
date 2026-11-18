@@ -602,6 +602,25 @@ def test_build_refuses_a_gtf_without_transcripts_before_writing(tmp_path: Path):
     assert list(idx_dir.iterdir()) == []
 
 
+def test_a_reference_longer_than_an_int32_coordinate_is_refused_by_name(tmp_path):
+    """A coordinate is an int32 from the index to the scan, as it is in BAM, so a reference longer than 2^31 - 1 bp
+    cannot be addressed. pysam reports a length as a C int, clipped at that largest value, so the build reads the
+    FASTA's own index: the reference is refused by name at its true length, never recorded 2,147,483,647 bp long."""
+    too_long = int(np.iinfo(np.int32).max) + 1
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(">chr1\n" + "A" * 1000 + "\n>chrHuge\nACGT\n")
+    # the index of a FASTA whose chrHuge is one base too long; only the index is read for a length
+    (tmp_path / "genome.fa.fai").write_text(
+        f"chr1\t1000\t6\t1000\t1001\nchrHuge\t{too_long}\t1016\t4\t5\n"
+    )
+    gtf = tmp_path / "annotation.gtf"
+    gtf.write_text('chr1\ttest\texon\t100\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n')
+    idx_dir = tmp_path / "idx"
+    with pytest.raises(ValueError, match=f"chrHuge \\({too_long:,} bp\\)"):
+        TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+    assert list(idx_dir.iterdir()) == []
+
+
 def test_an_empty_gtf_rebuild_leaves_the_existing_index_loadable(tmp_path: Path):
     """The refusal comes before any old file is deleted, the manifest and the splice blacklist among
     them, so a rebuild refused for an empty GTF leaves the index it would have replaced untouched and

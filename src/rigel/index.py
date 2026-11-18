@@ -205,10 +205,11 @@ def load_ref_lengths(path: str | Path) -> dict[str, int]:
 
 
 def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
-    """Read reference names and lengths from a FASTA file.
+    """Read reference names and lengths from a FASTA file's index (``samtools faidx``; pysam builds it when it is
+    missing) rather than scanning the sequence.
 
-    The FASTA must be indexed (``samtools faidx``). We read the index
-    rather than scanning the full file.
+    The lengths are read from the index's own text: pysam reports a length as a C int, clipped at 2^31 - 1. A reference
+    longer than that is refused by name, since a coordinate is an int32 from the index to the scan, as it is in BAM.
 
     Returns
     -------
@@ -217,7 +218,21 @@ def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
     """
     fasta_file = str(fasta_file)
     with pysam.FastaFile(fasta_file) as fh:
-        ref_lengths = {fh.references[i]: fh.lengths[i] for i in range(fh.nreferences)}
+        names = list(fh.references)
+    with open(fasta_file + ".fai") as fai:
+        indexed = dict(line.split("\t")[:2] for line in fai)
+    ref_lengths = {name: int(indexed[name]) for name in names}
+    longest = int(np.iinfo(np.int32).max)
+    too_long = [name for name, length in ref_lengths.items() if length > longest]
+    if too_long:
+        k = CONSTANTS.qc.report_examples
+        listed = "; ".join(f"{name} ({ref_lengths[name]:,} bp)" for name in too_long[:k]) + (
+            f"; and {len(too_long) - k:,} more" if len(too_long) > k else ""
+        )
+        raise ValueError(
+            f"{len(too_long):,} reference(s) are longer than {longest:,} bp, the most an int32 coordinate "
+            f"addresses (as in BAM): {listed}"
+        )
     return ref_lengths
 
 
