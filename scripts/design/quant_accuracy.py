@@ -754,10 +754,11 @@ _MD_HOW_TO_READ = (
     "both sides — zero truth and zero estimate, since the transcript table drops them — so they "
     "enter no figure here. A raw row count would read as thousands of transcripts scored perfectly; "
     "it is not reported for that reason.",
-    "- **There is no false-negative column, because under fractional assignment it cannot fire.** "
-    "A false negative needs an estimate of EXACTLY zero, and a fractional posterior essentially "
-    "never is, so the column would read 0 and look like a perfect score for something "
-    "unmeasured. `under-assigned` is the live quantity and it is reported instead.",
+    "- **`false-negative mass` is the truth on the expressed transcripts the estimate gives EXACTLY "
+    "zero.** A component the EM left at its floor is assigned nothing, so the tool reports the "
+    "transcript as absent, under fractional assignment too. It is the part of `under-assigned` "
+    "the tool gave up whole, as `false-positive mass` is the part of `over-assigned` on a silent "
+    "transcript; `detected` counts the estimates above zero.",
     "- **`MARD` is the SYMMETRIC mean absolute relative difference**, `|est−true| / (|est|+|true|)` "
     "averaged over the expressed set, so it is bounded in [0, 1] and finite at a zero estimate — "
     "0.5 is a 3× error, not a 50 % one. `median rel. err` is the ordinary `|est−true|/true`, over "
@@ -788,7 +789,9 @@ _MD_AXES = (
      "`|estimate − truth|` over every annotated transcript, SILENT ONES INCLUDED, and splits into "
      "`over-assigned` + `under-assigned`; `false-positive mass` is the part of the over-assignment "
      "that landed on a transcript the simulator gave ZERO fragments, so it is a subset of `Σ|Δ|` "
-     "and the number this tool exists for."),
+     "and the number this tool exists for. `false-negative mass` is its mirror, the truth on an "
+     "expressed transcript the tool gave exactly zero, and a subset of `under-assigned`. Each is "
+     "followed by the number of transcripts it sits on."),
     ("gene", "3. Gene level — the same, with isoform ambiguity summed away",
      "The same scorer over genes, and the difference from the transcript row is the point: "
      "summing a gene's isoforms collapses exactly the error that comes from not knowing WHICH "
@@ -867,7 +870,8 @@ def _md_axis(primary: dict, conds: list[str], axis: str, title: str, blurb: str)
     """Section 2 or 3: the transcript or the gene table, one row per scenario."""
     unit = "expressed" if axis == "transcript" else "expressed genes"
     head = (f"| scenario | {unit} | detected | Σ\\|Δ\\| | Σ\\|Δ\\| as % of true | net Δ | "
-            "over-assigned | under-assigned | false-positive mass | on n | MARD | Spearman |")
+            "over-assigned | under-assigned | false-positive mass | on n | false-negative mass | on n | "
+            "MARD | Spearman |")
     if axis == "transcript":
         head = head.replace("| MARD |", "| median rel. err | MARD |")
     # count columns with the escaped pipes removed: the two `|` in `Σ\|Δ\|` are cell content, not delimiters
@@ -881,7 +885,7 @@ def _md_axis(primary: dict, conds: list[str], axis: str, title: str, blurb: str)
             cells = [f"`{c}`", f"{r['n_expressed']:,}", f"{r['n_detected']:,}",
                      f"{r['count_abs_err']:,.0f}", f"{share:.2f} %", _signed(r["count_net_err"])]
             cells += [f"{r['count_over']:,.0f}", f"{r['count_under']:,.0f}",
-                      f"{r['fp_mass']:,.0f}", f"{r['fp_n']:,}"]
+                      f"{r['fp_mass']:,.0f}", f"{r['fp_n']:,}", f"{r['fn_mass']:,.0f}", f"{r['fn_n']:,}"]
             if axis == "transcript":
                 cells.append(f"{r['median_rel_err']:.3f}")
             cells += [f"{r['mard']:.3f}", f"{r['spearman']:.4f}"]

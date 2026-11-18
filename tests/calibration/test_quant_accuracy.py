@@ -781,15 +781,22 @@ def test_the_deferred_stratum_is_marked_wherever_it_appears(tmp_path):
     assert md.count("DEFERRED") >= 4, "the deferred stratum is unmarked in at least one section"
 
 
-def test_the_report_does_not_present_a_column_that_cannot_fire(tmp_path):
-    """``fn_mass`` needs an estimate of exactly zero, which a posterior under fractional assignment essentially never
-    is, so it reads 0.0 everywhere, and a column of zeros labelled "false-negative mass" would read as a perfect score
-    for something never measured. ``count_under`` is the live quantity and is reported instead.
+def test_the_report_presents_the_false_negative_mass_beside_the_under_assignment(tmp_path):
+    """``fn_mass`` is the truth on the expressed transcripts the estimate gives exactly zero. A component the EM left at
+    its floor is assigned nothing, so the column fires under fractional assignment too, and leaving it out would hide
+    real RNA the tool reports as absent. It is a part of ``count_under``, which stays beside it.
     """
     md = _render(tmp_path)
-    assert "false-negative" not in md.split("## 2.")[1], "a column that cannot fire was reported"
-    assert "under-assigned" in md and "over-assigned" in md
-    assert "255" in md, "count_under (the live under-assignment) is missing"
+    assert "cannot fire" not in md, "the report still says a false negative cannot be measured"
+    for section in ("## 2.", "## 3."):
+        table = [x for x in md.split(section)[1].split("## ")[0].splitlines() if x.startswith("|")]
+        head, row = (
+            [c.strip() for c in x.replace("\\|", "").split("|")] for x in (table[0], table[-1])
+        )
+        at = head.index("false-negative mass")
+        assert (row[at], row[at + 1]) == ("11", "1"), "fn_mass and fn_n are not under their header"
+        assert row[head.index("under-assigned")] == "255", "count_under is missing"
+        assert row[head.index("false-positive mass")] == "33", "fp_mass moved from under its header"
 
 
 def test_the_report_does_not_call_the_truth_tables_row_count_a_transcript_count(tmp_path):
