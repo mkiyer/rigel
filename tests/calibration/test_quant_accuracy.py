@@ -494,12 +494,13 @@ def test_an_oracle_part_records_the_bam_it_was_split_from(toy, tmp_path):
 
 
 def _quant_ruler(toy, arm, factor, seed=EMConfig().seed):
-    """One full ``run_pipeline`` with the EM's effective lengths under ``install_ruler_arm``."""
+    """One full ``run_pipeline`` with the EM's effective lengths under ``install_ruler_arm``, the toy's one reference
+    carrying gDNA, so nothing is held."""
     from rigel.pipeline import run_pipeline
 
     cfg = PipelineConfig()
     cfg = dataclasses.replace(cfg, em=dataclasses.replace(cfg.em, seed=seed))
-    restore, fired = qa.install_ruler_arm(arm, factor)
+    restore, fired = qa.install_ruler_arm(arm, factor, np.zeros(len(factor), dtype=bool))
     try:
         result = run_pipeline(str(toy.bam_path), toy.index, cfg)
     finally:
@@ -550,6 +551,83 @@ def test_the_ruler_guard_refuses_an_arm_that_could_not_have_measured():
         qa.check_ruler_arm("c", "oracle_ruler_noop", dict(fired, max_abs_delta=1e-9))
     with pytest.raises(RuntimeError, match="never ran"):
         qa.check_ruler_arm("c", "oracle_ruler", dict(fired, ruler=0))
+
+
+@pytest.fixture(scope="module")
+def toy_zero(tmp_path_factory):
+    """The zero-gDNA toy: no reference carries gDNA."""
+    from _prior_toy import build_toy_zero_gdna
+
+    return build_toy_zero_gdna(tmp_path_factory)
+
+
+def _ruler_condition(toy, suite, n_gdna, monkeypatch):
+    """``oracle_ruler`` installed as ``run_condition`` installs it, on a panel whose manifest names the toy's one
+    reference as genomic, under a condition that drew ``n_gdna`` gDNA fragments, with the simulator's factor stood in
+    by a probed spike-in's (about 1000) on every annotated transcript. Returns the run's transcript table, its fired
+    counter and the factor."""
+    from rigel.pipeline import run_pipeline
+
+    (ref,) = toy.index.ref_name_to_id
+    suite.mkdir(exist_ok=True)
+    (suite / "manifest.json").write_text(
+        json.dumps(
+            {"gdna": {"genomic_refs": [ref]}, "conditions": [{"name": "c", "n_gdna": n_gdna}]}
+        )
+    )
+    factor = np.where(toy.index.t_df["is_synthetic"].to_numpy(bool), 1.0, 1000.0)
+    monkeypatch.setattr(qa, "capture_truth_factor", lambda *a: factor)
+    cfg = PipelineConfig()
+    restore, fired = qa.install_condition_arm(
+        "oracle_ruler", suite, toy.index, "c", cfg, None, None
+    )
+    try:
+        result = run_pipeline(str(toy.bam_path), toy.index, cfg)
+    finally:
+        restore()
+    return result.estimator.get_counts_df(toy.index), fired, factor
+
+
+def test_the_ruler_arm_keeps_the_shipped_length_where_the_condition_drew_no_gdna(
+    toy, toy_zero, tmp_path, monkeypatch
+):
+    """The arm leaves the locus gDNA length as shipped, and its factor is anchored on that length's scale: where gDNA
+    was drawn, the shipped gDNA length reads gDNA's own capture. Where none was drawn (an RNA-only spike-in reference,
+    or every reference of a zero-gDNA condition) nothing measured capture, the shipped gDNA length is the uncaptured
+    one, and a probed transcript at ``fl × factor`` would sit three orders of magnitude above it: the E-step then
+    hands the uncaptured components every fragment they explain alike (on the ladder, about every probed spike-in
+    fragment to gDNA). There the arm must hand the EM the shipped lengths, read off the EM's own published length and
+    counts; where gDNA was drawn it substitutes as before. Which references drew gDNA is read off the manifest."""
+    base, _ = _quant(toy_zero, "base", None)
+    held, fired, _ = _ruler_condition(toy_zero, tmp_path / "zero", 0, monkeypatch)
+    assert fired["ruler"] >= 1
+    np.testing.assert_array_equal(held["em_effective_length"], base["em_effective_length"])
+    exact = [c for c in base.columns if c != "posterior_mean"]
+    pd.testing.assert_frame_equal(base[exact], held[exact], check_exact=True)
+
+    shipped, _ = _quant(toy, "base", None)
+    sub, fired, factor = _ruler_condition(toy, tmp_path / "contaminated", 1, monkeypatch)
+    ids = toy.index.t_df["t_id"].to_numpy()
+    plain = shipped.set_index("transcript_id")["em_effective_length"]
+    want = plain * pd.Series(factor, index=ids).reindex(plain.index)
+    got = sub.set_index("transcript_id")["em_effective_length"].reindex(plain.index)
+    np.testing.assert_allclose(got.to_numpy(), want.to_numpy(), rtol=1e-12, atol=0.0)
+    assert fired["max_abs_delta"] > 0.0
+
+
+def test_the_references_without_gdna_are_the_manifests_never_the_counts():
+    """A spike-in reference outside ``gdna.genomic_refs`` holds no gDNA in any condition, and a zero-gDNA condition
+    holds none on any reference; a condition the manifest does not list is refused rather than read as one."""
+    t_df = pd.DataFrame({"ref": ["chr1", "chr1", "ERCC-1", "chr2"]})
+    index = type("I", (), {"t_df": t_df, "ref_name_to_id": {"chr1": 0, "ERCC-1": 1, "chr2": 2}})()
+    manifest = {
+        "gdna": {"genomic_refs": ["chr1", "chr2"]},
+        "conditions": [{"name": "g05", "n_gdna": 5}, {"name": "g00", "n_gdna": 0}],
+    }
+    assert qa.gdna_free_transcripts(manifest, index, "g05").tolist() == [False, False, True, False]
+    assert qa.gdna_free_transcripts(manifest, index, "g00").tolist() == [True] * 4
+    with pytest.raises(KeyError):
+        qa.gdna_free_transcripts(manifest, index, "g50")
 
 
 def test_the_no_capture_arm_replaces_the_readers_answer_and_nothing_else(monkeypatch):

@@ -7,7 +7,7 @@ difference from ``base`` is what that one thing is worth:
 
 - ``oracle``: the ``LocusPriors`` built from the origin-split truth (needs the oracle cache);
 - ``oracle_ruler``: the simulator's capture-aware effective length in place of the shipped ruler's, the only arm
-  that reaches the lengths the EM divides by;
+  that reaches the lengths the EM divides by, on every reference the condition drew gDNA from;
 - ``oracle_alloc_seed``: the true per-transcript allocation weights, a capability proof, not a headroom claim;
 - ``no_capture``: every capture efficiency read as 1, the line a capture reader must beat: under it a row is worth
   what reading no capture at all is worth. It substitutes no truth, so it scores an aligner's BAM too;
@@ -98,6 +98,12 @@ from _scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
 #: stay as shipped. Probes can make capture isoform-specific and isoforms split by the ratio of their lengths, so this arm
 #: prices the ruler end to end. Capture-OFF its factor is exactly 1, so it hands the EM RNA's own length, ``fl``; where
 #: the shipped ruler returns another length with every efficiency at 1, the arm prices that difference too.
+#:
+#: The factor's scale is the kept gDNA length's, which reads capture off gDNA's own fragments. On a reference the
+#: condition drew no gDNA from (an RNA-only spike-in, or every reference of a zero-gDNA condition) nothing measured
+#: capture: the kept gDNA length there is the uncaptured one, and a probed transcript at ``fl × factor`` would stand its
+#: whole capture factor above it, so the E-step would hand the gDNA component every fragment the two explain alike.
+#: There both arms keep the shipped length (``gdna_free_transcripts``), and the arm prices nothing.
 _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
 ARMS = ("base", "noop", "oracle", "oracle_alloc_seed", "no_capture") + tuple(_RULER_ARMS)
@@ -488,26 +494,38 @@ def capture_truth_factor(suite: Path, index, condition: str) -> np.ndarray:
     return anchor_capture_factor(truth.factor, truth.probed_frac, truth.L_plain)
 
 
-def install_ruler_arm(arm: str, factor: np.ndarray):
-    """Wrap the ruler so the EM divides by ``fl × factor``. Returns ``(restore, fired)``.
+def gdna_free_transcripts(manifest: dict, index, condition: str) -> np.ndarray:
+    """``bool[n_transcripts]``: the transcripts on a reference *condition* drew no gDNA from, the RNA-only spike-ins and
+    every reference of a zero-gDNA condition, read off the manifest (``calibration_oracle.genomic_ref_ids``), never off
+    where gDNA landed. A condition the manifest does not list is refused."""
+    refs = sibling("calibration_oracle.py").genomic_ref_ids(manifest, condition, index.ref_name_to_id)
+    t_ref = index.t_df["ref"].map(index.ref_name_to_id).to_numpy(np.int64)
+    return ~np.isin(t_ref, refs)
 
-    ``transcript_capture_eff_lengths`` is patched as a module attribute, which works because
-    ``pipeline.setup_geometry_and_estimator`` imports it at call time. Both arms run the same wrapper: it runs the
-    shipped ruler, builds the substitute, and records how far the substitute sits from the shipped lengths
-    (``truth_delta``) and how far the returned lengths do (``max_abs_delta``); ``oracle_ruler_noop`` returns the
-    shipped object. ``check_ruler_arm`` reads the counter.
+
+def install_ruler_arm(arm: str, factor: np.ndarray, held: np.ndarray):
+    """Wrap the ruler so the EM divides by ``fl × factor``, and by the shipped length where ``held``. Returns
+    ``(restore, fired)``.
+
+    ``held`` marks the transcripts on a reference the condition drew no gDNA from (``gdna_free_transcripts``), where
+    the factor has no gDNA length on its own scale to stand beside. ``transcript_capture_eff_lengths`` is patched as a
+    module attribute, which works because ``pipeline.setup_geometry_and_estimator`` imports it at call time. Both arms
+    run the same wrapper: it runs the shipped ruler, builds the substitute, and records how far the substitute sits from
+    the shipped lengths (``truth_delta``), how far the returned lengths do (``max_abs_delta``) and how many transcripts
+    it held (``held``); ``oracle_ruler_noop`` returns the shipped object. ``check_ruler_arm`` reads the counter.
     """
     from rigel.calibration import capture_eff_length as CEL
 
     substitute = _RULER_ARMS[arm]
     factor = np.asarray(factor, dtype=np.float64)
+    held = np.asarray(held, dtype=bool)
     orig_ruler = CEL.transcript_capture_eff_lengths
-    fired = {"n": 0, "ruler": 0, "max_abs_delta": 0.0, "truth_delta": 0.0}
+    fired = {"n": 0, "ruler": 0, "max_abs_delta": 0.0, "truth_delta": 0.0, "held": int(held.sum())}
 
     def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths, tables, junction_cap):
         shipped = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, tables, junction_cap)
         base = np.asarray(shipped, dtype=np.float64)
-        truth = np.asarray(fl_eff_lengths, dtype=np.float64) * factor
+        truth = np.where(held, base, np.asarray(fl_eff_lengths, dtype=np.float64) * factor)
         out = truth if substitute else shipped
         fired["n"] += 1
         fired["ruler"] += 1
@@ -629,7 +647,9 @@ def install_condition_arm(arm: str, suite: Path, index, condition: str, pipeline
         return install_truth_weights(truth_weights(truth, index))
     if arm in _RULER_ARMS:
         # checked before the fall-through: `install_arm` has no fields for a ruler arm
-        return install_ruler_arm(arm, capture_truth_factor(suite, index, condition))
+        manifest = json.loads((Path(suite) / "manifest.json").read_text())
+        return install_ruler_arm(arm, capture_truth_factor(suite, index, condition),
+                                 gdna_free_transcripts(manifest, index, condition))
     if arm == "no_capture":
         return install_no_capture()
     oracle = None
@@ -692,9 +712,11 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     common = {**row_stamp(arm, condition, pipeline_config, bam_name), "seconds": seconds}
     if arm in _RULER_ARMS:
         # how far the arm moved the EM's lengths and how far the truth sits from the shipped ruler, in bp on the
-        # worst transcript, so the arm's reach is readable from the output
+        # worst transcript, and how many transcripts it kept at the shipped length (no gDNA on their reference), so
+        # the arm's reach is readable from the output
         common["ruler_max_abs_delta"] = float(fired["max_abs_delta"])
         common["ruler_truth_delta"] = float(fired["truth_delta"])
+        common["ruler_n_held"] = int(fired["held"])
     library = score_library(result, quant, summary)
     if bam_name != ORACLE_BAM:
         library.update(aligned_library_truth(library, Path(bam), summary))

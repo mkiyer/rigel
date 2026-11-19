@@ -75,7 +75,7 @@ that one thing is worth:
 | `base` | nothing: the shipped pipeline | the deliverable |
 | `no_capture` | every capture efficiency read as 1, the capture weight 0; calibration's bulk kept | what reading capture is worth: a row where `base` is worse is a row where the capture reader cost more than it gave. It substitutes no truth, so it runs under `--bam` too |
 | `oracle` | the `LocusPriors` built from the origin-split truth | what a perfect prior is worth; what is left belongs to the EM, the lengths and the annotation |
-| `oracle_ruler` | the simulator's capture-aware effective length for every transcript and span, anchored on the unprobed transcripts, so the uncaptured bulk reads 1 as the shipped lengths do | what the lengths do to the isoform split; the gDNA component keeps the shipped length |
+| `oracle_ruler` | the simulator's capture-aware effective length for every transcript and span on a reference the condition drew gDNA from, anchored on the unprobed transcripts, so the uncaptured bulk reads 1 as the shipped lengths do; elsewhere (the RNA-only spike-ins, every reference at `g00`) the shipped length | what the lengths do to the isoform split; the gDNA component keeps the shipped length, so where no gDNA measured capture the arm prices nothing |
 | `oracle_alloc_seed` | the true relative abundances as the EM's per-transcript allocation weights, with the shipped coverage seed | a capability proof, never a headroom claim |
 | `noop`, `oracle_ruler_noop` | nothing, through the substitution path | must be byte-identical to `base` |
 
