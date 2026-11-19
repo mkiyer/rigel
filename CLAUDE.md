@@ -134,7 +134,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The baseline: 0 failed / 3,614 passed / 0 skipped, 3,614 collected** (re-derived 2026-11-18, with the scan phase: the splice blacklist retired, the census and the leading segment, pruning within each place). Any failure is a regression.
+**The baseline: 0 failed / 3,623 passed / 0 skipped, 3,623 collected** (re-derived 2026-11-18, with the paired proper score). Any failure is a regression.
 - Re-derive the count; never edit it by hand. Only adding or removing a test moves it.
 - A golden update (`--update-golden`) is where a regression gets laundered into "intended". Read the diff and check the
   truth-scored instruments first.
@@ -150,6 +150,7 @@ Each instrument's module docstring and `--help` are its manual. `docs/SUCCESS.md
 |---|---|
 | `design/preflight.py` | Can this session run and regenerate everything? `--full` adds every `--self-test` |
 | `design/quant_accuracy.py` | How accurate is the tool end to end, against truth? Read in a pinned A/B pair. `--arm no_capture` is the line a capture reader must beat; `--report … --markdown` renders the release report; `--bam` runs on an aligner's input (the STAR rung) |
+| `design/paired_score.py` | Does one arm forecast each fragment's source better than another? The Brier score of P(gDNA) and its CORP miscalibration on identical read names, per stratum, closed on `quant_accuracy.py`'s pools. `--record` one arm per process (a second build under its own interpreter), then `--pair` the two records |
 | `design/calibration_vs_oracle.py` | Is the calibration result right against an oracle calibration? `--set` prices a config value on both arms. It cannot see the capture-contracted length: read `ruler_vs_truth.py` beside every capture-ON arm |
 | `design/ruler_vs_truth.py` | Is the EM's capture-contracted length right against the simulator's own yield? `--scale` puts every class on one scale; `--module` runs prototype rulers |
 | `design/prior_vs_oracle.py` | Is the locus prior's gDNA count right? `P − O` is calibration's error, `O − S` the pooled share's |
