@@ -347,10 +347,12 @@ class CalibrationConfig:
     #: split of its count is as likely as any other (``gdna_density.BackgroundLaw``). It caps how far the background
     #: can argue against an intron's composition, ``log(1 + ((1 − ε)/ε)·(C + 1)·NB_max)`` nats for ``C`` fragments, so
     #: an intron's own decisive strand evidence outweighs a background it contradicts; and it keeps a region the law
-    #: cannot explain from setting the law. A robustness setting read as a prior: 0.01 is odds of 99 to 1 that a region
-    #: is at the background, and calibration against truth sits within 1 % of its best for every in-scope stratum
-    #: from 1e-4 to 0.05. Raised toward 1 it flattens the abundance row, which turns the model off where the
-    #: intergenic regions are not a gDNA reference.
+    #: cannot explain from setting the law. 0.01 is odds of 99 to 1 that a region is at the background. The intergenic
+    #: pool is always fitted at this value. A stranded library measures its introns' own ε from their strands
+    #: (``calibration.intron_departure``), and this value is that estimate's prior mode; an unstranded library's introns
+    #: read at this value, where calibration against truth sits within 1 % of its best for every in-scope stratum from
+    #: 1e-4 to 0.05. Raised toward 1 it flattens the abundance row, which turns the model off where the intergenic
+    #: regions are not a gDNA reference.
     intron_departure_prior: float = 0.01
 
     def __post_init__(self) -> None:
@@ -653,6 +655,11 @@ class CalibrationConstants:
     #: of the spread changes no intron's row measurably.
     background_fit_tolerance: float = 1e-6
 
+    #: The introns' departure prior (``intron_departure``) takes each intron's background expectation at this many
+    #: midpoint quantiles of the background's count. A discretization, not a model choice: at 64 the estimate is within
+    #: 0.4 % of the exact sum over every count, where its own spread on a 2,000-intron library is about 6 %.
+    departure_quadrature_nodes: int = 64
+
     def __post_init__(self) -> None:
         _check_ranges(
             self,
@@ -666,6 +673,7 @@ class CalibrationConstants:
             junction_cap_grid_points=self.junction_cap_grid_points >= 2,
             background_rate_shape=self.background_rate_shape > 0.0,
             background_fit_tolerance=0.0 < self.background_fit_tolerance < 1.0,
+            departure_quadrature_nodes=self.departure_quadrature_nodes >= 1,
         )
 
 

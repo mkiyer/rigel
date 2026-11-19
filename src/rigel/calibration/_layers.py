@@ -78,6 +78,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             # `capture_efficiency` is every region's and boundary's capture efficiency: a posterior under the
             # landscape prior from the object's own deconvolved gDNA count, read by the ruler and the locus prior.
             "capture_efficiency",
+            # `intron_departure` is the introns' departure prior ε for the library, from single-strand introns'
+            # antisense counts under the background law (2) and the library's sense fraction (4).
+            "intron_departure",
         ),
     ),
     (

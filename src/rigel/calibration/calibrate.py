@@ -10,6 +10,7 @@ module below it. An object's composition has three sources: the binomial strand 
       -> chain + geometry + statics               the geometry owns every divisor
       -> the intergenic background's gDNA law     every intron's count is read against it (the intron abundance model)
       -> strand balance: κ
+      -> the introns' departure prior ε           the library's own, read from its single-strand introns' strands
       -> signature-binary init (G1/G2/G3)
       -> pass 1: solve_chain with no fitted prior, one forward and one backward pass
       -> refits (calib_refit_iters): fit the gDNA landscape on the belief, reset the belief, solve again
@@ -24,7 +25,7 @@ Gate: ``tests/calibration/test_calibrate.py``.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -33,6 +34,7 @@ from .capture_efficiency import CaptureReading, capture_efficiencies, visible_sh
 from .diagnostics import CalibrationDiagnostics, SweepDiagnostics
 from .effective_length import observable_cut_shares
 from .gdna_density import BackgroundLaw, background_law
+from .intron_departure import DepartureFit, fit_departure_prior
 from .landscape import DensityLandscape, fit_landscape
 from .messages.silent import SilentPolicy
 from .messages.transfer import TransferPolicy
@@ -55,7 +57,7 @@ from .region_geometry import (
 )
 from .result import CalibrationResult
 from .signature import RegionType, coarse_type_array
-from .strand_balance import StrandBalance, fit_strand_balance
+from .strand_balance import StrandBalance, fit_strand_balance, strand_discriminability
 from .substrate import CalibrationSubstrate
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from ..config import CONSTANTS
@@ -153,7 +155,8 @@ def lattice_points(window: float, step: float) -> int:
 class _SweepInputs:
     """Everything a sweep reads, fixed for the whole calibration: the chain, its statics and geometry, the region
     arrays, the strand model, the policy, the config, the per-slot gDNA support ``(mass_global, eff_global)`` the
-    landscape prior is fit and read on, and the intergenic background's gDNA law every intron is read against."""
+    landscape prior is fit and read on, the intergenic background's gDNA law every intron is read against, carrying the
+    introns' departure prior, and that prior's fit."""
 
     chain: RegionChain
     statics: RegionStatics
@@ -165,6 +168,7 @@ class _SweepInputs:
     mass_global: np.ndarray
     eff_global: np.ndarray
     background: BackgroundLaw
+    departure: DepartureFit
 
 
 def _sweep_inputs(
@@ -186,12 +190,18 @@ def _sweep_inputs(
     mutes the channel. A library with no spliced read is unstranded, κ = ½ with a dead channel, never an error."""
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_region_geometry(chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf)
+    statics = build_region_statics(chain, region_arrays, boundary_flags)
     strand = fit_strand_balance(strand_model)
     mass_global, eff_global = region_gdna_geometry(geometry)
+    # The pool is fitted at the run setting: an intergenic region departs at its own rate, which no strand measures.
+    # The introns' rows then read at the library's own rate where its strands measure one.
     background = _background(chain, geometry, region_arrays, config.intron_departure_prior)
+    departure = _departure(
+        chain, statics, geometry, region_arrays, strand, background, config.intron_departure_prior
+    )
     return _SweepInputs(
         chain=chain,
-        statics=build_region_statics(chain, region_arrays, boundary_flags),
+        statics=statics,
         geometry=geometry,
         region_arrays=region_arrays,
         strand=strand,
@@ -199,7 +209,8 @@ def _sweep_inputs(
         config=config,
         mass_global=mass_global,
         eff_global=eff_global,
-        background=background,
+        background=replace(background, departure=departure.departure),
+        departure=departure,
     )
 
 
@@ -225,6 +236,48 @@ def _background(chain, geometry, region_arrays, departure: float) -> BackgroundL
         law.size,
     )
     return law
+
+
+def _departure(
+    chain,
+    statics,
+    geometry,
+    region_arrays,
+    strand: StrandBalance,
+    law: BackgroundLaw,
+    setting: float,
+) -> DepartureFit:
+    """The introns' departure prior for this library (`intron_departure.fit_departure_prior`), its mode the run's
+    ``calibration.intron_departure_prior``. A single-strand intron's RNA splits between the genome strands by κ and its
+    gDNA evenly, so its count on the strand opposite its annotation, given its count, reads its gDNA against the law.
+    An intron that admits both strands has no such reading. A dead strand channel (`strand_discriminability`) is read
+    as κ = ½, as the solve reads it, so an unstranded library keeps the setting."""
+    region_type = coarse_type_array(slot_signature(chain, region_arrays.signature))
+    fp = np.asarray(statics.free_pos, dtype=bool)
+    fn = np.asarray(statics.free_neg, dtype=bool)
+    intron = (np.asarray(chain.kind) == REGION) & (region_type == RegionType.INTRON) & (fp ^ fn)
+    count = np.asarray(geometry.unspliced_count, np.float64)[intron]  # by genome strand
+    plus = fp[intron]
+    kappa = float(strand.rna_sense_frac)
+    live = strand_discriminability(kappa, strand.n_observations) > 0.0
+    fit = fit_departure_prior(
+        np.where(plus, count[:, 0], count[:, 1]),
+        np.where(plus, count[:, 1], count[:, 0]),
+        np.asarray(geometry.eff_gdna, np.float64)[intron],
+        law,
+        kappa if live else 0.5,
+        setting,
+    )
+    logger.info(
+        "calibration: the introns' departure prior %.4g from %d single-strand introns holding a fragment; their "
+        "strands prefer it to the run setting %.4g by %.1f nats%s",
+        fit.departure,
+        fit.n_introns,
+        setting,
+        fit.evidence,
+        "" if live else " (the strand channel is dead, so they say nothing)",
+    )
+    return fit
 
 
 def _policy(config, strand: StrandBalance):
@@ -553,6 +606,8 @@ def calibrate(
         diagnostics.belief = belief
         diagnostics.landscape = landscape
         diagnostics.rna_sense_frac = inputs.strand.rna_sense_frac
+        diagnostics.background = inputs.background
+        diagnostics.departure = inputs.departure
     _log_summary(result, inputs.strand, substrate, sj)
     return result
 

@@ -1449,9 +1449,10 @@ def _add_quant_advanced_options(grp, qd: dict) -> None:
         f"(default {qd['intron_departure_prior']:g}): the probability that a region's gDNA is not at the intergenic "
         "background (a probe's reach, a copy-number change, unannotated transcription). It caps how far the background "
         "can argue against an intron's own strand evidence, and keeps a region the background cannot explain from "
-        "setting it. Answers are flat across a wide range around the default; raising it toward 1 turns the intron "
-        "abundance model off, for libraries whose intergenic regions are not a gDNA reference. Advanced calibration "
-        "knob.",
+        "setting it. A stranded library measures its introns' own value from their strands, with this as its prior; "
+        "an unstranded library uses this value, and answers are flat across a wide range around the default. Raising "
+        "it toward 1 turns the intron abundance model off, for libraries whose intergenic regions are not a gDNA "
+        "reference. Advanced calibration knob.",
     )
     grp.add_argument(
         "--overhang-alpha",

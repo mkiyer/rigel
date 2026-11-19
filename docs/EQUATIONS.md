@@ -353,7 +353,8 @@ A region resolves a rate only above `~1/E` (Fisher information `ρE`); `ρ ≈ 0
 `intron_row`. An intergenic region admits no RNA strand, so the intergenic pool is the library's one structurally pure
 gDNA pool, though unannotated transcription, a copy-number change or a probe's reach can still move a region off it.
 Every object is read with one two-part law: with probability `1 − ε` it is at the background, its count a draw from
-`NegBinom(ρE, s)`; otherwise any count is as likely. ε is the run setting `calibration.intron_departure_prior`.
+`NegBinom(ρE, s)`; otherwise any count is as likely. ε is the run setting `calibration.intron_departure_prior` for
+the pool, and for the introns of a library whose strands cannot measure their own (§7.2).
 
 *The fit.* With `φ = 1/s` the over-dispersion, the rate at each φ is the one-sided root of §7, with the negative
 binomial's own expected shortfall in place of De Moivre's:
@@ -394,10 +395,43 @@ as strand evidence does, `C·(log d − 1) + μ` while `μ ≪ s`, so it overrul
 ss 0.99, 3× at 0.70. Capped, strand overtakes it at a fixed count, about 16 fragments at ss 0.99 and 100 at ss 0.70
 in the local solve, never at ½.
 
-ε is a robustness setting read as a prior, not a literal posterior probability: the flat part is defined on the
-intron's own `0…C`, while the negative binomial's mass there is `P(G ≤ C)`, so an intron well under its background
-reads as uninformative rather than as all gDNA. Calibration against truth is within 1 % of its best for every in-scope
-stratum from ε = 10⁻⁴ to 0.05. The row's precision `1/Var_λ` over the whole normalised row joins `τ_λ` (§9c).
+Set rather than measured, ε is a robustness setting read as a prior, not a literal posterior probability: the flat
+part is defined on the intron's own `0…C`, while the negative binomial's mass there is `P(G ≤ C)`, so an intron well
+under its background reads as uninformative rather than as all gDNA. At a fixed setting, calibration against truth is
+within 1 % of its best for every in-scope stratum from ε = 10⁻⁴ to 0.05. The row's precision `1/Var_λ` over the whole
+normalised row joins `τ_λ` (§9c).
+
+**7.2 The introns' departure prior, per library.** `intron_departure.fit_departure_prior`, called by
+`calibrate._departure`. A single-strand intron's RNA lands on the strand opposite its annotation at `1 − κ`, its gDNA
+on either strand evenly. So its antisense count `A`, given its count `C`, reads its gDNA share `f` through the solve's
+own strand likelihood, `A ~ Binom(C, p(f))` with `p(f) = f/2 + (1 − f)(1 − κ)`. Under §7.1's two-part law the
+intron's strands have the likelihood
+
+    L_i(ε) = (1 − ε)·a_i + ε·b_i
+    a_i = E[Binom(A_i; C_i, p(g/C_i)) | g ≤ C_i]                     g from the background, at 64 midpoint quantiles
+    b_i = ∫₀¹ Binom(A_i; C_i, p(f)) df = [I_{x₂} − I_{x₁}](A_i + 1, C_i − A_i + 1) / ((C_i + 1)(x₂ − x₁))
+
+`x₁` and `x₂` are the ends of `p`'s range, `1 − κ` and ½, and `I` is the regularised incomplete beta. Both terms are
+conditioned on `C`, so a count far above the background, as RNA makes it, is no evidence; at κ = ½, `a_i = b_i` and
+the likelihood is flat.
+
+The prior is `Beta(2, 1/m0)`, `m0` the run setting: its mode is `m0`, and it holds one departing intron's worth of
+evidence at that rate. Each term of the log posterior is the log of an affine function of ε, so the log posterior is
+concave. ε̂ is the one root of its derivative, found by bisection:
+
+    Σ_i (b_i − a_i)/L_i(ε) + 1/ε − (1/m0 − 1)/(1 − ε)
+
+The evidence reported beside it is `Σ log L_i(ε̂) − Σ log L_i(m0)`, in nats. It is not negative, because the mode gains
+at least what the prior gives up. A library whose strands say nothing returns `m0` with no evidence: a dead channel,
+no single-strand intron holding a fragment, or no background.
+
+`a_i` is the background's reading of the intron as the row makes it, so ε̂ is the weight of the row's flat part that
+the strands support: how often the background misreads an intron. A departure of the intron's gDNA is one cause. A
+sparse intron is the other. Where the background expects `μ < 1` fragments, every fragment is an excess. The row
+prices `g` and charges nothing for the RNA `C − g`, so it reads the excess as RNA. At `μ = 0.2` a pure-gDNA intron at
+its background reads 32 % gDNA from one fragment and 11 % from three, against 50 % with no row. If those fragments are
+gDNA the strands say so, so a library whose sparse introns hold mostly gDNA reads near 1, and its rows step aside for
+the strands. The intergenic pool keeps `m0`, because its regions depart at their own rate, which no strand measures.
 
 ---
 

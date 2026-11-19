@@ -195,8 +195,9 @@ class BackgroundLaw:
     over-dispersion the pool supports and the rate's own posterior width, ``1/size = 1/s + 1/(sum w·n + ½)``, so an
     intron is one more draw from the law rather than a draw at a known rate. ``pooled_rate``, the naive ``sum n /
     sum E``, and ``kept``, the regions' summed weight under the law, report how much of the pool departed from it.
-    ``departure`` is the run's ``calibration.intron_departure_prior``: the pool can measure its own spread but not how
-    often a region leaves it."""
+    The pool is fitted at the run's ``calibration.intron_departure_prior`` as ``departure``: it can measure its own
+    spread but not how often a region leaves it. The introns read the law at their library's own ``departure`` where
+    their strands measure one."""
 
     log_rate: float
     size: float

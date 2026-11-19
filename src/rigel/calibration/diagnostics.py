@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from .gdna_density import BackgroundLaw
+    from .intron_departure import DepartureFit
     from .landscape import DensityLandscape
     from .region_arrays import RegionArrays
     from .region_chain import RegionChain
@@ -61,7 +63,8 @@ class SweepDiagnostics:
 class CalibrationDiagnostics:
     """The solve's intermediates, filled by ``calibrate``: the chain, its geometry and statics, the substrate, the sj
     axis and region frame it ran on, the final belief (after the refits), the last refit's landscape (``None`` when no
-    refit fitted one), the library's RNA sense fraction, and the last sweep's :class:`SweepDiagnostics`."""
+    refit fitted one), the library's RNA sense fraction, the intergenic background's law as the sweep read it (its
+    departure prior the introns'), the fit of that departure prior, and the last sweep's :class:`SweepDiagnostics`."""
 
     chain: RegionChain | None = None
     geometry: RegionGeometry | None = None
@@ -72,4 +75,6 @@ class CalibrationDiagnostics:
     belief: RegionBelief | None = None
     landscape: DensityLandscape | None = None
     rna_sense_frac: float | None = None
+    background: BackgroundLaw | None = None
+    departure: DepartureFit | None = None
     sweep: SweepDiagnostics = field(default_factory=SweepDiagnostics)

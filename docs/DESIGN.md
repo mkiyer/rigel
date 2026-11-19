@@ -394,8 +394,17 @@ alone) and the delivered message rows. It never reads the spliced mass.
   the prior that a region is not at the background (a probe's reach, a copy-number change, a mappability gap,
   unannotated transcription). It leaves the row's peak alone and caps its tail, so an intron's own decisive strand
   evidence outweighs a background it contradicts, and the same ε keeps a region the law cannot explain from setting
-  the law: the rate is read from the pool's shortfalls, the spread from the two-part likelihood (EQUATIONS §7.1). The row
-  is read at the λ nodes, except that the node whose lattice cell holds the background's mode reads the mode, so a deep
+  the law: the rate is read from the pool's shortfalls, the spread from the two-part likelihood (EQUATIONS §7.1).
+  **A stranded library measures its introns' own ε** (`intron_departure`, EQUATIONS §7.2). Its single-strand introns'
+  strands say how often the background misreads an intron, and the introns' rows read at that rate, the run setting
+  the prior's centre. The intergenic pool keeps the setting: its regions depart at a rate no strand measures. The
+  strands catch every misreading. One is a departure of the intron's gDNA, such as a probe's reach. The other is a
+  sparse intron: where the background expects less than one fragment, the row, which charges nothing for RNA, reads
+  each fragment as RNA. On the VCaP mix, whose exome-captured DNA leaves most introns under one fragment's
+  expectation, ε̂ is 0.995, and the rows step aside for the strands. On the ladder's stranded capture-OFF rows ε̂ is
+  2–4·10⁻⁴. **An unstranded library keeps the setting**, so nothing catches its sparse introns' gDNA being read as RNA:
+  at an expectation of 0.2, a pure-gDNA intron reads 32 % gDNA from one fragment and 11 % from three (50 % with no
+  row). The row is read at the λ nodes, except that the node whose lattice cell holds the background's mode reads the mode, so a deep
   intron's peak, narrower than a cell, is never lost between two nodes. No other slot carries a location term, and none
   returns as a flag or constant.
 - **One λ lattice for every consumer** at `CalibrationConfig.sweep_logodds_step` over `[−L, L]`, `L` the larger of

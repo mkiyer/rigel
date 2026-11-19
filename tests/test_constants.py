@@ -50,6 +50,7 @@ BROKEN = {
         "junction_cap_grid_points": 1,
         "background_rate_shape": 0.0,
         "background_fit_tolerance": 1.0,
+        "departure_quadrature_nodes": 0,
     },
     "fragment_length": {
         "pool_prior_ess": -1.0,

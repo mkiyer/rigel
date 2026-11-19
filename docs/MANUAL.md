@@ -254,7 +254,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--em-convergence-delta D` | `1e-6` | Convergence threshold for EM parameter updates |
 | `--calib-refit-iters N` | `3` | Number of times calibration re-solves after refitting its population gDNA prior. `0` gives the prior-free first solve only, and with it no capture correction: no gDNA landscape is fitted, so every capture efficiency is 1. |
 | `--sweep-block-slots N` | `1000` | Calibration's working set: the chain is solved one locus block at a time, the pieces between intergenic regions merged up to this many slots per block. Performance only — the answer is the same for every value; smaller blocks use less memory per sweep. |
-| `--intron-departure-prior E` | `0.01` | The intron abundance model's departure prior, strictly between 0 and 1: the probability that a region's gDNA is not at the intergenic background. It caps how far the background can argue against an intron's own strand evidence, and keeps a region the background cannot explain from setting it. Raising it toward 1 turns the model off. |
+| `--intron-departure-prior E` | `0.01` | The intron abundance model's departure prior, strictly between 0 and 1: the probability that a region's gDNA is not at the intergenic background. It caps how far the background can argue against an intron's own strand evidence, and keeps a region the background cannot explain from setting it. A stranded library measures its introns' own value, with `E` as the prior's centre; an unstranded library uses `E`. Raising it toward 1 turns the model off. |
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning, in [0, 1), against the best candidate at the same alignment (a multimapper's alignments are pruned each on its own, so every one stays in the EM). Lower keeps more candidates; `0` disables pruning. |
 | `--intron-overhang-tolerance K` | `3` | Intron-overhang tolerance (bp) at annotated introns: how many bases an aligned read end may lie inside an intron, at the edge of a gap the reads did not sequence or at a fragment's outer end, as when an aligner runs a read a base or two across a splice site. An annotated intron in an unsequenced gap may overlap up to K aligned bases at either end and still count as lying in the gap, and a transcript is contradicted only by an intron holding more than K aligned bases. Along a witness transcript it decides whether two mates are one molecule; it also shapes the candidates' lengths and the gap hypotheses calibration arbitrates, so it changes calibration's tally. Junctions are matched exactly. |
@@ -809,9 +809,15 @@ Advanced; the defaults suit standard libraries.
   intron's excess over that background is RNA. `E` is the probability that a region is not at the background
   (a probe's reach, a copy-number change, a mappability gap, unannotated transcription). It caps how far the
   background can argue against an intron's own strand evidence, so a decisive strand reading wins, and it keeps
-  an intergenic region the background cannot explain from setting the background. Calibration is flat across a
-  wide range around the default (within 1 % of its best from `1e-4` to `0.05` on the simulated panels). Raising
-  it toward 1 flattens the background's evidence and so turns the model off: do that when the library's
+  an intergenic region the background cannot explain from setting the background.
+
+  A stranded library measures its introns' own value from their strands, with `E` as the prior's centre. The log
+  reports it, with the evidence for it over `E` in nats. A value near 1 says the background misreads the library's
+  introns, and their strands decide instead. A sparse library reads high this way: where most introns hold less than
+  one fragment of the background's gDNA, the background takes each fragment for RNA, and the strands say it is gDNA.
+  The intergenic pool always uses `E`. An unstranded library uses `E` for its introns too, and calibration is flat
+  across a wide range around the default (within 1 % of its best from `1e-4` to `0.05` on the simulated panels).
+  Raising `E` toward 1 flattens the background's evidence and so turns the model off: do that when the library's
   intergenic regions are not a gDNA reference.
 
   Nascent-RNA protocols (GRO-seq, PRO-seq, TT-seq) need no different value for their intronic RNA, which the
