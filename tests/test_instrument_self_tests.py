@@ -20,7 +20,7 @@ import pytest
 INSTRUMENTS = [
     ("calibration_vs_oracle", 26, "{n}/{n} self-test gates fired"),
     ("ruler_vs_truth", 45, "{n}/{n} self-test gates fired"),
-    ("paired_score", 46, "{n}/{n} self-test gates fired"),
+    ("paired_score", 47, "{n}/{n} self-test gates fired"),
 ]
 
 

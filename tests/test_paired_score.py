@@ -154,6 +154,89 @@ def test_a_swapped_class_on_a_real_run_is_refused(toy, tmp_path, monkeypatch):
     assert row["checks"]["winner_above_its_class"] > 0
 
 
+def _plant_capture(monkeypatch):
+    """Plant a capture reading on the capture-OFF toy, whose reader reads none: the reader's own answer with half its
+    regions at efficiency 3, saturated at 3, at weight 1. It moves the toy's pools, so a record that never reached
+    the ``no_capture`` arm reads it."""
+    import importlib
+
+    calibrate = importlib.import_module("rigel.calibration.calibrate")
+    inner = calibrate._capture_fields
+
+    def planted(*args, **kwargs):
+        fields = inner(*args, **kwargs)
+        eff = np.array(fields["gdna_capture_efficiency_region"], dtype=np.float64)
+        eff[: eff.size // 2] = 3.0
+        return dict(
+            fields,
+            gdna_capture_efficiency_region=eff,
+            gdna_capture_saturation=3.0,
+            gdna_capture_weight=1.0,
+        )
+
+    monkeypatch.setattr(calibrate, "_capture_fields", planted)
+
+
+def test_a_no_capture_record_reads_no_capture_and_closes_on_quant_accuracys_no_capture_pools(
+    toy, tmp_path, monkeypatch
+):
+    """Every capture-ON row is read beside ``no_capture``, so a record can run under it: every capture efficiency
+    read as 1, through ``quant_accuracy.install_no_capture`` and refused by its ``check_no_capture``. Under a planted
+    capture reading the shipped record reads the plant and the ``no_capture`` record does not: its pools are
+    ``quant_accuracy.py --arm no_capture``'s on the same run, bit for bit, and the pair names the arm as what varies."""
+    qa = PS.sibling("quant_accuracy.py")
+    cfg = PS.protocol_config([])
+    restore, _ = qa.install_no_capture()
+    try:
+        plain = run_pipeline(str(toy.bam_path), toy.index, cfg)
+    finally:
+        restore()
+    want = qa.score_library(plain, plain.estimator.get_counts_df(toy.index), {})
+
+    _plant_capture(monkeypatch)
+    base = PS.record_bam("base", toy.bam_path, toy.index, cfg, tmp_path / "work", {}, CONDITION)
+    nc = PS.record_bam(
+        "nc", toy.bam_path, toy.index, cfg, tmp_path / "work", {}, CONDITION, qa_arm="no_capture"
+    )
+    for arrays, row in (base, nc):
+        assert row["accepted"], row["checks"]
+    pools = ("mrna_est", "nrna_est", "gdna_est", "n_intergenic_gdna")
+    assert [nc[1]["library"][k] for k in pools] == [want[k] for k in pools]
+    assert base[1]["library"]["mrna_est"] != want["mrna_est"], (
+        "the plant moved nothing, so this test checks nothing"
+    )
+    assert (base[1]["qa_arm"], nc[1]["qa_arm"]) == ("base", "no_capture")
+    row = PS.pair_records(_as_record(*base, "base"), _as_record(*nc, "nc"))
+    assert row["varies"] == {"qa_arm": ["base", "no_capture"]}
+    assert sum(row["moved"].values()) > 0
+
+
+def test_a_no_capture_record_whose_run_read_capture_is_refused(toy, tmp_path, monkeypatch):
+    """Break the arm: its wrapper installed, but the reading it replaces handed back untouched. The record must refuse
+    the run rather than book the shipped reading as ``no_capture``."""
+    qa = PS.sibling("quant_accuracy.py")
+    _plant_capture(monkeypatch)
+    real = qa.install_no_capture
+
+    def inert():
+        restore, fired = real()
+        restore()
+        return (lambda: None), {"n": 1}
+
+    monkeypatch.setattr(qa, "install_no_capture", inert)
+    with pytest.raises(RuntimeError, match="no_capture"):
+        PS.record_bam(
+            "nc",
+            toy.bam_path,
+            toy.index,
+            PS.protocol_config([]),
+            tmp_path / "work",
+            {},
+            CONDITION,
+            qa_arm="no_capture",
+        )
+
+
 def test_a_mis_joined_read_name_on_real_records_is_refused(shipped):
     arrays, row = shipped
     shifted = {**arrays, "key": np.roll(arrays["key"], 1)}

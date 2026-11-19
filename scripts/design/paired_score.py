@@ -8,6 +8,10 @@ the input BAM its forecast as four class masses (annotated RNA, nascent RNA, the
 scores both on the fragments both forecast, so a difference cannot come from scoring different fragments. A read pair
 one arm forecasts and the other does not is counted by source and by the other arm's status, never dropped. Two
 ``--set`` configurations of one build are two ``--record`` runs; a second build records under its own interpreter.
+``--arm no_capture`` records under ``quant_accuracy.py``'s arm of that name, every capture efficiency read as 1, the
+line every capture-ON row is read beside: through its own ``install_no_capture``, refused by its ``check_no_capture``.
+It substitutes no truth, so it records from an aligner's BAM too. The record carries its arm as ``qa_arm``, and a pair
+names it in what varies.
 
 Where a forecast comes from:
 
@@ -79,6 +83,7 @@ Usage::
     python scripts/design/paired_score.py --record --conditions COND --out $RIGEL_ARMS/ps_base
     python scripts/design/paired_score.py --record --conditions COND --set calibration.message_policy=silent \\
         --out $RIGEL_ARMS/ps_silent
+    python scripts/design/paired_score.py --record --conditions COND --arm no_capture --out $RIGEL_ARMS/ps_no_capture
     # 2. join them by read name, per condition, and print the tables
     python scripts/design/paired_score.py --pair $RIGEL_ARMS/ps_base $RIGEL_ARMS/ps_silent \\
         --out $RIGEL_ARMS/ps_base_silent.jsonl
@@ -136,6 +141,10 @@ _KIND_OF_ORIGIN = {"gdna": 0, "mrna": 1, "nrna": 2}
 #: A read pair's status in a record. Only ``forecast`` is scored.
 STATUSES = ("forecast", "unassigned", "withheld", "excluded")
 FORECAST, UNASSIGNED, WITHHELD, EXCLUDED = range(len(STATUSES))
+
+#: The ``quant_accuracy.py`` arms a record can run under: the ones that substitute no truth, so they record from any
+#: BAM of the condition's reads. ``base`` substitutes nothing.
+ARMS = ("base", "no_capture")
 
 #: The protocol every arm runs under: the scan pinned, so the pair is exactly reproducible, and the assignment
 #: fractional, so the class sums close on the pools. Applied before the arm's own ``--set``.
@@ -643,19 +652,29 @@ def capture_run(bam: Path, index, pipeline_config, annotated_bam: Path):
 
 
 def record_condition(arm: str, suite: Path, index, condition: str, pipeline_config, bam_name: str,
-                     work_dir: Path) -> tuple[dict, dict]:
+                     work_dir: Path, qa_arm: str = "base") -> tuple[dict, dict]:
     """One arm on one condition of a panel: ``(arrays, row)``."""
     bam = suite / condition / bam_name
     if not bam.is_file():
         raise SystemExit(f"⛔ {condition}: no {bam_name}")
     summary = json.loads((suite / condition / "truth_summary.json").read_text())
-    return record_bam(arm, bam, index, pipeline_config, work_dir, summary, condition)
+    return record_bam(arm, bam, index, pipeline_config, work_dir, summary, condition, qa_arm)
+
+
+def install_record_arm(qa, qa_arm: str):
+    """Install the record's ``quant_accuracy.py`` arm (:data:`ARMS`) with that instrument's own code: nothing for
+    ``base``, every capture efficiency read as 1 for ``no_capture``. Returns ``(restore, fired)``."""
+    if qa_arm not in ARMS:
+        raise SystemExit(f"⛔ arm {qa_arm!r} is not one a record runs under ({', '.join(ARMS)})")
+    return qa.install_no_capture() if qa_arm == "no_capture" else qa.install_arm("base", None)
 
 
 def record_bam(arm: str, bam: Path, index, pipeline_config, work_dir: Path, summary: dict,
-               condition: str) -> tuple[dict, dict]:
-    """One arm on one BAM: ``(arrays, row)``, the row stamped as ``quant_accuracy.py`` stamps its rows. ``summary`` is
-    the condition's ``truth_summary.json``, whose ``origin_counts`` are the simulator's templates by source."""
+               condition: str, qa_arm: str = "base") -> tuple[dict, dict]:
+    """One arm on one BAM: ``(arrays, row)``, the row stamped as ``quant_accuracy.py`` stamps its rows, under the
+    ``quant_accuracy.py`` arm ``qa_arm``. ``summary`` is the condition's ``truth_summary.json``, whose
+    ``origin_counts`` are the simulator's templates by source. A ``no_capture`` run that read any capture is refused
+    (``check_no_capture``), as is an arm whose wrapper never ran."""
     from rigel.splice import NUM_SPLICE_STRAND_COLS
 
     qa = sibling("quant_accuracy.py")
@@ -663,13 +682,19 @@ def record_bam(arm: str, bam: Path, index, pipeline_config, work_dir: Path, summ
     work_dir.mkdir(parents=True, exist_ok=True)
     annotated = work_dir / f".{condition}.{os.getpid()}.annotated.bam"
     start = time.perf_counter()
+    restore, fired = install_record_arm(qa, qa_arm)
     try:
         result, units, em_mass, t = capture_run(bam, index, pipeline_config, annotated)
         quant = result.estimator.get_counts_df(index)
         lib = qa.score_library(result, quant, summary)
         pairs = read_pairs(_bam_records(annotated), pipeline_config.scan.skip_duplicates)
     finally:
+        restore()
         annotated.unlink(missing_ok=True)
+    if fired["n"] == 0:
+        raise RuntimeError(f"{condition} [{qa_arm}]: the arm's wrapper never ran, so the record is the shipped run's")
+    if qa_arm == "no_capture":
+        qa.check_no_capture(condition, result.calibration)
     est, stats = result.estimator, result.stats
     empty = np.zeros(0, np.int64)
     run = Run(
@@ -699,6 +724,7 @@ def record_bam(arm: str, bam: Path, index, pipeline_config, work_dir: Path, summ
     truth = {k: int(summary.get("origin_counts", {}).get(o, 0)) for k, o in zip(KINDS, ("gdna", "mrna", "nrna"))}
     row = {
         **qa.row_stamp(arm, condition, pipeline_config, bam_name),
+        "qa_arm": qa_arm,
         "seconds": time.perf_counter() - start,
         "stratum": list(stratum(condition)),
         "scope": scope(stratum(condition)),
@@ -763,7 +789,7 @@ def load_record(rec_dir: Path, condition: str) -> dict:
 
 
 def _stamp(meta: dict) -> dict:
-    return {k: meta.get(k) for k in ("arm", "condition", "bam", "settings", "message_policy", "em_seed",
+    return {k: meta.get(k) for k in ("arm", "qa_arm", "condition", "bam", "settings", "message_policy", "em_seed",
                                      "assignment_mode", "revision")}
 
 
@@ -838,11 +864,12 @@ def pair_records(a: dict, b: dict) -> dict:
 
 def _varies(ma: dict, mb: dict) -> dict:
     """What differs between the two arms' stamps: the settings either sets (the other's value or the shipped one),
-    and the revision."""
+    the ``quant_accuracy.py`` arm, and the revision."""
     sa, sb = ma.get("settings") or {}, mb.get("settings") or {}
     out = {k: [sa.get(k), sb.get(k)] for k in sorted(set(sa) | set(sb)) if sa.get(k) != sb.get(k)}
-    if ma.get("revision") != mb.get("revision"):
-        out["revision"] = [ma.get("revision"), mb.get("revision")]
+    for k in ("qa_arm", "revision"):
+        if ma.get(k) != mb.get(k):
+            out[k] = [ma.get(k), mb.get(k)]
     return out
 
 
@@ -1270,6 +1297,9 @@ def _check_pair(check) -> None:
     same = pair_records(a, {**a, "meta": {**a["meta"], "arm": "a2"}})
     check("an arm against itself: Δ Brier exactly 0, nothing moved",
           same["delta"]["brier"] == 0.0 and sum(same["moved"].values()) == 0)
+    arm = pair_records({**a, "meta": {**a["meta"], "qa_arm": "base"}}, {**b, "meta": {**b["meta"], "qa_arm": "no_capture"}})
+    check("two records under one setting and two arms: the pair names the arm, and only it, as what varies",
+          arm["varies"] == {"qa_arm": ["base", "no_capture"]})
 
 
 def _check_strata(check) -> None:
@@ -1336,18 +1366,19 @@ def _record(args) -> int:
     cfg = protocol_config(args.settings)
     names = panel_conditions(args.suite, args.conditions)
     label = args.label or args.out.name
+    qa_arm = args.arm or "base"
     if args.jobs > 1 and len(names) > 1:
         run_shards(Path(__file__).resolve(), names, args.jobs, args.work_dir / f".{label}_shards",
-                   lambda _out, shard: ["--record", "--suite", str(args.suite), "--index", str(args.index),
-                                        "--bam", args.bam, "--out", str(args.out), "--label", label,
-                                        "--work-dir", str(args.work_dir), "--conditions", *shard,
+                   lambda _out, shard: ["--record", "--arm", qa_arm, "--suite", str(args.suite),
+                                        "--index", str(args.index), "--bam", args.bam, "--out", str(args.out),
+                                        "--label", label, "--work-dir", str(args.work_dir), "--conditions", *shard,
                                         *set_args(args.settings)])
         return 0
     index = TranscriptIndex.load(str(args.index))
     refused = []
     for name in names:
         print(f"  … {label}  {name}", flush=True)
-        arrays, row = record_condition(label, args.suite, index, name, cfg, args.bam, args.work_dir)
+        arrays, row = record_condition(label, args.suite, index, name, cfg, args.bam, args.work_dir, qa_arm)
         write_record(args.out, name, arrays, row)
         worst = max((v["diff"] / v["bound"] if v["bound"] > 0 else float(v["diff"] > 0))
                     for v in row["closure"].values()) if row["closure"] else float("nan")
@@ -1380,6 +1411,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=None,
                     help="--record: the arm's record directory; --pair: the pair file (jsonl)")
     ap.add_argument("--label", default=None, help="--record: the arm's name in the tables (default: --out's name)")
+    ap.add_argument("--arm", choices=ARMS, default=None,
+                    help="--record: the quant_accuracy.py arm to run under (default base; no_capture reads every "
+                         "capture efficiency as 1)")
     ap.add_argument("--markdown", type=Path, default=None, help="--pair or --report: also write the tables here")
     ap.add_argument("--work-dir", type=Path, default=SCRATCH / "rigel_paired_score",
                     help="where each run's annotated BAM is written, read once, and deleted")
@@ -1398,8 +1432,9 @@ def main() -> int:
     if args.record:
         return _record(args)
     if args.pair:
-        if args.settings:
-            raise SystemExit("⛔ --set belongs to --record: a pair reads the settings its records were made under")
+        if args.settings or args.arm:
+            raise SystemExit("⛔ --set and --arm belong to --record: a pair reads the settings and the arm its records "
+                             "were made under")
         rows = pair_dirs(*args.pair, args.conditions)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text("".join(json.dumps(r) + "\n" for r in rows))
