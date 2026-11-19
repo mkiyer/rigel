@@ -169,7 +169,8 @@ def sampler_truth(sampler: CaptureSampler, lengths, widths, pmf, off_target: flo
 @dataclasses.dataclass(frozen=True, slots=True)
 class Sim:
     """The condition's simulator as the truth needs it: the sampler on the panel's probes, the RNA and gDNA generating
-    fragment-length laws, the two weight constants, the reference lengths and the transcript rows."""
+    fragment-length laws, the two weight constants, the reference lengths, the transcript rows, and the references
+    gDNA is drawn from (the manifest's ``gdna.genomic_refs``; an RNA-only spike-in backbone is not among them)."""
 
     sampler: CaptureSampler
     widths: np.ndarray
@@ -180,6 +181,7 @@ class Sim:
     transcripts: list
     gdna_widths: np.ndarray
     gdna_pmf: np.ndarray
+    gdna_refs: frozenset
 
 
 def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition: str) -> Sim:
@@ -226,6 +228,7 @@ def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition
         transcripts,
         np.asarray(gdna_widths, dtype=np.int64),
         np.asarray(gdna_pmf, dtype=np.float64),
+        frozenset(manifest.get("gdna", {}).get("genomic_refs") or []),
     )
 
 
@@ -660,7 +663,8 @@ def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
 
 def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, width_step: int = 4) -> np.ndarray:
     """Per locus, ``Y_g = Σ_w f_g(w) Σ_{starts s whose fragment overlaps a block} (off + bind · best single-part
-    overlap)``, read off the simulator's own gDNA-space landscape, the computation the reads were drawn with.
+    overlap)``, read off the simulator's own gDNA-space landscape, the computation the reads were drawn with. A block
+    on a reference the simulator never draws gDNA from (``sim.gdna_refs``) yields nothing, however it is probed.
 
     ``blocks`` is ``int64[n, 4]`` of ``(locus, ref_id, start, end)``. The width grid is thinned by ``width_step``,
     each kept width carrying its bin's pmf mass (the landscape is per width per reference)."""
@@ -673,6 +677,8 @@ def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, w
     live = sim.sampler.enabled and sim.bind > 0.0
     for rid in np.unique(blocks[:, 1]):
         name = id2name[int(rid)]
+        if name not in sim.gdna_refs:
+            continue
         RL = int(sim.ref_lengths[name])
         bb = blocks[blocks[:, 1] == rid]
         for w, pw in zip(wk, pk, strict=True):
@@ -999,7 +1005,8 @@ class _Panel:
         """The panel as the yield reads it: RNA and gDNA under the same law."""
         widths = np.asarray(self.widths, dtype=np.int64)
         pmf = np.asarray(self.pmf, dtype=np.float64)
-        return Sim(self.sampler, widths, pmf, self.off, self.binding, {"chr1": 16000}, self.transcripts, widths, pmf)
+        return Sim(self.sampler, widths, pmf, self.off, self.binding, {"chr1": 16000}, self.transcripts, widths, pmf,
+                   frozenset({"chr1"}))
 
 
 def _self_test_panel(tmp: Path) -> _Panel:
@@ -1088,6 +1095,24 @@ def _check_manifest_loader(panel: _Panel, check) -> None:
     check("a masked transcript's plain length counts only the starts the simulator could draw",
           abs(plain[u] / enumerated - 1.0) < 1e-12)
     check("...so masking leaves an uncaptured transcript's factor exactly 1", factor[u] == 1.0)
+    # the gDNA-space yield is the simulator's: on a reference the manifest draws gDNA from, a probed footprint yields
+    # a captured gDNA mass; on one it never draws gDNA from (an RNA-only spike-in backbone) it yields none, probed or
+    # not, so no locus there can be read against a gDNA yield
+    capture_on = {"probes": str(panel.tmp / "probes.bed"), "probe_format": "bed12", "off_target_weight": panel.off,
+                  "binding_per_base": panel.binding, "min_overlap": 1}
+    blocks = np.array([(0, 0, 11000, 13600), (1, 0, 1000, 3600)], dtype=np.int64)
+    for refs in (["chr1"], []):
+        manifest_path.write_text(json.dumps({
+            **manifest, "gdna": {**manifest["gdna"], "genomic_refs": refs},
+            "capture_configs": [{"label": "on", "config": capture_on}],
+        }))
+        captured = load_sim(panel.index, Path(panel.index.index_dir), panel.tmp, "example_capture_on")
+        Y = gdna_space_yield(captured, blocks, 2, {0: "chr1"}, width_step=4)
+        if refs:
+            check("a probed footprint on a reference gDNA is drawn from yields a captured gDNA mass",
+                  Y[0] > 0.0 and Y[1] > 2.0 * Y[0])
+        else:
+            check("...and on a reference gDNA is never drawn from it yields none, probed or not", not Y.any())
     manifest_path.write_text(json.dumps({k: v for k, v in manifest.items() if k != "genome"}))
     fired = refuses(load)
     manifest_path.write_text(json.dumps(manifest))
