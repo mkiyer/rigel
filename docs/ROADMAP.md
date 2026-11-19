@@ -41,7 +41,21 @@ place. Pinned and fractional, against the tree before it:
 - On the VCaP mix, whose BAM was aligned at STAR's defaults, the retirement moves 2,398 more DNA fragments into
   annotated RNA (issue #7); the pruning moves under 250 fragments of either library.
 
-The four ladder identity references hold on this tree, and the VCaP mix's is re-frozen on it (`TESTING.md` §6).
+The intron abundance model landed on 2026-11-19 (`DESIGN.md` §5.4, `EQUATIONS.md` §7.1–7.2): every intron's count is
+read against the gDNA law of the library's own intergenic regions, with a departure prior a stranded library measures
+from its introns' strands. Pinned and fractional, against the tree before it:
+- On unstranded capture OFF transfer now beats silent on every row. Calibration's Σ|gDNA error| on the ladder falls
+  from 618,686 to 337,648, and the simulator's gDNA net from −325,530 to −77,872 fragments. Bar 1's worst in-scope row
+  goes from −3.03 % to −1.76 % of the library's gDNA.
+- The stranded strata hold, transcripts and genes within 0.7 %, and bar 5 holds and fails on the same rows.
+- On the VCaP mix the introns' strands read the departure prior as 0.995, so the model steps aside there: every pool
+  is within 79 fragments of the tree before it.
+- STAR's unstranded capture OFF transcripts rise from 657,739 to 711,513, all of it g05's giant locus at the EM's cap
+  (issue #34, issue #78); every other row of that stratum improves.
+- Sparse unstranded libraries book about 1 % of their gDNA as nascent RNA (issue #82). The deferred stratum's annotated
+  error rises from 430,814 to 520,047 on the simulator's alignments (issue #4).
+
+All five identity references are re-frozen on this tree (`TESTING.md` §6).
 
 The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
 alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
@@ -88,16 +102,12 @@ Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_previe
 The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the release fixes or states; its
 `release-blocker` label is what it fixes. In order:
 
-1. **The unstranded introns, bounded at two sessions, with the owner:** issue #26 and issue #77. Find which messages
-   carry the intron error under transfer on unstranded capture-OFF g98, fix them, then try the intron abundance
-   model. If transfer still loses to silent there, issue #26 ships stated.
-2. **The capture reader, bounded at two sessions, with the owner:** issue #36's paired proper score in the tree
-   first; then issue #61, issue #65 and issue #6, then issue #1 against a pass bar the owner sets before any
-   candidate runs. If no candidate passes, issue #1 ships stated.
-3. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5. Dissect the largest
+1. **The capture reader, bounded at two sessions, with the owner:** issue #61, issue #65 and issue #6, then issue #1
+   against a pass bar the owner sets before any candidate runs. If no candidate passes, issue #1 ships stated.
+2. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5. Dissect the largest
    gap first, the simulator's stranded capture-ON g50, and bring the dissection to the owner before fixing.
-4. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
-   issue #10, issue #12, issue #13, issue #23, issue #46 and issue #78, and for issue #1 or issue #26 if either falls
-   back; the CHANGELOG; then issue #11.
+3. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
+   issue #10, issue #12, issue #13, issue #23, issue #46, issue #78 and issue #82, and for issue #1 if it falls back;
+   the CHANGELOG; then issue #11.
 
 After that, the open issues outside the milestone, in issue order.
