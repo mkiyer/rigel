@@ -48,6 +48,8 @@ BROKEN = {
         "track_floor": 0.0,
         "rate_log_floor": 0.0,
         "junction_cap_grid_points": 1,
+        "background_rate_shape": 0.0,
+        "background_fit_tolerance": 1.0,
     },
     "fragment_length": {
         "pool_prior_ess": -1.0,

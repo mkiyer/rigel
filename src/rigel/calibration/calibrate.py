@@ -8,6 +8,7 @@ module below it. An object's composition has three sources: the binomial strand 
 
     substrate (observation banks on three axes)
       -> chain + geometry + statics               the geometry owns every divisor
+      -> the intergenic background's gDNA law     every intron's count is read against it (the intron abundance model)
       -> strand balance: κ
       -> signature-binary init (G1/G2/G3)
       -> pass 1: solve_chain with no fitted prior, one forward and one backward pass
@@ -31,6 +32,7 @@ import numpy as np
 from .capture_efficiency import CaptureReading, capture_efficiencies, visible_share, weighted
 from .diagnostics import CalibrationDiagnostics, SweepDiagnostics
 from .effective_length import observable_cut_shares
+from .gdna_density import BackgroundLaw, background_law
 from .landscape import DensityLandscape, fit_landscape
 from .messages.silent import SilentPolicy
 from .messages.transfer import TransferPolicy
@@ -150,8 +152,8 @@ def lattice_points(window: float, step: float) -> int:
 @dataclass(frozen=True, slots=True)
 class _SweepInputs:
     """Everything a sweep reads, fixed for the whole calibration: the chain, its statics and geometry, the region
-    arrays, the strand model, the policy, the config, and the per-slot gDNA support ``(mass_global, eff_global)`` the
-    landscape prior is fit and read on."""
+    arrays, the strand model, the policy, the config, the per-slot gDNA support ``(mass_global, eff_global)`` the
+    landscape prior is fit and read on, and the intergenic background's gDNA law every intron is read against."""
 
     chain: RegionChain
     statics: RegionStatics
@@ -162,6 +164,7 @@ class _SweepInputs:
     config: CalibrationConfig
     mass_global: np.ndarray
     eff_global: np.ndarray
+    background: BackgroundLaw
 
 
 def _sweep_inputs(
@@ -185,6 +188,7 @@ def _sweep_inputs(
     geometry = build_region_geometry(chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf)
     strand = fit_strand_balance(strand_model)
     mass_global, eff_global = region_gdna_geometry(geometry)
+    background = _background(chain, geometry, region_arrays, config.intron_departure_prior)
     return _SweepInputs(
         chain=chain,
         statics=build_region_statics(chain, region_arrays, boundary_flags),
@@ -195,7 +199,32 @@ def _sweep_inputs(
         config=config,
         mass_global=mass_global,
         eff_global=eff_global,
+        background=background,
     )
+
+
+def _background(chain, geometry, region_arrays, departure: float) -> BackgroundLaw:
+    """The intergenic regions' gDNA law (`gdna_density.background_law`): their unspliced count over their gDNA
+    opportunity. An intergenic region admits no RNA strand, so it is the library's one structurally pure gDNA pool, and
+    the intron abundance model reads every intron's count against its law; a region that departs from the law (it
+    holds unannotated transcription, or sits in a copy-number change) does not set it. ``departure`` is the run's
+    ``calibration.intron_departure_prior``."""
+    region_type = coarse_type_array(slot_signature(chain, region_arrays.signature))
+    eff = np.asarray(geometry.eff_gdna, np.float64)
+    pool = (np.asarray(chain.kind) == REGION) & (region_type == RegionType.INTERGENIC)
+    pool &= eff > CONSTANTS.calibration.opportunity_floor
+    counts = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
+    law = background_law(counts[pool], eff[pool], departure)
+    logger.info(
+        "calibration: the intergenic background, %.4e fragments/bp (pooled %.4e) over %d regions, %.1f of them at "
+        "the background (negative binomial size %.4g); every intron's count is read against it",
+        float(np.exp(law.log_rate)),
+        law.pooled_rate,
+        law.n_objects,
+        law.kept,
+        law.size,
+    )
+    return law
 
 
 def _policy(config, strand: StrandBalance):
@@ -254,6 +283,7 @@ def _sweep(s: _SweepInputs, belief, prior, diagnostics: SweepDiagnostics | None)
         n_grid=lattice_points(window, cfg.sweep_logodds_step),
         logodds_window=window,
         gdna_prior=prior,
+        background=s.background,
         policy=s.policy,
         block_slots=cfg.sweep_block_slots,
         n_threads=int(cfg.n_threads),

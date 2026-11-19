@@ -1,4 +1,5 @@
-"""The gDNA background rate: the closed form `poisson_lower_mean` and the contamination-robust one-sided root."""
+"""The gDNA background rate: the closed forms `poisson_lower_mean` and `nb_lower_mean`, and the contamination-robust
+one-sided root."""
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ import pytest
 from scipy.stats import poisson
 
 from rigel.calibration.gdna_density import (
+    nb_lower_mean,
     one_sided_rate,
     poisson_lower_mean,
 )
@@ -202,3 +204,37 @@ def test_the_returned_rate_is_actually_a_root():
 def test_misaligned_inputs_raise():
     with pytest.raises(ValueError):
         one_sided_rate(np.ones(4), np.ones(5))
+
+
+# ── the negative binomial's closed form, and the one-sided root at a size ────────────────────────────
+
+NB_CASES = ((0.7, 3.0), (5.3, 20.0), (97.2, 8.0), (1234.5, 50.0))
+
+
+@pytest.mark.parametrize(("lam", "size"), NB_CASES)
+def test_nb_lower_mean_matches_the_exact_truncated_sum(lam, size):
+    """``(lam/size)(m + size) P(X = m)`` against the direct sum ``sum_{k<=m} (lam - k) P(X = k)``: a different
+    algorithm, not the same formula twice."""
+    from scipy.stats import nbinom
+
+    k = np.arange(0, int(np.floor(lam)) + 1)
+    p = nbinom.pmf(k, size, size / (size + lam))
+    exact = float(((lam - k) * p).sum())
+    assert nb_lower_mean(np.array([lam]), size)[0] == pytest.approx(exact, rel=1e-10)
+
+
+def test_nb_lower_mean_is_de_moivre_at_infinite_size():
+    lam = np.array(LAMS)
+    assert np.array_equal(nb_lower_mean(lam, np.inf), poisson_lower_mean(lam))
+    assert nb_lower_mean(lam, 1e12) == pytest.approx(poisson_lower_mean(lam), rel=1e-6)
+
+
+def test_the_one_sided_root_reads_a_scattered_pool_at_its_own_size():
+    """A negative binomial pool (size 20, mean 90): read at its own size the one-sided root is its rate; read as
+    Poisson, the expected deficit is far too small and the root lands well below it."""
+    rng = np.random.default_rng(3)
+    e = np.full(2000, 1800.0)
+    lam = rng.gamma(20.0, 0.05 * 1800.0 / 20.0, size=e.size)
+    n = rng.poisson(lam).astype(float)
+    assert one_sided_rate(n, e, 20.0).rate == pytest.approx(0.05, rel=0.02)
+    assert one_sided_rate(n, e).rate < 0.95 * 0.05

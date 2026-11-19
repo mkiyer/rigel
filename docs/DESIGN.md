@@ -385,9 +385,19 @@ solved, G2 one strand and resolved by it, G3 both strands (AMBIG).
 Jeffreys reference, plus on the refits the landscape at the density each cell implies), the RNA arm (the reference
 alone) and the delivered message rows. It never reads the spliced mass.
 
-- **ψ has no reference location**: where the strand channel is silent a location term would be the whole answer at
-  any depth, so none returns as a flag, constant or weakened variant; background reaches a slot only through the
-  landscape and the messages.
+- **ψ's one reference location is the intron abundance model, at introns.** An intron's unspliced count `C` is read
+  against the gDNA law of this library's own intergenic regions (`gdna_density.background_law`, fitted once per
+  calibration): the row `log((1 − ε)·NegBinom(g; ρE, size) + ε/(C + 1))` joins the intron's ψ, its precision joins
+  `τ_λ` (an own channel, §7.1), and under the transfer policy it is the intron's own claim (§6b). Where the strand
+  channel is silent the row is the intron's whole composition evidence, which is its purpose: an intergenic region
+  admits no RNA, so its density is gDNA's, measured. ε (`CalibrationConfig.intron_departure_prior`, a run setting) is
+  the prior that a region is not at the background (a probe's reach, a copy-number change, a mappability gap,
+  unannotated transcription). It leaves the row's peak alone and caps its tail, so an intron's own decisive strand
+  evidence outweighs a background it contradicts, and the same ε keeps a region the law cannot explain from setting
+  the law: the rate is read from the pool's shortfalls, the spread from the two-part likelihood (EQUATIONS §7.1). The row
+  is read at the λ nodes, except that the node whose lattice cell holds the background's mode reads the mode, so a deep
+  intron's peak, narrower than a cell, is never lost between two nodes. No other slot carries a location term, and none
+  returns as a flag or constant.
 - **One λ lattice for every consumer** at `CalibrationConfig.sweep_logodds_step` over `[−L, L]`, `L` the larger of
   `sweep_logodds_window` and the landscape's derived demand (`DensityLandscape.required_logodds_window`); the step is
   fixed, so a wider bracket never coarsens it. **The θ nodes follow the strand term's peak** (`tilt_window`: a window
@@ -452,7 +462,8 @@ its two held messages and the gDNA prior. **The completion contract**: no slot i
 **The composition rules** are a kind and its parameters at `(destination, side)` — FORWARD, TRANSPORT, SPLICE-OUT,
 EDGE, LEVEL (`transfer_rows.h`) — at most one per face, optional rows beside a presence mask read first:
 
-- **intron ⇄ its boundary: FORWARD.** One unspliced population, so the density odds are shared and the count log-odds
+- **intron ⇄ its boundary: FORWARD.** An intron's claim is its strand profile and its abundance row (§5.4), which add
+  as independent witnesses. One unspliced population, so the density odds are shared and the count log-odds
   shift by `log(Eg_i/Eg_b) − log(Er_i/Er_b)`, adding no width; into the intron only under a shared single strand
   (`boundary_shares_strand`) and a live strand channel.
 - **boundary → exon at a licensed face: TRANSPORT, the splice-in map** (`splice_faces`, `face_map_lambda`,
@@ -521,7 +532,8 @@ component-agnostic; who trains it is the caller's (`calibrate._fit_gdna_hyperpri
   modes, and AMBIG is what the prior resolves. A live region with no unspliced mass is a zero-count ANCHOR and trains
   regardless: the strongest depletion evidence there is.
 - **A node whose only evidence is a bound does not train**: `RegionBelief.has_composition` (an own channel, structural
-  certainty, or a received composition row) selects; levels, ceilings and cube rows are bounds.
+  certainty, or a received composition row) selects; levels, ceilings and cube rows are bounds. An intron's abundance
+  row is an own channel: its count against the measured background, two-sided wherever the background holds.
 - **The location floor**: a slot trains only where `Var(log f_g) ≤ 1 nat²` (`CONSTANTS.landscape.located_var`, the
   one-fragment wall through `Var(log c) = 1/c`); above it precision is a continuous weight (`landscape._reliability`).
 - **The grid spans every slot the prior is read at** (`fit_landscape(domain=…)`), so the training cut never moves

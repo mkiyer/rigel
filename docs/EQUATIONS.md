@@ -349,6 +349,56 @@ solved by bisection: `F(0) = 0`, `F(0+) < 0` once any object is counted, `F` unb
 Contamination only lowers `(λ_i − n_i)₊`, so the bias is one-signed, high. The pooled `Σn/ΣE` is reported beside it.
 A region resolves a rate only above `~1/E` (Fisher information `ρE`); `ρ ≈ 0` does not prove absence.
 
+**7.1 The intergenic background's law, and an intron's row.** `gdna_density.background_law`; the kernel's
+`intron_row`. An intergenic region admits no RNA strand, so the intergenic pool is the library's one structurally pure
+gDNA pool, though unannotated transcription, a copy-number change or a probe's reach can still move a region off it.
+Every object is read with one two-part law: with probability `1 − ε` it is at the background, its count a draw from
+`NegBinom(ρE, s)`; otherwise any count is as likely. ε is the run setting `calibration.intron_departure_prior`.
+
+*The fit.* With `φ = 1/s` the over-dispersion, the rate at each φ is the one-sided root of §7, with the negative
+binomial's own expected shortfall in place of De Moivre's:
+
+    E[(λ − X)₊] = (λ/s)·(⌊λ⌋ + s)·P(X = ⌊λ⌋)          (De Moivre's at s = ∞)
+
+It telescopes as his does: `(λ − k)p_k = c_k − c_{k−1}` with `c_k = (λ/s)(k + s)p_k`, from `k p_k = (k − 1 + s)·
+(λ/(λ + s))·p_{k−1}`. Added fragments cannot move the root. φ maximises the pool's two-part likelihood,
+
+    Σ_i log[(1 − ε)·NegBinom(n_i; ρ(φ)E_i, 1/φ) + ε/(n_i + 1)]
+
+by golden section on `[0, φ_mom]`, `φ_mom = (Σ(n_i − λ_i)² − Σλ_i)/Σλ_i²` at the Poisson root, which a departing
+object only inflates. Each object's weight `w_i` is its posterior probability of being at the background. Poisson's
+shortfall would put a scattered pool's rate well low (at mean 97 and size 8 the shortfall is 14.1, Poisson's 3.9),
+and the pooled `Σn/ΣE` with the plain moment estimate lets one departing region set both: on the test chromosome the
+unannotated blank chromosome, one region, raised the pooled rate by 23 % and cut the size to 3.5.
+
+*The row.* An intron's gDNA `g` is one more draw at its own opportunity `E`, its rate uncertain, so
+`1/size = φ + 1/(Σw_i n_i + ½)`. Over the λ lattice of step `h`, offset to a maximum of 0:
+
+    row(λ) = log((1 − ε)·NegBinom(g_λ; ρE, size) + ε/(C + 1))
+
+with `g_λ = C·σ(λ)` at each node, except that the node whose cell `[C·σ(λ − h/2), C·σ(λ + h/2))` holds the negative
+binomial's mode reads the mode. A deep intron's peak is narrower than a cell: read at the nodes alone it can fall
+between two, both under the floor, and the row goes flat (30,000 fragments over a background expecting 6,420 read ½
+for a truth of 0.214). Reading every cell at its best point would catch the peak too, but it flattens every broad
+row's top, and on the test chromosome that cost 1–5 % of the intron error.
+
+*The cap.* The row's lowest point below its peak is
+
+    Δ = log[1 + ((1 − ε)/ε)·(C + 1)·NB_max] ≈ log((1 − ε)/ε) + log((C + 1)·NB_max)
+
+the prior odds plus an Occam factor (`NB_max ≈ 1/(√(2π)·sd)`, the law's largest mass on `0…C`): 7.5 nats at ε = 0.01
+for 65 fragments over a background of 2.3. Without ε that intron, 25 times the background, is priced at −156 nats,
+which outweighs even ss 0.99 strand evidence. At a fixed departure `d` the uncapped row's push-back grows with depth
+as strand evidence does, `C·(log d − 1) + μ` while `μ ≪ s`, so it overrules strand at every practical depth once
+`d > e^{1+D(κ)}`, `D(κ) = ½·log(1/(4κ(1 − κ)))` per fragment between pure gDNA and pure single-strand RNA: 13.7× at
+ss 0.99, 3× at 0.70. Capped, strand overtakes it at a fixed count, about 16 fragments at ss 0.99 and 100 at ss 0.70
+in the local solve, never at ½.
+
+ε is a robustness setting read as a prior, not a literal posterior probability: the flat part is defined on the
+intron's own `0…C`, while the negative binomial's mass there is `P(G ≤ C)`, so an intron well under its background
+reads as uninformative rather than as all gDNA. Calibration against truth is within 1 % of its best for every in-scope
+stratum from ε = 10⁻⁴ to 0.05. The row's precision `1/Var_λ` over the whole normalised row joins `τ_λ` (§9c).
+
 ---
 
 ## 9. Priors on a grid
@@ -430,7 +480,9 @@ clip then hands RNA a pseudocount of exactly zero. The strength `U` is not deriv
 
 ## 9c. ψ's reference and its curvature
 
-The reference is §9's Beta(½, ½); ψ ships no reference location. **9c.2.** `τ_λ` (§5.2b; `solve_kernel.cpp`'s
+The reference is §9's Beta(½, ½); ψ's one reference location is an intron's abundance row (§7.1), the intron's own
+count read against a background measured in the same library, so its curvature is that count's information and joins
+`τ_λ`. **9c.2.** `τ_λ` (§5.2b; `solve_kernel.cpp`'s
 `strand_evidence`) reads the strand counts alone: the data's Fisher information, which a prior's curvature is not
 (`TRAPS: a-priors-curvature-is-not-the-datas-information`). Near a vertex the likelihood is genuinely flat in λ —
 moving the mode from `f_g = 0.98576` to `0.99975` lowers `[f_g(1−f_g)]²` by 3,154× — and a reference's curvature fed

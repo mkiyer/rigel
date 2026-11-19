@@ -116,6 +116,9 @@ struct Chain {
     const double* flux;                                 // the sj count over both strands
     const bool* terminal;  // the caller's terminals (`ChainView.terminal`): the regions that admit no RNA strand
     double kappa;
+    // each slot's abundance row against the intergenic background (the intron abundance model), or nullptr: an
+    // intron with a row claims it
+    const double* const* intron_row = nullptr;
 
     // the two structural classes of a non-exon region: an intron admits a strand; an intergenic region admits none
     // and is a terminal. Terminals come from the caller and are never re-derived here, so the sweep's cut, the
@@ -231,11 +234,24 @@ struct Intersection {
     void finish() { norm_inplace(acc, K); }
 };
 
+// A node's own claim: its strand profile where it has a strand claim, and an intron's abundance row; where an intron
+// has both they are two independent witnesses of one composition and add.
 inline void claims(const Chain& c, RowsOut& own, Scratch& S) {
     for (int x = 0; x < c.n; ++x) {
         const bool single = c.fp[x] != c.fn[x];
-        if (!(single && c.has_own[x])) continue;
-        c.strand_profile(x, S.a.data());
+        const double* r = (c.intron_row != nullptr && c.intron(x)) ? c.intron_row[x] : nullptr;
+        const bool abundance = r != nullptr && ptp(r, c.K) > EPS;
+        const bool strand = single && c.has_own[x];
+        if (!(strand || abundance)) continue;
+        if (strand) {
+            c.strand_profile(x, S.a.data());
+            if (abundance) {
+                for (int j = 0; j < c.K; ++j) S.a[j] += r[j];
+                norm_inplace(S.a.data(), c.K);
+            }
+        } else {
+            std::copy(r, r + c.K, S.a.begin());
+        }
         own.set(x, S.a.data());
     }
 }

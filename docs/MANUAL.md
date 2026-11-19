@@ -254,6 +254,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--em-convergence-delta D` | `1e-6` | Convergence threshold for EM parameter updates |
 | `--calib-refit-iters N` | `3` | Number of times calibration re-solves after refitting its population gDNA prior. `0` gives the prior-free first solve only, and with it no capture correction: no gDNA landscape is fitted, so every capture efficiency is 1. |
 | `--sweep-block-slots N` | `1000` | Calibration's working set: the chain is solved one locus block at a time, the pieces between intergenic regions merged up to this many slots per block. Performance only — the answer is the same for every value; smaller blocks use less memory per sweep. |
+| `--intron-departure-prior E` | `0.01` | The intron abundance model's departure prior, strictly between 0 and 1: the probability that a region's gDNA is not at the intergenic background. It caps how far the background can argue against an intron's own strand evidence, and keeps a region the background cannot explain from setting it. Raising it toward 1 turns the model off. |
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning, in [0, 1), against the best candidate at the same alignment (a multimapper's alignments are pruned each on its own, so every one stays in the EM). Lower keeps more candidates; `0` disables pruning. |
 | `--intron-overhang-tolerance K` | `3` | Intron-overhang tolerance (bp) at annotated introns: how many bases an aligned read end may lie inside an intron, at the edge of a gap the reads did not sequence or at a fragment's outer end, as when an aligner runs a read a base or two across a splice site. An annotated intron in an unsequenced gap may overlap up to K aligned bases at either end and still count as lying in the gap, and a transcript is contradicted only by an intron holding more than K aligned bases. Along a witness transcript it decides whether two mates are one molecule; it also shapes the candidates' lengths and the gap hypotheses calibration arbitrates, so it changes calibration's tally. Junctions are matched exactly. |
@@ -796,13 +797,30 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 The per-locus priors are priors: a decisive per-locus likelihood overrides them, so a locus that
 disagrees with calibration generally wins.
 
-### The one knob
+### The two knobs
 
-Advanced; the default suits standard libraries.
+Advanced; the defaults suit standard libraries.
 
 - `--calib-refit-iters N` (default `3`) — how many times calibration re-fits its population
   gDNA-density prior on the current solve and re-solves. `0` gives the prior-free first solve, which fits no
   gDNA landscape and so applies no capture correction (every capture efficiency is 1).
+- `--intron-departure-prior E` (default `0.01`) — the intron abundance model's departure prior. Calibration
+  reads every intron's unspliced count against the gDNA law of the library's own intergenic regions, and an
+  intron's excess over that background is RNA. `E` is the probability that a region is not at the background
+  (a probe's reach, a copy-number change, a mappability gap, unannotated transcription). It caps how far the
+  background can argue against an intron's own strand evidence, so a decisive strand reading wins, and it keeps
+  an intergenic region the background cannot explain from setting the background. Calibration is flat across a
+  wide range around the default (within 1 % of its best from `1e-4` to `0.05` on the simulated panels). Raising
+  it toward 1 flattens the background's evidence and so turns the model off: do that when the library's
+  intergenic regions are not a gDNA reference.
+
+  Nascent-RNA protocols (GRO-seq, PRO-seq, TT-seq) need no different value for their intronic RNA, which the
+  model reads as RNA either way. Their risk is transcription in the intergenic regions themselves (run-through
+  past genes, enhancer RNA). The background's rate is read from the regions' shortfalls, which added RNA cannot
+  move, so it holds while some intergenic regions are clean. The log reports the fitted background beside the
+  naive pooled rate and the number of regions at the background: a fitted rate far below the pooled one, or few
+  regions at the background, says the intergenic regions carry RNA, and if nearly all of them do, raise `E`
+  toward 1.
 
 The remaining `CalibrationConfig` fields (for example `sweep_logodds_step`, the log-odds
 lattice's step, which is dimensionless and guarantees every slot's composition to within 1.25 % of its

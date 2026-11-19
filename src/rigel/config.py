@@ -342,9 +342,25 @@ class CalibrationConfig:
     #: solve is bit-identical at every count.
     n_threads: int = 0
 
+    #: The intron abundance model's departure prior ε: the probability that a region's gDNA is not at the intergenic
+    #: background (a probe's reach, a copy-number change, a mappability gap, unannotated transcription), under which any
+    #: split of its count is as likely as any other (``gdna_density.BackgroundLaw``). It caps how far the background
+    #: can argue against an intron's composition, ``log(1 + ((1 − ε)/ε)·(C + 1)·NB_max)`` nats for ``C`` fragments, so
+    #: an intron's own decisive strand evidence outweighs a background it contradicts; and it keeps a region the law
+    #: cannot explain from setting the law. A robustness setting read as a prior: 0.01 is odds of 99 to 1 that a region
+    #: is at the background, and calibration against truth sits within 1 % of its best for every in-scope stratum
+    #: from 1e-4 to 0.05. Raised toward 1 it flattens the abundance row, which turns the model off where the
+    #: intergenic regions are not a gDNA reference.
+    intron_departure_prior: float = 0.01
+
     def __post_init__(self) -> None:
         if self.n_threads < 0:
             raise ValueError(f"CalibrationConfig.n_threads must be >= 0; got {self.n_threads}.")
+        if not (0.0 < float(self.intron_departure_prior) < 1.0):
+            raise ValueError(
+                "CalibrationConfig.intron_departure_prior must be a probability strictly between 0 and 1; "
+                f"got {self.intron_departure_prior}."
+            )
         if self.calib_refit_iters < 0:
             raise ValueError(
                 f"CalibrationConfig.calib_refit_iters must be >= 0; got {self.calib_refit_iters}."
@@ -626,6 +642,17 @@ class CalibrationConstants:
     #: over any range up to 380-fold.
     junction_cap_grid_points: int = 600
 
+    #: The Jeffreys prior on a Poisson rate, ``ρ^(−½)``, adds this to the intergenic pool's weighted count when the
+    #: rate's own posterior width is read as a Gamma, ``Gamma(Σw·n + ½, ΣE)`` (``gdna_density.background_law``): the
+    #: reference exponent ψ's Jeffreys arms carry, and the shape that keeps an empty pool's rate finite and its width
+    #: proper.
+    background_rate_shape: float = 0.5
+
+    #: The background's over-dispersion search (``gdna_density.background_law``) stops when its golden-section bracket
+    #: is this share of the starting one, the pool's moment estimate. A discretization, not a model choice: a millionth
+    #: of the spread changes no intron's row measurably.
+    background_fit_tolerance: float = 1e-6
+
     def __post_init__(self) -> None:
         _check_ranges(
             self,
@@ -637,6 +664,8 @@ class CalibrationConstants:
             track_floor=self.track_floor > 0.0,
             rate_log_floor=self.rate_log_floor > 0.0,
             junction_cap_grid_points=self.junction_cap_grid_points >= 2,
+            background_rate_shape=self.background_rate_shape > 0.0,
+            background_fit_tolerance=0.0 < self.background_fit_tolerance < 1.0,
         )
 
 

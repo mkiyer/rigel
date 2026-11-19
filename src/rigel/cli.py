@@ -1019,6 +1019,7 @@ PARAM_SPECS: tuple[ParamSpec, ...] = (
     # -- CalibrationConfig: advanced --
     ParamSpec("calib_refit_iters", "calibration.calib_refit_iters"),
     ParamSpec("sweep_block_slots", "calibration.sweep_block_slots"),
+    ParamSpec("intron_departure_prior", "calibration.intron_departure_prior"),
     # -- Fan-out: total threads → the EM's, the scan's and calibration's budgets --
     ParamSpec("threads", "em.n_threads"),
     ParamSpec("threads", "scan.total_threads"),
@@ -1440,6 +1441,17 @@ def _add_quant_advanced_options(grp, qd: dict) -> None:
         "Performance only — the answer is the same for every value; it sizes the solver's per-thread "
         "arena, so smaller blocks use less memory per sweep. Advanced "
         "calibration knob.",
+    )
+    grp.add_argument(
+        "--intron-departure-prior",
+        type=float,
+        help="The intron abundance model's departure prior, strictly between 0 and 1 "
+        f"(default {qd['intron_departure_prior']:g}): the probability that a region's gDNA is not at the intergenic "
+        "background (a probe's reach, a copy-number change, unannotated transcription). It caps how far the background "
+        "can argue against an intron's own strand evidence, and keeps a region the background cannot explain from "
+        "setting it. Answers are flat across a wide range around the default; raising it toward 1 turns the intron "
+        "abundance model off, for libraries whose intergenic regions are not a gDNA reference. Advanced calibration "
+        "knob.",
     )
     grp.add_argument(
         "--overhang-alpha",

@@ -2,7 +2,8 @@
 // blocks on a thread pool, with ψ's kernel (`psi_kernel.h`) and the composition transfer's (`transfer_kernel.h`) as its
 // pieces. The gates read the same kernels through `_solve_impl.testing` (testing/solve.cpp).
 //
-//   solve_blocks     the sweep. Per locus block: the self-solve ψ, the own-evidence precision, the message layer
+//   solve_blocks     the sweep. Per locus block: the introns' abundance rows, the self-solve ψ, the own-evidence
+//                    precision, the message layer
 //                    (builders, two passes, solve; skipped under the silent policy), the final ψ, the write-back on
 //                    the owned slots, `has_composition`, and the counts of the backbone's assertions. Each block runs
 //                    on one pool thread with that thread's arena; the belief is written in place and the diagnostics
@@ -103,6 +104,75 @@ void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec al
     });
 }
 
+// ---- the intron abundance model ----
+// An intron's gDNA is one draw from the intergenic background's law at its own gDNA opportunity E, except with prior
+// probability ε, when it is not at the background and any g in [0, C] is as likely. So its unspliced count C carries a
+// row on the λ grid, log((1 − ε)·NegBinom(f_g·C; rate·E, size) + ε/(C + 1)), offset so its maximum is 0: the peak is
+// the background's where the background is right, and the tail is capped, so the intron's own decisive strand evidence
+// outweighs a background it contradicts. The row is read at the λ nodes, except that the node whose lattice cell holds
+// the background's mode is read at the mode: a deep intron's peak, narrower than a cell, falls between two nodes, and
+// read at the nodes alone it would sit under the departure floor at both and the row would be flat. The law is fitted
+// once per calibration (`gdna_density.background_law`). The row joins ψ, its precision joins the intron's own
+// composition evidence, and it is the intron's own claim to the message layer.
+
+struct Background {
+    double log_rate;   // the background rate's log, fragments per unit of gDNA opportunity
+    double size;       // the negative binomial size an intron's gDNA is drawn with (∞: Poisson)
+    double departure;  // ε, the prior probability that the intron's gDNA is not at the background
+};
+
+// log NegBinom(g; mean μ, size r) at a continuous g ≥ 0; r = ∞ is the Poisson limit
+double log_negbinom(double g, double mu, double size) {
+    mu = std::max(mu, P::ARM_EPS);
+    const double lg_g1 = std::lgamma(g + 1.0);
+    if (!std::isfinite(size)) {
+        const double t = g * std::log(mu);
+        return t - mu - lg_g1;
+    }
+    const double r = std::max(size, P::ARM_EPS);
+    const double rpm = r + mu;
+    const double t_r = r * (std::log(r) - std::log(rpm));
+    const double t_g = g * (std::log(mu) - std::log(rpm));
+    return std::lgamma(g + r) - std::lgamma(r) - lg_g1 + t_r + t_g;
+}
+
+// one intron's row over the uniform λ lattice: its gDNA count f_g·C against the background at its opportunity, at each
+// node, and at the background's mode for the node whose cell holds it
+void intron_row(const Background& bg, double count, double eff, const double* lam, int K, double* out) {
+    const double mu = std::exp(bg.log_rate) * std::max(eff, P::ARM_EPS);
+    // the continuous count's mode, where ψ(g + size) − ψ(g + 1) = log((μ + size)/μ), to O(1/g²); 0 below size 1
+    const double mode = std::max(0.0, (std::isfinite(bg.size) ? mu * (1.0 - 1.0 / bg.size) : mu) - 0.5);
+    const double half = K > 1 ? 0.5 * (lam[K - 1] - lam[0]) / (K - 1) : 0.0;
+    for (int k = 0; k < K; ++k) {
+        const double lo = P::sigmoid(lam[k] - half) * count, hi = P::sigmoid(lam[k] + half) * count;
+        const double node = std::clamp(P::sigmoid(lam[k]), P::ARM_EPS, 1.0 - P::ARM_EPS) * count;
+        out[k] = log_negbinom(mode >= lo && mode < hi ? mode : node, mu, bg.size);
+    }
+    // the departure: log((1 − ε)·NB + ε/(C + 1)), summed in the log domain
+    const double a = std::log1p(-bg.departure), b = std::log(bg.departure) - std::log(count + 1.0);
+    for (int k = 0; k < K; ++k) {
+        const double x = a + out[k], hi = std::max(x, b);
+        out[k] = hi + std::log(std::exp(x - hi) + std::exp(b - hi));
+    }
+    const double m = vmax(out, K);
+    for (int k = 0; k < K; ++k) out[k] -= m;
+}
+
+// the composition evidence a row carries, 1/Var_λ under the row normalised; a flat row carries none
+double row_precision(const double* row, const double* lam, int K) {
+    if (!(ptp(row, K) > P::ARM_EPS)) return 0.0;
+    const double m = vmax(row, K);
+    double z = 0.0, s1 = 0.0, s2 = 0.0;
+    for (int k = 0; k < K; ++k) {
+        const double w = std::exp(row[k] - m);
+        z += w;
+        s1 += w * lam[k];
+        s2 += w * lam[k] * lam[k];
+    }
+    const double mean = s1 / z, var = s2 / z - mean * mean;
+    return var > P::ARM_EPS ? 1.0 / var : 0.0;
+}
+
 // ---- the block pipeline ----
 
 // The backbone's assertions, counted per block on the owned slots as (violations, eligible); the backbone raises.
@@ -124,6 +194,7 @@ struct Sweep {  // the whole chain and the call's settings, read-only
     int policy; double rho_gdna, rho_rna; bool split_live;
     const P::Grid* grid;
     bool want_capture;
+    const Background* background;  // the intergenic background's law, or nullptr: no intron abundance rows
 };
 
 struct Outputs {  // written in place, the owned slots of each block
@@ -149,6 +220,8 @@ struct Arena {
     std::vector<double> fg_loc, tau_lam, rows, out, bound, row;
     std::vector<uint8_t> solvable, has_own, own_ev, held, empty_g, empty_r;
     std::vector<const double*> row_ptr;
+    std::vector<double> intron;               // the block's intron abundance rows, (n, K)
+    std::vector<const double*> intron_ptr;    // each slot's row, or nullptr
     BuilderTables builders;
     ReceivedStore received[2];
     CubeStore cube;
@@ -163,6 +236,8 @@ struct Arena {
         grow(rows, static_cast<size_t>(n) * K);
         for (auto* v : {&solvable, &has_own, &own_ev, &held, &empty_g, &empty_r}) grow(*v, n);
         grow(row_ptr, n);
+        grow(intron, static_cast<size_t>(n) * K);
+        grow(intron_ptr, n);
     }
 };
 
@@ -193,7 +268,23 @@ P::SlotInputs slot_inputs(const Sweep& W, const Block& b, const Arena& A, int i,
     const bool built = W.grid->arm->built();  // the fitted gDNA arm
     return P::SlotInputs{b.obs.cnt[2 * i], b.obs.cnt[2 * i + 1], b.belief.fg[i], b.belief.fpos[i], b.belief.fneg[i],
                          b.obs.fp[i], b.obs.fn[i], built,
-                         built ? P::Arm::shift_of(A.sums.n_u[i], b.obs.a_g[i]) : 0.0, row_prior, delivered};
+                         built ? P::Arm::shift_of(A.sums.n_u[i], b.obs.a_g[i]) : 0.0, row_prior, delivered,
+                         A.intron_ptr[i]};
+}
+
+// Each intron's abundance row on the grid: a non-exon region that admits a strand, read against the background. No
+// row where the background is off, nor at any other slot.
+void intron_rows(const Sweep& W, const Block& b, Arena& A) {
+    const int K = W.K;
+    for (int i = 0; i < b.n; ++i) {
+        const double* r = nullptr;
+        if (W.background != nullptr && !b.obs.is_bnd[i] && !b.obs.is_exon[i] && (b.obs.fp[i] || b.obs.fn[i])) {
+            double* dest = A.intron.data() + static_cast<size_t>(i) * K;
+            intron_row(*W.background, b.obs.cnt[2 * i] + b.obs.cnt[2 * i + 1], b.obs.a_g[i], W.lam, K, dest);
+            r = dest;
+        }
+        A.intron_ptr[i] = r;
+    }
 }
 
 // The self-solve: every solvable slot (a live strand and an unspliced fragment) on its own cube, the incoming belief
@@ -209,15 +300,18 @@ void self_solve(const Sweep& W, const Block& b, Arena& A) {
     }
 }
 
-// The own evidence: a single-strand slot's strand precision at fg_loc.
+// The own evidence: a single-strand slot's strand precision at fg_loc, and an intron's abundance-row precision. The
+// builders' bit is the strand claim's; the abundance row reaches them as the intron's own row (`Chain::intron_row`).
 void own_evidence(const Sweep& W, const Block& b, Arena& A) {
     for (int i = 0; i < b.n; ++i) {
         const bool single = b.obs.fp[i] != b.obs.fn[i];
         const double i_strand =
             strand_evidence(b.obs.cnt[2 * i], b.obs.cnt[2 * i + 1], A.fg_loc[i], W.kappa, W.disc);
-        const double tau = single ? i_strand : 0.0;
+        const double tau_strand = single ? i_strand : 0.0;
+        const double tau_row = A.intron_ptr[i] != nullptr ? row_precision(A.intron_ptr[i], W.lam, W.K) : 0.0;
+        const double tau = tau_strand + tau_row;
         A.tau_lam[i] = tau;
-        as_bool(A.has_own)[i] = tau > 0.0;
+        as_bool(A.has_own)[i] = tau_strand > 0.0;
         as_bool(A.own_ev)[i] = tau > rigel::OWN_EVIDENCE_EPS;
     }
 }
@@ -266,7 +360,8 @@ void solve_lanes(const Sweep& W, const Block& b, Arena& A, SolveLane& G, SolveLa
 std::pair<bool, int> message_layer(const Sweep& W, const Block& b, Arena& A) {
     const int n = b.n, K = W.K;
     Scratch& S = *A.S;
-    const Chain c = chain_of(b.obs, A.sums, n, A.left.data(), A.right.data(), as_bool(A.has_own), W.lam, K, W.kappa);
+    Chain c = chain_of(b.obs, A.sums, n, A.left.data(), A.right.data(), as_bool(A.has_own), W.lam, K, W.kappa);
+    c.intron_row = A.intron_ptr.data();
     A.builders.build(c, W.rho_gdna, W.rho_rna, S);
     for (int i = 0; i < n; ++i) {
         as_bool(A.empty_g)[i] = !(A.sums.n_u[i] > 0.0) || !(b.obs.a_g[i] > 0.0);
@@ -361,6 +456,7 @@ void solve_one_block(const Sweep& W, int64_t start, int64_t stop, int64_t end, O
     const int K = W.K;
     A.size(b.n, K);
     link_block(W, b, A);
+    intron_rows(W, b, A);
     self_solve(W, b, A);
     own_evidence(W, b, A);
     bool has_rows = false;
@@ -472,7 +568,7 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
                       Mat route_rate_hi, Vec eff_gdna, Vec eff_rna, Vec belief_fpos, Vec belief_fneg, Vec belief_fg,
                       nb::ndarray<int64_t, nb::ndim<2>, nb::c_contig> blocks, double kappa, double disc, Vec lam,
                       int n_tilt, int policy, double rho_gdna, double rho_rna, bool split_live, nb::object gdna,
-                      Vec out_fpos, Vec out_fneg, Vec out_fg, Vec out_var, BoolVec out_has_composition,
+                      nb::object background, Vec out_fpos, Vec out_fneg, Vec out_fg, Vec out_var, BoolVec out_has_composition,
                       nb::object diagnostics, int n_threads) {
     const int64_t n = static_cast<int64_t>(free_pos.shape(0));
     const int K = static_cast<int>(lam.shape(0)), B = static_cast<int>(blocks.shape(0));
@@ -492,6 +588,17 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
         if (curve.G < 1 || static_cast<int>(logP.shape(0)) != curve.G)
             throw std::invalid_argument("solve_blocks: the gDNA arm's curve is two (G,) arrays");
     }
+    Background bg{};  // the intergenic background's law, or none
+    const Background* bg_ptr = nullptr;
+    if (!background.is_none()) {
+        nb::tuple t = nb::cast<nb::tuple>(background);
+        if (nb::len(t) != 3)
+            throw std::invalid_argument("solve_blocks: the background is None or (log_rate, size, departure)");
+        bg = Background{nb::cast<double>(t[0]), nb::cast<double>(t[1]), nb::cast<double>(t[2])};
+        if (!(bg.departure > 0.0 && bg.departure < 1.0))
+            throw std::invalid_argument("solve_blocks: the background's departure prior is in (0, 1)");
+        bg_ptr = &bg;
+    }
     Outputs out{out_fpos.data(), out_fneg.data(), out_fg.data(), out_var.data(), out_has_composition.data()};
     const bool want_capture = !diagnostics.is_none();
     if (want_capture) {
@@ -506,7 +613,7 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
                               sj_count.data(), sj_count_lo.data(), sj_count_hi.data(), route_rate_lo.data(),
                               route_rate_hi.data(), eff_gdna.data(), eff_rna.data()},
                   left.data(), right.data(), Belief{belief_fpos.data(), belief_fneg.data(), belief_fg.data()},
-                  kappa, disc, lam.data(), K, policy, rho_gdna, rho_rna, split_live, &grid, want_capture};
+                  kappa, disc, lam.data(), K, policy, rho_gdna, rho_rna, split_live, &grid, want_capture, bg_ptr};
     const int64_t* bl = blocks.data();
     std::vector<BlockResult> results(B);
     const int T = pool_threads(n_threads, B);
@@ -530,10 +637,11 @@ NB_MODULE(_solve_impl, m) {
           nb::arg("route_rate_lo"), nb::arg("route_rate_hi"), nb::arg("eff_gdna"), nb::arg("eff_rna"), nb::arg("belief_fpos"),
           nb::arg("belief_fneg"), nb::arg("belief_fg"), nb::arg("blocks"), nb::arg("kappa"), nb::arg("disc"), nb::arg("lam"),
           nb::arg("n_tilt"), nb::arg("policy"), nb::arg("rho_gdna"), nb::arg("rho_rna"), nb::arg("split_live"),
-          nb::arg("gdna").none(), nb::arg("out_fpos").noconvert(), nb::arg("out_fneg").noconvert(),
-          nb::arg("out_fg").noconvert(), nb::arg("out_var").noconvert(), nb::arg("out_has_composition").noconvert(),
-          nb::arg("diagnostics").none(), nb::arg("n_threads"),
-          "Solve every locus block of the chain — the prior rows, the self-solve, the own evidence, the message layer, the "
+          nb::arg("gdna").none(), nb::arg("background").none(), nb::arg("out_fpos").noconvert(),
+          nb::arg("out_fneg").noconvert(), nb::arg("out_fg").noconvert(), nb::arg("out_var").noconvert(),
+          nb::arg("out_has_composition").noconvert(), nb::arg("diagnostics").none(), nb::arg("n_threads"),
+          "Solve every locus block of the chain — the introns' abundance rows, the self-solve, the own evidence, the "
+          "message layer, the "
           "final solve, the write-back, the assertions' counts — on a pool of threads, one block at a time; the belief and "
           "`has_composition` written in place on the owned slots; the counts and the capture returned. "
           "Bit-identical at every thread count.");

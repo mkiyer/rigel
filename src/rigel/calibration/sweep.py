@@ -128,6 +128,7 @@ def solve_chain(
     n_grid: int,
     logodds_window: float,
     gdna_prior=None,
+    background=None,
     policy,
     block_slots: int | None = None,
     n_threads: int = 1,
@@ -152,6 +153,12 @@ def solve_chain(
     ψ carries the Jeffreys reference measure alone on both arms. The prior-free pass only trains the population gDNA
     hyperprior, so it need not answer objects it cannot solve. The kernel reads the curve at every cell on each slot's
     own gDNA support (``region_geometry.region_gdna_geometry``).
+
+    ``background`` is the intergenic regions' gDNA law (``gdna_density.BackgroundLaw``), or ``None``. When it is
+    informative, every intron (a non-exon region that admits a strand) reads its own unspliced count against it, the
+    intron abundance model: the row ``log((1 − ε)·NegBinom(f_g·C; rate·E, size) + ε/(C + 1))`` on the λ grid, ε the
+    law's departure prior, joins ψ, its precision joins the intron's own composition evidence, and under the transfer
+    policy it is the intron's own claim, beside its strand claim where it has one.
 
     ``diagnostics``, a record instruments and tests pass, asks the kernel for its diagnostic arrays and is filled with
     them (:class:`~.diagnostics.SweepDiagnostics`); production passes none.
@@ -187,6 +194,9 @@ def solve_chain(
         policy=POLICY_KERNEL[policy.name],
         **_library_args(library),
         gdna=_landscape_curve(gdna_prior),
+        background=None
+        if background is None or not background.informative
+        else (float(background.log_rate), float(background.size), float(background.departure)),
         out_fpos=out["f_pos"],
         out_fneg=out["f_neg"],
         out_fg=out["f_g"],
