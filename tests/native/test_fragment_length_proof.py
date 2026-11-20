@@ -193,15 +193,18 @@ def test_randomised_at_realistic_scale():
         sj_strand=np.zeros(0, dtype=np.int8),
         region_types=np.zeros(n_regions, dtype=np.int8),
     )
+    # The oracle has no length limit, so the accumulator's must never bind: L is at most the span, which stays below
+    # max_span. A limit as large as the address space would allocate its length tables densely (tens of GiB).
+    max_span = 3000
     n_checked = 0
     for _ in range(4000):
         start = int(rng.integers(-50, ref_len + 50))
-        end = start + int(rng.integers(1, 3000))
+        end = start + int(rng.integers(1, max_span))
         introns = []
         for _ in range(int(rng.integers(0, 5))):
             a = int(rng.integers(start - 20, end + 20))
             introns.append((a, a + int(rng.integers(0, 900))))
-        acc = Accumulator(part, max_fragment_length=10**9)
+        acc = Accumulator(part, max_fragment_length=max_span)
         outcome = acc.deposit(0, start, end, observed_introns=introns)
         want = oracle_deposits(region_bounds, ref_len, start, end, introns, spliced=False)
         ctx = f"[{start},{end}) introns={introns}"
