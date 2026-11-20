@@ -661,8 +661,9 @@ def setup_geometry_and_estimator(
     ``effective_lengths_em`` are capture-contracted by the rule the gDNA component's length takes too (each
     transcript's share of every region, boundary and junction its fragments deposit on, at that object's capture
     efficiency, a junction's capped at ``junction_cap``), so every component competes on one footing under capture.
-    ``effective_lengths``, TPM's, stay the full FL-marginal length over the observable starts. Off capture, or with
-    no gDNA, the two are bit-identical (``calibration/capture_eff_length.py``).
+    ``effective_lengths``, TPM's, stay the full FL-marginal length over the observable starts. Where every capture
+    efficiency is exactly 1 (no landscape, or a reading of 1 everywhere) the two are bit-identical, whatever the
+    length tables (``calibration/capture_eff_length.py``).
     """
     if rna_fl.n_observations <= 0:
         raise ValueError(

@@ -378,14 +378,23 @@ def test_no_landscape_returns_the_fl_marginal_lengths_bit_identically(multiexon_
     np.testing.assert_array_equal(eff, fl)
 
 
-def test_efficiencies_of_one_everywhere_contract_nothing_bit_identically(multiexon_index):
+@pytest.mark.parametrize("tables", ["one law", "gDNA's own law apart", "every table apart"])
+def test_efficiencies_of_one_everywhere_contract_nothing_bit_identically(multiexon_index, tables):
     """A landscape of one level reads every object at the bulk: the factor is exactly 1 on every transcript, spliced and
-    unspliced (a junction between two exons at 1, its introns at 1, prices at exactly 1), so a capture-OFF library's
-    lengths are ``fl`` bit for bit."""
+    unspliced (a junction between two exons at 1, its introns at 1, prices at exactly 1), so a library reading no
+    capture has lengths ``fl`` bit for bit, whatever the tables. An efficiency of 1 carries nothing to the scorer's gDNA
+    table, though its law differs from gDNA's uncaptured one and from RNA's."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
+    g = normal_pmf(mean=160.0, sd=40.0, lo=60, hi=300)
+    t_g = normal_pmf(mean=230.0, sd=30.0, lo=150, hi=320)
+    length_tables = {
+        "one law": _one_law(PMF),
+        "gDNA's own law apart": LengthTables(PMF, PMF, g, None),
+        "every table apart": LengthTables(PMF, t_g, g, None),
+    }[tables]
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
-    eff = _lengths(_cal(ra, np.ones(ra.n_regions), 1.0), ra, idx, fl, _one_law(PMF))
+    eff = _lengths(_cal(ra, np.ones(ra.n_regions), 1.0), ra, idx, fl, length_tables)
     np.testing.assert_array_equal(eff, fl)
 
 
@@ -706,21 +715,43 @@ def _random_field(ra, seed):
     return rng.uniform(0.5, 3.0, ra.n_regions)
 
 
-def test_at_one_table_rna_reads_its_capture_weighted_length_on_the_uncaptured_law(multiexon_index):
-    """Both tables one law and gDNA's uncaptured law another: every transcript's length is ``Σ_o c_o share_o(g)``,
-    the null model's normaliser, whatever the RNA law the shares are weighted by."""
+def test_at_one_table_rna_reads_its_own_length_plus_the_excess_on_the_uncaptured_law(
+    multiexon_index,
+):
+    """Both tables one law and gDNA's uncaptured law another: every transcript's length is its own fl-marginal length
+    plus the excess gDNA's reading carries, ``fl + Σ_o (c_o − 1) share_o(g)``, whatever the RNA law the shares are
+    weighted by. Capture adds to the uncaptured yield, and only the addition is gDNA's measurement."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     g = normal_pmf(mean=160.0, sd=40.0, lo=60, hi=300)
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = _lengths(
-        _cal(ra, np.full(ra.n_regions, 0.5), 1.0), ra, idx, fl, LengthTables(PMF, PMF, g, None)
+        _cal(ra, np.full(ra.n_regions, 3.0), 1.0), ra, idx, fl, LengthTables(PMF, PMF, g, None)
     )
     on_g = transcript_objects(idx, ra, g)
-    expected = np.zeros(fl.size)
-    np.add.at(expected, on_g.t, 0.5 * on_g.contained)
-    np.add.at(expected, on_g.t[on_g.cut_row], 0.5 * on_g.cut_share)
+    expected = fl.copy()
+    np.add.at(expected, on_g.t, 2.0 * on_g.contained)
+    np.add.at(expected, on_g.t[on_g.cut_row], 2.0 * on_g.cut_share)
     np.testing.assert_allclose(eff, expected, rtol=1e-12)
+
+
+def test_a_reading_below_one_carries_nothing_and_never_goes_below_zero(multiexon_index):
+    """Only an excess over 1 is carried. A depleted object read on gDNA's short law, carried to a scorer's table of
+    longer fragments that places fewer starts on it, would carry an excess below −1 and enter below zero; it enters as
+    read instead, so every length is ``fl`` times the one reading."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    g = normal_pmf(mean=160.0, sd=40.0, lo=60, hi=300)
+    t_g = normal_pmf(mean=400.0, sd=30.0, lo=320, hi=480)
+    c = 1e-3
+    on_g, on_t = transcript_objects(idx, ra, g), transcript_objects(idx, ra, t_g)
+    reach = on_t.contained > 0.0
+    assert np.any(on_g.contained[reach] / on_t.contained[reach] > 1.0 / (1.0 - c))
+    fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
+    eff = _lengths(
+        _cal(ra, np.full(ra.n_regions, c), 1.0), ra, idx, fl, LengthTables(PMF, t_g, g, None)
+    )
+    np.testing.assert_allclose(eff, fl * c, rtol=1e-12)
 
 
 def test_where_gdnas_table_is_its_uncaptured_law_the_efficiencies_are_read_as_given(
@@ -738,8 +769,9 @@ def test_where_gdnas_table_is_its_uncaptured_law_the_efficiencies_are_read_as_gi
 
 
 def test_each_efficiency_is_carried_by_the_anchors_share_over_the_tables(multiexon_index):
-    """``ĉ_o = c_o share_o(g) / share_o(T_G)``, weighted by RNA's shares; an object ``T_G`` cannot reach (here every
-    500 bp piece, against a law that only places longer fragments) keeps ``c_o``."""
+    """``ĉ_o = 1 + (c_o − 1) share_o(g) / share_o(T_G)`` where ``c_o > 1``, weighted by RNA's shares: only an excess
+    over 1 is carried. A reading of 1 or below enters as read, and so does an object ``T_G`` cannot reach (here every
+    500 bp piece, against a law that only places longer fragments)."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     g = normal_pmf(mean=160.0, sd=40.0, lo=60, hi=300)
@@ -758,14 +790,18 @@ def test_each_efficiency_is_carried_by_the_anchors_share_over_the_tables(multiex
         np.asarray(cal.gdna_region_eff_len),
         1.0,
     )
+    assert np.any(c[on_r.piece] < 1.0) and np.any(c[on_r.piece] > 1.0)
     piece = np.where(
-        on_t.contained > 0,
-        c[on_r.piece] * on_g.contained / np.where(on_t.contained > 0, on_t.contained, 1.0),
+        (on_t.contained > 0) & (c[on_r.piece] > 1.0),
+        1.0
+        + (c[on_r.piece] - 1.0)
+        * on_g.contained
+        / np.where(on_t.contained > 0, on_t.contained, 1.0),
         c[on_r.piece],
     )
     cut = np.where(
-        on_t.cut_share > 0,
-        c_cut * on_g.cut_share / np.where(on_t.cut_share > 0, on_t.cut_share, 1.0),
+        (on_t.cut_share > 0) & (c_cut > 1.0),
+        1.0 + (c_cut - 1.0) * on_g.cut_share / np.where(on_t.cut_share > 0, on_t.cut_share, 1.0),
         c_cut,
     )
     num, den = np.zeros(fl.size), np.zeros(fl.size)
@@ -956,16 +992,18 @@ def _path_placements(exons, w):
 
 @pytest.mark.parametrize("junction_cap", [4.0, 9.0])
 @pytest.mark.parametrize("fixture", ["multiexon_index", "masked_index"])
-def test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law(
+def test_a_templates_place_weights_carry_its_lengths_excess_on_the_uncaptured_law(
     fixture, junction_cap, request
 ):
-    """``Σ_x g(ℓ_x) w(x) = eff_em_t`` over every observable placement of a template on its own path, junctions included.
-    ``w(x) = Σ_o m_o(x) c_o`` is the native deposit's masses at the reader's efficiencies (a junction at its price), the
-    weight a multimapper's place carries (``place_log_weights``), and ``g`` is the law the efficiencies are read on
-    (``tables.anchor``), not the scorer's table, here another law (``T_R = T_G ≠ g``). So the weight and the length the
-    EM divides a transcript by follow one rule, in the frame calibration measures capture in. A placement touching a
-    masked base is never observed and weighs nothing. Both are handed one junction cap: at a cap other than the result's
-    saturated level (9 against 4) the identity holds only if the weight and the length read the cap they were handed.
+    """``Σ_x g(ℓ_x) (w(x) − 1) = eff_em_t − fl_t`` over every observable placement of a template on its own path,
+    junctions included, on a field at or above 1. ``w(x) = Σ_o m_o(x) c_o`` is the native deposit's masses at the
+    reader's efficiencies (a junction at its price), the weight a multimapper's place carries (``place_log_weights``),
+    and ``g`` is the law the efficiencies are read on (``tables.anchor``), not the scorer's table, here another law
+    (``T_R = T_G ≠ g``). So the weight and the length the EM divides a transcript by carry one excess, in the frame
+    calibration measures capture in; the uncaptured part of the length is RNA's own on its own table, which a place's
+    weight, common to every candidate there, does not carry. A placement touching a masked base is never observed and
+    weighs nothing. Both are handed one junction cap: at a cap other than the result's saturated level (9 against 4) the
+    identity holds only if the weight and the length read the cap they were handed.
     """
     from rigel.calibration.capture_eff_length import (
         observable_fl_eff_lengths,
@@ -981,11 +1019,12 @@ def test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law(
     ra = RegionArrays.from_index(idx)
     rng = np.random.default_rng(5)
     n_boundaries = boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0]
+    # regions at or above 1 and boundaries well above them, so every junction prices above 1 too
     cal = _cal(
         ra,
-        rng.uniform(0.3, 6.0, ra.n_regions),
+        rng.uniform(1.0, 2.0, ra.n_regions),
         1.0,
-        boundary=rng.uniform(0.3, 6.0, n_boundaries),
+        boundary=rng.uniform(4.0, 6.0, n_boundaries),
         saturation=4.0,
     )
     g = np.zeros(PMF.shape[0])
@@ -1007,6 +1046,7 @@ def test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law(
         np.ascontiguousarray(sj.strand, dtype=np.int8),
     )
     c_region, c_boundary, c_sj = place_efficiencies(cal, ra, idx, junction_cap)
+    assert min(c_region.min(), c_boundary.min(), c_sj.min()) >= 1.0
     masked = [(int(a), int(b)) for _ref, a, b in np.asarray(ra.unobservable)]
 
     checked = 0
@@ -1045,10 +1085,11 @@ def test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law(
             ),
             dtype=np.float64,
         )
-        # ``log w`` is float32, as the scorer reads it: half an ulp of each moves the sum by at most that share
+        # ``log w`` is float32, as the scorer reads it: half an ulp of each moves each weight by at most that share
+        w = np.exp(log_w)
         tolerance = 0.5 * float(np.finfo(np.float32).eps) * float(np.max(np.abs(log_w)))
-        assert float(np.sum(np.asarray(f) * np.exp(log_w))) == pytest.approx(
-            eff[t], rel=max(tolerance, 1e-12)
+        assert float(np.sum(np.asarray(f) * (w - 1.0))) == pytest.approx(
+            eff[t] - fl[t], abs=max(tolerance, 1e-12) * float(np.sum(np.asarray(f) * w))
         ), row["t_id"]
         checked += 1
     assert checked >= 2
@@ -1093,17 +1134,23 @@ def _exon_regions(ra: RegionArrays) -> np.ndarray:
 def _split_at(idx, ra, c, price, tables=None, rate=None):
     """``(rna_region, sj_mass)``: the unspliced and spliced RNA of a library in which every annotated transcript's
     fragments split between its objects exactly as the ruler's terms say with every junction priced at ``price``. A
-    transcript at rate ``ρ`` leaves ``ρ · (its contained multiplier) · c`` in an exon region and
-    ``ρ · (its junction multiplier) · price`` on a junction, the multipliers being its shares on RNA's table carried to
-    gDNA's table as the ruler carries an efficiency. ``rate`` is ``ρ`` by transcript id, 1 where not given."""
+    transcript at rate ``ρ`` leaves ``ρ · (its contained share) · ĉ`` in an exon region at efficiency ``c`` and
+    ``ρ · (its junction share) · p̂`` on a junction, ``ĉ = 1 + (c − 1)·k`` above 1 with ``k`` the object's share on
+    gDNA's uncaptured law over its share on gDNA's table, as the ruler carries an excess, and ``c`` as read at 1 or
+    below. ``rate`` is ``ρ`` by transcript id, 1 where not given."""
     from rigel.calibration.splice_graph import build_sj_geometry_arrays
 
     tables = _one_law(PMF) if tables is None else tables
     pieces = transcript_pieces(idx, ra)
     obj = object_shares(pieces, tables.rna)
     on_anchor, on_table = object_shares(pieces, tables.anchor), object_shares(pieces, tables.gdna)
-    piece_mult = obj.contained * on_anchor.contained / on_table.contained
-    cut_mult = obj.cut_share * on_anchor.cut_share / on_table.cut_share
+
+    def carried(level, k):
+        # the ruler's rule: only an excess over 1 is carried; a level of 1 or below enters as read
+        return np.where(level > 1.0, 1.0 + (level - 1.0) * k, level)
+
+    piece_term = obj.contained * carried(c[obj.piece], on_anchor.contained / on_table.contained)
+    cut_term = obj.cut_share * carried(np.float64(price), on_anchor.cut_share / on_table.cut_share)
     geo = build_sj_geometry_arrays(idx)
     rna = np.zeros(ra.n_regions)
     spliced = np.zeros(np.asarray(geo.src_region).shape[0])
@@ -1111,7 +1158,7 @@ def _split_at(idx, ra, c, price, tables=None, rate=None):
     for t in np.flatnonzero(~tdf["is_synthetic"].to_numpy(dtype=bool)):
         rho = (rate or {}).get(tdf["t_id"].iat[t], 1.0)
         rows = np.flatnonzero(obj.t == t)
-        np.add.at(rna, obj.piece[rows], rho * piece_mult[rows] * c[obj.piece[rows]])
+        np.add.at(rna, obj.piece[rows], rho * piece_term[rows])
         for k in np.flatnonzero(obj.is_junction & (obj.t[obj.cut_row] == t)):
             below, above = obj.piece[obj.cut_row[k]], obj.piece[obj.cut_row[k] + 1]
             row = np.flatnonzero(
@@ -1120,7 +1167,7 @@ def _split_at(idx, ra, c, price, tables=None, rate=None):
                 & (np.asarray(geo.strand) == tdf["strand"].iat[t])
             )
             assert row.shape[0] == 1, "the fixture's junction is not one row of the sj axis"
-            spliced[row[0]] += rho * cut_mult[k] * price
+            spliced[row[0]] += rho * cut_term[k]
     return rna, spliced
 
 
@@ -1196,6 +1243,29 @@ def test_the_junction_cap_reads_the_split_on_the_multipliers_the_ruler_applies(c
     step = _grid_step(100.0, _SUMMED)
     assert fit_junction_cap(cal, ra, idx, tables) == pytest.approx(600.0, rel=step)
     assert abs(fit_junction_cap(cal, ra, idx, _one_law(PMF)) / 600.0 - 1.0) > 2.0 * step
+
+
+def test_the_junction_cap_reads_the_split_on_the_rulers_own_terms_near_one(cap_index):
+    """Near the bulk the carry's form matters: an exon at 3 enters as ``1 + 2k`` and a junction priced 4 as
+    ``1 + 3k``, not ``3k`` and ``4k``. A library split by the ruler's terms at a price of 4, with gDNA's law apart from
+    both tables, reads a cap of 4, to the search grid's spacing."""
+    idx = cap_index
+    ra = RegionArrays.from_index(idx)
+    g = np.zeros(PMF.shape[0])
+    g[[120, 190, 260]] = [0.4, 0.35, 0.25]
+    tables = LengthTables(PMF, PMF, g, None)
+    c = _captured(ra, 3.0)
+    rna, spliced = _split_at(idx, ra, c, 4.0, tables, _RATES)
+    cal = _cal(
+        ra,
+        c,
+        1e-3,
+        boundary=np.full(_n_boundaries(ra), 3.0),
+        saturation=1.5,
+        rna_region=rna,
+        sj_mass=spliced,
+    )
+    assert fit_junction_cap(cal, ra, idx, tables) == pytest.approx(4.0, rel=_grid_step(1.5, 5.0))
 
 
 def test_the_spliced_counts_raise_the_junction_cap_and_never_lower_it(cap_index):

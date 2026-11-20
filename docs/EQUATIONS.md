@@ -678,14 +678,16 @@ too short for a gDNA fragment reads the boundary on its far side, so a one-regio
 never deposits on a junction, so `S` bounds only what gDNA can show. RNA crosses the junction. In an exon region `A`
 RNA and gDNA are the same placements under the same probes, so a transcript at rate `ρ_t` leaves `ρ_t S_t(A) c_A`
 contained fragments in `A` and `ρ_t M_t(J) p_J` on a junction `J` priced `p_J`: the ratio is free of `ρ_t`. Over the
-transcripts using `J`, with `A` covered by them alone and their `M_t(J)` read at the mean `X_J`,
+transcripts using `J`, with `A` covered by them alone and each object entering as the ruler enters it (§14.8),
 
-    E[W_J] / E[m_J] = X_J p_J / D_J,        D_J = Σ_{A beside J, its own} S(A) c_A
+    E[W_J] / E[m_J] = a_J(p_J) / D_J,        a_J(p) = X_J + X'_J (p − 1),        D_J = Σ_{A beside J, its own} S(A) ĉ_A
 
-`W_J` the junction's conserved spliced mass (`sj_conserved_mass`) and `m_J` calibration's unspliced RNA in those
-regions (`count_rna_region`). As counts, with `p_J(C)` the rule above at cap `C`:
+`X_J` the mean of `M_t(J)` over those transcripts and `X'_J` of `M_t(J)·S_J(g)/S_J(T_G)`, the carried excess
+(`a_J(p) = X_J p` where nothing is carried); `W_J` the junction's conserved spliced mass (`sj_conserved_mass`) and
+`m_J` calibration's unspliced RNA in those regions (`count_rna_region`). As counts, with `p_J(C)` the rule above at
+cap `C`:
 
-    W_J | W_J + m_J  ~  Binomial( q_J(C) ),        q_J(C) = X_J p_J(C) / (X_J p_J(C) + D_J)
+    W_J | W_J + m_J  ~  Binomial( q_J(C) ),        q_J(C) = a_J(p_J(C)) / (a_J(p_J(C)) + D_J)
 
     C = argmax_{C ≥ S}  Σ_J [ W_J log q_J(C) + m_J log(1 − q_J(C)) ]
 
@@ -840,13 +842,25 @@ gDNA's is its raw law's plug-in `law_l²/raw_l` (`_plugin_variance`) at the empi
 `Var = c₀² Var f₀ + c₁² Var f₁`; a clipped length carries no inverse variance
 (`test_the_contrasts_variance_is_its_own_estimators_through_the_clip`).
 
-**14.8 RNA's normaliser carries gDNA's efficiencies to the EM's tables.** §11's efficiencies are read on `g`, RNA's
-normaliser scores with `T_R` and `T_G`, so each object enters at `ĉ_o = c_o · S_o(g)/S_o(T_G)` (`c_o` where
-`S_o(T_G) = 0`):
+**14.8 RNA's normaliser carries capture's excess to the EM's tables.** Capture adds to the uncaptured yield: a
+placement's weight is `1 + b`, `b ≥ 0` the probes' excess (§14.1's `w`), so an object's yield on a length law `f` is
+`Y_o(f) = S_o(f) + B_o(f)`. §11's efficiencies are read on `g`, `c_o = Y_o(g)/S_o(g)`, so `B_o(g) = (c_o − 1) S_o(g)`.
+In RNA's normaliser `Σ_o Y_o(T_R)` the first part, `Σ_o S_o(T_R) = fl_t`, is RNA's own length on its own table and
+needs no measurement; only the excess is gDNA's reading, carried to the scorer's gDNA table as `B_o(g)·S_o(T_R)/S_o(T_G)`
+(`B_o(g)` itself where `S_o(T_G) = 0`). A reading below 1 is no excess: nothing is carried, and the object enters as
+read. So each object enters at
 
-    eff_t = fl_t · Σ_o S_o(T_R) ĉ_o / Σ_o S_o(T_R)
+    ĉ_o = 1 + (c_o − 1)₊ · S_o(g)/S_o(T_G) − (1 − c_o)₊,        eff_t = fl_t · Σ_o S_o(T_R) ĉ_o / Σ_o S_o(T_R)
 
-At one table this is `Σ_o c_o S_o(g)`, the normaliser exactly under the null (§14.1); at `T_G = g` the factor is 1.
+- Every `c_o = 1` gives `eff_t = fl_t` to the bit, whatever the tables: no capture read is no capture (the owner's
+  ruling, 2026-11-17).
+- At `T_G = g` the efficiencies are used as read.
+- At one table (`T_R = T_G = r`) it is `fl_t + Σ_o (c_o − 1) S_o(g)` where every `c_o ≥ 1`. Under the null (§14.1) the
+  normaliser is `Σ_o c_o S_o(g)`: the two differ by `fl_t` on `r` less `fl_t` on `g`, about `μ_g − μ_r` per transcript.
+  It is zero where nothing biases RNA's census; in a captured library, whose census capture lengthens, it is a share
+  `1/c` of a captured transcript's length and the whole of an uncaptured one's departure from the null.
+- Carried below 1, the excess `(c_o − 1)·S_o(g)/S_o(T_G)` would go below −1, and `ĉ_o` below 0, wherever
+  `S_o(g)/S_o(T_G) > 1/(1 − c_o)`.
 
 ---
 

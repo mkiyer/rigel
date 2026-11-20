@@ -11,7 +11,7 @@ a boundary or a junction. With ``S_p`` its contained share of piece ``p`` and ``
 
 A piece prices at its region's efficiency, a contiguous cut at its boundary's, a junction by conservation of bases
 (:func:`_junction_prices`), up to a cap RNA's own spliced fragments set (:func:`fit_junction_cap`). With no landscape,
-or every efficiency exactly 1, ``fl_eff_lengths`` comes back bit-identically. Efficiencies are yields against the bulk, so a captured transcript's length exceeds ``fl``, and a
+or every efficiency exactly 1, ``fl_eff_lengths`` comes back bit-identically, whatever the length tables. Efficiencies are yields against the bulk, so a captured transcript's length exceeds ``fl``, and a
 factor common to every component cancels in the EM. Pieces are cut at the index's unobservable mask; a template the
 mask does not touch is unchanged to the bit.
 
@@ -367,14 +367,15 @@ def fit_junction_cap(
     The saturated level is gDNA's, and gDNA never deposits on a junction; RNA does. In an exon region RNA and gDNA are
     the same placements under the same probes, so a transcript's fragments split between a junction and an exon region
     beside it as the ruler's own terms say: its conserved share at the junction times the junction's price, against its
-    contained share of the region times the region's efficiency. With ``W`` a junction's conserved spliced mass and
-    ``m`` the unspliced RNA calibration booked in the exon regions beside it::
+    contained share of the region times the region's efficiency, each as the ruler carries it (:func:`_carried`). With
+    ``W`` a junction's conserved spliced mass and ``m`` the unspliced RNA calibration booked in the exon regions beside
+    it::
 
-        W | W + m  ~  Binomial( X·p(C) / (X·p(C) + D) ),      p(C) = min(summed, max(C, best))
+        W | W + m  ~  Binomial( a(p(C)) / (a(p(C)) + D) ),      a(p) = X + X'·(p − 1),      p(C) = min(summed, max(C, best))
 
-    ``X`` is the mean, over the annotated transcripts using the junction, of what the ruler multiplies its price by;
-    ``D`` is what the ruler multiplies those regions' efficiencies by, times the efficiencies; ``p(C)`` is the junction
-    rule at cap ``C``. The cap is the ``C`` that maximises the junctions' joint likelihood on a geometric grid from the
+    ``X`` is the mean, over the annotated transcripts using the junction, of its share there, and ``X'`` of that share
+    times the carry factor (``X' = X`` where nothing is carried, so ``a(p) = X·p``); ``D`` is the ruler's term of those
+    regions at their efficiencies; ``p(C)`` is the junction rule at cap ``C``, above 1 on the whole grid. The cap is the ``C`` that maximises the junctions' joint likelihood on a geometric grid from the
     saturated level to the largest uncapped price, the first maximum taken. The counts can raise the cap and never
     lower it, so where they ask for no more the rule is the saturated level's, bit for bit.
 
@@ -394,12 +395,16 @@ def fit_junction_cap(
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     pieces = transcript_pieces(index, region_arrays)
     obj = object_shares(pieces, tables.rna)
-    piece_mult, cut_mult = obj.contained, obj.cut_share
+    # the ruler's own terms: a piece enters at its share times its region's efficiency as carried, and a junction
+    # priced p above 1 at its share plus the carried excess, ``share + slope·(p − 1)`` (:func:`_carried`)
+    c_piece = c_region[obj.piece]
+    cut_slope = obj.cut_share
     carry = _carry_shares(pieces, obj, tables)
     if carry is not None:
         on_anchor, on_table = carry
-        piece_mult = _carried(piece_mult, on_anchor.contained, on_table.contained)
-        cut_mult = _carried(cut_mult, on_anchor.cut_share, on_table.cut_share)
+        c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)
+        cut_slope = obj.cut_share * _carry_factor(on_anchor.cut_share, on_table.cut_share)
+    piece_term = obj.contained * c_piece
 
     # each annotated transcript's junction cuts, on the sj axis
     geo = build_sj_geometry_arrays(index)
@@ -416,29 +421,32 @@ def fit_junction_cap(
     )
     used = obj.is_junction & ~synthetic[cut_t] & (sj_of_cut >= 0)
     users = np.bincount(sj_of_cut[used], minlength=n_sj)
-    price_mult = np.bincount(sj_of_cut[used], weights=cut_mult[used], minlength=n_sj) / np.maximum(
-        users, 1
-    )
+    price_base = np.bincount(
+        sj_of_cut[used], weights=obj.cut_share[used], minlength=n_sj
+    ) / np.maximum(users, 1)
+    price_slope = np.bincount(
+        sj_of_cut[used], weights=cut_slope[used], minlength=n_sj
+    ) / np.maximum(users, 1)
 
     # the junction's own footprint: an exon region beside it that only its transcripts cover. The mask can cut a
-    # transcript's piece of a region into parts, so a transcript counts once per region and its multiplier there is
-    # the sum over its parts; every transcript covering a region holds the same observable parts of it, so they agree.
+    # transcript's piece of a region into parts, so a transcript counts once per region and its term there is the sum
+    # over its parts; every transcript covering a region holds the same observable parts of it, so they agree.
     annotated = ~synthetic[obj.t]
     pair, part_of = np.unique(
         obj.t[annotated] * n_regions + obj.piece[annotated], return_inverse=True
     )
     cover = np.bincount(pair % n_regions, minlength=n_regions)
-    region_mult = np.zeros(n_regions)
+    region_term = np.zeros(n_regions)
     np.maximum.at(
-        region_mult, pair % n_regions, np.bincount(part_of, weights=piece_mult[annotated])
+        region_term, pair % n_regions, np.bincount(part_of, weights=piece_term[annotated])
     )
     rna = np.maximum(np.asarray(calibration.count_rna_region, dtype=np.float64), 0.0)
     anchor = np.zeros(n_sj)
-    anchor_mult = np.zeros(n_sj)
+    anchor_term = np.zeros(n_sj)
     for side in (src, dst):
-        own = (users > 0) & (cover[side] == users) & (region_mult[side] > 0.0)
+        own = (users > 0) & (cover[side] == users) & (region_term[side] > 0.0)
         anchor += np.where(own, rna[side], 0.0)
-        anchor_mult += np.where(own, region_mult[side] * c_region[side], 0.0)
+        anchor_term += np.where(own, region_term[side], 0.0)
     spliced = np.asarray(calibration.sj_conserved_mass, dtype=np.float64)
 
     summed, best = _junction_parts(
@@ -450,20 +458,23 @@ def fit_junction_cap(
         np.asarray(calibration.gdna_region_eff_len, dtype=np.float64),
     )
     fit = (
-        (price_mult > 0.0)
+        (price_slope > 0.0)
         & (summed > np.maximum(saturation, best))
-        & (anchor_mult > 0.0)
+        & (anchor_term > 0.0)
         & (spliced + anchor > 0.0)
     )
     if not fit.any():
         return saturation
-    W, m, X, D, s, b = (a[fit] for a in (spliced, anchor, price_mult, anchor_mult, summed, best))
+    W, m, X, slope, D, s, b = (
+        a[fit] for a in (spliced, anchor, price_base, price_slope, anchor_term, summed, best)
+    )
     levels = np.geomspace(
         saturation, float(s.max()), CONSTANTS.calibration.junction_cap_grid_points
     )
     log_likelihood = np.empty(levels.shape[0])
     for i, level in enumerate(levels):
-        a = X * np.minimum(s, np.maximum(level, b))
+        # every price on the grid is above 1, so the junction's term is its share plus the carried excess
+        a = slope * np.minimum(s, np.maximum(level, b)) + (X - slope)
         log_likelihood[i] = (
             W * (np.log(a) - np.log(a + D)) + m * (np.log(D) - np.log(a + D))
         ).sum()
@@ -529,9 +540,10 @@ def place_log_weights(
 ) -> np.ndarray:
     """``log w`` per buffered row: a multimapper's place's capture weight, ``w(x) = Σ_o m_o(x) c_o``, the deposit
     rule's mass of the place at every object it deposits on (CSR over rows, ``rigel.native.PLACE_*`` kinds, flat
-    ids) times the object's capture efficiency (:func:`place_efficiencies`). Its sum over a component's placements,
-    on the law the efficiencies are read on, is the component's capture-contracted length, so every candidate at the
-    place carries it.
+    ids) times the object's capture efficiency (:func:`place_efficiencies`). Its sum over the gDNA component's
+    placements, on the law the efficiencies are read on, is that component's capture-contracted length, and its excess
+    over 1 summed over a transcript's is the excess of the transcript's length over its own (where every efficiency is
+    at least 1), so every candidate at the place carries it.
 
     A row with no object (a unique fragment's, on which the weight is common to every candidate) reads 0, and so does
     an intergenic place, because intergenic sequence is uncaptured. float32, as the scorer reads it.
@@ -569,12 +581,12 @@ def transcript_capture_eff_lengths(
 
     The efficiencies ``c_o`` are the result's (a piece's region's, a contiguous cut's boundary's, a junction's from the
     objects beside it, capped at ``junction_cap``, :func:`fit_junction_cap`): gDNA's yields, read on gDNA's uncaptured
-    law ``g`` (``tables.anchor``). Each is carried to the
-    scorer's gDNA table ``T_G`` (``tables.gdna``) as ``ĉ_o = c_o · share_o(g) / share_o(T_G)``. Where the two tables
-    are one law the per-fragment capture weight cancels and this is ``Σ_o c_o share_o(g)``, the null model exactly;
-    where ``T_G`` is ``g`` the efficiencies are used as read. An object ``T_G`` cannot reach keeps ``c_o``. With no
-    landscape ``fl`` is returned unchanged, and a transcript with no share on any object (shorter than every fragment)
-    keeps ``fl``.
+    law ``g`` (``tables.anchor``). Capture adds to the uncaptured yield, and the uncaptured part is RNA's own share on
+    its own table, so only the excess is carried to the scorer's gDNA table ``T_G`` (``tables.gdna``):
+    ``ĉ_o = 1 + (c_o − 1)·share_o(g)/share_o(T_G)`` where ``c_o > 1``, and ``c_o`` as read elsewhere and where ``T_G``
+    cannot reach (:func:`_carried`). Every efficiency exactly 1 gives ``fl`` to the bit, whatever the tables; where
+    ``T_G`` is ``g`` the efficiencies are used as read. With no landscape ``fl`` is returned unchanged, and a transcript
+    with no share on any object (shorter than every fragment) keeps ``fl``.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     if calibration.gdna_bulk_density is None:
@@ -623,10 +635,19 @@ def _carry_shares(
     return object_shares(pieces, tables.anchor), on_table
 
 
-def _carried(c: np.ndarray, share_anchor: np.ndarray, share_table: np.ndarray) -> np.ndarray:
-    """``c · share(g) / share(T_G)`` per object; ``c`` where ``T_G`` has no share there."""
+def _carry_factor(share_anchor: np.ndarray, share_table: np.ndarray) -> np.ndarray:
+    """``share(g) / share(T_G)`` per object, by which capture's excess is carried to the scorer's gDNA table; 1 where
+    ``T_G`` has no share there."""
     reach = share_table > 0.0
-    return np.where(reach, c * share_anchor / np.where(reach, share_table, 1.0), c)
+    return np.where(reach, share_anchor / np.where(reach, share_table, 1.0), 1.0)
+
+
+def _carried(c: np.ndarray, share_anchor: np.ndarray, share_table: np.ndarray) -> np.ndarray:
+    """``ĉ`` per object. Capture adds to the uncaptured yield, and the uncaptured part is RNA's own share on its own
+    table, so only an excess over 1 is carried: ``1 + (c − 1)·share(g)/share(T_G)``. A reading of 1 or below carries
+    nothing and enters as read, and so does an object ``T_G`` has no share of."""
+    carry = (c > 1.0) & (share_table > 0.0)
+    return np.where(carry, 1.0 + (c - 1.0) * _carry_factor(share_anchor, share_table), c)
 
 
 def rna_captured_fraction(calibration: "CalibrationResult", region_arrays: "RegionArrays") -> float:
