@@ -64,6 +64,21 @@ carried between length tables (issue #65). A landscape trained on anchors alone 
 transcript error moves by at most 0.35 % and gene error by 0.9 %, and bar 5 holds and fails on the same rows. The
 capture-ON references and the VCaP mix's are re-frozen on that tree.
 
+The capture reader's clamp went on 2026-11-20 (`DESIGN.md` §7.2), on the owner's go with its cost stated: an object
+reads its own level, not its enriched basin's peak. Pinned and fractional, against the tree before it:
+- Under stranded capture the annotated pool passes 0.7.1's bar on every row at 5 % gDNA and above but the
+  simulator's g05, which misses it by 565 fragments (+27,644 → +18,647, against 18,082). The simulator's g50 goes
+  from +53,207 to +30,002, its g98 from +25,398 to +18,575 and STAR's g50 from +34,964 to +22,297.
+- Transcripts on that stratum rise 4.6 % on the simulator and 9.7 % on STAR, 24 % and 29 % at 5 % gDNA, where
+  fragments move between the isoforms of genes with many (issue #83); genes fall 5.0 % on the simulator and
+  hold on STAR. Bars 3 and 4 fail against the clamped reader there.
+- Off capture the simulator's rows are unchanged to the digit. STAR's rows that read a false capture level rise by
+  up to 1.5 % (issue #1); its zero-gDNA switch row reads 2.2 times the no-capture line on transcripts and genes.
+- On the VCaP mix, DNA called annotated RNA falls by 4,990 fragments and RNA-library fragments called gDNA rise by
+  8,899.
+
+The capture-ON references and the VCaP mix's are re-frozen on that tree.
+
 The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
 alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
 identical reads, and transcript error 0.10–0.47 of 0.7.1's. It also states eight failures, each an open entry
@@ -83,8 +98,8 @@ but those marked closed:
   (issue #12).
 
 Against 0.7.1 re-scored on the same reads (2026-11-16), HEAD's transcript and gene errors are lower on every in-scope
-rung of the ladder, on both inputs. At 5 % gDNA and above, four stranded capture-ON rows call more of the library
-annotated than 0.7.1 does: the simulator's g05, g50 and g98, and STAR's g50 (issue #76). The release holds for them
+rung of the ladder, on both inputs. At 5 % gDNA and above, one stranded capture-ON row calls more of the library
+annotated than 0.7.1 does: the simulator's g05, by 565 fragments (issue #76). The release holds for it
 (`DESIGN.md` §0b).
 
 No preview ships (the owner's ruling, 2026-11-04): 0.8.0 waits for every `release-blocker` issue, in the order under
@@ -109,12 +124,14 @@ Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_previe
 The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the release fixes or states; its
 `release-blocker` label is what it fixes. In order:
 
-1. **The capture reader, bounded at two sessions, with the owner:** issue #1 against a pass bar the owner sets before
-   any candidate runs. If no candidate passes, issue #1 ships stated.
-2. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5. Dissect the largest
-   gap first, the simulator's stranded capture-ON g50, and bring the dissection to the owner before fixing.
+1. **The capture reader, bounded at two sessions, with the owner:** the first closed issue #61, issue #65 and issue #6
+   and the reader's clamp. The second is issue #1's, against a pass bar the owner sets before any candidate runs. If
+   no candidate passes, issue #1 ships stated.
+2. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5, which the simulator's
+   stranded capture-ON g05 misses by 565 fragments. What is left is the cuts' prices, read from gDNA's objects
+   beside them rather than from RNA's own crossings: with every junction at its true price that row reads +9,375.
 3. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
-   issue #10, issue #12, issue #13, issue #23, issue #46, issue #78 and issue #82, and for issue #1 if it falls back;
-   the CHANGELOG; then issue #11.
+   issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and for issue #1
+   if it falls back; the CHANGELOG; then issue #11.
 
 After that, the open issues outside the milestone, in issue order.

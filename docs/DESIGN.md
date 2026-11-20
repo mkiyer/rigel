@@ -578,7 +578,8 @@ far above 1, and the fully captured level is the saturation.
 The read-out clamps nothing (the owner's go, 2026-11-20): an object reads its own level on either side of its basin's
 peak. Read at the peak, a gene's captured exons come out alike and low together, an error that cancels between the
 gene's isoforms and stays in its total as DNA called annotated RNA. Read at its own level an object is unbiased and as
-noisy as its own gDNA count: the pools gain, and where gDNA is sparse the split between a gene's isoforms pays.
+noisy as its own gDNA count: the pools gain, and where gDNA is sparse the split between a gene's isoforms pays
+(issue #83).
 
 > **The weight** (`capture_efficiency.visible_share`, `weighted`; the owner's go, 2026-11-15). The published reading is
 > the reader's raised to one library-wide weight `w` (`gdna_capture_weight`), every efficiency and the saturated level

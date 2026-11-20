@@ -33,14 +33,18 @@ for robustness, so a number measured at the panel's nascent share is a stress re
 - `src/`'s numbers are 1f97ff96's (the junction cap and the share over one tally) plus the **capture weight**, landed
   2026-11-15: the capture reading is raised to the share of the library's reads whose own gDNA would show. At 5 % gDNA
   and above no in-scope whole-genome row rises by more than about 1 %; the 0.1 % hole closes on genes; STAR's zero-gDNA
-  rows fall, the switch row still about four times the no-capture line (`docs/ROADMAP.md`).
+  rows fall, the switch row then about four times the no-capture line (`docs/ROADMAP.md`).
 - The **scan phase** landed 2026-11-18: the splice blacklist is retired, and a multimapper's candidates are pruned
   within each place. The simulator's rows are bit-identical; on the STAR rung the stranded capture-ON rows move,
   through the one locus that holds most of the row (issue #78).
 - The **intron abundance model** landed 2026-11-19: every intron's count is read against the library's own intergenic
   gDNA law, with a departure prior a stranded library measures from its strands. Transfer now beats silent on
   unstranded capture OFF; the stranded strata hold; VCaP is unchanged; sparse unstranded libraries book about 1 % of
-  their gDNA as nascent (issue #82). This tree is the baseline.
+  their gDNA as nascent (issue #82).
+- The **unclamped capture reader** landed 2026-11-20: an object reads its own level, not its enriched basin's peak.
+  Under stranded capture the annotated pool passes 0.7.1's bar at 5 % gDNA and above on every row but the
+  simulator's g05, which misses by 565 fragments (issue #76). Transcripts rise 4.6 % on the simulator and 9.7 % on
+  STAR, between the isoforms of genes with many (issue #83). This tree is the baseline.
 - The validation of ec996bba beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
   (`docs/ROADMAP.md`).
 - **No preview ships.** 0.8.0 waits for every `release-blocker` issue in the milestone; the milestone's other issues

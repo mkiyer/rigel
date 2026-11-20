@@ -33,7 +33,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
 - **Capture-aware effective lengths.** Under a capture panel a transcript's EM effective length is
   its share of every region and boundary its fragments land on, each at that object's capture
   efficiency: the object's own gDNA density read against the uncaptured (bulk) gDNA level, as a
-  posterior under the library's fitted gDNA landscape, and saturated at its own captured level. There
+  posterior under the library's fitted gDNA landscape, each object at its own level. There
   is no capture detector or on/off switch: capture is read object by object, and a library whose gDNA
   sits at one level reads every efficiency as 1. The gDNA component's length follows the same
   conversion as its count.
@@ -147,7 +147,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   second density census of the gDNA track with its own thresholds. The report's capture tile and panel
   show calibration's own answer instead: `calibration.gdna_bulk_density`, the uncaptured gDNA level the
   capture efficiencies are read against (`null` when no gDNA landscape was fitted), and
-  `calibration.gdna_capture_saturation`, the saturated captured level over it (1 when there is none).
+  `calibration.gdna_capture_saturation`, the landscape's most massive captured level over it (1 when there is none).
 - Three `locus_stats.feather` columns (`--emit-locus-stats`): `gdna_log_eff_len`, `digamma_calls_per_estep`
   and `squarem_extrapolation_clamp_count`.
 - Index columns nothing read: `transcripts.feather`'s `abundance`, `nrna_abundance` and `n_exons`, and
