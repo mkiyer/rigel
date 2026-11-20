@@ -90,7 +90,11 @@ at κ = ½ the gDNA fraction cancels from the strand mean. Every score is read p
   intergenic and intron slots is safe on real data, not on the panel.
 - **The release holds for the annotated pool.** At 5 % gDNA and above, 0.8.0 does not ship while an in-scope row's
   annotated error exceeds 0.7.1's on the same reads (`SUCCESS.md`, bar 5; issue #76, issue #9). This bar has no
-  stated-limitation fallback.
+  stated-limitation fallback. One row is excepted (the owner, 2026-11-20): the simulator's stranded capture-ON g05,
+  which 7b254a9c misses by 565 fragments, does not hold the release.
+- **The last sessions before 0.8.0 have no pass bar** (the owner, 2026-11-20): what is achievable is not known. Each
+  improves the tool's current state toward a simple, robust tool that performs well across many kinds of data, and
+  what is left ships stated.
 - **One message policy.** `transfer` ships on every stratum. A row where it loses to `silent` is a defect in the
   messages, repaired there, never a reason to switch policy by stratum (issue #26, issue #77).
 - **The splice blacklist is retired** (issue #49, issue #63, issue #64). The recommended STAR settings report a
@@ -98,8 +102,6 @@ at κ = ½ the gDNA fraction cancels from the strand mean. Every score is read p
   do not cover is stated (issue #7). A blacklist brought back later is regenerated at those settings first.
 - **A multimapper's candidates are pruned within each place, never across places**, so no place is orphaned and the
   EM decides between places (issue #62; §9.4).
-- **Ruled, not yet built.** An efficiency of exactly 1 gives RNA's own length, and only the excess over 1 is carried
-  (issue #65; §9.2).
 
 ---
 

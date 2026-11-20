@@ -122,16 +122,22 @@ Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_previe
 ## Next
 
 The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the release fixes or states; its
-`release-blocker` label is what it fixes. In order:
+`release-blocker` label is what it waits for. The last sessions have no pass bar (`DESIGN.md` §0b): each improves the
+tool's current state, simply and robustly across many kinds of data, and what is left ships stated. In order, one
+`src/` writer at a time:
 
-1. **The capture reader, bounded at two sessions, with the owner:** the first closed issue #61, issue #65 and issue #6
-   and the reader's clamp. The second is issue #1's, against a pass bar the owner sets before any candidate runs. If
-   no candidate passes, issue #1 ships stated.
-2. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5, which the simulator's
-   stranded capture-ON g05 misses by 565 fragments. What is left is the cuts' prices, read from gDNA's objects
-   beside them rather than from RNA's own crossings: with every junction at its true price that row reads +9,375.
-3. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
-   issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and for issue #1
-   if it falls back; the CHANGELOG; then issue #11.
+1. **The cuts' prices** (issue #76 with issue #9; running): read RNA's capture on the cuts from RNA's own crossings,
+   not from gDNA's objects beside them. The simulator's stranded capture-ON g05 misses bar 5 by 565 fragments, which
+   the owner accepted; with every junction at its true price that row reads +9,375.
+2. **False capture** (issue #1): the capture reader's last session, with the owner, on the tree item 1 leaves.
+3. **Performance** (issue #84): compute and memory, every change a proven numeric no-op.
+4. **Code review** (issue #85): clean, concise, readable and maintainable, with no hard-coded constants.
+5. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
+   issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and for what items 1 and
+   2 leave of issue #76, issue #9 and issue #1; the CHANGELOG; then issue #11.
+
+CI runs alongside from now (issue #11). On its first run since September (fe0e3183) the native build compiled on Linux
+and macOS. Two tests stopped the runs: one asserts a native kernel equals NumPy to the bit, which x86-64 misses by
+1e-15, and one needs `minimap2`, which the CI environment lacks.
 
 After that, the open issues outside the milestone, in issue order.

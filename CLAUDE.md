@@ -49,10 +49,11 @@ for robustness, so a number measured at the panel's nascent share is a stress re
   (`docs/ROADMAP.md`).
 - **No preview ships.** 0.8.0 waits for every `release-blocker` issue in the milestone; the milestone's other issues
   ship stated in the MANUAL.
-- **The order of work** (`docs/ROADMAP.md`, Next): the capture reader → the annotated pool against 0.7.1 → the
-  release. One `src/` writer at a time, in the main checkout.
-- The **capture reader** is developed together with the owner, bounded at two sessions. Its working memory is
-  `docs/dev/CAPTURE_IDEAS.md`.
+- **The order of work** (`docs/ROADMAP.md`, Next): the cuts' prices (issue #76) → false capture (issue #1) →
+  performance → code review → the release, with CI alongside. No session has a pass bar: each improves the current
+  state, and what is left ships stated. One `src/` writer at a time, in the main checkout.
+- The **capture reader** is developed together with the owner; one session of its two is left, for issue #1. Its
+  working memory is `docs/dev/CAPTURE_IDEAS.md`.
 - Everything retired at the 2026-11-03 reset is in `$RIGEL_RUNS/archive/cleanup_2026-11-03/`.
 
 ## The 0.8.0 scope
