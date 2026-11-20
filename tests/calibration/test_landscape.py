@@ -7,6 +7,8 @@ kernel widths come from the local neighbour spacing so they widen as regions thi
 into the bulk and the enriched basins closes the module.
 """
 
+import math
+
 import numpy as np
 import pytest
 
@@ -211,8 +213,14 @@ def test_the_arm_tracks_the_region_mass():
 
 def test_the_kernels_arm_is_numpys_interpolation_of_the_curve_to_the_bit():
     """The arm ψ reads per cell (`native/psi_kernel.h`, ``Arm``) is ``np.interp`` of the curve at ``log σ(λ) + log M −
-    log E`` to the bit, with the ends held and the fraction, mass and opportunity clipped at the landscape's guard;
-    numpy is a different implementation. An arm that extrapolated past the grid, or skipped a clip, would fail here."""
+    log E``, with the ends held and the fraction, mass and opportunity clipped at the landscape's guard; numpy is a
+    different implementation. An arm that extrapolated past the grid, or skipped a clip, would fail here.
+
+    The held ends are copies and agree to the bit. Inside the grid the value is one multiply-add, ``fp[j] + s·(x −
+    xp[j])``, which a compiler may round once (fused) or twice. Clang on arm64 fuses it in the kernel and in numpy's
+    build alike. On x86-64 the kernel fuses it where the compiler's default target has FMA, as Ubuntu's GCC 15 does,
+    while numpy's wheel is built for a baseline without FMA. So the two agree to the bit only where they were built
+    alike, and within one ulp everywhere."""
     from scipy.special import expit
 
     from _psi_reference import gdna_arm
@@ -229,16 +237,21 @@ def test_the_kernels_arm_is_numpys_interpolation_of_the_curve_to_the_bit():
     slot_mass = np.concatenate([rng.uniform(0.0, 3000.0, m - 3), [0.0, 1e-15, 1e6]])
     slot_eff = np.concatenate([rng.uniform(1.0, 5000.0, m - 2), [0.0, 1.0]])
     eps = 1e-12
+    # the C library's log, the one the kernel calls: numpy's SIMD log may differ from it by an ulp, and the curve's
+    # slope (up to about 60 here) carries that ulp of the abscissa into the value
+    log = np.vectorize(math.log, otypes=[float])
     frac = np.clip(expit(lam), eps, 1.0 - eps)
     x = (
-        np.log(frac)[None, :]
-        + (np.log(np.maximum(slot_mass, eps)) - np.log(np.maximum(slot_eff, eps)))[:, None]
+        log(frac)[None, :]
+        + (log(np.maximum(slot_mass, eps)) - log(np.maximum(slot_eff, eps)))[:, None]
     )
     want = np.interp(x.ravel(), ls.log_rho, ls.logP, left=ls.logP[0], right=ls.logP[-1]).reshape(
         x.shape
     )
     got = gdna_arm(ls.log_rho, ls.logP, lam, slot_mass, slot_eff)
-    assert np.array_equal(got, want), f"max |Δ| {np.abs(got - want).max():.3e}"
+    held = (x < ls.log_rho[0]) | (x > ls.log_rho[-1])
+    assert np.array_equal(got[held], want[held]), "a held end is not the curve's end value"
+    np.testing.assert_array_max_ulp(got, want, maxulp=1)
     assert (x < ls.log_rho[0]).any() and (x > ls.log_rho[-1]).any(), "the ends were not exercised"
 
 
