@@ -420,12 +420,18 @@ def fit_junction_cap(
         users, 1
     )
 
-    # the junction's own footprint: an exon region beside it that only its transcripts cover. The pieces of one
-    # region are one length, so the region has one multiplier.
+    # the junction's own footprint: an exon region beside it that only its transcripts cover. The mask can cut a
+    # transcript's piece of a region into parts, so a transcript counts once per region and its multiplier there is
+    # the sum over its parts; every transcript covering a region holds the same observable parts of it, so they agree.
     annotated = ~synthetic[obj.t]
-    cover = np.bincount(obj.piece[annotated], minlength=n_regions)
+    pair, part_of = np.unique(
+        obj.t[annotated] * n_regions + obj.piece[annotated], return_inverse=True
+    )
+    cover = np.bincount(pair % n_regions, minlength=n_regions)
     region_mult = np.zeros(n_regions)
-    region_mult[obj.piece[annotated]] = piece_mult[annotated]
+    np.maximum.at(
+        region_mult, pair % n_regions, np.bincount(part_of, weights=piece_mult[annotated])
+    )
     rna = np.maximum(np.asarray(calibration.count_rna_region, dtype=np.float64), 0.0)
     anchor = np.zeros(n_sj)
     anchor_mult = np.zeros(n_sj)

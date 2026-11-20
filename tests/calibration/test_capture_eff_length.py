@@ -1303,6 +1303,54 @@ def test_a_junctions_evidence_is_the_exon_regions_only_its_own_transcripts_cover
     assert cap_with(own[0], 4.0) < base * 0.9
 
 
+@pytest.fixture(scope="module")
+def cap_masked_index(tmp_path_factory):
+    """The cap fixture with an unobservable run inside ``b2``'s own second exon, which the mask cuts into two parts."""
+    return build_test_index(
+        tmp_path_factory,
+        _CAP_GTF,
+        genome_size=11000,
+        name="junctioncap_masked",
+        unknown={"chr1": [(9200, 9230)]},
+    )
+
+
+def test_a_junctions_own_exon_keeps_its_evidence_where_the_mask_splits_it(cap_masked_index):
+    """The mask cuts ``b2``'s own second exon into two observable parts of one region and one transcript. The footprint
+    counts each transcript once per region and gives the region the sum of its parts' shares, so with ``b2`` the only
+    isoform carrying fragments its junction is still fitted: the cap is the price its split says, and a fourfold change
+    in that exon's unspliced RNA moves it. Counted part by part, one transcript would cover the exon twice, the exon
+    would belong to no junction, and nothing would be left to fit."""
+    idx = cap_masked_index
+    ra = RegionArrays.from_index(idx)
+    start, end = np.asarray(ra.start), np.asarray(ra.end)
+    own = np.flatnonzero((start == 9000) & (end == 9500))
+    assert own.shape[0] == 1
+    pieces = transcript_pieces(idx, ra)
+    b2 = _tidx(idx, "b2")
+    assert np.count_nonzero((pieces.t == b2) & (pieces.piece == own[0])) == 2
+    c = _captured(ra, _LEVEL)
+    rna, spliced = _split_at(idx, ra, c, 600.0, rate={"a1": 0.0, "b1": 0.0, "b2": 300.0})
+
+    def cap_with(factor=1.0):
+        r = rna.copy()
+        r[own[0]] *= factor
+        cal = _cal(
+            ra,
+            c,
+            1e-3,
+            boundary=np.full(_n_boundaries(ra), _LEVEL),
+            saturation=100.0,
+            rna_region=r,
+            sj_mass=spliced,
+        )
+        return fit_junction_cap(cal, ra, idx, _one_law(PMF))
+
+    base = cap_with()
+    assert base == pytest.approx(600.0, rel=_grid_step(100.0, _SUMMED))
+    assert cap_with(4.0) < base * 0.9
+
+
 def test_a_junction_with_no_exon_region_of_its_own_is_not_fitted(multiexon_index):
     """In the multi-exon fixture an annotated single-exon transcript covers every exon of the spliced one, so no exon
     region is any junction's own and nothing anchors a split: the cap is the saturated level exactly, though the
