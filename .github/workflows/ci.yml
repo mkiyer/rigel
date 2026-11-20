@@ -34,7 +34,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          conda install -y htslib samtools scikit-build-core nanobind cmake
+          conda install -y htslib samtools minimap2 scikit-build-core nanobind cmake
 
       - name: Install package with dev extras
         run: |
