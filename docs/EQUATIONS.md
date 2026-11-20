@@ -675,7 +675,7 @@ fragment. Capture saturates (a fragment binds its best probe part), so
 too short for a gDNA fragment reads the boundary on its far side, so a one-region intron gives `½(c_lo + c_hi)`.
 
 **The junction cap, from RNA's own split** (`fit_junction_cap`). The saturation level `S` (below) is gDNA's, and gDNA
-never deposits on a junction, so `S` bounds only what gDNA can show. RNA crosses the junction. In an exon region `A`
+never deposits on a junction, so `S` says only what gDNA shows. RNA crosses the junction. In an exon region `A`
 RNA and gDNA are the same placements under the same probes, so a transcript at rate `ρ_t` leaves `ρ_t S_t(A) c_A`
 contained fragments in `A` and `ρ_t M_t(J) p_J` on a junction `J` priced `p_J`: the ratio is free of `ρ_t`. Over the
 transcripts using `J`, with `A` covered by them alone and each object entering as the ruler enters it (§14.8),
@@ -704,11 +704,10 @@ contained, a boundary's crossing) as `ℓ(x) = k log(S eˣ) − S eˣ` over `x =
 Efron's two groups — the bulk basin collapsed onto its peak `x_b` with its whole mass, elsewhere the unpadded density
 `DensityLandscape.logP_free`:
 
-    log c_o = E[min(x, s(x)) | k_o, S_o] − x_b
+    log c_o = E[x | k_o, S_o] − x_b
 
-`s(x)` the peak of the enriched basin holding `x` (`+∞` outside one): capture saturates per level. A mean of the LOG
-density, so a lone level of mass `μ` at `Δ` nats above the bulk lifts an evidence-free object by `e^{μΔ}`, not
-`1 + μ(e^Δ − 1)`. `S = 0` reads 1; `k` is a deconvolved mass, the Poisson continued by the gamma function.
+A mean of the LOG density, so a lone level of mass `μ` at `Δ` nats above the bulk lifts an evidence-free object by
+`e^{μΔ}`, not `1 + μ(e^Δ − 1)`. `S = 0` reads 1; `k` is a deconvolved mass, the Poisson continued by the gamma function.
 
 **The weight** (`visible_share`, `weighted`). The published reading is the reader's raised to one library-wide weight:
 

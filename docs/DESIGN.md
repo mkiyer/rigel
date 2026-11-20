@@ -569,11 +569,16 @@ used to construct validation truth do not become inputs to the production estima
 > gDNA density read against the BULK, the peak of the landscape's largest basin, since gDNA off the probes always
 > outnumbers gDNA on them. The prior is Efron's two groups — the bulk basin collapsed onto its peak, elsewhere the
 > population's own density; the likelihood is the object's own Poisson count, a region's contained, a boundary's
-> crossing; the read-out is the posterior mean of the log density, saturated at its enriched basin's peak.
+> crossing; the read-out is the posterior mean of the log density.
 
 No mode is located and nothing gated: a one-basin landscape, no landscape, and an object with no gDNA support read 1.
 The crossings are read once, by their boundary. The unit is the bulk (`gdna_bulk_density`), so an enriched object reads
 far above 1, and the fully captured level is the saturation.
+
+The read-out clamps nothing (the owner's go, 2026-11-20): an object reads its own level on either side of its basin's
+peak. Read at the peak, a gene's captured exons come out alike and low together, an error that cancels between the
+gene's isoforms and stays in its total as DNA called annotated RNA. Read at its own level an object is unbiased and as
+noisy as its own gDNA count: the pools gain, and where gDNA is sparse the split between a gene's isoforms pays.
 
 > **The weight** (`capture_efficiency.visible_share`, `weighted`; the owner's go, 2026-11-15). The published reading is
 > the reader's raised to one library-wide weight `w` (`gdna_capture_weight`), every efficiency and the saturated level
@@ -696,7 +701,7 @@ With no landscape every length is its uncontracted span, bit-identically.
   `[0, max(the junction cap, the best object it touches)]`, since a fragment binds its best single probe part
   (`capture_eff_length._junction_prices`). **Capture is local**: only objects within a fragment of it enter.
 - **The junction cap is RNA's** (`capture_eff_length.fit_junction_cap`, landed 2026-11-13). gDNA never crosses a
-  junction, so the landscape's saturated level only bounds what gDNA shows. The cap starts there, at the capture weight
+  junction, so the landscape's saturated level says only what gDNA shows. The cap starts there, at the capture weight
   (§7.2), and is raised as far as the library's junctions support, each read on its own footprint: its conserved spliced
   mass against the unspliced RNA of the exon regions beside it that its transcripts alone cover (`EQUATIONS.md` §11).
   The counts never lower it, and with no level above the bulk (a saturated level of exactly 1) it is not fitted: no

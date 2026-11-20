@@ -12,12 +12,11 @@ common to every efficiency cancels in the EM.
   landscape reads exactly 1 everywhere.
 - Likelihood: the object's deconvolved gDNA mass ``k`` on its gDNA support ``S``, the Poisson
   ``ℓ(x) = k·log(S·eˣ) − S·eˣ``.
-- Readout: ``log e = E[min(x, s(x))] − x_b`` over the posterior, so the bulk reads 1. The mean is of the log density,
-  so a lone prior level of mass ``μ`` at ``Δ`` nats above the bulk lifts an object with no evidence by ``e^{μΔ}``
-  rather than a linear mean's ``1 + μ(e^Δ − 1)``. ``s(x)`` is the peak of the enriched basin holding ``x`` (``+∞``
-  outside every enriched basin), so capture saturates per level.
+- Readout: ``log e = E[x] − x_b`` over the posterior, so the bulk reads 1 and an object whose count places it reads its
+  own level. The mean is of the log density, so a lone prior level of mass ``μ`` at ``Δ`` nats above the bulk lifts an
+  object with no evidence by ``e^{μΔ}`` rather than a linear mean's ``1 + μ(e^Δ − 1)``.
 - Saturation: ``exp(x_sat − x_b)`` for the most massive enriched basin's peak ``x_sat``, or 1 when there is none; the
-  junction price saturates at it (``capture_eff_length``).
+  junction price saturates at it (``capture_eff_length``), and no object's own reading does.
 - Weight (``weighted``): the published reading is the reader's raised to one library-wide weight ``w`` in [0, 1], every
   efficiency and the saturation alike, so each level keeps the share ``w`` of its distance from the bulk in nats. ``w``
   is the share of the one-strand unspliced mass whose object would show a gDNA fragment of its own
@@ -66,7 +65,7 @@ class CaptureReading:
 
 @dataclass(frozen=True, slots=True)
 class _TwoGroups:
-    """The two-group prior on the landscape's grid, and the level each grid cell reads at."""
+    """The two-group prior on the landscape's grid."""
 
     x: np.ndarray
     #: the bulk peak's grid index: the census reads its peaks off this grid
@@ -75,14 +74,12 @@ class _TwoGroups:
     log_pi0: float
     #: the alternative's log mass per cell: ``-inf`` inside the bulk basin and wherever the population is empty
     log_alt: np.ndarray
-    #: ``min(x, s(x))``: the level each cell reads at, saturated at its enriched basin's peak
-    level: np.ndarray
     saturation: float
 
 
 def _two_groups(landscape: DensityLandscape) -> _TwoGroups:
-    """The two-group prior on the landscape's grid (module docstring): the bulk basin's mass at its peak, the
-    population's own density elsewhere, and each cell's level saturated at its enriched basin's peak."""
+    """The two-group prior on the landscape's grid (module docstring): the bulk basin's mass at its peak and the
+    population's own density elsewhere."""
     x = np.asarray(landscape.log_rho, dtype=np.float64)
     free = np.asarray(landscape.logP_free, dtype=np.float64)
     if x.ndim != 1 or x.size < 2 or not np.all(np.isfinite(x)) or free.shape != x.shape:
@@ -102,9 +99,6 @@ def _two_groups(landscape: DensityLandscape) -> _TwoGroups:
     pi0 = float(p[in_bulk].sum())
     alt = np.where(in_bulk, 0.0, p)
     log_alt = np.where(alt > 0.0, np.log(np.maximum(alt, _TINY)), -np.inf)
-    cap = np.full(x.shape, np.inf)
-    for m in above:
-        cap[(x >= m.lo) & (x <= m.hi)] = m.log_rho
     saturation = (
         float(np.exp(max(above, key=lambda m: m.basin_mass).log_rho - x[ib])) if above else 1.0
     )
@@ -113,14 +107,13 @@ def _two_groups(landscape: DensityLandscape) -> _TwoGroups:
         ib=ib,
         log_pi0=float(np.log(pi0)) if pi0 > 0.0 else -np.inf,
         log_alt=log_alt,
-        level=np.minimum(x, cap),
         saturation=saturation,
     )
 
 
 def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray) -> np.ndarray:
-    """``exp(E[min(x, s(x))] − x_b)`` per object: the two-group posterior of its own count ``k`` on its support
-    ``S``, the bulk as the one level ``x_b`` with its basin's mass. ``S = 0``: 1."""
+    """``exp(E[x] − x_b)`` per object: the two-group posterior of its own count ``k`` on its support ``S``, the bulk as
+    the one level ``x_b`` with its basin's mass. ``S = 0``: 1."""
     x = prior.x
     xb = float(x[prior.ib])
     rate = np.exp(x)
@@ -145,7 +138,7 @@ def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray) -> np.ndarray:
         den = np.maximum(w_null + w_alt.sum(1), _TINY)
         # the level moment as a sum along the object's own row, not a matrix–vector product: BLAS need not sum a row
         # in one order at every tile height, and the height is a resource setting
-        mean_level = (w_null * xb + (w_alt * prior.level).sum(1)) / den
+        mean_level = (w_null * xb + (w_alt * x).sum(1)) / den
         out[sl] = np.where(S[sl] > 0.0, np.exp(mean_level - xb), 1.0)
     return out
 

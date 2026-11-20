@@ -1,13 +1,12 @@
 """``capture_efficiency``: an object's capture efficiency is its own gDNA density read against the bulk.
 
-It is the posterior mean of the object's log density, saturated per enriched basin, under the fitted landscape as a
-two-group prior (the bulk basin a point at its peak, the population's own density elsewhere), from the object's own
-count: a region's contained count on its contained support, a boundary's crossing count on its crossing support. No
-mode, no gate, no constant. An unprobed exon holding no gDNA fragment reads the bulk, not a multimapper floor. The tests
-pin the model's properties: an informative object reads its own level, capture saturates per level, a one-basin
-landscape reads exactly 1, a lone level lifts an object without evidence by at most ``e^{μΔ}``, a level below the bulk
-reads below 1, each object reads only its own count, the density unit is free, the row tiles change nothing, and
-calibrate's wiring. A piece too short to contain a fragment is read through its boundaries by the length
+It is the posterior mean of the object's log density under the fitted landscape as a two-group prior (the bulk basin a
+point at its peak, the population's own density elsewhere), from the object's own count: a region's contained count on
+its contained support, a boundary's crossing count on its crossing support. No mode, no gate, no constant. An unprobed
+exon holding no gDNA fragment reads the bulk, not a multimapper floor. The tests pin the model's properties: an
+informative object reads its own level, above its basin's peak as below it, a one-basin landscape reads exactly 1, a
+lone level lifts an object without evidence by at most ``e^{μΔ}``, a level below the bulk reads below 1, each object
+reads only its own count, the density unit is free, the row tiles change nothing, and calibrate's wiring. A piece too short to contain a fragment is read through its boundaries by the length
 (``test_capture_eff_length.py``), not here.
 
 The published reading is the reader's raised to one library-wide weight, the share of the one-strand unspliced mass
@@ -88,7 +87,7 @@ def _dense_reference(ls: DensityLandscape, k, S) -> np.ndarray:
     """The reader written out once with no row tiles and its bulk term in closed form: the specification the tiled
     implementation must equal."""
     x = np.asarray(ls.log_rho, dtype=np.float64)
-    bulk, above = split_basins(census(ls))
+    bulk, _above = split_basins(census(ls))
     xb = float(bulk.log_rho)
     in_bulk = (x >= bulk.lo) & (x <= bulk.hi)
     p = np.exp(ls.logP_free - np.max(ls.logP_free))
@@ -97,9 +96,6 @@ def _dense_reference(ls: DensityLandscape, k, S) -> np.ndarray:
     alt = np.where(in_bulk, 0.0, p)
     tiny = np.finfo(float).tiny
     log_alt = np.where(alt > 0.0, np.log(np.maximum(alt, tiny)), -np.inf)
-    cap = np.full(x.shape, np.inf)
-    for m in above:
-        cap[(x >= m.lo) & (x <= m.hi)] = m.log_rho
     floor = CE.CONSTANTS.calibration.rate_log_floor
     lam = np.exp(x)[None, :] * S[:, None]
     ll = np.where(S[:, None] > 0.0, k[:, None] * np.log(np.maximum(lam, floor)) - lam, 0.0)
@@ -110,7 +106,7 @@ def _dense_reference(ls: DensityLandscape, k, S) -> np.ndarray:
     top = np.maximum(a_null, a_alt.max(1))
     w_null, w_alt = np.exp(a_null - top), np.exp(a_alt - top[:, None])
     den = w_null + w_alt.sum(1)
-    mean_level = (w_null * xb + w_alt @ np.minimum(x, cap)) / den
+    mean_level = (w_null * xb + w_alt @ x) / den
     return np.where(S > 0.0, np.exp(mean_level - xb), 1.0)
 
 
@@ -143,13 +139,17 @@ def test_an_informative_object_reads_its_own_level(landscape):
     assert abs(np.log(c[2] * rb * 3.0 / RHO_CAP)) < 0.2
 
 
-def test_capture_saturates_at_its_own_basins_peak(landscape):
-    """A density above its enriched basin's peak reads that peak: a 50 kb piece at three times the captured level reads
-    exactly the saturated level, the most massive (here the only) enriched basin's peak over the bulk. Without
-    saturation it would read its own level, three times higher."""
-    r = capture_efficiencies(landscape, *_field([50000], [3.0 * RHO_CAP], []))
+def test_a_density_above_its_basins_peak_reads_its_own_level(landscape):
+    """The read-out is the object's own level on either side of its basin's peak: a 50 kb piece at one and a half times
+    the captured level reads one and a half times what a piece at the captured level reads, to the grid's step, and
+    above the saturated level. Read at its enriched basin's peak it would read what the piece at the peak reads, a ratio
+    of 1, and every captured object above a peak would read low."""
+    r = capture_efficiencies(landscape, *_field([50000] * 2, [RHO_CAP, 1.5 * RHO_CAP], [RHO_DEP]))
+    c = r.efficiency_region
+    step = float(np.diff(landscape.log_rho)[0])
     assert r.saturation > 100.0
-    assert r.efficiency_region[0] == pytest.approx(r.saturation, rel=1e-9)
+    assert abs(np.log(c[1] / c[0] / 1.5)) < step
+    assert c[1] > r.saturation
 
 
 def test_a_one_basin_landscape_reads_exactly_one_everywhere():

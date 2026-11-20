@@ -615,7 +615,8 @@ answer. Calibration fits a landscape of gDNA densities over the genome; its larg
 the gDNA off the probes, and each region's capture efficiency is its own gDNA density read against that
 bulk, so `em_effective_length` is scaled by those efficiencies and rises above `effective_length` where
 capture enriched the transcript. `gdna_capture_saturation` is the landscape's most massive enriched level
-over the bulk, the level at which capture saturates. Capture can only be read from genomic DNA, so every
+over the bulk: the level of a typical captured region, not a limit on any one region's efficiency.
+Capture can only be read from genomic DNA, so every
 efficiency and the saturation are reported at `gdna_capture_weight`, between 0 and 1: the share of the
 library's reads that sit where their own region would show genomic DNA. Each is raised to that power, so
 where the reads sit on regions holding no DNA the reading fades toward no capture (a weight of 0 reads 1
@@ -626,7 +627,7 @@ calibration fitted no landscape at all. The report shows the bulk and the satura
 pass/fail verdict.
 
 `junction_capture_cap` is the level a splice junction's capture is capped at in `em_effective_length`.
-Genomic DNA never crosses a junction, so the saturated level only bounds what gDNA can show. RNA crosses it:
+Genomic DNA never crosses a junction, so the saturated level says only what gDNA shows. RNA crosses it:
 each junction's spliced fragments are read against the unspliced RNA of the exons beside it, and where
 the library's junctions together support a higher level the cap is raised to it. It is never lowered, so
 it equals `gdna_capture_saturation` wherever the spliced counts ask for no more, and in every library that

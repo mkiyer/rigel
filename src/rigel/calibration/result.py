@@ -185,7 +185,7 @@ class CalibrationResult:
     #: or no landscape was fitted. The ruler's junction cap starts at it and RNA's spliced fragments can raise it
     #: (`capture_eff_length.fit_junction_cap`).
     gdna_capture_saturation: float
-    #: float64[n_regions]: each region's capture efficiency ``exp(w · (E[min(x, s(x))] − x_b))``, its own gDNA density
+    #: float64[n_regions]: each region's capture efficiency ``exp(w · (E[x] − x_b))``, its own gDNA density
     #: against the bulk with the landscape as a two-group prior and its contained count as the likelihood
     #: (`capture_efficiency.capture_efficiencies`), raised to the capture weight ``w``. A relative yield: 1 at the bulk,
     #: above 1 under capture, and exactly 1 everywhere with no bulk density. The ruler and the locus prior price every
