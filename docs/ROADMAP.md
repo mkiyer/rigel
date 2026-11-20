@@ -57,6 +57,13 @@ from its introns' strands. Pinned and fractional, against the tree before it:
 
 All five identity references are re-frozen on this tree (`TESTING.md` §6).
 
+The capture reader's first fixes landed the same day. The junction cap counts a transcript once per region where the
+mask splits an exon (issue #61). An efficiency of exactly 1 gives RNA's own length, and only capture's excess over 1 is
+carried between length tables (issue #65). A landscape trained on anchors alone reads one basin, gated by a test
+(issue #6, which no longer reproduced). Off capture the identity references are bit-identical; under capture
+transcript error moves by at most 0.35 % and gene error by 0.9 %, and bar 5 holds and fails on the same rows. The
+capture-ON references and the VCaP mix's are re-frozen on that tree.
+
 The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
 alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
 identical reads, and transcript error 0.10–0.47 of 0.7.1's. It also states eight failures, each an open entry
@@ -102,8 +109,8 @@ Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_previe
 The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the release fixes or states; its
 `release-blocker` label is what it fixes. In order:
 
-1. **The capture reader, bounded at two sessions, with the owner:** issue #61, issue #65 and issue #6, then issue #1
-   against a pass bar the owner sets before any candidate runs. If no candidate passes, issue #1 ships stated.
+1. **The capture reader, bounded at two sessions, with the owner:** issue #1 against a pass bar the owner sets before
+   any candidate runs. If no candidate passes, issue #1 ships stated.
 2. **The annotated pool against 0.7.1:** issue #9 and issue #76, against `SUCCESS.md`'s bar 5. Dissect the largest
    gap first, the simulator's stranded capture-ON g50, and bring the dissection to the owner before fixing.
 3. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
