@@ -227,7 +227,9 @@ def test_the_mixture_is_continuous_in_kappa_and_through_equal_means():
     cs = np.array(
         [capture_mixture(G, size_biased(G, x), 0.9)[1] for x in np.linspace(0.05, 0.0, 501)]
     )
-    assert cs[-1] == 0.0 and np.max(np.abs(np.diff(cs))) < 1e-3
+    # zero to rounding: at equal laws the slope at c = 0 is a rounding residue of either sign, which the platform's
+    # summation order decides, and a positive one leaves c at about residue / curvature (2e-15 on x86-64 Linux)
+    assert cs[-1] < 1e-12 and np.max(np.abs(np.diff(cs))) < 1e-3
 
 
 # ── no capture, and the ends of the path ─────────────────────────────────────────────────────────────────
