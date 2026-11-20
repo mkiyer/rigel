@@ -167,6 +167,39 @@ def test_a_one_basin_landscape_reads_exactly_one_everywhere():
     assert r.saturation == 1.0
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_anchors_alone_are_one_basin_and_read_exactly_one(seed):
+    """A library with no gDNA evidence trains its landscape on its zero-count anchors alone, on a grid that spans every
+    slot the prior is read at, RNA-rich exons included, and refits three times (each refit's E-step places the
+    location-free anchors where the previous landscape is). An anchor says only "below the resolution wall", so the
+    density has one maximum: the census finds one basin, the saturated level is 1, and every object holding no gDNA
+    fragment reads exactly 1, however long."""
+    rng = np.random.default_rng(seed)
+    n_anchor, n_exon = 3000, 2000
+    eff_anchor = np.exp(rng.uniform(np.log(50.0), np.log(50_000.0), n_anchor))
+    eff_exon = np.exp(rng.uniform(np.log(100.0), np.log(5_000.0), n_exon))
+    mass_exon = eff_exon * np.exp(rng.uniform(np.log(1e-3), np.log(10.0), n_exon))
+    domain = (np.r_[np.zeros(n_anchor), mass_exon], np.r_[eff_anchor, eff_exon])
+    ls = None
+    for _refit in range(3):
+        ls = fit_landscape(
+            np.zeros(n_anchor),
+            np.zeros(n_anchor),
+            eff_anchor,
+            np.zeros(n_anchor),
+            anchor=np.ones(n_anchor, dtype=bool),
+            domain=domain,
+            prev=ls,
+        )
+        assert ls is not None
+        _bulk, above = split_basins(census(ls))
+        assert above == ()
+        r = capture_efficiencies(ls, np.zeros(n_exon), eff_exon, np.zeros(n_anchor), eff_anchor)
+        assert r.saturation == 1.0
+        np.testing.assert_array_equal(r.efficiency_region, 1.0)
+        np.testing.assert_array_equal(r.efficiency_boundary, 1.0)
+
+
 def test_a_lone_level_lifts_an_object_without_evidence_by_at_most_e_to_the_mu_delta():
     """An object whose own count says nothing reads the prior. In the log readout a lone level of prior mass ``μ`` at
     ``Δ`` nats above the bulk lifts it by at most ``e^{μΔ}``, where the posterior mean of the density itself would read

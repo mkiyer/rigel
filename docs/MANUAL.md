@@ -638,9 +638,7 @@ fades that reading, since such a library's reads sit where no genomic DNA shows,
 a simulated transcriptome-only library aligned by STAR, with no capture panel, reads a landscape
 saturation of 149,367× and reports it at a weight of 0.19 as a `gdna_capture_saturation` of 9.3, and the
 `em_effective_length` of the transcripts on those regions is inflated by up to that factor. A saturation
-above 1 on a library that was not captured is this limitation, not capture. With no gDNA evidence at all
-(an empty or nearly empty library) the landscape's smoothing alone can read a saturation near 10 and
-lengthen every `em_effective_length` by a few percent.
+above 1 on a library that was not captured is this limitation, not capture.
 
 **Known limitation: a captured library whose off-target DNA is thin.** The capture weight is a share of
 the library's reads, so RNA on regions too thinly covered by genomic DNA to show any lowers it for the
