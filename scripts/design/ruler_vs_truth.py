@@ -100,14 +100,8 @@ CLASSES = (
 KINDS = ("mRNA", "single-exon", "entity")
 #: the tolerance the per-class share is reported at: within ±0.1 nat of the truth, a 10 % effective length
 WITHIN = 0.1
-#: the keys a capture config carries from the panel manifest
-_CAPTURE_KEYS = (
-    "probes",
-    "probe_format",
-    "off_target_weight",
-    "binding_per_base",
-    "min_overlap",
-)
+#: the keys a capture config carries from the panel manifest: every field of the simulator's config
+_CAPTURE_KEYS = tuple(f.name for f in dataclasses.fields(CaptureConfig))
 
 
 # ── the truth ────────────────────────────────────────────────────────────────────────────────────
@@ -143,9 +137,9 @@ def sampler_truth(sampler: CaptureSampler, lengths, widths, pmf, off_target: flo
     """``(L_plain, factor_true, probed_frac)`` from the sampler's own partition.
 
     ``L_plain`` counts the starts the simulator could draw without capture, so a transcript's unknown bases (masked,
-    never drawn) leave its factor the capture's alone. The probed fraction is read off the partition at a one-base
-    fragment, where every start carries exactly its own base: ``(partition(1) − off·n) / binding`` over its ``n``
-    known bases counts the probed ones (a split probe's pieces at their penalty)."""
+    never drawn) leave its factor the capture's alone. The probed fraction is geometry, blind to how strongly each
+    probe binds: the share of its ``n`` known bases that lie under a probe part (``CaptureSampler.probed_bases``),
+    a split probe's pieces counted base by base."""
     L = np.asarray(lengths, dtype=np.int64)
     n = L.size
     rows = range(n)
@@ -158,9 +152,8 @@ def sampler_truth(sampler: CaptureSampler, lengths, widths, pmf, off_target: flo
     factor = np.where(ok, L_true / np.maximum(L_plain, 1e-12), np.nan)
     binding = float(sampler.config.binding_per_base)
     if sampler.enabled and binding > 0.0:
-        one = sampler.partition_array("mrna", rows, L, 1)
         known = sampler.admissible_counts("mrna", rows, L, 1)
-        probed = np.clip((one - off_target * known) / (binding * np.maximum(known, 1)), 0.0, 1.0)
+        probed = np.clip(sampler.probed_bases("mrna", rows) / np.maximum(known, 1), 0.0, 1.0)
     else:
         probed = np.zeros(n)
     return L_plain, factor, probed
@@ -185,10 +178,20 @@ class Sim:
 
 
 def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition: str) -> Sim:
-    """The condition's simulator, read from the panel manifest: its capture config on the panel's probes, masked where
-    the panel's genome is unknown, and its RNA and gDNA fragment-length laws."""
+    """The condition's simulator, read from the panel manifest: its capture config on the panel's probes, each probe
+    weighed by its sequence in the panel's genome, masked where that genome is unknown, and its RNA and gDNA
+    fragment-length laws. A captured condition whose recorded capture config lacks a field of the simulator's, or
+    carries one it does not know, was simulated under another weight model, and is refused."""
     manifest = json.load(open(panel_dir / "manifest.json"))
     cap_cfg = capture_config(manifest, condition)
+    missing = sorted(set(_CAPTURE_KEYS) - set(cap_cfg))
+    unknown = sorted(set(cap_cfg) - set(_CAPTURE_KEYS))
+    if cap_cfg.get("probes") and (missing or unknown):
+        raise SystemExit(
+            f"⛔ {condition}'s capture config records {missing or 'every field'} missing and {unknown or 'no'} unknown "
+            "field(s): it was simulated under another capture weight model than this simulator's, so its truth "
+            "cannot be rebuilt here; simulate the panel again"
+        )
     sim = manifest["simulation"]
     transcripts = load_transcripts_from_index(index_dir)
     if len(transcripts) != len(index.t_df) or any(
@@ -199,15 +202,16 @@ def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition
         r["ref"]: int(r["length"])
         for r in pd.read_feather(index.index_dir + "/ref_lengths.feather").to_dict("records")
     }
-    sampler = CaptureSampler.from_config(
-        CaptureConfig(**{k: cap_cfg[k] for k in _CAPTURE_KEYS if k in cap_cfg}),
-        transcripts,
-        ref_lengths,
-    )
-    # the masks the reads were drawn under: every template's unknown bases, from the panel's own genome
+    # the probes' strengths and the masks the reads were drawn under, from the panel's own genome
     if "genome" not in manifest:
         raise SystemExit("⛔ the manifest names no genome, so the truth cannot mask what the simulator never drew")
     with pysam.FastaFile(str(manifest["genome"])) as fasta:
+        sampler = CaptureSampler.from_config(
+            CaptureConfig(**{k: cap_cfg[k] for k in _CAPTURE_KEYS if k in cap_cfg}),
+            transcripts,
+            ref_lengths,
+            fasta=fasta,
+        )
         sampler.mask_unknown_sequence(fasta, manifest.get("gdna", {}).get("genomic_refs") or [])
     params = type("Sim", (), {k: sim[k] for k in ("frag_mean", "frag_std", "frag_min", "frag_max")})
     widths, pmf = fl_pmf(params)
@@ -1009,6 +1013,24 @@ class _Panel:
                    frozenset({"chr1"}))
 
 
+#: the self-test genome's repeating unit: 20 bases holding ``20 * gc_optimum`` G or C, so every window a multiple of
+#: 20 long, every probe of the self-test panel among them, holds exactly the optimum's GC and binds at strength 1
+_UNIT = 20
+
+
+def _self_test_genome(path: Path, length: int, at_strength: dict | None = None) -> Path:
+    """A genome of ``length`` bases repeating the optimum's unit, with each ``(start, end)`` of ``at_strength``
+    written as A and T instead (GC 0, a probe there binds weakly); indexed for ``pysam``."""
+    n_gc = round(_UNIT * CaptureConfig.gc_optimum)
+    unit = ("GC" * _UNIT)[:n_gc] + ("AT" * _UNIT)[: _UNIT - n_gc]
+    bases = list(unit * (length // _UNIT))
+    for lo, hi in at_strength or ():
+        bases[lo:hi] = ("AT" * (hi - lo))[: hi - lo]
+    path.write_text(">chr1\n" + "".join(bases) + "\n")
+    pysam.faidx(str(path))
+    return path
+
+
 def _self_test_panel(tmp: Path) -> _Panel:
     # the self-test is test code, so it builds its index with the suite's one synthetic-index builder
     sys.path.insert(0, str(_REPO / "tests"))
@@ -1035,17 +1057,20 @@ def _self_test_panel(tmp: Path) -> _Panel:
     )
     transcripts = load_transcripts_from_index(index.index_dir)
     off, binding = 1.0, 10.0
-    sampler = CaptureSampler.from_config(
-        CaptureConfig(
-            probes=str(bed),
-            probe_format="bed12",
-            off_target_weight=off,
-            binding_per_base=binding,
-            min_overlap=1,
-        ),
-        transcripts,
-        {"chr1": 16000},
-    )
+    # every probe binds at full strength on this genome, so the closed forms below read binding_per_base itself
+    with pysam.FastaFile(str(_self_test_genome(tmp / "optimum.fa", 16000))) as fasta:
+        sampler = CaptureSampler.from_config(
+            CaptureConfig(
+                probes=str(bed),
+                probe_format="bed12",
+                off_target_weight=off,
+                binding_per_base=binding,
+                min_overlap=1,
+            ),
+            transcripts,
+            {"chr1": 16000},
+            fasta=fasta,
+        )
     widths, pmf = fl_pmf(type("Sim", (), dict(frag_mean=200, frag_std=50, frag_min=100, frag_max=300)))
     row = {tid: int(i) for i, tid in enumerate(index.t_df.t_id)}
     L = np.array([int(t.length) for t in transcripts], dtype=np.int64)
@@ -1098,8 +1123,9 @@ def _check_manifest_loader(panel: _Panel, check) -> None:
     # the gDNA-space yield is the simulator's: on a reference the manifest draws gDNA from, a probed footprint yields
     # a captured gDNA mass; on one it never draws gDNA from (an RNA-only spike-in backbone) it yields none, probed or
     # not, so no locus there can be read against a gDNA yield
-    capture_on = {"probes": str(panel.tmp / "probes.bed"), "probe_format": "bed12", "off_target_weight": panel.off,
-                  "binding_per_base": panel.binding, "min_overlap": 1}
+    capture_on = {**dataclasses.asdict(CaptureConfig()), "probes": str(panel.tmp / "probes.bed"),
+                  "probe_format": "bed12", "off_target_weight": panel.off, "binding_per_base": panel.binding,
+                  "min_overlap": 1}
     blocks = np.array([(0, 0, 11000, 13600), (1, 0, 1000, 3600)], dtype=np.int64)
     for refs in (["chr1"], []):
         manifest_path.write_text(json.dumps({
@@ -1113,6 +1139,18 @@ def _check_manifest_loader(panel: _Panel, check) -> None:
                   Y[0] > 0.0 and Y[1] > 2.0 * Y[0])
         else:
             check("...and on a reference gDNA is never drawn from it yields none, probed or not", not Y.any())
+    # a captured record lacking a field of the simulator's capture config was simulated under another weight model
+    manifest_path.write_text(json.dumps({
+        **manifest, "capture_configs": [{"label": "on", "config": {
+            k: v for k, v in capture_on.items() if k != "gc_half_distance"}}],
+    }))
+    check("a captured record lacking a capture-config field is refused",
+          refuses(load_sim, panel.index, Path(panel.index.index_dir), panel.tmp, "example_capture_on"))
+    manifest_path.write_text(json.dumps({
+        **manifest, "capture_configs": [{"label": "on", "config": {**capture_on, "gdna_split_penalty": 0.2}}],
+    }))
+    check("...and so is one carrying a field this simulator does not know",
+          refuses(load_sim, panel.index, Path(panel.index.index_dir), panel.tmp, "example_capture_on"))
     manifest_path.write_text(json.dumps({k: v for k, v in manifest.items() if k != "genome"}))
     fired = refuses(load)
     manifest_path.write_text(json.dumps(manifest))
@@ -1144,6 +1182,19 @@ def _check_truth(panel: _Panel, check) -> Truth:
     check("probed fraction: half-probed reads ½", abs(probed[h] - 0.5) < 1e-9)
     n = panel.L.size
     return Truth(L_plain, factor, probed, transcript_kinds(panel.index.t_df), np.full(n, 100.0), np.full(n, 10.0))
+
+
+def _check_strength(panel: _Panel, truth: Truth, check) -> None:
+    """A probe binds at the strength its sequence gives: the same panel on a genome where the probed gene's probe is
+    A and T alone captures that gene less, while its probed fraction, geometry, stays 1."""
+    weak_genome = _self_test_genome(panel.tmp / "weak.fa", 16000, at_strength=[(1000, 1600), (3000, 3600)])
+    with pysam.FastaFile(str(weak_genome)) as fasta:
+        weak = CaptureSampler.from_config(panel.sampler.config, panel.transcripts, {"chr1": 16000}, fasta=fasta)
+    _, factor, probed = sampler_truth(weak, panel.L, panel.widths, panel.pmf, panel.off)
+    p, h = panel.p, panel.h
+    check("an AT-only probe binds weaker: its gene's truth factor falls", 1.0 < factor[p] < truth.factor[p])
+    check("...the other probe's gene is untouched", factor[h] == truth.factor[h])
+    check("...and its probed fraction, geometry, stays 1", abs(probed[p] - 1.0) < 1e-9)
 
 
 def _check_score(panel: _Panel, truth: Truth, check) -> None:
@@ -1293,6 +1344,7 @@ def self_test() -> int:
         panel = _self_test_panel(Path(tmp))
         _check_manifest_loader(panel, check)
         truth = _check_truth(panel, check)
+        _check_strength(panel, truth, check)
         _check_score(panel, truth, check)
         _check_module_loader(panel.tmp, check)
         _check_one_scale(panel, truth, check)

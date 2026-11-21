@@ -52,7 +52,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   drives the scan, the sweep and the locus EM). The scan's thread budget is split by a measured
   ratio, the second pass's lookups run in the kernel, and the fragment-length fits are vectorised.
 - **The simulator** (`rigel.sim`, which `scripts/sim/panel.py` drives): sparse nascent RNA, capture with a
-  fragment binding through one contiguous part of a probe, R1-sense libraries, FASTQ emission, and every
+  fragment binding through one contiguous part of a probe, each probe at a strength its own sequence's GC content
+  gives (falling at both extremes), R1-sense libraries, FASTQ emission, and every
   simulated read's true origin in its name. The `rigel sim` scenario YAML exposes a scenario's genes, read
   model and depth, not capture or R1-sense.
 - **Index provenance**: the manifest records the build's sources and flags, and a transcript that

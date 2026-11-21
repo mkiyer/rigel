@@ -108,8 +108,9 @@ MASKS = {
 }
 LAYOUTS = {
     "no probes": [],
-    "one probe": [ProbeInterval(380, 500)],
-    "two probes": [ProbeInterval(50, 170), ProbeInterval(640, 780)],
+    "one probe": [ProbeInterval(380, 500, 1.0)],
+    # two strengths, so the masked draws are checked against strength times overlap
+    "two probes": [ProbeInterval(50, 170, 1.0), ProbeInterval(640, 780, 0.4)],
 }
 WIDTHS = [1, 50, 120, 200, 999, 1000]
 
@@ -129,11 +130,11 @@ def _weights(intervals, runs, width, enabled, off=1.0, binding=10.0):
     for s in range(len(out)):
         if any(s < hi and s + width > lo for lo, hi in runs):
             continue
-        best = 0
+        best = 0.0
         if enabled:
             for p in intervals:
-                best = max(best, min(s + width, p.end) - max(s, p.start))
-        out[s] = off + binding * max(best, 0)
+                best = max(best, p.strength * (min(s + width, p.end) - max(s, p.start)))
+        out[s] = off + binding * best
     return out
 
 

@@ -6,10 +6,13 @@ gives the capture-aware effective length (:meth:`~CaptureSampler.partition_array
 (:meth:`~CaptureSampler.sample_starts`) and weighs one fragment (:meth:`~CaptureSampler.fragment_weight`). Without a
 probe file the sampler is disabled: uniform starts and plain effective lengths.
 
-A fragment weighs ``off_target_weight + binding_per_base * overlap``, ``overlap`` being its best overlap with one
-contiguous probe part in its own template. A molecule hybridises through one contiguous stretch, so a probe split
-across a splice junction is whole in a transcript holding the junction and two parts elsewhere (gDNA, a nascent
-span, an isoform without the junction), where a fragment binds the better part, never their sum. Each probe maps by
+A fragment weighs ``off_target_weight + binding_per_base * max(strength * overlap)``, the maximum over the contiguous
+probe parts in its own template, ``overlap`` the fragment's overlap with a part and ``strength`` the part's probe's.
+A probe binds at a strength its own sequence gives, :func:`gc_strength` of its GC content, 1 for the best-binding
+probe; it is read once from the reference when the panel loads. A molecule hybridises through one contiguous stretch,
+so a probe split across a splice junction is whole in a transcript holding the junction and two parts elsewhere
+(gDNA, a nascent span, an isoform without the junction), where a fragment binds the better part, never their sum;
+the split probe is one probe, its sequence its blocks joined, and its parts share its strength. Each probe maps by
 genomic overlap, not containment, onto gDNA and onto every transcript whose exons it touches, on either strand,
 since the library is DNA at capture.
 
@@ -23,6 +26,7 @@ from __future__ import annotations
 
 import gzip
 import logging
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +43,22 @@ from .config import CaptureConfig
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CaptureSampler", "ProbeInterval"]
+__all__ = ["CaptureSampler", "ProbeInterval", "gc_strength"]
+
+
+def gc_strength(gc, config: CaptureConfig):
+    """A probe's binding strength relative to the best-binding probe, from the GC fraction of its own sequence:
+    ``2 ** -((gc - gc_optimum) / gc_half_distance) ** 2``.
+
+    Capture falls away at both GC extremes, so the simplest form right in shape is one peak at ``gc_optimum`` that
+    falls symmetrically on a log scale, halving at ``gc_half_distance`` on either side, a quarter-strength probe
+    lying ``sqrt(2)`` half distances away. Scalar in, float out; an array in, an array out. ``gc_half_distance =
+    inf`` gives exactly 1 everywhere: every probe binds alike.
+    """
+    out = np.exp2(
+        -np.square((np.asarray(gc, dtype=np.float64) - config.gc_optimum) / config.gc_half_distance)
+    )
+    return float(out) if out.ndim == 0 else out
 
 
 def _merged(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
@@ -57,10 +76,12 @@ def _merged(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True, slots=True)
 class ProbeInterval:
-    """One contiguous part of a probe on one coordinate axis — the unit a fragment binds through."""
+    """One contiguous part of a probe on one coordinate axis — the unit a fragment binds through — with its probe's
+    binding strength (:func:`gc_strength`), which every part of the probe shares."""
 
     start: int
     end: int
+    strength: float
 
 
 class CaptureSampler:
@@ -111,6 +132,8 @@ class CaptureSampler:
         #: probes, or nascent RNA would be under-enriched against the gDNA beside it.
         self._mrna_intervals: dict[int, list[ProbeInterval]] = defaultdict(list)
         self._gdna_intervals: dict[str, list[ProbeInterval]] = defaultdict(list)
+        #: Each loaded probe's binding strength, in the probe file's order.
+        self._probe_strengths: list[float] = []
 
         #: Probe layout per space, flattened on first use (`_flat_probes`); it does not depend on fragment length.
         self._flat_probe_cache: dict[str, tuple] = {}
@@ -289,17 +312,31 @@ class CaptureSampler:
         config: CaptureConfig | None,
         transcripts: Sequence[Transcript],
         ref_lengths: Mapping[str, int],
+        fasta=None,
     ) -> "CaptureSampler":
-        """Build a sampler from a probe file, or return disabled if absent."""
+        """Build a sampler from a probe file, or return disabled if absent. ``fasta`` (a ``pysam.FastaFile``) is the
+        reference each probe's sequence, and so its binding strength, is read from; it is required unless the
+        config has no GC effect (``gc_half_distance = inf``)."""
         if config is None or not config.probes:
             return cls.disabled(transcripts, ref_lengths)
         _validate_config(config)
+        if fasta is None and not math.isinf(config.gc_half_distance):
+            raise ValueError(
+                "a probe binds at the strength its own GC content gives, so the capture sampler reads each probe's "
+                "sequence: pass the genome the panel lies on (`fasta`)"
+            )
         sampler = cls(config, transcripts, ref_lengths, enabled=True)
-        sampler._load_probe_file(Path(config.probes))
+        sampler._load_probe_file(Path(config.probes), fasta)
+        strengths = sampler.probe_strengths()
         logger.info(
-            "Hybrid capture enabled: %d transcript targets (incl. nascent entities), %d gDNA refs",
+            "Hybrid capture enabled: %d transcript targets (incl. nascent entities), %d gDNA refs; %d probes, "
+            "binding strength 5/50/95 %%: %s",
             len(sampler._mrna_intervals),
             len(sampler._gdna_intervals),
+            len(strengths),
+            " / ".join(f"{q:.3f}" for q in np.percentile(strengths, [5, 50, 95]))
+            if len(strengths)
+            else "-",
         )
         return sampler
 
@@ -328,9 +365,9 @@ class CaptureSampler:
         return float(self.partition_array(space, [key], lengths, frag_len)[0])
 
     def _flat_probes(self, space: str) -> tuple[np.ndarray, ...] | None:
-        """A space's probe parts as ``(keys, start, end)`` in ``(key, start)`` order, which lets `_run_landscape` find
-        merged runs with one prefix maximum. A fragment binds the best part, so no probe identity is carried. Built
-        once per space.
+        """A space's probe parts as ``(keys, start, end, strength)`` in ``(key, start)`` order, which lets
+        `_run_landscape` find merged runs with one prefix maximum. A fragment binds the part with the largest
+        strength times overlap, so a part carries its probe's strength and no other identity. Built once per space.
         """
         cached = self._flat_probe_cache.get(space)
         if cached is not None:
@@ -344,16 +381,19 @@ class CaptureSampler:
         keys: list[int | str] = []
         starts: list[int] = []
         ends: list[int] = []
+        strengths: list[float] = []
         for key, intervals in intervals_by_key.items():
             for interval in sorted(intervals, key=lambda i: (i.start, i.end)):
                 keys.append(key)
                 starts.append(interval.start)
                 ends.append(interval.end)
+                strengths.append(interval.strength)
 
         flat = (
             keys,
             np.asarray(starts, dtype=np.int64),
             np.asarray(ends, dtype=np.int64),
+            np.asarray(strengths, dtype=np.float64),
         )
         self._flat_probe_cache[space] = (flat,)
         return flat
@@ -391,7 +431,7 @@ class CaptureSampler:
             return cached.copy()
 
         flat = self._flat_probes(space)
-        flat_keys, starts, ends = flat
+        flat_keys, starts, ends, strengths = flat
         if not flat_keys:
             self._partition_memo[memo_key] = result
             return result.copy()
@@ -400,7 +440,7 @@ class CaptureSampler:
         positions = np.fromiter(
             (key_to_pos.get(key, -1) for key in flat_keys), dtype=np.int64, count=len(flat_keys)
         )
-        landscape = self._run_landscape(positions, starts, ends, eff, int(frag_len))
+        landscape = self._run_landscape(positions, starts, ends, strengths, eff, int(frag_len))
         if landscape is None:
             self._partition_memo[memo_key] = result
             return result.copy()
@@ -415,13 +455,13 @@ class CaptureSampler:
         self._partition_memo[memo_key] = result
         return result.copy()
 
-    def _run_landscape(self, positions, starts, ends, eff, width):
+    def _run_landscape(self, positions, starts, ends, strengths, eff, width):
         """The capture landscape over merged probe runs: `partition_array` sums it per key and `binding_landscape` reads
         its nonzero positions, so the effective length and the start distribution cannot disagree.
 
         Returns ``(buffer, run_offset, run_start, run_first, positions)``, or ``None`` if nothing is live. The buffer
-        holds ``w(s)``, the best overlap with one contiguous probe part, over the concatenated runs: run ``r`` covers
-        template positions ``[run_start[r], run_start[r] + run_len[r])``.
+        holds ``w(s)``, the largest strength times overlap with one contiguous probe part, over the concatenated runs:
+        run ``r`` covers template positions ``[run_start[r], run_start[r] + run_len[r])``.
         """
         key_eff = np.where(positions >= 0, eff[positions], 0)
         lo = np.maximum(0, starts - width + 1)
@@ -429,10 +469,11 @@ class CaptureSampler:
         alive = (positions >= 0) & (hi > lo)
         if not alive.any():
             return None
-        positions, starts, ends, lo, hi = (
+        positions, starts, ends, strengths, lo, hi = (
             positions[alive],
             starts[alive],
             ends[alive],
+            strengths[alive],
             lo[alive],
             hi[alive],
         )
@@ -475,10 +516,11 @@ class CaptureSampler:
             )
             if self.config.min_overlap > 1:
                 overlap = np.where(overlap >= self.config.min_overlap, overlap, 0)
-            weights = np.maximum(overlap, 0).astype(np.float64)
+            weights = np.maximum(overlap, 0) * strengths[selection][segment]
             return base[selection][segment] + position, weights
 
-        # A fragment binds through its best single part: the max across parts, never their sum.
+        # A fragment binds through one part, the one with the largest strength times overlap: the max across parts,
+        # never their sum.
         for rank in range(int(slot.max()) + 1):
             index, weights = scatter(slot == rank)
             buffer[index] = np.maximum(buffer[index], weights)
@@ -561,28 +603,28 @@ class CaptureSampler:
         if not self.enabled or self.config.binding_per_base <= 0:
             return self.config.off_target_weight
         frag_end = frag_start + frag_len
-        score = 0
+        score = 0.0
         for interval in self.probe_intervals(space, key):
             overlap = min(frag_end, interval.end) - max(frag_start, interval.start)
             if overlap >= self.config.min_overlap:
-                score = max(score, overlap)
+                score = max(score, interval.strength * overlap)
         return self.config.off_target_weight + self.config.binding_per_base * score
 
     # -- Probe loading -----------------------------------------------------
 
-    def _load_probe_file(self, path: Path) -> None:
+    def _load_probe_file(self, path: Path, fasta) -> None:
         lines = _read_probe_lines(path)
         if not lines:
             raise ValueError(f"capture probe file is empty: {path}")
         probe_format = _detect_probe_format(lines, self.config.probe_format)
         if probe_format == "transcript":
-            self._load_transcript_probes(lines, path)
+            self._load_transcript_probes(lines, path, fasta)
         elif probe_format == "bed12":
-            self._load_bed12_probes(lines, path)
+            self._load_bed12_probes(lines, path, fasta)
         else:
             raise ValueError(f"unsupported capture probe format: {probe_format!r}")
 
-    def _load_transcript_probes(self, lines: list[str], path: Path) -> None:
+    def _load_transcript_probes(self, lines: list[str], path: Path, fasta) -> None:
         header = _transcript_header(_split_fields(lines[0]))
         start_idx = 1 if header is not None else 0
         n_loaded = 0
@@ -602,11 +644,12 @@ class CaptureSampler:
                 int(end_text),
                 path,
                 row_number,
+                fasta,
             )
             n_loaded += 1
         logger.info("Loaded %d transcript-coordinate capture probes from %s", n_loaded, path)
 
-    def _load_bed12_probes(self, lines: list[str], path: Path) -> None:
+    def _load_bed12_probes(self, lines: list[str], path: Path, fasta) -> None:
         n_loaded = 0
         for row_number, line in enumerate(lines, start=1):
             fields = _split_fields(line)
@@ -628,7 +671,9 @@ class CaptureSampler:
             ]
             if not blocks:
                 continue
-            self._add_genomic_probe(ref, blocks)
+            self._add_genomic_probe(
+                ref, blocks, self._probe_strength(ref, blocks, fasta, f"{path}:{row_number}")
+            )
             n_loaded += 1
         logger.info("Loaded %d BED12 capture probes from %s", n_loaded, path)
 
@@ -639,6 +684,7 @@ class CaptureSampler:
         end: int,
         path: Path,
         row_number: int,
+        fasta,
     ) -> None:
         t_idx = self._tx_id_to_index.get(transcript_id)
         if t_idx is None:
@@ -654,17 +700,47 @@ class CaptureSampler:
             )
 
         transcript = self.transcripts[t_idx]
+        ref = str(transcript.ref)
         blocks = transcript_to_genomic_blocks(start, end, transcript)
-        self._add_genomic_probe(str(transcript.ref), blocks)
+        self._add_genomic_probe(
+            ref, blocks, self._probe_strength(ref, blocks, fasta, f"{path}:{row_number}")
+        )
 
-    def _add_genomic_probe(self, ref: str, blocks: Sequence[tuple[int, int]]) -> None:
-        """Map one probe, as genomic blocks, by overlap to gDNA and to every transcript whose exons it touches.
+    def _probe_strength(
+        self, ref: str, blocks: Sequence[tuple[int, int]], fasta, where: str
+    ) -> float:
+        """One probe's binding strength, :func:`gc_strength` of the GC fraction of its sequence, its genomic blocks
+        joined, over the bases the reference knows (``N`` is unknown, as for the mask). Without a reference there is
+        no GC effect (``from_config`` refuses otherwise), and every probe binds at 1. A probe that lies wholly on
+        unknown bases is refused: no fragment over it can ever be drawn, so the panel was designed on another
+        reference."""
+        if fasta is None:
+            strength = 1.0
+        else:
+            if ref not in fasta.references:
+                raise ValueError(f"{where}: a probe on {ref}, which the reference does not hold")
+            sequence = "".join(fasta.fetch(ref, int(lo), int(hi)) for lo, hi in blocks).upper()
+            known = len(sequence) - sequence.count("N")
+            if known == 0:
+                raise ValueError(
+                    f"{where}: a probe on {ref} {list(blocks)} lies wholly on unknown bases (N), where no fragment "
+                    "can be drawn: the panel was designed on another reference"
+                )
+            strength = gc_strength((sequence.count("G") + sequence.count("C")) / known, self.config)
+        self._probe_strengths.append(strength)
+        return strength
+
+    def _add_genomic_probe(
+        self, ref: str, blocks: Sequence[tuple[int, int]], strength: float
+    ) -> None:
+        """Map one probe, as genomic blocks, by overlap to gDNA and to every transcript whose exons it touches, every
+        part at the probe's one ``strength``.
 
         Each template receives the probe's contiguous parts in its own coordinates: a transcript holding the
         junction a probe spans receives it whole, since its landed pieces merge, while gDNA, a nascent span and an
         isoform without the junction receive the separate parts.
         """
-        self._add_gdna_blocks(ref, merge_intervals(blocks))
+        self._add_gdna_blocks(ref, merge_intervals(blocks), strength)
         lo = min(b[0] for b in blocks)
         hi = max(b[1] for b in blocks)
         for t_idx in self._transcripts_overlapping(ref, lo, hi):
@@ -673,16 +749,47 @@ class CaptureSampler:
             if not landed:
                 continue
             for start, end in merge_intervals(landed):
-                self._mrna_intervals[int(t_idx)].append(ProbeInterval(start, end))
+                self._mrna_intervals[int(t_idx)].append(ProbeInterval(start, end, strength))
 
-    def _add_gdna_blocks(self, ref: str, blocks: Sequence[tuple[int, int]]) -> None:
+    def _add_gdna_blocks(
+        self, ref: str, blocks: Sequence[tuple[int, int]], strength: float
+    ) -> None:
         ref_len = self.ref_lengths.get(ref)
         if ref_len is None:
             return
         for start, end in blocks:
-            interval = _clip_interval(start, end, ref_len)
+            interval = _clip_interval(start, end, ref_len, strength)
             if interval is not None:
                 self._gdna_intervals[ref].append(interval)
+
+    def probe_strengths(self) -> np.ndarray:
+        """Each loaded probe's binding strength, in the probe file's order."""
+        return np.asarray(self._probe_strengths, dtype=np.float64)
+
+    def probed_bases(self, space: str, keys: Iterable[int | str]) -> np.ndarray:
+        """Per template, how many of its bases lie under a probe part and are known to the reference: the panel's
+        geometry, blind to how strongly each probe binds."""
+        keys = list(keys)
+        out = np.zeros(len(keys), dtype=np.int64)
+        if not self.enabled:
+            return out
+        for pos, key in enumerate(keys):
+            parts = self.probe_intervals(space, key)
+            if not parts:
+                continue
+            lo = np.fromiter((p.start for p in parts), dtype=np.int64, count=len(parts))
+            hi = np.fromiter((p.end for p in parts), dtype=np.int64, count=len(parts))
+            order = np.argsort(lo, kind="stable")
+            covered = _merged(lo[order], hi[order])
+            n = int((covered[:, 1] - covered[:, 0]).sum())
+            for u_lo, u_hi in self.unknown(space, key).tolist():
+                n -= int(
+                    np.maximum(
+                        np.minimum(covered[:, 1], u_hi) - np.maximum(covered[:, 0], u_lo), 0
+                    ).sum()
+                )
+            out[pos] = n
+        return out
 
     def probe_intervals(self, space: str, key: int | str) -> list[ProbeInterval]:
         """The probe parts mapped onto one template: a transcript row in ``"mrna"``, a reference in ``"gdna"``."""
@@ -699,8 +806,8 @@ class CaptureSampler:
         seq_len: int,
         frag_len: int,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Start positions and their best single-part overlap weights, ascending by position, read out of
-        `_run_landscape`. Not cached: `sample_starts` asks for each ``(key, fragment length)`` pair once.
+        """Start positions and their best single-part weights (strength times overlap), ascending by position, read
+        out of `_run_landscape`. Not cached: `sample_starts` asks for each ``(key, fragment length)`` pair once.
         """
         width = int(frag_len)
         eff_len = int(seq_len) - width + 1
@@ -717,6 +824,7 @@ class CaptureSampler:
             np.zeros(n, dtype=np.int64),
             np.fromiter((i.start for i in ordered), dtype=np.int64, count=n),
             np.fromiter((i.end for i in ordered), dtype=np.int64, count=n),
+            np.fromiter((i.strength for i in ordered), dtype=np.float64, count=n),
             np.array([eff_len], dtype=np.int64),
             width,
         )
@@ -750,6 +858,10 @@ def _validate_config(config: CaptureConfig) -> None:
         raise ValueError("capture.binding_per_base must be >= 0")
     if config.min_overlap < 1:
         raise ValueError("capture.min_overlap must be >= 1")
+    if not 0.0 <= config.gc_optimum <= 1.0:
+        raise ValueError("capture.gc_optimum is a GC fraction, in [0, 1]")
+    if not config.gc_half_distance > 0.0:
+        raise ValueError("capture.gc_half_distance must be > 0 (inf: no GC effect)")
 
 
 def _read_probe_lines(path: Path) -> list[str]:
@@ -824,9 +936,9 @@ def _parse_bed_list(text: str) -> list[int]:
     return [int(part) for part in text.rstrip(",").split(",") if part]
 
 
-def _clip_interval(start: int, end: int, length: int) -> ProbeInterval | None:
+def _clip_interval(start: int, end: int, length: int, strength: float) -> ProbeInterval | None:
     start = max(0, int(start))
     end = min(int(length), int(end))
     if end <= start:
         return None
-    return ProbeInterval(start, end)
+    return ProbeInterval(start, end, strength)

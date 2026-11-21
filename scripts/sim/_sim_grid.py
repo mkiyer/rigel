@@ -26,6 +26,8 @@ from itertools import product
 from pathlib import Path
 from typing import Any
 
+import pysam
+
 from rigel.index import TranscriptIndex, load_manifest, load_reference_lengths, source_record
 from rigel.sim.capture import CaptureSampler
 from rigel.sim.transcriptome import load_transcripts_from_index
@@ -538,12 +540,14 @@ def run_condition_grid(
     captures, capture_in_names = capture_axis(cfg)
 
     outdir = Path(cfg.outdir)
-    # One sampler per capture scenario, shared by its conditions: the probe layout and the per-width partition
-    # depend only on the panel and the templates.
+    # One sampler per capture scenario, shared by its conditions: the probe layout, each probe's strength (read from
+    # its sequence) and the per-width partition depend only on the panel, the genome and the templates.
     ref_lengths = load_reference_lengths(Path(cfg.genome))
-    samplers = {
-        c.label: CaptureSampler.from_config(c.config, transcripts, ref_lengths) for c in captures
-    }
+    with pysam.FastaFile(str(cfg.genome)) as fasta:
+        samplers = {
+            c.label: CaptureSampler.from_config(c.config, transcripts, ref_lengths, fasta=fasta)
+            for c in captures
+        }
     cells = list(product(gdna_axis, od_axis, cfg.strand_specificities, captures))
     total = len(nrna_axis) * len(cells)
     conditions: list[dict] = []

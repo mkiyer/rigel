@@ -215,7 +215,7 @@ what `rigel quant` reads: the annotated transcripts plus the synthetic spans `in
 |---|---|
 | nascent RNA is a transcript | a span's molecules are its `nrna_abundance`, on its own template, reads tagged `nrna_`. Under `sparse` a span is off with probability `1 − on_fraction`, else log-uniform over `abundance_ranges` |
 | one multinomial over every RNA row | `prob ∝ abundance × capture-aware effective length`, annotated and span rows together |
-| capture binds by genomic overlap | a fragment binds through ONE contiguous part of a probe, never the sum: a transcript holding a probed junction holds the probe whole, while gDNA, a span and an isoform without the junction bind the better part; gDNA and nascent RNA enrich alike |
+| capture binds by genomic overlap, at the probe's strength | a probe binds at the strength its own sequence's GC content gives, falling at both extremes (`CaptureConfig.gc_optimum`, `gc_half_distance`); a fragment binds through ONE contiguous part of a probe, the one with the largest strength times overlap, never the sum: a transcript holding a probed junction holds the probe whole, while gDNA, a span and an isoform without the junction bind the better part, every part at its probe's one strength; gDNA and nascent RNA enrich alike |
 
 Capture depletes nascent RNA, and the post-capture lengths and abundances are the truth (`truth_summary.json`). The
 simulator does not do: dispersion beyond Poisson (it can plant a gDNA strand overdispersion, which no panel uses); R1-sense panels

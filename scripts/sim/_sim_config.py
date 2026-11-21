@@ -251,7 +251,17 @@ def _check_nrna(raw: dict, nrna: NRNAConfig) -> None:
 #: Every key a capture mapping may carry: the scenario's own (``label``, ``enabled``) and the ``CaptureConfig``
 #: fields.
 _CAPTURE_KEYS = frozenset(
-    {"label", "enabled", "probes", "probe_format", "off_target_weight", "binding_per_base", "min_overlap"}
+    {
+        "label",
+        "enabled",
+        "probes",
+        "probe_format",
+        "off_target_weight",
+        "binding_per_base",
+        "min_overlap",
+        "gc_optimum",
+        "gc_half_distance",
+    }
 )
 
 
@@ -283,6 +293,8 @@ def _capture_config(
         off_target_weight=float(merged.get("off_target_weight", CaptureConfig.off_target_weight)),
         binding_per_base=float(merged.get("binding_per_base", CaptureConfig.binding_per_base)),
         min_overlap=int(merged.get("min_overlap", CaptureConfig.min_overlap)),
+        gc_optimum=float(merged.get("gc_optimum", CaptureConfig.gc_optimum)),
+        gc_half_distance=float(merged.get("gc_half_distance", CaptureConfig.gc_half_distance)),
     )
 
 

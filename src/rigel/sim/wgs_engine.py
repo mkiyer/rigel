@@ -252,10 +252,10 @@ class WholeGenomeSimulator:
         ref_names = list(self.fasta.references)
         ref_lengths = [self.fasta.get_reference_length(r) for r in ref_names]
         self._ref_name_to_id: dict[str, int] = {name: i for i, name in enumerate(ref_names)}
-        # A prebuilt sampler is shared across conditions: its probe layout and partition memo depend only on the
-        # panel and the templates.
+        # A prebuilt sampler is shared across conditions: its probe layout, its probes' strengths and its partition
+        # memo depend only on the panel, the reference and the templates.
         self.capture = capture_sampler or CaptureSampler.from_config(
-            capture_config, transcripts, dict(zip(ref_names, ref_lengths))
+            capture_config, transcripts, dict(zip(ref_names, ref_lengths)), fasta=self.fasta
         )
         # Bases the reference does not know (`N`) are never drawn: each template is masked at its unknown runs.
         self.capture.mask_unknown_sequence(self.fasta, self.genomic_refs)

@@ -11,6 +11,8 @@ conditional.
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +21,7 @@ import pytest
 
 from rigel.sim.annotation import GeneBuilder
 from rigel.sim.capture import CaptureConfig, CaptureSampler
-from rigel.sim.capture.sampler import ProbeInterval
+from rigel.sim.capture.sampler import ProbeInterval, gc_strength
 from rigel.sim.genome import MutableGenome, random_dna_array
 from rigel.sim.wgs_config import GDNASimConfig, SimulationParams
 from rigel.sim.wgs_engine import WholeGenomeSimulator
@@ -52,7 +54,27 @@ def _transcript(
     return transcript
 
 
-def test_transcript_probe_weights_match_overlap_example(tmp_path):
+#: The geometry tests below bind every probe at full strength. A genome repeating a 20-base unit that holds
+#: ``20 * gc_optimum`` G or C has exactly the optimum's GC in every window a multiple of 20 long, and every probe in
+#: them is one, so each weighs ``binding_per_base`` per base of overlap: the best-binding probe's strength.
+OPTIMUM_UNIT = 20
+
+
+@pytest.fixture
+def at_optimum(tmp_path):
+    """A genome over ``chr1`` and ``chrA`` on which every probe a multiple of 20 long binds at strength 1."""
+    n_gc = round(OPTIMUM_UNIT * CaptureConfig.gc_optimum)
+    assert math.isclose(n_gc, OPTIMUM_UNIT * CaptureConfig.gc_optimum), (
+        "the unit must hold the optimum in whole bases"
+    )
+    unit = ("GC" * OPTIMUM_UNIT)[:n_gc] + ("AT" * OPTIMUM_UNIT)[: OPTIMUM_UNIT - n_gc]
+    lengths = {"chr1": 4_000, "chrA": 20_000}
+    path = _write_fasta(tmp_path, {ref: unit * (n // OPTIMUM_UNIT) for ref, n in lengths.items()})
+    with pysam.FastaFile(str(path)) as fasta:
+        yield fasta
+
+
+def test_transcript_probe_weights_match_overlap_example(tmp_path, at_optimum):
     probes = tmp_path / "probes.tsv"
     probes.write_text("transcript_id\tstart\tend\nT\t200\t320\nT\t500\t620\nT\t1500\t1620\n")
     transcript = _transcript("T", [(0, 2000)])
@@ -64,6 +86,7 @@ def test_transcript_probe_weights_match_overlap_example(tmp_path):
         ),
         [transcript],
         {"chr1": 2000},
+        fasta=at_optimum,
     )
 
     assert sampler.fragment_weight("mrna", 0, 2000, 1000, 200) == pytest.approx(1.0)
@@ -71,7 +94,7 @@ def test_transcript_probe_weights_match_overlap_example(tmp_path):
     assert sampler.fragment_weight("mrna", 0, 2000, 1480, 200) == pytest.approx(121.0)
 
 
-def test_a_split_probe_binds_every_template_through_one_contiguous_part(tmp_path):
+def test_a_split_probe_binds_every_template_through_one_contiguous_part(tmp_path, at_optimum):
     """A probe across a splice junction is one contiguous 60-mer only in a transcript that holds the
     junction; everywhere else (gDNA, the nascent entity, which is a single-exon transcript over the span,
     or an isoform that lacks the junction) it is two separate parts, and a fragment hybridises through
@@ -86,6 +109,7 @@ def test_a_split_probe_binds_every_template_through_one_contiguous_part(tmp_path
         CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
         [transcript, entity],
         {"chr1": 1000},
+        fasta=at_optimum,
     )
 
     # the spliced transcript holds the whole probe contiguously
@@ -99,7 +123,7 @@ def test_a_split_probe_binds_every_template_through_one_contiguous_part(tmp_path
         sampler.fragment_weight("nrna", 0, 400, 70, 280)
 
 
-def test_gdna_and_cdna_bind_the_same_half_of_a_split_probe_alike(tmp_path):
+def test_gdna_and_cdna_bind_the_same_half_of_a_split_probe_alike(tmp_path, at_optimum):
     """Hybridisation does not know what a molecule is: a gDNA fragment and a cDNA fragment of an
     isoform that lacks the junction hold the same 20 bases of the probe's first part, and weigh the
     same. Only a molecule holding the junction can bind the probe whole."""
@@ -111,6 +135,7 @@ def test_gdna_and_cdna_bind_the_same_half_of_a_split_probe_alike(tmp_path):
         CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
         [with_junction, without_junction],
         {"chr1": 1000},
+        fasta=at_optimum,
     )
 
     # T2 coordinates 60..120 are genomic 160..200 then 600..620: they hold genomic 180..200
@@ -120,7 +145,7 @@ def test_gdna_and_cdna_bind_the_same_half_of_a_split_probe_alike(tmp_path):
     assert gdna_half == pytest.approx(cdna_half)
 
 
-def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path):
+def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path, at_optimum):
     """A probe maps to compatible transcripts by genomic overlap: any isoform, any gene, either
     strand, and to gDNA. A sibling isoform sharing the probed exon, a single-exon
     transcript of another gene under the probe on the opposite strand, and a nascent entity spanning it
@@ -138,6 +163,7 @@ def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path):
         CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
         [t1, sibling, antisense, entity, far],
         {"chr1": 1000},
+        fasta=at_optimum,
     )
     # a 60-bp fragment lying exactly under the probe, in each transcript's own coordinates
     assert sampler.fragment_weight("mrna", 0, 200, 20, 60) == pytest.approx(61.0)  # T1
@@ -151,7 +177,7 @@ def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path):
     assert sampler.fragment_weight("gdna", "chr1", 1000, 120, 60) == pytest.approx(61.0)
 
 
-def test_bed12_probe_projects_to_transcript_and_gdna(tmp_path):
+def test_bed12_probe_projects_to_transcript_and_gdna(tmp_path, at_optimum):
     bed = tmp_path / "probes.bed"
     bed.write_text("chr1\t180\t440\tprobe1\t0\t+\t180\t440\t0\t2\t20,40\t0,220\n")
     transcript = _transcript("T", [(100, 200), (400, 500)])
@@ -164,6 +190,7 @@ def test_bed12_probe_projects_to_transcript_and_gdna(tmp_path):
         ),
         [transcript],
         {"chr1": 1000},
+        fasta=at_optimum,
     )
 
     assert sampler.fragment_weight("mrna", 0, 200, 80, 60) == pytest.approx(61.0)
@@ -171,7 +198,7 @@ def test_bed12_probe_projects_to_transcript_and_gdna(tmp_path):
     assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(41.0)
 
 
-def test_capture_partition_increases_targeted_transcript_weight(tmp_path):
+def test_capture_partition_increases_targeted_transcript_weight(tmp_path, at_optimum):
     probes = tmp_path / "probes.tsv"
     probes.write_text("T1\t400\t520\n")
     transcripts = [
@@ -182,6 +209,7 @@ def test_capture_partition_increases_targeted_transcript_weight(tmp_path):
         CaptureConfig(probes=str(probes), binding_per_base=10.0),
         transcripts,
         {"chr1": 3000},
+        fasta=at_optimum,
     )
 
     targeted = sampler.partition("mrna", 0, 1000, 100)
@@ -190,7 +218,7 @@ def test_capture_partition_increases_targeted_transcript_weight(tmp_path):
     assert targeted > untargeted * 20
 
 
-def test_overlapping_probes_do_not_stack_capture_strength(tmp_path):
+def test_overlapping_probes_do_not_stack_capture_strength(tmp_path, at_optimum):
     probes = tmp_path / "overlap.tsv"
     probes.write_text("transcript_id\tstart\tend\nT\t100\t220\nT\t140\t260\n")
     transcript = _transcript("T", [(0, 300)])
@@ -198,6 +226,7 @@ def test_overlapping_probes_do_not_stack_capture_strength(tmp_path):
         CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
         [transcript],
         {"chr1": 300},
+        fasta=at_optimum,
     )
 
     assert sampler.fragment_weight("mrna", 0, 300, 140, 80) == pytest.approx(81.0)
@@ -211,7 +240,7 @@ def test_overlapping_probes_do_not_stack_capture_strength(tmp_path):
     assert sampler.partition("mrna", 0, 300, 80) == pytest.approx(221 + expected_extra)
 
 
-def test_duplicate_isoform_probes_do_not_stack_gdna_strength(tmp_path):
+def test_duplicate_isoform_probes_do_not_stack_gdna_strength(tmp_path, at_optimum):
     probes = tmp_path / "duplicate.tsv"
     probes.write_text("transcript_id\tstart\tend\nT1\t20\t140\nT2\t20\t140\n")
     transcripts = [
@@ -222,6 +251,7 @@ def test_duplicate_isoform_probes_do_not_stack_gdna_strength(tmp_path):
         CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
         transcripts,
         {"chr1": 500},
+        fasta=at_optimum,
     )
 
     assert sampler.fragment_weight("gdna", "chr1", 500, 120, 120) == pytest.approx(121.0)
@@ -436,7 +466,7 @@ def test_random_probe_writer_outputs_bed12_for_sj_spanning_probe(tmp_path):
     assert fields[11] == "0,260"
 
 
-def test_random_probe_writer_masks_shared_isoform_sequence_by_abundance(tmp_path):
+def test_random_probe_writer_masks_shared_isoform_sequence_by_abundance(tmp_path, at_optimum):
     transcripts = [
         _transcript("LOW", [(100, 200), (300, 400)], abundance=10.0, gene_id="G"),
         _transcript("HIGH", [(100, 200), (300, 400)], abundance=1000.0, gene_id="G"),
@@ -464,6 +494,7 @@ def test_random_probe_writer_masks_shared_isoform_sequence_by_abundance(tmp_path
         CaptureConfig(probes=str(bed), probe_format="bed12", binding_per_base=1.0),
         transcripts,
         {"chr1": 1000},
+        fasta=at_optimum,
     )
 
     assert sampler.fragment_weight("mrna", 0, 200, 0, 100) > 1.0
@@ -527,18 +558,18 @@ def brute_force_partition(
     binding_per_base: float,
     min_overlap: int,
 ) -> float:
-    """The definition, spelled out: for every start, the fragment's best overlap with one contiguous
-    probe part, summed over starts. A fragment hybridises through one contiguous stretch, so separate
+    """The definition, spelled out: for every start, the fragment's best strength times overlap with one
+    contiguous probe part, summed over starts. A fragment hybridises through one contiguous stretch, so separate
     parts — of different probes, or of one probe split across an intron — never add."""
     total = 0.0
     for start in range(max(0, seq_len - frag_len + 1)):
         total += off_target_weight
-        best = 0
+        best = 0.0
         for interval in intervals:
             overlap = min(start + frag_len, interval.end) - max(start, interval.start)
             if overlap < min_overlap or overlap <= 0:
                 continue
-            best = max(best, overlap)
+            best = max(best, interval.strength * overlap)
         total += binding_per_base * best
     return total
 
@@ -561,8 +592,8 @@ def make_sampler(intervals_by_key: dict[int, list[ProbeInterval]], **overrides) 
     return sampler
 
 
-def iv(start: int, end: int) -> ProbeInterval:
-    return ProbeInterval(start=start, end=end)
+def iv(start: int, end: int, strength: float = 1.0) -> ProbeInterval:
+    return ProbeInterval(start=start, end=end, strength=strength)
 
 
 # ── the layouts. Each is a named shape the optimisation could get wrong differently ────────────────
@@ -576,6 +607,14 @@ LAYOUTS: dict[str, list[ProbeInterval]] = {
     "two parts, OVERLAPPING": [iv(100, 220), iv(160, 280)],
     "three probes, dense": [iv(100, 220), iv(240, 360), iv(380, 500)],
     "a split probe's two separate parts": [iv(100, 160), iv(400, 460)],
+    # probes bind at their own strengths: a fragment binds the part with the largest strength times overlap
+    "two OVERLAPPING parts of UNEQUAL strength": [iv(100, 220, 1.0), iv(160, 280, 0.25)],
+    "a weak long probe beside a strong short one": [iv(100, 160, 0.9), iv(160, 560, 0.2)],
+    "three probes of three strengths, dense": [
+        iv(100, 220, 0.9),
+        iv(240, 360, 0.5),
+        iv(380, 500, 0.1),
+    ],
     "no probes": [],
 }
 
@@ -1025,7 +1064,9 @@ class TestTheOnProbeConditional:
     exonic start carries ~ p^2/2, flat in w.
     """
 
-    def test_the_on_probe_share_of_capture_mass_rises_with_fragment_length(self, tmp_path):
+    def test_the_on_probe_share_of_capture_mass_rises_with_fragment_length(
+        self, tmp_path, at_optimum
+    ):
         """Checked against the closed form, not against a recorded number.
 
         For a probe ``[b, e)`` sitting far enough inside a template that no start is truncated,
@@ -1046,7 +1087,9 @@ class TestTheOnProbeConditional:
             off_target_weight=1.0,
             binding_per_base=10.0,
         )
-        sampler = CaptureSampler.from_config(config, [transcript], {"chrA": transcript_length})
+        sampler = CaptureSampler.from_config(
+            config, [transcript], {"chrA": transcript_length}, fasta=at_optimum
+        )
 
         shares = []
         for width in (60, 120, 240, 480, 800):
@@ -1063,7 +1106,7 @@ class TestTheOnProbeConditional:
 # ── probes on transcripts the index merged ───────────────────────────────────────────────────────
 
 
-def test_a_probe_naming_a_merged_duplicate_binds_its_kept_twin(tmp_path):
+def test_a_probe_naming_a_merged_duplicate_binds_its_kept_twin(tmp_path, at_optimum):
     """A panel may be designed on the raw annotation, and the index folds identical transcripts into one
     (`--collapse-duplicate-transcripts`), recording each dropped id as the kept one's alias. A probe naming a dropped
     id binds the kept twin, the same molecule.
@@ -1077,11 +1120,12 @@ def test_a_probe_naming_a_merged_duplicate_binds_its_kept_twin(tmp_path):
         CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
         [kept],
         {"chr1": 2000},
+        fasta=at_optimum,
     )
     assert sampler.fragment_weight("mrna", 0, 2000, 250, 200) == pytest.approx(71.0)
 
 
-def test_a_probe_naming_no_transcript_is_refused(tmp_path):
+def test_a_probe_naming_no_transcript_is_refused(tmp_path, at_optimum):
     """A probe whose transcript is neither in the index nor an alias of one names a panel built for another
     annotation: refused, never skipped, since a skipped probe is coverage the truth silently lacks."""
     probes = tmp_path / "probes.tsv"
@@ -1091,6 +1135,7 @@ def test_a_probe_naming_no_transcript_is_refused(tmp_path):
             CaptureConfig(probes=str(probes), binding_per_base=1.0),
             [_transcript("T", [(0, 2000)])],
             {"chr1": 2000},
+            fasta=at_optimum,
         )
 
 
@@ -1134,3 +1179,266 @@ def test_the_probe_writer_refuses_a_bed_target_before_writing(tmp_path):
             [_transcript("T1", [(0, 1200)])], target, capture_fraction=1.0, probe_length=120, seed=7
         )
     assert target.read_text() == "rendered\n"
+
+
+# ── a probe binds at a strength its own sequence's GC content gives ──────────────────────────────
+#
+# Capture falls away at both GC extremes, so a probe binds at ``2 ** -((gc − gc_optimum) / gc_half_distance) ** 2``
+# times ``binding_per_base``, its GC read from its own sequence: a probe split across a junction is one probe, its
+# blocks joined, and its parts share that strength. A fragment binds the one part with the largest strength times
+# overlap. Each gate below names the mistake it catches.
+
+
+def _genome(length: int, placed: dict[int, str]) -> str:
+    """``length`` bases of ``ACGT`` filler with each sequence of ``placed`` written at its offset."""
+    bases = list(("ACGT" * (length // 4 + 1))[:length])
+    for offset, sequence in placed.items():
+        bases[offset : offset + len(sequence)] = sequence
+    return "".join(bases)
+
+
+def _composed(n: int, n_gc: int) -> str:
+    """``n`` known bases, ``n_gc`` of them G or C."""
+    return ("GC" * n)[:n_gc] + ("AT" * n)[: n - n_gc]
+
+
+def _bed12(path: Path, rows: list[tuple[str, list[tuple[int, int]]]]) -> Path:
+    """One BED12 line per probe, ``(ref, blocks)`` with absolute genomic blocks."""
+    lines = []
+    for i, (ref, blocks) in enumerate(rows):
+        lo, hi = blocks[0][0], blocks[-1][1]
+        sizes = ",".join(str(e - s) for s, e in blocks)
+        starts = ",".join(str(s - lo) for s, _ in blocks)
+        lines.append(
+            f"{ref}\t{lo}\t{hi}\tp{i}\t0\t+\t{lo}\t{hi}\t0\t{len(blocks)}\t{sizes}\t{starts}\n"
+        )
+    path.write_text("".join(lines))
+    return path
+
+
+def _sampler_on(tmp_path, sequence: str, rows, transcripts=(), **config) -> CaptureSampler:
+    """A BED12 panel on one ``chr1`` of ``sequence``, its probes weighed by their sequence."""
+    fasta_path = _write_fasta(tmp_path, {"chr1": sequence})
+    bed = _bed12(tmp_path / "probes.bed", rows)
+    cfg = CaptureConfig(
+        probes=str(bed),
+        probe_format="bed12",
+        off_target_weight=1.0,
+        binding_per_base=10.0,
+        **config,
+    )
+    with pysam.FastaFile(str(fasta_path)) as fasta:
+        sampler = CaptureSampler.from_config(
+            cfg, list(transcripts), {"chr1": len(sequence)}, fasta=fasta
+        )
+        sampler.mask_unknown_sequence(fasta, ["chr1"])
+    return sampler
+
+
+def test_the_strength_is_one_at_the_optimum_half_at_the_half_distance_and_falls_at_both_extremes():
+    """The form: 1 at ``gc_optimum``, ½ at ``gc_optimum ± gc_half_distance``, symmetric, and falling monotonically
+    away on both sides, never reaching 0. Perturbation: a one-sided or a linear form fails a side."""
+    cfg = CaptureConfig()
+    assert gc_strength(cfg.gc_optimum, cfg) == 1.0
+    for side in (-1.0, 1.0):
+        assert gc_strength(cfg.gc_optimum + side * cfg.gc_half_distance, cfg) == pytest.approx(0.5)
+    below = np.linspace(0.0, cfg.gc_optimum, 56)
+    above = np.linspace(cfg.gc_optimum, 1.0, 46)
+    assert (np.diff(gc_strength(below, cfg)) > 0).all() and (
+        np.diff(gc_strength(above, cfg)) < 0
+    ).all()
+    assert (gc_strength(np.linspace(0.0, 1.0, 101), cfg) > 0).all()
+    distance = np.linspace(0.0, 0.4, 9)
+    np.testing.assert_allclose(
+        gc_strength(cfg.gc_optimum - distance, cfg), gc_strength(cfg.gc_optimum + distance, cfg)
+    )
+
+
+def test_two_probes_of_equal_overlap_yield_in_the_ratio_of_their_strengths(tmp_path):
+    """Two 120-mers, one at the optimum (66 G or C) and one at GC 0.35 (42), a half distance of 0.20 below it, so
+    at half strength: a fragment lying exactly under each weighs off-target plus ``binding_per_base`` times its
+    strength times 120, so the two captured weights stand in the ratio of the strengths, and the one at the optimum
+    keeps ``binding_per_base`` as its full strength. The vectorised landscape and the partition say the same.
+
+    Perturbation: a sampler that ignores the strength reads the two alike."""
+    sequence = _genome(2000, {200: _composed(120, 66), 1200: _composed(120, 42)})
+    sampler = _sampler_on(
+        tmp_path,
+        sequence,
+        [("chr1", [(200, 320)]), ("chr1", [(1200, 1320)])],
+        gc_half_distance=0.20,
+    )
+    cfg = sampler.config
+    strong, weak = gc_strength(66 / 120, cfg), gc_strength(42 / 120, cfg)
+    assert strong == 1.0 and weak == pytest.approx(0.5)
+    np.testing.assert_array_equal(sampler.probe_strengths(), [strong, weak])
+
+    w_strong = sampler.fragment_weight("gdna", "chr1", 2000, 200, 120)
+    w_weak = sampler.fragment_weight("gdna", "chr1", 2000, 1200, 120)
+    assert w_strong == 1.0 + 10.0 * 120
+    assert (w_weak - 1.0) / (w_strong - 1.0) == pytest.approx(weak / strong, rel=1e-12)
+
+    positions, weights = sampler.binding_landscape("gdna", "chr1", 2000, 120)
+    landscape = dict(zip(positions.tolist(), weights.tolist()))
+    assert landscape[200] == 120.0 and landscape[1200] == pytest.approx(120.0 * weak, rel=1e-12)
+    # each probe lies whole inside the template, so its starts sum its length times the width
+    expected = (2000 - 120 + 1) + 10.0 * (120 * 120) * (strong + weak)
+    assert sampler.partition("gdna", "chr1", 2000, 120) == pytest.approx(expected, rel=1e-12)
+
+
+def test_a_split_probe_is_one_probe_whose_parts_share_the_strength_of_its_joined_sequence(tmp_path):
+    """A probe split across a junction, 60 bases of G or C in the first exon and 60 of A or T in the second: its
+    sequence is its blocks joined, GC 0.5, and both parts carry that one strength, in gDNA, where they lie apart,
+    and in the transcript holding the junction, where they are one part.
+
+    Perturbation: reading each block's GC alone gives the parts 1.0 and 0.0, two very different strengths."""
+    sequence = _genome(1000, {100: "GC" * 30, 400: "AT" * 30})
+    transcript = _transcript("T", [(0, 160), (400, 1000)])
+    sampler = _sampler_on(
+        tmp_path, sequence, [("chr1", [(100, 160), (400, 460)])], transcripts=[transcript]
+    )
+    s = gc_strength(0.5, sampler.config)
+    assert s < 1.0
+    assert [p.strength for p in sampler.probe_intervals("gdna", "chr1")] == [s, s]
+    assert [(p.start, p.end, p.strength) for p in sampler.probe_intervals("mrna", 0)] == [
+        (100, 220, s)
+    ]
+    # a fragment over either part alone in gDNA binds its 60 bases at the probe's one strength
+    assert sampler.fragment_weight("gdna", "chr1", 1000, 100, 60) == pytest.approx(
+        1.0 + 10.0 * 60 * s, rel=1e-12
+    )
+    assert sampler.fragment_weight("gdna", "chr1", 1000, 400, 60) == pytest.approx(
+        1.0 + 10.0 * 60 * s, rel=1e-12
+    )
+    # the transcript holding the junction sees it whole
+    assert sampler.fragment_weight("mrna", 0, 760, 100, 120) == pytest.approx(
+        1.0 + 10.0 * 120 * s, rel=1e-12
+    )
+
+
+def test_a_fragment_binds_the_part_with_the_largest_strength_times_overlap(tmp_path):
+    """A probe at the optimum beside one at GC 0.25: a fragment holding 20 bases of the strong probe and all 120 of
+    the weak one binds the weak one, whose strength times overlap is larger, and one holding 40 of the strong binds
+    the strong. Never their sum, and never the larger overlap regardless of strength.
+
+    Perturbation: the larger overlap (120 in both) or the sum of the two both fail."""
+    sequence = _genome(1000, {200: _composed(120, 66), 320: _composed(120, 30)})
+    sampler = _sampler_on(tmp_path, sequence, [("chr1", [(200, 320)]), ("chr1", [(320, 440)])])
+    weak = gc_strength(30 / 120, sampler.config)
+    assert 20 < 120 * weak < 40
+    assert sampler.fragment_weight("gdna", "chr1", 1000, 300, 140) == pytest.approx(
+        1.0 + 10.0 * 120 * weak, rel=1e-12
+    )
+    assert sampler.fragment_weight("gdna", "chr1", 1000, 280, 160) == pytest.approx(
+        1.0 + 10.0 * 40, rel=1e-12
+    )
+
+
+def test_a_probe_over_unknown_bases_reads_its_strength_from_the_bases_it_knows(tmp_path):
+    """A 120-mer whose last 20 bases the reference does not know (``N``) and whose 100 known bases hold 55 G or C:
+    its GC is 0.55 over what is known, the optimum, and the mask still keeps every fragment off the unknown bases.
+    A probe that lies wholly on unknown bases has no sequence to bind with and is refused.
+
+    Perturbation: counting the unknown bases as known A or T reads GC 0.458, a weaker probe."""
+    sequence = _genome(1000, {200: _composed(100, 55) + "N" * 20})
+    sampler = _sampler_on(tmp_path, sequence, [("chr1", [(200, 320)])])
+    np.testing.assert_array_equal(sampler.probe_strengths(), [1.0])
+    assert sampler.fragment_weight("gdna", "chr1", 1000, 200, 100) == 1.0 + 10.0 * 100
+    assert (
+        sampler.fragment_weight("gdna", "chr1", 1000, 250, 100) == 0.0
+    )  # it covers the unknown bases
+
+    blind = _genome(1000, {600: "N" * 120})
+    (tmp_path / "blind").mkdir()
+    with pytest.raises(ValueError, match="unknown"):
+        _sampler_on(tmp_path / "blind", blind, [("chr1", [(600, 720)])])
+
+
+def test_a_sampler_that_cannot_read_its_probes_sequence_is_refused(tmp_path):
+    """Every probe's strength comes from its own sequence, so a panel loaded without the genome cannot be weighed:
+    refused, never read as every probe binding alike."""
+    bed = _bed12(tmp_path / "probes.bed", [("chr1", [(200, 320)])])
+    with pytest.raises(ValueError, match="genome"):
+        CaptureSampler.from_config(
+            CaptureConfig(probes=str(bed), probe_format="bed12"), [], {"chr1": 1000}
+        )
+
+
+def test_with_no_gc_effect_every_probe_binds_alike(tmp_path):
+    """``gc_half_distance = inf`` is the form's limit: every probe's strength is exactly 1 whatever its sequence, so
+    the weights are the overlap geometry alone, bit for bit, with or without the genome. This is the setting the
+    no-op proof runs."""
+    cfg = CaptureConfig(gc_half_distance=math.inf)
+    assert (gc_strength(np.linspace(0.0, 1.0, 101), cfg) == 1.0).all()
+    sequence = _genome(2000, {200: _composed(120, 66), 1200: _composed(120, 12)})
+    rows = [("chr1", [(200, 320)]), ("chr1", [(1200, 1320)])]
+    read = _sampler_on(tmp_path, sequence, rows, gc_half_distance=math.inf)
+    np.testing.assert_array_equal(read.probe_strengths(), [1.0, 1.0])
+    unread = CaptureSampler.from_config(replace(read.config), [], {"chr1": 2000})
+    for start in (150, 200, 260, 1200, 1250):
+        assert read.fragment_weight("gdna", "chr1", 2000, start, 120) == unread.fragment_weight(
+            "gdna", "chr1", 2000, start, 120
+        )
+    assert read.fragment_weight("gdna", "chr1", 2000, 1200, 120) == 1.0 + 10.0 * 120
+
+
+def test_the_probed_bases_are_the_panels_geometry_blind_to_strength(tmp_path):
+    """Which of a template's known bases lie under a probe is geometry: a weak probe covers its bases as fully as a
+    strong one, and an unknown base under a probe is not counted."""
+    sequence = _genome(2000, {200: _composed(120, 66), 1200: _composed(100, 12) + "N" * 20})
+    sampler = _sampler_on(tmp_path, sequence, [("chr1", [(200, 320)]), ("chr1", [(1200, 1320)])])
+    assert sampler.probe_strengths()[1] < 0.1
+    assert sampler.probed_bases("gdna", ["chr1"]).tolist() == [220]
+
+
+def test_the_simulator_weighs_its_probes_from_its_own_genome(tmp_path):
+    """The read engine builds its sampler on the FASTA it draws from, so each probe's strength is its sequence's."""
+    genome = MutableGenome(3000, seed=7, name="chr1")
+    builder = GeneBuilder(genome)
+    builder.add_gene("g1", "+", [{"t_id": "T1", "exons": [(100, 1100)]}])
+    transcripts = builder.get_transcripts()
+    fasta = genome.write_fasta(tmp_path)
+    probes = tmp_path / "probes.tsv"
+    probes.write_text("T1\t400\t520\nT1\t700\t820\n")
+    sim = WholeGenomeSimulator(
+        fasta,
+        transcripts,
+        SimulationParams(
+            sim_seed=11, frag_mean=100, frag_std=1, frag_min=100, frag_max=100, read_length=50
+        ),
+        GDNASimConfig(),
+        genomic_refs=[genome.name],
+        capture_config=CaptureConfig(probes=str(probes), binding_per_base=10.0),
+    )
+    try:
+        with pysam.FastaFile(str(fasta)) as fa:
+            gc = [
+                sum(b in "GC" for b in fa.fetch("chr1", 100 + s, 100 + e).upper()) / (e - s)
+                for s, e in ((400, 520), (700, 820))
+            ]
+        np.testing.assert_allclose(
+            sim.capture.probe_strengths(), gc_strength(np.array(gc), sim.capture.config)
+        )
+    finally:
+        sim.close()
+
+
+def test_parse_yaml_capture_gc_settings(tmp_path):
+    """The GC settings are read from a scenario's ``capture:`` block like every other capture key, ``.inf``
+    included."""
+    probes = tmp_path / "probes.tsv"
+    probes.write_text("T1\t10\t130\n")
+    config = tmp_path / "sim.yaml"
+    config.write_text(
+        f"genome: genome.fa\ngtf: annotation.gtf\ncapture:\n  probes: {probes}\n"
+        f"  gc_optimum: 0.5\n  gc_half_distance: .inf\n"
+    )
+    cfg = parse_yaml_config(config)
+    assert cfg.capture.gc_optimum == 0.5 and math.isinf(cfg.capture.gc_half_distance)
+    default = tmp_path / "default.yaml"
+    default.write_text(f"genome: genome.fa\ngtf: annotation.gtf\ncapture:\n  probes: {probes}\n")
+    parsed = parse_yaml_config(default).capture
+    assert (parsed.gc_optimum, parsed.gc_half_distance) == (
+        CaptureConfig.gc_optimum,
+        CaptureConfig.gc_half_distance,
+    )
