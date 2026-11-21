@@ -81,6 +81,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             # `intron_departure` is the introns' departure prior ε for the library, from single-strand introns'
             # antisense counts under the background law (2) and the library's sense fraction (4).
             "intron_departure",
+            # `lock_departure` is the locks' departure for the library: what each locked object's two strands can
+            # share, in the same two groups, from the library's sense fraction (4).
+            "lock_departure",
         ),
     ),
     (

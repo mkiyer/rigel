@@ -40,7 +40,8 @@ The table binds prose, comments, docstrings and identifiers alike:
 | **splice-out** / **splice-in** | a message crossing a boundary in the direction mature RNA departs / arrives through the sj there | `graft` |
 
 A G1 object's certainty is the annotation's — real intergenic space carries unannotated transcription — which is safe
-for a pooled level and no licence to treat one slot as ground truth. `donor` / `acceptor` are strand-dependent 5′/3′
+for a pooled level and no licence to treat one slot as ground truth. A stranded library asks each one's own strands
+(the locks' departure, §5). `donor` / `acceptor` are strand-dependent 5′/3′
 names over structures stored in genomic order, so on a minus-strand sj a "donor" holds the acceptor; they survive only
 in the index's flag bits (`FLAG_DONOR_s` marks the genomic-low end of an `s`-strand intron), which every reader reads in
 genomic terms. Splice-out and splice-in name a step's semantics, not its arithmetic: a step always uses the low slot's
@@ -315,7 +316,7 @@ drawn choices (the oracle in `scripts/design/_oracle.py`).
 `calibration.calibrate` owns the order and computes no model of its own:
 
 ```
-substrate → chain, geometry, statics → strand model (κ; binomial) → G1/G2/G3 initial belief
+substrate → chain, geometry, statics → strand model (κ; binomial) → the locks' departure → G1/G2/G3 initial belief
   → pass 0: solve_chain with no fitted prior
   → refits (calib_refit_iters): fit the gDNA landscape on the belief, reset the belief, solve_chain again
   → deconvolved mass per region and boundary → capture efficiencies → CalibrationResult
@@ -364,8 +365,8 @@ is a sweep over the chain, not a per-object fit.
 every divisor below it — contained placements at a region, crossing placements at a boundary, each on its component's
 own law — and the published gDNA lengths are projected off it. Precision is per component, never one scalar. A known
 bias: an unspliced crossing's RNA half takes an unbounded reach, over-calling gDNA before a polyA site. A TOTAL
-abundance is a pre-solve instrument only. The initial belief is the signature class: G1 locked all-gDNA and never
-solved, G2 one strand and resolved by it, G3 both strands (AMBIG).
+abundance is a pre-solve instrument only. The initial belief is the signature class: G1 locked and never solved, at
+the gDNA share its own strands leave it; G2 one strand and resolved by it; G3 both strands (AMBIG).
 
 - **κ, the RNA sense fraction, is the genuine junctions' rate.** A stranded library's annotated junction is genuine
   RNA (at the library's minority-strand rate), a splice artifact (misaligned gDNA, ½) or reversed; the three-class
@@ -379,6 +380,21 @@ solved, G2 one strand and resolved by it, G3 both strands (AMBIG).
   factor of a free κ against κ = ½ on the spliced 2×2, `ln BF = N·ln 2 + ln B(κ̂(N + 2), (1 − κ̂)(N + 2)) > 0`, with no
   multiple of σ chosen and no gDNA term. A library with no spliced read is unstranded, never an error. gDNA's strand
   term is ½.
+- **A locked object reads its strands** (`lock_departure`, EQUATIONS §7.3). A G1 object was booked as gDNA whole, the
+  one place the strand likelihood was not read. gDNA lands on either strand evenly, so what one strand of a locked
+  object holds beyond the other is not gDNA: a read placed at the wrong copy of a duplicated sequence, hanging over an
+  annotated end (issue #18), or a transcript the annotation ends too soon (issue #12). The fit is the introns'
+  departure prior's two groups with the lock as the null, and ε̂ the library's own rate of departed locks, with no
+  prior and no setting. **A locked object is gDNA until its own strands say otherwise** (the owner, 2026-11-21): the
+  lock keeps the posterior over its prior, so a single fragment or a balanced few are all gDNA at any ε̂, and the
+  library's rate tempers a lock its strands move and never moves one by itself. The object's gDNA share is its
+  booking, so its training of the landscape (a one-sided lock is wider than the location floor and trains nothing),
+  and the background's law reads it. **The sweep reads only the part that is still a lock** (the owner, 2026-11-21):
+  the edge rule floors the exon beside a lock with a structurally pure count (issue #41), and what a departed lock's
+  strands share is an estimate, as a single-strand slot's gDNA is, and floors no neighbour. Against handing the sweep
+  the share, it is even at 5 % gDNA and above and better with none. The kernel is unchanged. A dead strand channel, and a library whose every lock is balanced, are the lock bit
+  for bit: every row on the simulator's own alignments, and every unstranded row. It cannot help an unstranded
+  library, whose transcribed fragments are balanced too (issue #1).
 
 ### 5.4 ψ, the per-slot solve
 
@@ -598,9 +614,14 @@ from its own evidence leaves that in place. It is continuous and has no constant
 reads as weak capture and fades), and one from ψ's own variance (an unstranded slot says nothing of its own gDNA, so
 unstranded capture ON fades). What it costs is issue #2.
 
-False gDNA on a near-gDNA-free library still reads as capture, faded by the weight but not removed
-(issue #1); that off-target cDNA is depleted as gDNA is remains untested
-(issue #46).
+RNA the annotation does not explain is booked as gDNA and, where it is dense, read as capture: on a library with
+almost no gDNA, where the bulk sits at the landscape's floor and the weight fades the reading without removing it, and
+on an unstranded one. A stranded library's locks read their strands (§5.3), which takes the one-strand part out of the
+booking; what both strands share, and all of it on an unstranded library, stays. That ships stated, and the reader is
+not softened (the owner, 2026-11-20): a captured busy exon has
+no more gDNA evidence of its own than a busy exon in a library with none, so reading a booking with less trust costs
+true capture at 5 % gDNA wherever it helps a false one (issue #1). That off-target cDNA is depleted as gDNA is remains
+untested (issue #46).
 
 ### 7.3 The result
 

@@ -433,6 +433,55 @@ its background reads 32 % gDNA from one fragment and 11 % from three, against 50
 gDNA the strands say so, so a library whose sparse introns hold mostly gDNA reads near 1, and its rows step aside for
 the strands. The intergenic pool keeps `m0`, because its regions depart at their own rate, which no strand measures.
 
+**7.3 The locks' departure, per library.** `lock_departure.fit_lock_departure`, called by `calibrate._lock`. A slot
+whose annotation admits no RNA strand is locked as gDNA. gDNA lands on either genome strand evenly; a molecule
+transcribed from strand `s` lands on the plus column at `q_s`, with `q₊ = κ` and `q₋ = 1 − κ`. If the slot holds `g`
+gDNA fragments and `x₊`, `x₋` transcribed ones, `n = g + x₊ + x₋`, its two columns `u`, `v` have
+
+    E[u − v] = (2κ − 1)·(x₊ − x₋),        so        g ≤ n − |E[u − v]| / |2κ − 1|
+
+The strands identify the difference and nothing else. At a perfect protocol the bound is `2·min(u, v)`, what the two
+strands can share; at κ = ½ it is `n`. Transcription on both strands in equal amounts stays inside the shared part.
+The bound is not the estimate: under pure gDNA `E|u − v| ≈ √(2n/π)`, so the bare shared part reads binomial noise as
+departure. So two groups, §7.2's with the lock in the background's place:
+
+    L_j(ε) = (1 − ε)·a_j + ε·b_j
+    a_j = Binom(u_j; n_j, ½)                                                the lock
+    b_j = ½·Σ_s ∫₀¹ Binom(u_j; n_j, f/2 + (1 − f)·q_s) df                  departed: a share 1 − f from one strand
+
+with `f` uniform, the strand either one, and each integral §7.2's incomplete-beta form on `[x₁, x₂] = sorted(q_s, ½)`.
+ε̂ maximises `Σ_j log L_j(ε)` on `[0, 1]`. The sum is concave, so ε̂ is the one root of `Σ_j (b_j − a_j)/L_j(ε)` or an
+end. There is no prior, because ε = 0 is the lock. Under the lock `E[b/a] = 1`, so the slope at 0 has mean zero with a
+long right tail, and ε̂ is exactly 0 in most all-gDNA libraries.
+
+A locked object is gDNA until its own strands say otherwise. The posterior `(1 − ε̂)·a/L` would move an object whose
+strands say nothing (`b = a`: one fragment) to `1 − ε̂` on the library's rate alone, so the weight the lock keeps is
+that posterior over its prior:
+
+    w = min(1, a / L(ε̂)) = 1 / (1 + ε̂·(b/a − 1)₊)
+
+`b ≤ a` gives `w = 1` at any ε̂. Elsewhere ε̂ tempers how far the object's strands are believed, and `1 − w` is the
+part of the posterior they added to the prior, `(P(departed | u) − ε̂)/(1 − ε̂)`, floored at 0. The object's gDNA
+share is
+
+    φ = w + (1 − w)·f̄,        f̄ = Σ_s b_s·f̄_s / Σ_s b_s,        f̄_s = (E[p | s] − q_s) / (½ − q_s)
+    E[p | s] = (u + 1)/(n + 2) · [I_{x₂} − I_{x₁}](u + 2, n − u + 1) / [I_{x₂} − I_{x₁}](u + 1, n − u + 1)
+
+the mean of a `Beta(u + 1, n − u + 1)` truncated to `p`'s range. The remainder is transcribed,
+`(1 − w)·(b_s/Σb)·(1 − f̄_s)` on strand `s`, so the simplex closes. `Var(log φ)` is the spread of `log f` over the two
+groups: 0 with weight `w`, the departed posterior's `log f` otherwise. That is unbounded at `f → 0`, so its two moments
+are read at quantiles whose level runs as `t²` from that end over 64 midpoints `t`, with weight `2t`, which bounds the
+integrand. A one-sided lock shares a fragment or two, give or take as much: `Var(log f) ≈ 1.6`, above the landscape's
+location floor.
+
+The lock's booking is `φ·n`. Its belief is `(f₊, f₋, φ)` at `Var(log φ)`, and a locked slot is never solved, so every
+reader of `f_g × count` follows it, the landscape among them, and §7.1's law is handed the count at `φ·n`. The two parts
+of `φ` differ. `w·n` is still a lock, a structurally pure gDNA count; `(1 − w)·f̄·n` is the departed reading's estimate,
+with a width, as any single-strand slot's gDNA is. The sweep reads a locked slot's count as a pure count, in the edge
+rule's floor on the exon beside it, and no single-strand slot floors its neighbour, so the sweep is handed `w·n`
+(`calibrate._lock_belief`, `_locked_at`). A dead strand channel is read as κ = ½: `b = a`, ε̂ = 0, φ ≡ w ≡ 1, and the
+run is the lock's bit for bit.
+
 ---
 
 ## 9. Priors on a grid

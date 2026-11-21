@@ -633,13 +633,35 @@ the library's junctions together support a higher level the cap is raised to it.
 it equals `gdna_capture_saturation` wherever the spliced counts ask for no more, and in every library that
 reads no capture.
 
-**Known limitation: a library with almost no gDNA.** There the bulk sits near the landscape's floor, and
-the few regions where calibration calls gDNA read as enormous capture against it. The capture weight
-fades that reading, since such a library's reads sit where no genomic DNA shows, but does not remove it:
-a simulated transcriptome-only library aligned by STAR, with no capture panel, reads a landscape
-saturation of 149,367× and reports it at a weight of 0.19 as a `gdna_capture_saturation` of 9.3, and the
-`em_effective_length` of the transcripts on those regions is inflated by up to that factor. A saturation
-above 1 on a library that was not captured is this limitation, not capture.
+**Known limitation: RNA the annotation does not explain can read as capture.** Rigel takes an unspliced
+fragment for genomic DNA wherever the annotation has no RNA to give it to: past a transcript's annotated
+end, in intergenic space, on a gene's other strand, or at the second copy of a duplicated gene when the
+aligner reports the read at both. On a stranded library, calibration reads the two strands of each such
+place and does not count as genomic DNA what one strand holds beyond the other, since genomic DNA lands on
+both evenly; what both strands hold, and all of it on an unstranded library, it still counts. Where such
+fragments are dense they stand above the bulk as a level of genomic DNA, which is what capture looks like,
+and two kinds of library show it with no capture panel. In our tests, on simulated libraries aligned by
+STAR:
+
+- *A library with almost no gDNA.* The bulk sits at the landscape's floor, so any such level stands
+  thousands-fold above it, and busy exons that hold no DNA evidence of their own are read at those levels
+  too. The capture weight fades the reading, since the library's reads sit where no genomic DNA shows, but
+  does not remove it. A stranded, transcriptome-only library reads a landscape level of 25,786× and reports
+  it at a weight of 0.06 as a `gdna_capture_saturation` of 1.8. Its `em_effective_length` is a little above
+  `effective_length` for four transcripts in five, more than 1.2 times it for one transcript in a hundred,
+  and at most 2.2 times it. Its transcript error is 3.6 % of the annotated RNA fragments and its gene error
+  0.4 %, where the same run with capture not read makes 2.5 % and 0.3 %.
+- *An unstranded library.* With no strand to say that the fragments past a transcript's end are RNA, they
+  are booked as genomic DNA, and so is part of the exon beside them. An unstranded library with 5 % gDNA
+  reports a weight of 0.87 and a saturation of 10.1. One transcript in a hundred has an
+  `em_effective_length` more than 1.08 times its `effective_length`, and the largest is 85 times it. Its
+  transcript error is 4.5 % of the annotated RNA fragments and its gene error 0.9 %, against 2.6 % and
+  0.4 % with capture not read.
+
+In both the error takes annotated RNA away, at most about 0.1 % of it, mostly to nascent RNA; it does not turn
+genomic DNA into annotated RNA. With every read placed where it came from, the same two libraries' errors
+are within 1 % of the run with capture not read. A `gdna_capture_saturation` above 1 on a library that was
+not captured is this limitation, not capture.
 
 **Known limitation: a captured library whose off-target DNA is thin.** The capture weight is a share of
 the library's reads, so RNA on regions too thinly covered by genomic DNA to show any lowers it for the

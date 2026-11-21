@@ -657,7 +657,8 @@ class CalibrationConstants:
 
     #: The introns' departure prior (``intron_departure``) takes each intron's background expectation at this many
     #: midpoint quantiles of the background's count. A discretization, not a model choice: at 64 the estimate is within
-    #: 0.4 % of the exact sum over every count, where its own spread on a 2,000-intron library is about 6 %.
+    #: 0.4 % of the exact sum over every count, where its own spread on a 2,000-intron library is about 6 %. The locks'
+    #: departure (``lock_departure``) reads a departed lock's ``Var(log f)`` at as many quantiles of its share.
     departure_quadrature_nodes: int = 64
 
     def __post_init__(self) -> None:

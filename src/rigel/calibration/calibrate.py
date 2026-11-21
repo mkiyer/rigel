@@ -10,8 +10,9 @@ module below it. An object's composition has three sources: the binomial strand 
       -> chain + geometry + statics               the geometry owns every divisor
       -> the intergenic background's gDNA law     every intron's count is read against it (the intron abundance model)
       -> strand balance: κ
+      -> the locks' departure                     what each locked object's two strands can share: its gDNA
       -> the introns' departure prior ε           the library's own, read from its single-strand introns' strands
-      -> signature-binary init (G1/G2/G3)
+      -> signature-binary init (G1/G2/G3)         a locked object at its strands' share
       -> pass 1: solve_chain with no fitted prior, one forward and one backward pass
       -> refits (calib_refit_iters): fit the gDNA landscape on the belief, reset the belief, solve again
       -> chain_region_deconv, chain_boundary_deconv: per-object gDNA / RNA mass
@@ -36,6 +37,7 @@ from .effective_length import observable_cut_shares
 from .gdna_density import BackgroundLaw, background_law
 from .intron_departure import DepartureFit, fit_departure_prior
 from .landscape import DensityLandscape, fit_landscape
+from .lock_departure import LockFit, fit_lock_departure
 from .messages.silent import SilentPolicy
 from .messages.transfer import TransferPolicy
 from .region_chain import (
@@ -47,10 +49,12 @@ from .region_chain import (
     on_object_axis,
 )
 from .region_geometry import (
+    RegionBelief,
     RegionGeometry,
     RegionStatics,
     build_region_geometry,
     build_region_statics,
+    g1_locked,
     init_beliefs,
     region_gdna_geometry,
     slot_signature,
@@ -156,11 +160,17 @@ class _SweepInputs:
     """Everything a sweep reads, fixed for the whole calibration: the chain, its statics and geometry, the region
     arrays, the strand model, the policy, the config, the per-slot gDNA support ``(mass_global, eff_global)`` the
     landscape prior is fit and read on, the intergenic background's gDNA law every intron is read against, carrying the
-    introns' departure prior, and that prior's fit."""
+    introns' departure prior, and that prior's fit.
+
+    ``lock`` is the locks' departure on the slot axis (:func:`_lock`), and ``message_geometry`` the geometry the sweep
+    reads: ``geometry`` with each locked slot's count at the part of it that is still a lock (:func:`_locked_at`). It
+    is ``geometry`` itself where every lock stands."""
 
     chain: RegionChain
     statics: RegionStatics
     geometry: RegionGeometry
+    message_geometry: RegionGeometry
+    lock: LockFit
     region_arrays: RegionArrays
     strand: StrandBalance
     policy: SilentPolicy | TransferPolicy
@@ -193,9 +203,17 @@ def _sweep_inputs(
     statics = build_region_statics(chain, region_arrays, boundary_flags)
     strand = fit_strand_balance(strand_model)
     mass_global, eff_global = region_gdna_geometry(geometry)
-    # The pool is fitted at the run setting: an intergenic region departs at its own rate, which no strand measures.
-    # The introns' rows then read at the library's own rate where its strands measure one.
-    background = _background(chain, geometry, region_arrays, config.intron_departure_prior)
+    lock = _lock(statics, geometry, strand)
+    # The sweep reads a locked slot's count as a structurally pure gDNA count: the edge rule's floor on the exon beside
+    # it. Only the part of the count that is still a lock is that. What a departed lock's strands share is an
+    # estimate with a width, as any single-strand slot's gDNA is, and no such slot floors its neighbour.
+    message_geometry = _locked_at(geometry, lock, lock.kept)
+    # The pool is fitted at the run setting: an intergenic region's gDNA departs from the law at its own rate, which
+    # no strand measures. The introns' rows then read at the library's own rate where its strands measure one. The law
+    # reads an intergenic region's gDNA count, so its share.
+    background = _background(
+        chain, _locked_at(geometry, lock, lock.share), region_arrays, config.intron_departure_prior
+    )
     departure = _departure(
         chain, statics, geometry, region_arrays, strand, background, config.intron_departure_prior
     )
@@ -203,6 +221,8 @@ def _sweep_inputs(
         chain=chain,
         statics=statics,
         geometry=geometry,
+        message_geometry=message_geometry,
+        lock=lock,
         region_arrays=region_arrays,
         strand=strand,
         policy=_policy(config, strand),
@@ -211,6 +231,71 @@ def _sweep_inputs(
         eff_global=eff_global,
         background=replace(background, departure=departure.departure),
         departure=departure,
+    )
+
+
+def _lock(statics, geometry, strand: StrandBalance) -> LockFit:
+    """The locks' departure for this library (`lock_departure.fit_lock_departure`), on the slot axis: a slot the
+    annotation admits no RNA strand at holds gDNA on both genome strands evenly, so what one strand holds beyond the
+    other is not gDNA, and the fit gives each locked slot its gDNA share. A slot that admits a strand is not a lock and
+    keeps share 1 here; the solve reads its strands. A dead strand channel (`strand_discriminability`) is read as
+    κ = ½, as the solve reads it, so an unstranded library's locks stand."""
+    locked = g1_locked(
+        np.asarray(statics.free_pos, dtype=bool), np.asarray(statics.free_neg, dtype=bool)
+    )
+    count = np.asarray(geometry.unspliced_count, np.float64)
+    kappa = float(strand.rna_sense_frac)
+    live = strand_discriminability(kappa, strand.n_observations) > 0.0
+    fit = fit_lock_departure(count[locked, 0], count[locked, 1], kappa if live else 0.5)
+
+    def on_slots(values, default):
+        out = np.full(locked.shape[0], default, dtype=np.float64)
+        out[locked] = values
+        return out
+
+    logger.info(
+        "calibration: the locks' departure %.4g from %d locked objects holding a fragment; their strands prefer it "
+        "to the lock by %.1f nats, and share %.1f of their %d fragments as gDNA%s",
+        fit.departure,
+        fit.n_objects,
+        fit.evidence,
+        float((fit.share * count[locked].sum(axis=1)).sum()),
+        int(count[locked].sum()),
+        "" if live else " (the strand channel is dead, so they say nothing)",
+    )
+    return replace(
+        fit,
+        share=on_slots(fit.share, 1.0),
+        kept=on_slots(fit.kept, 1.0),
+        rna_pos=on_slots(fit.rna_pos, 0.0),
+        rna_neg=on_slots(fit.rna_neg, 0.0),
+        variance=on_slots(fit.variance, 0.0),
+    )
+
+
+def _locked_at(geometry: RegionGeometry, lock: LockFit, factor: np.ndarray) -> RegionGeometry:
+    """``geometry`` with each locked slot's unspliced count scaled by ``factor``, which is 1 off the locks. A locked
+    slot is not solved, so its count is read only as a gDNA count: by the sweep's message builders and by the
+    background's law. ``geometry`` itself where every lock stands."""
+    if lock.departure == 0.0:
+        return geometry
+    count = np.asarray(geometry.unspliced_count, np.float64)
+    return replace(geometry, unspliced_count=count * factor[:, None])
+
+
+def _lock_belief(belief: RegionBelief, lock: LockFit) -> RegionBelief:
+    """The initial belief with each locked slot at what its strands share: its gDNA share, the transcribed remainder
+    by strand, and the share's ``Var(log f_g)``. A locked slot is never solved, so this is its answer; a lock that
+    stands is ``{0, 0, 1}`` at variance 0, as before."""
+    if lock.departure == 0.0:
+        return belief
+    departed = lock.share < 1.0
+    return replace(
+        belief,
+        f_pos=np.where(departed, lock.rna_pos, belief.f_pos),
+        f_neg=np.where(departed, lock.rna_neg, belief.f_neg),
+        f_g=np.where(departed, lock.share, belief.f_g),
+        var_gdna=np.where(departed, lock.variance, belief.var_gdna),
     )
 
 
@@ -293,8 +378,9 @@ def _policy(config, strand: StrandBalance):
 
 
 def _init_belief(s: _SweepInputs):
-    """The signature-binary G1/G2/G3 belief on the chain, before any sweep."""
-    return init_beliefs(
+    """The signature-binary G1/G2/G3 belief on the chain, before any sweep, each locked slot at its strands' share
+    (:func:`_lock_belief`)."""
+    belief = init_beliefs(
         s.geometry,
         s.statics,
         rna_sense_frac=s.strand.rna_sense_frac,
@@ -302,6 +388,7 @@ def _init_belief(s: _SweepInputs):
         logodds_window=s.config.sweep_logodds_window,
         n_threads=int(s.config.n_threads),
     )
+    return _lock_belief(belief, s.lock)
 
 
 def _sweep(s: _SweepInputs, belief, prior, diagnostics: SweepDiagnostics | None):
@@ -328,7 +415,7 @@ def _sweep(s: _SweepInputs, belief, prior, diagnostics: SweepDiagnostics | None)
     return solve_chain(
         s.chain,
         s.statics,
-        s.geometry,
+        s.message_geometry,
         belief,
         s.region_arrays,
         rna_sense_frac=s.strand.rna_sense_frac,
@@ -608,6 +695,7 @@ def calibrate(
         diagnostics.rna_sense_frac = inputs.strand.rna_sense_frac
         diagnostics.background = inputs.background
         diagnostics.departure = inputs.departure
+        diagnostics.lock = inputs.lock
     _log_summary(result, inputs.strand, substrate, sj)
     return result
 

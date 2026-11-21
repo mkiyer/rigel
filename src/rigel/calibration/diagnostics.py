@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .gdna_density import BackgroundLaw
     from .intron_departure import DepartureFit
     from .landscape import DensityLandscape
+    from .lock_departure import LockFit
     from .region_arrays import RegionArrays
     from .region_chain import RegionChain
     from .region_geometry import RegionBelief, RegionGeometry, RegionStatics
@@ -64,7 +65,8 @@ class CalibrationDiagnostics:
     """The solve's intermediates, filled by ``calibrate``: the chain, its geometry and statics, the substrate, the sj
     axis and region frame it ran on, the final belief (after the refits), the last refit's landscape (``None`` when no
     refit fitted one), the library's RNA sense fraction, the intergenic background's law as the sweep read it (its
-    departure prior the introns'), the fit of that departure prior, and the last sweep's :class:`SweepDiagnostics`."""
+    departure prior the introns'), the fit of that departure prior, the locks' departure on the slot axis, and the last
+    sweep's :class:`SweepDiagnostics`, whose counts are the sweep's own: a locked slot's at its gDNA share."""
 
     chain: RegionChain | None = None
     geometry: RegionGeometry | None = None
@@ -77,4 +79,5 @@ class CalibrationDiagnostics:
     rna_sense_frac: float | None = None
     background: BackgroundLaw | None = None
     departure: DepartureFit | None = None
+    lock: LockFit | None = None
     sweep: SweepDiagnostics = field(default_factory=SweepDiagnostics)
