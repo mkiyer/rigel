@@ -723,30 +723,65 @@ fragment. Capture saturates (a fragment binds its best probe part), so
 `C` the junction cap. Where each boundary reads its flanks' mean it is `½(c_exon,lo + c_exon,hi)`. An intron piece
 too short for a gDNA fragment reads the boundary on its far side, so a one-region intron gives `½(c_lo + c_hi)`.
 
+**The best part, where a placement leaves a cut's exons** (`_best_part`, `_homes`). A cut's own price is read from
+gDNA's objects: a boundary inside an exon from the gDNA that crosses it, a junction from its two splice sites. Where
+gDNA's fragment at such a cut runs out of the exon it runs on into the intron. RNA's runs across the junction into the
+next exon, a placement gDNA does not have. Call a cut's HOME the exon it lies in, or the two exons a junction joins,
+with `h_lo`, `h_hi` the home's bases either side of the cut and `near`, `far` the template's. A placement's deposit at
+the cut depends only on its bases either side of it, so the cut's share `M` splits by where its placements go, each
+part a share at other reaches:
+
+    inside = M(h_lo, h_hi)          lo = M(near, h_hi) − inside          hi = M(h_lo, far) − inside
+    both = M(near, far) − inside − lo − hi
+
+`lo` holds the placements that leave the home at its low end alone, across the junction that ends it there; `hi` and
+`both` likewise. A placement that leaves across a junction is RNA's crossing of that junction, and a fragment binds
+its best single probe part. So with `c` the cut's own price and `x_lo`, `x_hi` the two junctions' CROSSING LEVELS,
+
+    c_cut = c + [ lo·(x_lo − c)₊ + hi·(x_hi − c)₊ + both·(max(x_lo, x_hi) − c)₊ ] / M(near, far)
+
+    x_junction = min( max(c_lo + c_hi − ½(c_intron,lo + c_intron,hi), 0),  C )
+
+A crossing level is the junction's price without its best-object term: conservation's sum up to the cap, what RNA's
+crossing captures there as the library's junctions read it. The best object beside a junction is one gDNA object's
+own reading, the largest of four, and prices the junction it lies beside; passed on, it would carry that one
+object's noise to every cut within a fragment of it. A crossing level is never one already raised, so nothing is
+passed on twice. The rule only raises: a template with no junction (the locus gDNA, a synthetic span, a single-exon
+transcript), a cut whose placements all stay home, and one level everywhere keep `c` to the bit. The split is taken
+on the law the efficiencies are read on (`g`, §14), which the excess is carried from. One placement at a time it is
+the place weight's rule (§15.2), and `tests/calibration/test_capture_eff_length.py` gates the two against every
+placement of a template. What it assumes without checking: that a placement across a junction captures at that
+junction's crossing level wherever it started. Under probes tiled along the transcript every such placement does.
+Under a probe across the junction alone, a placement that starts far from the junction holds less of the probe than
+the level says, and the cut reads high. It also takes the junction's level as read: a level the library does not hold
+(issue #1) is carried to the cuts beside it.
+
 **The junction cap, from RNA's own split** (`fit_junction_cap`). The saturation level `S` (below) is gDNA's, and gDNA
 never deposits on a junction, so `S` says only what gDNA shows. RNA crosses the junction. In an exon region `A`
 RNA and gDNA are the same placements under the same probes, so a transcript at rate `ρ_t` leaves `ρ_t S_t(A) c_A`
 contained fragments in `A` and `ρ_t M_t(J) p_J` on a junction `J` priced `p_J`: the ratio is free of `ρ_t`. Over the
 transcripts using `J`, with `A` covered by them alone and each object entering as the ruler enters it (§14.8),
 
-    E[W_J] / E[m_J] = a_J(p_J) / D_J,        a_J(p) = X_J + X'_J (p − 1),        D_J = Σ_{A beside J, its own} S(A) ĉ_A
+    E[W_J] / E[m_J] = a_J / D_J,   a_J = mean_t [ M_t(J) + M'_t(J) (p_t,J − 1) ],   D_J = Σ_{A beside J, its own} S(A) ĉ_A
 
-`X_J` the mean of `M_t(J)` over those transcripts and `X'_J` of `M_t(J)·S_J(g)/S_J(T_G)`, the carried excess
-(`a_J(p) = X_J p` where nothing is carried); `W_J` the junction's conserved spliced mass (`sj_conserved_mass`) and
-`m_J` calibration's unspliced RNA in those regions (`count_rna_region`). As counts, with `p_J(C)` the rule above at
-cap `C`:
+over those transcripts `t`: `p_t,J` is the price the ruler gives `t`'s cut at `J`, the junction rule with the
+placements that leave across the next junction at its crossing level where that is higher (the best part, above), and
+`M'_t(J) = M_t(J)·S_J(g)/S_J(T_G)` the carried excess (`a_J = M(J) p_J` where nothing is carried and nothing leaves);
+`W_J` is the junction's conserved spliced mass (`sj_conserved_mass`) and `m_J` calibration's unspliced RNA in those
+regions (`count_rna_region`). As counts, with `a_J(C)` the term at cap `C`:
 
-    W_J | W_J + m_J  ~  Binomial( q_J(C) ),        q_J(C) = a_J(p_J(C)) / (a_J(p_J(C)) + D_J)
+    W_J | W_J + m_J  ~  Binomial( q_J(C) ),        q_J(C) = a_J(C) / (a_J(C) + D_J)
 
     C = argmax_{C ≥ S}  Σ_J [ W_J log q_J(C) + m_J log(1 − q_J(C)) ]
 
-over the junctions with a region of their own, a fragment in their footprint and a price the cap can move
-(conservation's sum above `max(S, the best object beside)`). A term is constant in `C` below its junction's best
-object and above its sum, and concave in `log C` between, so the sum is not concave: it is maximised by search on a
-geometric grid from `S` to the largest sum (`CONSTANTS.calibration.junction_cap_grid_points`) and the first maximum
-is taken, so a cap the counts cannot tell from `S` is `S`. The cap is one-sided (`C ≥ S`), and with no level above the
-bulk (`S = 1`) it is 1. The shares are the ruler's own, carried to gDNA's table as an efficiency is (§14), so the fit
-and the lengths it feeds state one model. What it assumes without checking is issue #8.
+over the junctions with a region of their own, a fragment in their footprint and a term the cap can move: their own
+price (conservation's sum above `max(S, the best object beside)`), or the crossing level of a junction their placements
+leave across (a sum above `S`). A junction's own price is constant in `C` below its best object and above its sum, and
+concave in `log C` between, so the sum is not concave: it is maximised by search on a geometric grid from `S` to the
+largest sum the fit reads (`CONSTANTS.calibration.junction_cap_grid_points`) and the first maximum is taken, so a cap
+the counts cannot tell from `S` is `S`. The cap is one-sided (`C ≥ S`), and with no level above the bulk (`S = 1`) it
+is 1. The shares are the ruler's own, carried to gDNA's table as an efficiency is (§14), so the fit and the lengths it
+feeds state one model. What it assumes without checking is issue #8.
 
 **The efficiency** (`capture_efficiencies`). Each object reads its gDNA count `k` on its support `S` (a region's
 contained, a boundary's crossing) as `ℓ(x) = k log(S eˣ) − S eˣ` over `x = log ρ`, against the fitted landscape as
@@ -783,8 +818,9 @@ bulk, and `transcript_capture_eff_lengths` returns `fl` while `assemble_priors` 
 
 **Where the rule is exact.** For gDNA under any capture physics; for another component on the objects where its
 fragments are gDNA's — contained pieces and cuts away from junctions, exon edges and template ends. Near an edge or end
-its fragments splice or stop where gDNA's run on, and a probe captures in genomic coordinates on gDNA but transcript
-coordinates on cDNA (issue #33).
+its fragments splice or stop where gDNA's run on. A splice is read from the junction's crossing level (the best part),
+a reading and not a measurement; a template's end is not read, and a probe captures in genomic coordinates on gDNA but
+transcript coordinates on cDNA (issue #33).
 
 ---
 
@@ -933,8 +969,11 @@ deposit mass at object `o` (`Σ_o m_o = 1`) and `c_o` §11's efficiency,
     w(x) = Σ_o m_o(x) c_o,         Σ_x f(ℓ_x) w(x) = Σ_o c_o Σ_x f(ℓ_x) m_o(x) = Σ_o c_o share_o(f)
 
 so `w` sums over a component's placements to its normaliser on the law the efficiencies are read on (a bottleneck,
-maximum or per-base mean would not). A junction takes §11's price (RNA only); an implicit place is weighed on its
-observed path. On `g`, gDNA's sum is calibration's supports and a transcript's at one table is §14.8's
+maximum or per-base mean would not). A junction takes §11's price (RNA only), and a place across junctions binds its
+best part: each boundary it crosses and each junction it uses reads the larger of its own efficiency and the crossing
+level of the nearest junction the place uses on each side of it, which is §11's best part one placement at a time, so
+the sum is still the template's (`_place_best_part`). An implicit place is weighed on its observed path. On `g`, gDNA's
+sum is calibration's supports and a transcript's at one table is §14.8's
 (`test_a_templates_place_weights_sum_to_its_length_on_the_uncaptured_law`). Where a unit's hypotheses imply one length
 the scorer's table factor cancels; where they differ the ratio is the shared law's per-fragment one.
 

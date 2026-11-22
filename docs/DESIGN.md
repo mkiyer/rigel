@@ -730,6 +730,17 @@ With no landscape every length is its uncontracted span, bit-identically.
   The counts never lower it, and with no level above the bulk (a saturated level of exactly 1) it is not fitted: no
   capture is read, so there is none for a junction to exceed. The lengths and a multimapper's place weights read the one
   value (`summary.json`'s `junction_capture_cap`).
+- **A fragment binds its best part across a junction** (`capture_eff_length._best_part`). Where gDNA's fragment at a
+  cut runs out of the exon into the intron, RNA's runs across the junction into the next exon, and gDNA has no such
+  placement to read it by. So the part of a cut's share from placements that leave its exons across a junction is priced
+  at that junction's crossing level where it is higher: a boundary inside an exon near its end, and a junction beside a
+  short exon. The crossing level is conservation's sum up to the cap. The best object beside a junction is not passed
+  on: it is one gDNA object's own reading, and passed on it would carry that object's noise to every cut near it. The
+  rule only raises, a template with no junction keeps every cut at its boundary, and the cap's fit reads every
+  junction's term at the same prices. It reads high where the only probe lies across the junction and the placement
+  starts far from it. And it passes on whatever the junction rule reads: where a library reads a capture level it does
+  not hold (issue #1), or reads one from almost no gDNA, the cuts beside the junction take that level too, and the
+  split between a gene's isoforms pays (issue #83).
 - **A junction's price is never pooled**: some are probed by a probe spanning the junction and some are not, so each
   keeps its own two boundaries and intron, no junction's price is evidence for another's, and any gain from pooling
   them is chance another panel reverses. The cap is the rule's one library level, as the saturated level was, and its
@@ -770,8 +781,9 @@ refused (`EQUATIONS.md`, the pseudocounts' odds).
 
 > **A fragment's likelihood under a component sums, over its places, each place's term times its capture weight; hits
 > overlapping on one reference are one place, read at their best** (`scoring.cpp`'s `merge_places`). **A place's weight
-> is the deposit rule's mass at the reader's efficiencies, `w = Σ_o m_o·c_o`, on every candidate there**
-> (`capture_eff_length.place_log_weights`). **A hit with no transcript candidate is an intergenic place: uncaptured, at
+> is the deposit rule's mass at the reader's efficiencies, `w = Σ_o m_o·c_o`, on every candidate there, a place across
+> junctions binding its best part as a transcript's length does (§9.2)** (`capture_eff_length.place_log_weights`).
+> **A hit with no transcript candidate is an intergenic place: uncaptured, at
 > calibration's bulk gDNA rate, a per-unit background no locus carries, never pruned** (`em_locus.h`'s
 > `IntergenicTerm`; `EQUATIONS.md`, a multimapper's places). **Pruning runs within each place, never across places:
 > a place keeps each pool's candidates within the bound of its own best, and its gDNA term within the bound of its

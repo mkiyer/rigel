@@ -46,7 +46,12 @@ for robustness, so a number measured at the panel's nascent share is a stress re
 - The simulator's **probes bind by their own GC** (2026-11-21), and the capture panels are regenerated with them.
 - **A locked object reads its strands** (2026-11-21, issue #1): a stranded library's one-stranded fragments on an
   object the annotation admits no RNA at are no longer booked gDNA whole. Only stranded STAR rows move: transcript
-  error falls on all six, most at no gDNA (431,143 → 287,469). This tree is the baseline.
+  error falls on all six, most at no gDNA (431,143 → 287,469).
+- **The cuts' prices** landed 2026-11-22 (issue #76): an RNA placement that leaves an exon across a junction is
+  priced at the junction's crossing level, read from gDNA beside it, not by the half-intron gDNA object at the cut.
+  Under stranded capture at 5 % gDNA and above the annotated over-call per locus falls 13–41 % on five of six rows;
+  isoforms pay on rows whose capture reading is false or thin (STAR unstranded capture OFF 5 %, transcripts +9.8 %).
+  This tree is the baseline.
 - **Every error is read per object** (the owner, 2026-11-21): Σ|estimate − truth| over objects, never a library net
   (`docs/SUCCESS.md`). Bar 5 holds on every row it covers, transcripts at most 0.72 of 0.7.1's and genes 0.55.
   Bar 1 holds on every row but one: stranded capture ON at 5 % gDNA, 9.5 % of the library's gDNA above chance.
@@ -54,8 +59,7 @@ for robustness, so a number measured at the panel's nascent share is a stress re
   (`docs/ROADMAP.md`).
 - **No preview ships.** 0.8.0 waits for every `release-blocker` issue in the milestone; the milestone's other issues
   ship stated in the MANUAL.
-- **The order of work** (`docs/ROADMAP.md`, Next): the cuts' prices (issue #76) → performance → code review → the
-  release, with CI alongside. No session has a pass bar: each improves the current state, and what is left ships
+- **The order of work** (`docs/ROADMAP.md`, Next): performance → code review → the release, with CI alongside. No session has a pass bar: each improves the current state, and what is left ships
   stated. One `src/` writer at a time, in the main checkout.
 - The **capture reader** is developed together with the owner. Its working memory is `docs/dev/CAPTURE_IDEAS.md`.
 - Everything retired at the 2026-11-03 reset is in `$RIGEL_RUNS/archive/cleanup_2026-11-03/`.
@@ -147,8 +151,8 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The baseline: 0 failed / 3,780 passed / 0 skipped, 3,780 collected** (re-derived 2026-11-21, with the locks'
-departure). Any failure is a regression.
+**The baseline: 0 failed / 3,784 passed / 0 skipped, 3,784 collected** (re-derived 2026-11-22, with the cuts'
+prices). Any failure is a regression.
 - Re-derive the count; never edit it by hand. Only adding or removing a test moves it.
 - A golden update (`--update-golden`) is where a regression gets laundered into "intended". Read the diff and check the
   truth-scored instruments first.

@@ -92,6 +92,22 @@ against the tree before it:
 - On the VCaP mix the DNA-origin share holds: 0.257245 against 0.257226, the truth 0.2518. Its identity reference is
   re-frozen on this tree.
 
+The cuts' prices landed on 2026-11-22 (`EQUATIONS.md` §11, the best part; issue #76). An RNA placement that leaves a
+cut's exons across a junction is priced at that junction's crossing level, read from the gDNA at its two splice sites
+and capped by the junction cap, where gDNA's own placement there ran into the intron. Calibration does not move.
+Pinned and fractional, per object, against the tree before it:
+- Stranded capture ON, the annotated over-call per locus: simulator g05 25,142 → 20,972, g50 34,802 → 21,903, g98
+  flat; STAR g05 11,104 → 8,849, g50 27,385 → 16,119, g98 29,672 → 25,796. The mass leaves annotated RNA mostly for
+  nascent RNA, which holds no junction: simulator g50 annotated −18,577, nascent +15,019, gDNA +3,558.
+- On the 24 in-scope rows at 5 % gDNA and above, transcripts fall on 8, rise on 3 and hold within 0.1 % on 13. The
+  ruler's gDNA / isoform gap closes (g05 1.138 → 1.104, g50 1.049 → 1.007).
+- It costs where the capture reading is false or thin and passes that level on: STAR unstranded capture OFF 5 %
+  transcripts +9.8 % (that stratum +4.6 %, bar 4), STAR stranded capture OFF at no gDNA genes +4.7 %, 0.1 % gDNA under
+  capture transcripts +7.7 % and genes +2.2 %, and a probe across the junction alone (the junction-probe design)
+  transcripts +3.4 %.
+- On the VCaP mix the DNA-origin share is 0.257370, and 6.3 % of the transcript mass moves between isoforms (genes
+  0.30 %), which no truth there can score.
+
 The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
 alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
 identical reads, and transcript error 0.10–0.47 of 0.7.1's. It also states eight failures, each an open entry
@@ -112,10 +128,11 @@ but those marked closed:
 
 Every error is read per object (the owner, 2026-11-21; `SUCCESS.md`). Against 0.7.1 re-scored on the same reads
 (2026-11-21), at 5 % gDNA and above, on every in-scope row of the ladder on both inputs and of both fl-gap panels,
-HEAD's error is below 0.7.1's on transcripts (at most 0.72 of it), genes (0.55) and each pool per locus (0.90), so
-bar 5 holds. The library nets that missed were 0.7.1's cancellation: at STAR's stranded capture-ON 50 %, its −1,380
-is +16,265 over and −17,645 under across loci. Below 5 %, stranded capture ON at 0.1 % gDNA is worse than 0.7.1, with
-about 120,000 nascent fragments read as annotated (genes 262,037 against 192,554), on the no-capture line too.
+HEAD's error is below 0.7.1's on transcripts (at most 0.72 of it) and genes (0.55), so bar 5 holds, and on each pool
+per locus (annotated 0.64, gDNA 0.74) but nascent at STAR's stranded capture-OFF 5 %, 9,711 against 9,709. The
+library nets that missed were 0.7.1's cancellation: at STAR's stranded capture-ON 50 %, its −1,380 is +16,265 over and
+−17,645 under across loci. Below 5 %, stranded capture ON at 0.1 % gDNA is worse than 0.7.1, with about 120,000
+nascent fragments read as annotated (genes 267,694 against 192,554), on the no-capture line too.
 
 Calibration per object, Σ|P − O| less chance as a share of the library's gDNA: at 5 % gDNA 4.5 % unstranded capture
 OFF, 4.5 % stranded capture OFF and 9.5 % stranded capture ON, which fails bar 1; at 50 % and 98 %, and on both fl-gap
@@ -146,13 +163,11 @@ The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the 
 tool's current state, simply and robustly across many kinds of data, and what is left ships stated. In order, one
 `src/` writer at a time:
 
-1. **The cuts' prices** (issue #76 with issue #9): read RNA's capture on the cuts from RNA's own crossings, not from
-   gDNA's objects beside them. The candidate is built; it is re-measured on this tree, beside bar 1's one failing row.
-2. **Performance** (issue #84): compute and memory, every change a proven numeric no-op.
-3. **Code review** (issue #85): clean, concise, readable and maintainable, with no hard-coded constants.
-4. **The release:** one ladder re-score; a MANUAL limitation for issue #1, issue #2, issue #3, issue #4 with issue #5,
-   issue #7, issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and for what
-   item 1 leaves of issue #76 and issue #9; the CHANGELOG; then issue #11.
+1. **Performance** (issue #84): compute and memory, every change a proven numeric no-op.
+2. **Code review** (issue #85): clean, concise, readable and maintainable, with no hard-coded constants.
+3. **The release:** one ladder re-score; a MANUAL limitation for issue #1, issue #2, issue #3, issue #4 with issue #5,
+   issue #7, issue #9, issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and
+   for the cuts' prices' costs; the CHANGELOG; then issue #11.
 
 CI runs alongside from now (issue #11). On its first run since September (fe0e3183) the native build compiled on Linux
 and macOS. Two tests stopped the runs: one asserts a native kernel equals NumPy to the bit, which x86-64 misses by

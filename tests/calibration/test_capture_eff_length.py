@@ -7,7 +7,8 @@ produce); each object's share is what the deposit rule gives it, through the ref
 shares sum to its fl-marginal length exactly. The pricing half: with every efficiency 1 (no landscape, or one level) the
 lengths are the fl-marginal ones bit-identically; a piece prices at its region, a contiguous cut at its boundary, a
 junction at its two splice sites' boundaries less the intron beside them, bounded by the larger of the junction cap and
-the best object it touches; the cap is the saturated level, raised as far as each junction's spliced fragments support
+the best object it touches; a placement that leaves a cut's exons across a junction at that junction's crossing level
+where it is higher; the cap is the saturated level, raised as far as each junction's spliced fragments support
 against the unspliced RNA of its own exons; one factor on every efficiency is one factor on every length; a transcript of exons
 shorter than a fragment is read through its cuts; and the ruler reads the result's efficiencies and the geometry, never
 the counts.
@@ -1045,7 +1046,9 @@ def test_a_templates_place_weights_carry_its_lengths_excess_on_the_uncaptured_la
         np.ascontiguousarray(sj.boundary_right, dtype=np.int32),
         np.ascontiguousarray(sj.strand, dtype=np.int8),
     )
-    c_region, c_boundary, c_sj = place_efficiencies(cal, ra, idx, junction_cap)
+    c_region, c_boundary, c_sj, c_sj_crossing, sj_low_boundary, sj_high_boundary = (
+        place_efficiencies(cal, ra, idx, junction_cap)
+    )
     assert min(c_region.min(), c_boundary.min(), c_sj.min()) >= 1.0
     masked = [(int(a), int(b)) for _ref, a, b in np.asarray(ra.unobservable)]
 
@@ -1082,6 +1085,9 @@ def test_a_templates_place_weights_carry_its_lengths_excess_on_the_uncaptured_la
                 c_region=c_region,
                 c_boundary=c_boundary,
                 c_sj=c_sj,
+                c_sj_crossing=c_sj_crossing,
+                sj_low_boundary=sj_low_boundary,
+                sj_high_boundary=sj_high_boundary,
             ),
             dtype=np.float64,
         )
@@ -1093,6 +1099,283 @@ def test_a_templates_place_weights_carry_its_lengths_excess_on_the_uncaptured_la
         ), row["t_id"]
         checked += 1
     assert checked >= 2
+
+
+# --- the best part: a fragment that leaves a cut's exons across a junction is priced at that junction where it is higher
+
+
+def _best_part_reference(idx, ra, cal, pmf, junction_cap, t: int) -> tuple[float, float, int]:
+    """``(best part, own prices, placements across two junctions, junctions whose best object is passed over)`` for
+    template ``t``, placement by placement.
+
+    Every placement on the template's path goes through the native deposit rule; each mass is priced at its object's
+    own efficiency (a junction at its rule price), and then, on a placement that crosses junctions, at the larger of
+    that and the crossing level of the nearest junction the placement crosses on each side of the object. A junction's
+    crossing level is written out here from the field: its two splice sites' boundaries less half the intron beside
+    each, up to the cap, with no best-object term. The sums are the template's lengths under the two readings, on the
+    one law ``pmf``. Plain Python over genomic coordinates: no array of the ruler's is read."""
+    from rigel._bam_impl.testing import Accumulator
+    from rigel.calibration.capture_eff_length import place_efficiencies
+    from rigel.calibration.splice_graph import (
+        build_region_partition_arrays,
+        build_sj_arrays,
+        build_sj_geometry_arrays,
+    )
+    from rigel.native import PLACE_BOUNDARY, PLACE_REGION, PLACE_SJ
+    from rigel.types import Strand
+
+    bounds, _ref_offsets, types = build_region_partition_arrays(idx)
+    acc = Accumulator(
+        region_bounds=np.ascontiguousarray(bounds, dtype=np.int64),
+        region_types=np.ascontiguousarray(types, dtype=np.uint8),
+        max_length=pmf.shape[0],
+        ref=0,
+    )
+    sj = build_sj_arrays(idx)
+    acc.set_sj(
+        np.ascontiguousarray(sj.offsets, dtype=np.int32),
+        np.ascontiguousarray(sj.boundary_right, dtype=np.int32),
+        np.ascontiguousarray(sj.strand, dtype=np.int8),
+    )
+    c_region, c_boundary, c_sj = place_efficiencies(cal, ra, idx, junction_cap)[:3]
+    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
+    lo, _hi = boundary_region_indices(np.asarray(ra.ref_id))
+    boundary_at = {int(ends[r]): e for e, r in enumerate(lo)}
+    geo = build_sj_geometry_arrays(idx)
+    intron_of = {
+        (int(ends[s]), int(starts[d])): j
+        for j, (s, d, strand) in enumerate(
+            zip(geo.src_region, geo.dst_region, geo.strand, strict=True)
+        )
+        if int(strand) == int(Strand.POS)
+    }
+    exons = [(int(a), int(b)) for a, b in idx.get_exon_intervals(t)]
+
+    def crossing_level(donor: int, acceptor: int) -> float:
+        intron = np.flatnonzero((starts >= donor) & (ends <= acceptor))
+        assert intron.shape[0] == 1 and cal.gdna_region_eff_len[intron[0]] > 0.0, (
+            "the fixture's intron must be one region that holds a fragment"
+        )
+        summed = (
+            c_boundary[boundary_at[donor]] + c_boundary[boundary_at[acceptor]] - c_region[intron[0]]
+        )
+        return float(min(max(summed, 0.0), junction_cap))
+
+    crossing = {
+        (exons[k][1], exons[k + 1][0]): crossing_level(exons[k][1], exons[k + 1][0])
+        for k in range(len(exons) - 1)
+    }
+    passed_over = sum(float(c_sj[intron_of[i]]) > x for i, x in crossing.items())
+    best_part = own_prices = 0.0
+    across_two = 0
+    for w in np.flatnonzero(pmf):
+        for start, end, introns, _blocks in _path_placements(exons, int(w)):
+            kinds, ids, masses = acc.placement_masses(
+                start=start, end=end, observed_introns=tuple(introns), sj_strand=int(Strand.POS)
+            )
+            across_two += len(introns) >= 2
+            crossed = [(d, a, crossing[(d, a)]) for d, a in introns]
+            for kind, i, m in zip(kinds, ids, masses, strict=True):
+                if kind == PLACE_REGION:
+                    own, span = float(c_region[i]), None
+                elif kind == PLACE_BOUNDARY:
+                    own, span = float(c_boundary[i]), (int(ends[lo[i]]), int(ends[lo[i]]))
+                else:
+                    assert kind == PLACE_SJ
+                    own = float(c_sj[i])
+                    span = (int(ends[geo.src_region[i]]), int(starts[geo.dst_region[i]]))
+                price = own
+                if span is not None and crossed:
+                    below = [(a, p) for d, a, p in crossed if a <= span[0]]
+                    above = [(d, p) for d, a, p in crossed if d >= span[1]]
+                    if below:
+                        price = max(price, max(below)[1])
+                    if above:
+                        price = max(price, min(above)[1])
+                best_part += pmf[w] * m * price
+                own_prices += pmf[w] * m * own
+    return best_part, own_prices, across_two, passed_over
+
+
+def test_a_fragment_that_leaves_a_cuts_exons_across_a_junction_binds_its_best_part(pieces_index):
+    """Where gDNA's fragment at a cut runs on into the intron, RNA's runs across the junction into the next exon, and
+    gDNA has no such placement to read it by. Such a placement is RNA's crossing of that junction too, and a fragment
+    binds its best probe part, so its deposit at the cut (a boundary inside the exon, or the junction before it) is
+    priced at that junction's crossing level where it is higher; a placement that stays inside the cut's exons keeps
+    the cut's own price. The crossing level is conservation's sum up to the cap: the best object beside a junction,
+    which can price the junction itself above the cap, is one gDNA object's reading and is not passed on. ``t0``'s
+    exons are 60, 40 and 60 bp, cut into pieces by its siblings, under fragments of 30, 70 and 110 bp: every placement
+    is priced one by one from the native deposit, and the ruler's closed form must equal the sum, under a cap below the
+    boundaries' readings (4) and one above them (9). At the higher cap, pricing each cut at its own efficiency alone
+    reads this template about a tenth short."""
+    idx = pieces_index
+    ra = RegionArrays.from_index(idx)
+    pmf = np.zeros(121)
+    pmf[[30, 70, 110]] = [0.3, 0.4, 0.3]
+    rng = np.random.default_rng(11)
+    n_boundaries = boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0]
+    # boundaries well above the regions, so the junctions price above the boundaries inside the exons beside them
+    cal = _cal(
+        ra,
+        rng.uniform(1.0, 2.0, ra.n_regions),
+        1.0,
+        boundary=rng.uniform(2.0, 6.0, n_boundaries),
+        saturation=4.0,
+    )
+    t0 = _tidx(idx, "t0")
+    fl = contained_eff_length(idx.t_df["length"].to_numpy(np.float64), pmf)
+    for cap, margin in ((4.0, 1.01), (9.0, 1.05)):
+        best_part, own_prices, across_two, passed_over = _best_part_reference(
+            idx, ra, cal, pmf, cap, t0
+        )
+        assert across_two > 0, "the fixture must place a fragment across two junctions"
+        assert best_part > margin * own_prices, "the fixture must separate the two readings"
+        if cap == 4.0:
+            assert passed_over > 0, (
+                "a junction must be priced at its best object, above its crossing level"
+            )
+        eff = _lengths(cal, ra, idx, fl, _one_law(pmf), cap)[t0]
+        assert eff == pytest.approx(best_part, rel=1e-12)
+
+
+def test_a_cuts_placements_are_split_on_the_law_its_excess_is_carried_from(pieces_index):
+    """An efficiency is gDNA's yield on its uncaptured law ``g``, and only its excess is carried to the scorer's table
+    (``_carried``). So the placements that leave a cut's exons are counted on ``g`` too: with RNA's table and gDNA's
+    one law and ``g`` another, ``eff_em_t − fl_t = Σ_x g(ℓ_x) (w(x) − 1)`` over every placement of the template, each
+    placement's deposits at the best part, both priced one by one from the field and weighed as a multimapper's place
+    is. Splitting on RNA's table instead would carry the excess of placements ``g`` does not hold."""
+    idx = pieces_index
+    ra = RegionArrays.from_index(idx)
+    table = np.zeros(121)
+    table[[30, 70, 110]] = [0.3, 0.4, 0.3]
+    g = np.zeros(121)
+    g[[25, 55, 95]] = [0.2, 0.3, 0.5]
+    rng = np.random.default_rng(11)
+    n_boundaries = boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0]
+    cal = _cal(
+        ra,
+        rng.uniform(1.0, 2.0, ra.n_regions),
+        1.0,
+        boundary=rng.uniform(2.0, 6.0, n_boundaries),
+        saturation=4.0,
+    )
+    t0 = _tidx(idx, "t0")
+    lengths = idx.t_df["length"].to_numpy(np.float64)
+    fl = contained_eff_length(lengths, table)
+    placements = float(contained_eff_length(lengths, g)[t0])
+    # a cap under the boundaries' readings, where a junction is priced at its best object, and one above them
+    for cap, margin in ((4.0, 1.01), (9.0, 1.05)):
+        eff = _lengths(cal, ra, idx, fl, LengthTables(table, table, g, None), cap)[t0]
+        best_part, own_prices, across_two, passed_over = _best_part_reference(
+            idx, ra, cal, g, cap, t0
+        )
+        assert across_two > 0 and best_part > margin * own_prices
+        assert passed_over > 0 or cap == 9.0
+        assert eff - fl[t0] == pytest.approx(best_part - placements, rel=1e-12)
+        # and the place weight is the same rule: Σ_x g(ℓ_x) (w(x) − 1) over the template's placements
+        weights, law = _place_weights(idx, ra, cal, g, cap, t0)
+        tolerance = 0.5 * float(np.finfo(np.float32).eps) * float(np.max(np.abs(np.log(weights))))
+        assert float(np.sum(law * (weights - 1.0))) == pytest.approx(
+            eff - fl[t0], abs=max(tolerance, 1e-12) * float(np.sum(law * weights))
+        )
+
+
+def _place_weights(idx, ra, cal, pmf, junction_cap, t: int) -> tuple[np.ndarray, np.ndarray]:
+    """``(w, f)``: every placement of template ``t`` on its own path weighed as a multimapper's place is
+    (``place_log_weights`` on the native deposit's masses), with the law's mass at its length."""
+    from rigel._bam_impl.testing import Accumulator
+    from rigel.calibration.capture_eff_length import place_efficiencies, place_log_weights
+    from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
+    from rigel.types import Strand
+
+    bounds, _ref_offsets, types = build_region_partition_arrays(idx)
+    acc = Accumulator(
+        region_bounds=np.ascontiguousarray(bounds, dtype=np.int64),
+        region_types=np.ascontiguousarray(types, dtype=np.uint8),
+        max_length=pmf.shape[0],
+        ref=0,
+    )
+    sj = build_sj_arrays(idx)
+    acc.set_sj(
+        np.ascontiguousarray(sj.offsets, dtype=np.int32),
+        np.ascontiguousarray(sj.boundary_right, dtype=np.int32),
+        np.ascontiguousarray(sj.strand, dtype=np.int8),
+    )
+    c_region, c_boundary, c_sj, c_sj_crossing, sj_low_boundary, sj_high_boundary = (
+        place_efficiencies(cal, ra, idx, junction_cap)
+    )
+    exons = [(int(a), int(b)) for a, b in idx.get_exon_intervals(t)]
+    offsets, kinds, ids, masses, f = [0], [], [], [], []
+    for w in np.flatnonzero(pmf):
+        for start, end, introns, _blocks in _path_placements(exons, int(w)):
+            k, i, m = acc.placement_masses(
+                start=start, end=end, observed_introns=tuple(introns), sj_strand=int(Strand.POS)
+            )
+            kinds += list(k)
+            ids += list(i)
+            masses += list(m)
+            offsets.append(len(kinds))
+            f.append(pmf[w])
+    log_w = place_log_weights(
+        np.asarray(offsets, dtype=np.int64),
+        np.asarray(kinds, dtype=np.int8),
+        np.asarray(ids, dtype=np.int64),
+        np.asarray(masses, dtype=np.float64),
+        intergenic=np.zeros(len(f), dtype=bool),
+        c_region=c_region,
+        c_boundary=c_boundary,
+        c_sj=c_sj,
+        c_sj_crossing=c_sj_crossing,
+        sj_low_boundary=sj_low_boundary,
+        sj_high_boundary=sj_high_boundary,
+    )
+    return np.exp(np.asarray(log_w, dtype=np.float64)), np.asarray(f)
+
+
+def test_a_template_with_no_junction_prices_every_cut_at_its_own_boundary(multiexon_index):
+    """A synthetic span and a single-exon transcript are gDNA's own placements: no fragment of theirs crosses a
+    junction, so every cut keeps its boundary's efficiency and the length is the plain share-weighted sum, to the
+    bit, whatever the junctions beside them price at."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    rng = np.random.default_rng(3)
+    n_boundaries = boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0]
+    cal = _cal(
+        ra,
+        rng.uniform(1.0, 2.0, ra.n_regions),
+        1.0,
+        boundary=rng.uniform(2.0, 6.0, n_boundaries),
+        saturation=4.0,
+    )
+    fl = contained_eff_length(idx.t_df["length"].to_numpy(np.float64), PMF)
+    obj = transcript_objects(idx, ra, PMF)
+    spliced = np.zeros(len(idx.t_df), dtype=bool)
+    spliced[obj.t[obj.cut_row[obj.is_junction]]] = True
+    cut = np.zeros(len(idx.t_df), dtype=bool)
+    cut[obj.t[obj.cut_row]] = True
+    unspliced = np.flatnonzero(cut & ~spliced)
+    assert unspliced.size and spliced.any(), (
+        "the fixture must hold a cut template with no junction beside a spliced one"
+    )
+    eff = _lengths(cal, ra, idx, fl, _one_law(PMF), 9.0)
+    c_region = np.asarray(cal.gdna_capture_efficiency_region)
+    c_boundary = np.asarray(cal.gdna_capture_efficiency_boundary)
+    lo, _hi = boundary_region_indices(np.asarray(ra.ref_id))
+    boundary_after = {int(r): e for e, r in enumerate(lo)}
+    for t in unspliced:
+        rows = np.flatnonzero(obj.t == t)
+        cuts = np.flatnonzero(obj.t[obj.cut_row] == t)
+        assert not obj.is_junction[cuts].any()
+        # the ruler's own order of additions: the pieces, then the cuts
+        num = den = 0.0
+        for share, c in zip(obj.contained[rows], c_region[obj.piece[rows]], strict=True):
+            num += share * c
+            den += share
+        own = c_boundary[[boundary_after[int(p)] for p in obj.piece[obj.cut_row[cuts]]]]
+        for share, c in zip(obj.cut_share[cuts], own, strict=True):
+            num += share * c
+            den += share
+        assert eff[t] == fl[t] * (num / den)
 
 
 # --- the junction cap: the saturated level, raised as far as RNA's own spliced split supports -------------------------
@@ -1421,6 +1704,81 @@ def test_a_junctions_own_exon_keeps_its_evidence_where_the_mask_splits_it(cap_ma
     assert cap_with(4.0) < base * 0.9
 
 
+# gene gc: ``c1`` is two 500 bp exons around a 40 bp one, so nearly every fragment across its first junction leaves
+# the short exon across the second; ``c2`` covers the last exon too, so that exon is no junction's own
+_LEAVING_GTF = (
+    'chr1\ttest\texon\t1001\t1500\t.\t+\t.\tgene_id "gc"; transcript_id "c1";\n'
+    'chr1\ttest\texon\t2001\t2040\t.\t+\t.\tgene_id "gc"; transcript_id "c1";\n'
+    'chr1\ttest\texon\t3001\t3500\t.\t+\t.\tgene_id "gc"; transcript_id "c1";\n'
+    'chr1\ttest\texon\t3001\t3500\t.\t+\t.\tgene_id "gc"; transcript_id "c2";\n'
+)
+
+
+@pytest.fixture(scope="module")
+def leaving_index(tmp_path_factory):
+    return build_test_index(tmp_path_factory, _LEAVING_GTF, genome_size=5000, name="leaving")
+
+
+def test_the_junction_cap_reads_a_junction_through_the_placements_that_leave_across_the_next(
+    leaving_index,
+):
+    """The fit and the lengths state one model. ``c1``'s first junction has an exon of its own and a price the cap
+    cannot move (its two splice sites read 50, so conservation holds it at 99, under the saturated level); its second
+    has no exon of its own, and is itself priced at the best object beside it, a splice site reading 700. A fragment
+    across the first that leaves the 40 bp exon across the second takes the second's crossing level, its sum up to
+    the cap, so the first junction's spliced mass against its own exon's unspliced RNA reads the cap: a library drawn
+    at the ruler's own prices under a cap of 600 gives 600 back. A fit that read each junction at its own price would
+    hold no junction and return the saturated level, 100; one that passed the second junction's 700 on would find
+    nothing for the cap to move below 700."""
+    from rigel.calibration.splice_graph import build_sj_geometry_arrays
+
+    idx = leaving_index
+    ra = RegionArrays.from_index(idx)
+    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
+    c = _captured(ra, _LEVEL)
+    lo, _hi = boundary_region_indices(np.asarray(ra.ref_id))
+    boundary = np.full(_n_boundaries(ra), _LEVEL)
+    boundary[np.isin(ends[lo], (1500, 2000))] = 50.0
+    boundary[ends[lo] == 3000] = 700.0
+    tables = _one_law(PMF)
+
+    def library(cap):
+        """The unspliced RNA of each exon region and each junction's spliced mass, with ``c1`` at rate 40 and every
+        object at the ruler's own price under ``cap``."""
+        gdna_contained = contained_eff_length(np.asarray(ra.region_size_bp, dtype=np.float64), PMF)
+        obj = transcript_objects(idx, ra, PMF)
+        price = cut_efficiencies(obj, ra, c, boundary, gdna_contained, cap)
+        geo = build_sj_geometry_arrays(idx)
+        rna = np.zeros(ra.n_regions)
+        spliced = np.zeros(np.asarray(geo.src_region).shape[0])
+        t = _tidx(idx, "c1")
+        rows = np.flatnonzero(obj.t == t)
+        np.add.at(rna, obj.piece[rows], 40.0 * obj.contained[rows] * c[obj.piece[rows]])
+        for k in np.flatnonzero(obj.is_junction & (obj.t[obj.cut_row] == t)):
+            row = np.flatnonzero(
+                (np.asarray(geo.src_region) == obj.piece[obj.cut_row[k]])
+                & (np.asarray(geo.dst_region) == obj.piece[obj.cut_row[k] + 1])
+            )
+            assert row.shape[0] == 1
+            spliced[row[0]] += 40.0 * obj.cut_share[k] * price[k]
+        return rna, spliced, obj, price
+
+    rna, spliced, obj, price = library(600.0)
+    junctions = np.flatnonzero(obj.is_junction & (obj.t[obj.cut_row] == _tidx(idx, "c1")))
+    first = junctions[np.argmin(starts[obj.piece[obj.cut_row[junctions] + 1]])]
+    # the fixture's premise: the first junction's own price is conservation's 99 and most of its share leaves; the
+    # second is priced at its best object, above the cap
+    second = junctions[junctions != first][0]
+    assert obj.leave_hi_share[first] > 0.5 * obj.cut_share[first]
+    assert 99.0 < price[first] < 600.0
+    assert price[second] == pytest.approx(700.0)
+    cal = _cal(ra, c, 1e-3, boundary=boundary, saturation=100.0, rna_region=rna, sj_mass=spliced)
+    # the grid runs to the second junction's sum, its two splice sites less the intron: 400 + 700 − 1
+    assert fit_junction_cap(cal, ra, idx, tables) == pytest.approx(
+        600.0, rel=_grid_step(100.0, 1099.0)
+    )
+
+
 def test_a_junction_with_no_exon_region_of_its_own_is_not_fitted(multiexon_index):
     """In the multi-exon fixture an annotated single-exon transcript covers every exon of the spliced one, so no exon
     region is any junction's own and nothing anchors a split: the cap is the saturated level exactly, though the
@@ -1488,7 +1846,7 @@ def test_the_lengths_and_the_place_weights_read_the_cap_they_are_handed(cap_inde
         saturation=100.0,
         sj_mass=np.zeros(n_sj),
     )
-    _c_region, _c_boundary, c_sj = place_efficiencies(cal, ra, idx, 600.0)
+    c_sj = place_efficiencies(cal, ra, idx, 600.0)[2]
     np.testing.assert_array_equal(c_sj, np.full(n_sj, 600.0))
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     a1 = _tidx(idx, "a1")

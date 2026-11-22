@@ -67,7 +67,8 @@ class FragmentRouter:
     annotations : AnnotationTable or None
         If provided, every fragment routing decides on its own — deterministic, gated or intergenic — is annotated.
     place_efficiencies : tuple or None
-        ``(c_region, c_boundary, c_sj)`` (``capture_eff_length.place_efficiencies``): each multimapper's place weighs
+        ``capture_eff_length.place_efficiencies``' tuple, the efficiencies and each junction's two boundaries: each
+        multimapper's place weighs
         its candidates by its deposit masses at them (``capture_eff_length.place_log_weights``). ``None`` weighs every
         place 1.
     """
@@ -131,7 +132,14 @@ class FragmentRouter:
         weighs places."""
         arrays = chunk.to_scoring_arrays()
         if self.place_efficiencies is not None and chunk.place_offsets is not None:
-            c_region, c_boundary, c_sj = self.place_efficiencies
+            (
+                c_region,
+                c_boundary,
+                c_sj,
+                c_sj_crossing,
+                sj_low_boundary,
+                sj_high_boundary,
+            ) = self.place_efficiencies
             arrays["log_weight"] = place_log_weights(
                 chunk.place_offsets,
                 chunk.place_kind,
@@ -141,6 +149,9 @@ class FragmentRouter:
                 c_region=c_region,
                 c_boundary=c_boundary,
                 c_sj=c_sj,
+                c_sj_crossing=c_sj_crossing,
+                sj_low_boundary=sj_low_boundary,
+                sj_high_boundary=sj_high_boundary,
             )
         return arrays
 

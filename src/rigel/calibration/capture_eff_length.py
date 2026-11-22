@@ -10,7 +10,9 @@ a boundary or a junction. With ``S_p`` its contained share of piece ``p`` and ``
     eff_t = fl_t · (Σ_pieces S_p c_p + Σ_cuts M_k c_k) / (Σ_pieces S_p + Σ_cuts M_k).
 
 A piece prices at its region's efficiency, a contiguous cut at its boundary's, a junction by conservation of bases
-(:func:`_junction_prices`), up to a cap RNA's own spliced fragments set (:func:`fit_junction_cap`). With no landscape,
+(:func:`_junction_prices`), up to a cap RNA's own spliced fragments set (:func:`fit_junction_cap`). A placement that
+leaves a cut's exons across a junction is priced there at that junction's crossing level where it is higher
+(:func:`_best_part`): gDNA has no such placement to read it by. With no landscape,
 or every efficiency exactly 1, ``fl_eff_lengths`` comes back bit-identically, whatever the length tables. Efficiencies are yields against the bulk, so a captured transcript's length exceeds ``fl``, and a
 factor common to every component cancels in the EM. Pieces are cut at the index's unobservable mask; a template the
 mask does not touch is unchanged to the bit.
@@ -57,7 +59,11 @@ class TranscriptObjects:
     Pieces, one row each in transcript then genomic order: ``t`` the transcript, ``piece`` the region,
     ``contained`` its contained share. Cuts, one row per pair of consecutive pieces of a transcript:
     ``cut_row`` the left piece's row (the right one's is ``cut_row + 1``), ``cut_share`` the conserved
-    share, ``is_junction`` whether the transcript splices there. Annotation and pmf only.
+    share, ``is_junction`` whether the transcript splices there. A cut's HOME is the exon it lies in, or the two exons
+    a junction joins: ``leave_lo`` and ``leave_hi`` are the cuts (rows of the cut arrays, ``-1`` for none) that are the
+    junctions ending the home below and above, and ``leave_lo_share``, ``leave_hi_share`` and ``leave_both_share`` the
+    parts of ``cut_share`` from placements that leave the home across the one, the other, or both; the rest of the
+    share is from placements inside the home. Annotation and pmf only.
     """
 
     t: np.ndarray
@@ -67,6 +73,11 @@ class TranscriptObjects:
     cut_share: np.ndarray
     is_junction: np.ndarray
     n_transcripts: int
+    leave_lo: np.ndarray
+    leave_hi: np.ndarray
+    leave_lo_share: np.ndarray
+    leave_hi_share: np.ndarray
+    leave_both_share: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +85,9 @@ class TranscriptPieces:
     """The pmf-free half of :class:`TranscriptObjects`: every transcript's pieces, each piece's length, and at each
     cut the bases of the transcript left of it (``through``) and right of it (``rest``), counted to the nearest
     masked base. ``run_t`` and ``run_length`` are each transcript's runs — its stretches no masked base interrupts —
-    and ``masked`` the bases the mask took from each transcript."""
+    and ``masked`` the bases the mask took from each transcript. ``home_lo`` and ``home_hi`` are the bases of each
+    cut's home either side of it, and ``leave_lo`` and ``leave_hi`` the cuts that are the junctions ending the home
+    below and above (:func:`_homes`)."""
 
     t: np.ndarray
     piece: np.ndarray
@@ -87,6 +100,10 @@ class TranscriptPieces:
     run_t: np.ndarray
     run_length: np.ndarray
     masked: np.ndarray
+    home_lo: np.ndarray
+    home_hi: np.ndarray
+    leave_lo: np.ndarray
+    leave_hi: np.ndarray
 
 
 def _observable_parts(
@@ -221,6 +238,8 @@ def _runs(tk, piece, k, length, full_start, n_t: int, masked) -> TranscriptPiece
     run_lo = full_start[run_first]
     run_hi = full_end[np.r_[np.flatnonzero(run_first)[1:] - 1, tk.size - 1]] if tk.size else run_lo
     cut = np.flatnonzero(joined)
+    is_junction = (k[cut] != k[cut + 1]) & (piece[cut + 1] > piece[cut] + 1)
+    home_lo, home_hi, leave_lo, leave_hi = _homes(cut, is_junction, full_start, full_end)
     return TranscriptPieces(
         t=tk,
         piece=piece,
@@ -228,11 +247,44 @@ def _runs(tk, piece, k, length, full_start, n_t: int, masked) -> TranscriptPiece
         cut_row=cut,
         through=full_end[cut] - run_lo[run_id[cut]],
         rest=run_hi[run_id[cut]] - full_end[cut],
-        is_junction=(k[cut] != k[cut + 1]) & (piece[cut + 1] > piece[cut] + 1),
+        is_junction=is_junction,
         n_transcripts=n_t,
         run_t=tk[run_first],
         run_length=run_hi - run_lo,
         masked=masked,
+        home_lo=home_lo,
+        home_hi=home_hi,
+        leave_lo=leave_lo,
+        leave_hi=leave_hi,
+    )
+
+
+def _homes(cut: np.ndarray, is_junction: np.ndarray, full_start: np.ndarray, full_end: np.ndarray):
+    """``(home_lo, home_hi, leave_lo, leave_hi)`` per cut. A cut's HOME is the exon it lies in (a contiguous cut) or the
+    two exons it joins (a junction), an exon being the pieces contiguous cuts join. ``home_lo`` and ``home_hi`` are the
+    home's bases below and above the cut, so a placement with more bases than that on a side leaves the home there;
+    ``leave_lo`` and ``leave_hi`` are the cuts it leaves across, the junctions ending the home at each end, ``-1``
+    where the transcript or a masked base ends it and nothing leaves."""
+    n = full_start.shape[0]
+    none = np.zeros(0, dtype=np.int64)
+    if n == 0:
+        return np.zeros(0), np.zeros(0), none, none
+    same_exon = np.zeros(n, dtype=bool)  # piece i and piece i + 1 lie in one exon
+    same_exon[cut[~is_junction]] = True
+    first = np.flatnonzero(np.r_[True, ~same_exon[:-1]])
+    last = np.r_[first[1:] - 1, n - 1]
+    exon = np.repeat(np.arange(first.shape[0]), last - first + 1)
+    cut_after = np.full(n, -1, dtype=np.int64)  # the cut joining piece i to piece i + 1
+    cut_after[cut] = np.arange(cut.shape[0])
+    # an exon's pieces end where no contiguous cut follows, so a cut at either end of it is a junction
+    below = np.where(first > 0, cut_after[np.maximum(first - 1, 0)], -1)
+    above = cut_after[last]
+    lo_exon, hi_exon = exon[cut], exon[cut + 1]
+    return (
+        full_end[cut] - full_start[first][lo_exon],
+        full_end[last][hi_exon] - full_end[cut],
+        below[lo_exon],
+        above[hi_exon],
     )
 
 
@@ -269,17 +321,31 @@ def object_shares(pieces: TranscriptPieces, pmf: np.ndarray) -> TranscriptObject
     pmf = np.asarray(pmf, dtype=np.float64).copy()
     pmf[0] = 0.0
     cut = pieces.cut_row
-    left, right = conserved_cut_shares(
-        pmf, pieces.length[cut], pieces.length[cut + 1], pieces.through, pieces.rest
-    )
+    below, above = pieces.length[cut], pieces.length[cut + 1]
+
+    def share(reach_lo, reach_hi):
+        left, right = conserved_cut_shares(pmf, below, above, reach_lo, reach_hi)
+        return left + right
+
+    # a placement leaves the cut's home where it holds more bases on a side than the home does: the share at the
+    # template's reach less the share at the home's is the part that leaves
+    whole = share(pieces.through, pieces.rest)
+    inside = share(pieces.home_lo, pieces.home_hi)
+    low = np.maximum(share(pieces.through, pieces.home_hi) - inside, 0.0)
+    high = np.maximum(share(pieces.home_lo, pieces.rest) - inside, 0.0)
     return TranscriptObjects(
         t=pieces.t,
         piece=pieces.piece,
         contained=contained_eff_length(pieces.length, pmf),
         cut_row=cut,
-        cut_share=left + right,
+        cut_share=whole,
         is_junction=pieces.is_junction,
         n_transcripts=pieces.n_transcripts,
+        leave_lo=pieces.leave_lo,
+        leave_hi=pieces.leave_hi,
+        leave_lo_share=low,
+        leave_hi_share=high,
+        leave_both_share=np.maximum(whole - inside - low - high, 0.0),
     )
 
 
@@ -290,27 +356,72 @@ def cut_efficiencies(
     c_boundary: np.ndarray,
     gdna_contained: np.ndarray,
     junction_cap: float,
+    law: TranscriptObjects | None = None,
 ) -> np.ndarray:
-    """Every cut's efficiency: a contiguous cut's boundary's, a junction's from :func:`_junction_prices` at
-    ``junction_cap``. ``A`` is the piece below the cut and ``B`` the piece above it, in genomic order."""
+    """Every cut's efficiency. Its own is a contiguous cut's boundary's, a junction's from :func:`_junction_prices` at
+    ``junction_cap``; the part of its share from placements that leave its home across a junction is priced at that
+    junction's crossing level where it is higher (:func:`_best_part`), the split taken on ``law``, the objects on the
+    law the efficiencies are read on (``objects`` by default). ``A`` is the piece below the cut and ``B`` the piece
+    above it, in genomic order."""
     right_of = region_right_boundary(np.asarray(region_arrays.ref_id))
     A = objects.piece[objects.cut_row]
     B = objects.piece[objects.cut_row + 1]
     out = c_boundary[np.maximum(right_of[A], 0)]
+    crossing = np.zeros(out.shape[0])
     j = np.flatnonzero(objects.is_junction)
     if j.size:
         out = out.copy()
-        out[j] = _junction_prices(
+        out[j], crossing[j] = _junction_prices(
             A[j], B[j], right_of, c_region, c_boundary, gdna_contained, junction_cap
         )
-    return out
+    law = objects if law is None else law
+    return _best_part(
+        out,
+        _across(crossing, law.leave_lo),
+        _across(crossing, law.leave_hi),
+        law.leave_lo_share,
+        law.leave_hi_share,
+        law.leave_both_share,
+        law.cut_share,
+    )
+
+
+def _across(value: np.ndarray, leave: np.ndarray) -> np.ndarray:
+    """Per cut, ``value`` at the junction its placements leave its home across (``leave``, a row of the cuts); 0 where
+    the home ends with no junction. An efficiency is never negative, so 0 there raises nothing."""
+    return np.where(leave >= 0, value[np.maximum(leave, 0)], 0.0)
+
+
+def _best_part(own, x_lo, x_hi, share_lo, share_hi, share_both, share) -> np.ndarray:
+    """Every cut's price from its own (``own``) and the crossing levels (``x_lo``, ``x_hi``) of the junctions its
+    placements leave its home across, below and above (:func:`_across`).
+
+    gDNA's fragment at a cut near an exon's end runs on into the intron; RNA's runs across the junction into the next
+    exon, and gDNA has no such placement to read it by. That placement is RNA's crossing of the junction too, and a
+    fragment binds its best single probe part, so its deposit at the cut is priced at the junction's crossing level
+    where that is higher::
+
+        c_cut = own + ( lo·(x_lo − own)₊ + hi·(x_hi − own)₊ + both·(max(x_lo, x_hi) − own)₊ ) / share
+
+    ``lo``, ``hi`` and ``both`` are the parts of the cut's share from placements leaving across the junction below,
+    the one above, or both; the part inside the home keeps ``own``. A
+    junction's crossing level is conservation's sum up to the junction cap, ``min(summed, cap)``: what RNA's crossing
+    captures there, as the library's junctions read it. The best object beside a junction is not passed on. It is one
+    gDNA object's own reading, the largest of four, and it belongs to the junction it lies beside. A cut whose
+    placements all stay home, a template with no junction, and a field of one level keep ``own`` to the bit."""
+    excess = (
+        share_lo * np.maximum(x_lo - own, 0.0)
+        + share_hi * np.maximum(x_hi - own, 0.0)
+        + share_both * np.maximum(np.maximum(x_lo, x_hi) - own, 0.0)
+    )
+    return own + np.divide(excess, share, out=np.zeros_like(excess), where=share > 0.0)
 
 
 def _junction_prices(
     A, B, right_of, c_region, c_boundary, gdna_contained, junction_cap
-) -> np.ndarray:
-    """The junction between exon pieces ``A`` (below it, in genomic order) and ``B`` (above it), by conservation of
-    bases::
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(price, crossing)`` at the junction between exon pieces ``A`` (below it, in genomic order) and ``B`` (above
+    it). The price is by conservation of bases::
 
         c_junction = c_lo + c_hi − ½ (c_intron,lo + c_intron,hi)
 
@@ -325,9 +436,13 @@ def _junction_prices(
     inside a fully captured piece; without the cap, probes tiled to the exons' edges would count the exon's capture
     about twice. The cap lets a probe spanning the junction (one part for spliced RNA, two for gDNA) out-capture every
     gDNA object beside it; the best-object term lets a junction beside a stronger probe reach that object's level.
-    The cap is the library's (:func:`fit_junction_cap`); every other term is the junction's own."""
+    The cap is the library's (:func:`fit_junction_cap`); every other term is the junction's own.
+
+    The crossing level is the price without the best-object term, ``min(summed, junction_cap)``: what RNA's crossing
+    captures at the junction, which a placement that leaves a cut's exons across it takes with it
+    (:func:`_best_part`)."""
     summed, best = _junction_parts(A, B, right_of, c_region, c_boundary, gdna_contained)
-    return np.minimum(summed, np.maximum(junction_cap, best))
+    return np.minimum(summed, np.maximum(junction_cap, best)), np.minimum(summed, junction_cap)
 
 
 def _junction_parts(
@@ -371,20 +486,24 @@ def fit_junction_cap(
     ``W`` a junction's conserved spliced mass and ``m`` the unspliced RNA calibration booked in the exon regions beside
     it::
 
-        W | W + m  ~  Binomial( a(p(C)) / (a(p(C)) + D) ),      a(p) = X + X'·(p − 1),      p(C) = min(summed, max(C, best))
+        W | W + m  ~  Binomial( a(C) / (a(C) + D) ),      a(C) = mean_t [ X_t + X'_t·(p_t(C) − 1) ]
 
-    ``X`` is the mean, over the annotated transcripts using the junction, of its share there, and ``X'`` of that share
-    times the carry factor (``X' = X`` where nothing is carried, so ``a(p) = X·p``); ``D`` is the ruler's term of those
-    regions at their efficiencies; ``p(C)`` is the junction rule at cap ``C``, above 1 on the whole grid. The cap is the ``C`` that maximises the junctions' joint likelihood on a geometric grid from the
-    saturated level to the largest uncapped price, the first maximum taken. The counts can raise the cap and never
-    lower it, so where they ask for no more the rule is the saturated level's, bit for bit.
+    over the annotated transcripts ``t`` using the junction: ``X_t`` is the transcript's share there and ``X'_t`` that
+    share times the carry factor (``X' = X`` where nothing is carried, so the term is ``X·p``); ``p_t(C)`` is the price
+    the ruler gives the transcript's cut at cap ``C``, the junction rule ``min(summed, max(C, best))`` with the
+    placements that leave across the next junction at its crossing level ``min(summed, C)`` where that is higher
+    (:func:`_best_part`); ``D`` is the ruler's term of those regions at their efficiencies. The cap is the ``C`` that
+    maximises the junctions' joint likelihood on a geometric grid from the saturated level to the largest uncapped
+    price the fit reads, the first maximum taken. The counts can raise the cap and never lower it, so where they ask
+    for no more the rule is the saturated level's, bit for bit.
 
     A junction's evidence is its own footprint. An exon region beside it enters only when every annotated transcript
     covering the region uses the junction, so no other junction's and no other isoform's fragments are read; a
     junction is a row of the sj axis, its two regions and its strand. A junction with no such region, with no fragment
-    in its footprint, or whose price the cap cannot move is not in the fit, and with none in it the cap is the
-    saturated level. So it is at a saturated level of exactly 1 (no level above the bulk, or a capture weight of 0): no
-    capture is read, and there is none for a junction to exceed.
+    in its footprint, or whose term the cap cannot move (neither its own price nor the crossing level of a junction
+    its placements leave across) is not in the fit, and with none in it the cap is the saturated level. So it is at a
+    saturated level of exactly 1 (no level above the bulk, or a capture weight of 0): no capture is read, and there is
+    none for a junction to exceed.
     """
     from .splice_graph import build_sj_geometry_arrays
 
@@ -399,11 +518,13 @@ def fit_junction_cap(
     # priced p above 1 at its share plus the carried excess, ``share + slope·(p − 1)`` (:func:`_carried`)
     c_piece = c_region[obj.piece]
     cut_slope = obj.cut_share
+    law = obj
     carry = _carry_shares(pieces, obj, tables)
     if carry is not None:
         on_anchor, on_table = carry
         c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)
         cut_slope = obj.cut_share * _carry_factor(on_anchor.cut_share, on_table.cut_share)
+        law = on_anchor
     piece_term = obj.contained * c_piece
 
     # each annotated transcript's junction cuts, on the sj axis
@@ -421,12 +542,6 @@ def fit_junction_cap(
     )
     used = obj.is_junction & ~synthetic[cut_t] & (sj_of_cut >= 0)
     users = np.bincount(sj_of_cut[used], minlength=n_sj)
-    price_base = np.bincount(
-        sj_of_cut[used], weights=obj.cut_share[used], minlength=n_sj
-    ) / np.maximum(users, 1)
-    price_slope = np.bincount(
-        sj_of_cut[used], weights=cut_slope[used], minlength=n_sj
-    ) / np.maximum(users, 1)
 
     # the junction's own footprint: an exon region beside it that only its transcripts cover. The mask can cut a
     # transcript's piece of a region into parts, so a transcript counts once per region and its term there is the sum
@@ -449,32 +564,67 @@ def fit_junction_cap(
         anchor_term += np.where(own, region_term[side], 0.0)
     spliced = np.asarray(calibration.sj_conserved_mass, dtype=np.float64)
 
+    # every junction cut as the ruler prices it: its own rule's two bounds, and the junctions its placements leave
+    # across (:func:`_best_part`), as rows of the junction cuts
+    cuts = np.flatnonzero(obj.is_junction)
+    at = np.full(obj.cut_row.shape[0], -1, dtype=np.int64)
+    at[cuts] = np.arange(cuts.shape[0])
     summed, best = _junction_parts(
-        src,
-        dst,
+        obj.piece[obj.cut_row][cuts],
+        obj.piece[obj.cut_row + 1][cuts],
         region_right_boundary(np.asarray(region_arrays.ref_id)),
         c_region,
         c_boundary,
         np.asarray(calibration.gdna_region_eff_len, dtype=np.float64),
     )
-    fit = (
-        (price_slope > 0.0)
-        & (summed > np.maximum(saturation, best))
-        & (anchor_term > 0.0)
-        & (spliced + anchor > 0.0)
-    )
-    if not fit.any():
+    leave = [
+        np.where(to[cuts] >= 0, at[np.maximum(to[cuts], 0)], -1)
+        for to in (law.leave_lo, law.leave_hi)
+    ]
+    leaving = (law.leave_lo_share[cuts], law.leave_hi_share[cuts], law.leave_both_share[cuts])
+    slope, sj, counted = cut_slope[cuts], sj_of_cut[cuts], used[cuts]
+
+    # a junction is in the fit when the cap can move its term: its own price (conservation's sum above the saturated
+    # level and the best object beside it), or the crossing level of a junction its placements leave across (a sum
+    # above the saturated level)
+    moves = summed > np.maximum(saturation, best)
+    reads = [moves] + [
+        (to >= 0) & (part + leaving[2] > 0.0) & (summed[np.maximum(to, 0)] > saturation)
+        for to, part in zip(leave, leaving[:2], strict=True)
+    ]
+    moved = np.bincount(sj[counted], weights=np.logical_or.reduce(reads)[counted], minlength=n_sj)
+    held = np.bincount(sj[counted], weights=slope[counted], minlength=n_sj)
+    fit = (moved > 0) & (held > 0.0) & (anchor_term > 0.0) & (spliced + anchor > 0.0)
+    in_fit = np.flatnonzero(counted & fit[np.maximum(sj, 0)])
+    if in_fit.size == 0:
         return saturation
-    W, m, X, slope, D, s, b = (
-        a[fit] for a in (spliced, anchor, price_base, price_slope, anchor_term, summed, best)
-    )
+    # the grid ends at the largest sum the fit's junctions read, their own or one they leave across
+    read = np.zeros(cuts.shape[0], dtype=bool)
+    read[in_fit[reads[0][in_fit]]] = True
+    for to, reaches in zip(leave, reads[1:], strict=True):
+        read[to[in_fit[reaches[in_fit]]]] = True
     levels = np.geomspace(
-        saturation, float(s.max()), CONSTANTS.calibration.junction_cap_grid_points
+        saturation, float(summed[read].max()), CONSTANTS.calibration.junction_cap_grid_points
     )
+
+    # the fit's own cuts: each one's bounds, the sums of the junctions it leaves across, its shares and its sj
+    own_sum, own_best = summed[in_fit], best[in_fit]
+    sum_lo, sum_hi = (_across(summed, to)[in_fit] for to in leave)
+    parts = [part[in_fit] for part in (*leaving, law.cut_share[cuts])]
+    share, slope, sj = obj.cut_share[cuts][in_fit], slope[in_fit], sj[in_fit]
+    W, m, D, n = spliced[fit], anchor[fit], anchor_term[fit], users[fit]
     log_likelihood = np.empty(levels.shape[0])
     for i, level in enumerate(levels):
-        # every price on the grid is above 1, so the junction's term is its share plus the carried excess
-        a = slope * np.minimum(s, np.maximum(level, b)) + (X - slope)
+        # the ruler's term at each cut with the cap at this level, the excess over 1 carried, and its mean over the
+        # annotated transcripts using the junction
+        price = _best_part(
+            np.minimum(own_sum, np.maximum(level, own_best)),
+            np.minimum(sum_lo, level),
+            np.minimum(sum_hi, level),
+            *parts,
+        )
+        term = np.where(price > 1.0, share + slope * (price - 1.0), share * price)
+        a = np.bincount(sj, weights=term, minlength=n_sj)[fit] / n
         log_likelihood[i] = (
             W * (np.log(a) - np.log(a + D)) + m * (np.log(D) - np.log(a + D))
         ).sum()
@@ -502,29 +652,36 @@ def place_efficiencies(
     region_arrays: "RegionArrays",
     index: "TranscriptIndex",
     junction_cap: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(c_region, c_boundary, c_sj)``: the efficiencies a multimapper's place weight reads
-    (:func:`place_log_weights`), on the accumulator's flat object axes: calibration's own at a region and a boundary,
-    and at an annotated junction the price the transcripts' lengths give it (``_junction_prices`` at the same
-    ``junction_cap``), from its two exon regions. A junction reads 1 with no landscape, as every object does."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """``(c_region, c_boundary, c_sj, c_sj_crossing, sj_low_boundary, sj_high_boundary)``: the efficiencies a
+    multimapper's place weight reads (:func:`place_log_weights`), on the accumulator's flat object axes: calibration's
+    own at a region and a boundary, and at an annotated junction the price its own rule gives it
+    (``_junction_prices`` at the same ``junction_cap``), from its two exon regions, with its crossing level, the part
+    of that price a place across it passes on (:func:`_best_part`); and the boundary at each junction's low and high
+    splice site, which orders a place's junctions among the boundaries it crosses. A junction reads 1 with no
+    landscape, as every object does."""
     from .splice_graph import build_sj_geometry_arrays
 
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     geo = build_sj_geometry_arrays(index)
     src = np.asarray(geo.src_region, dtype=np.int64)
+    dst = np.asarray(geo.dst_region, dtype=np.int64)
+    right_of = region_right_boundary(np.asarray(region_arrays.ref_id))
+    low, high = right_of[src], right_of[np.maximum(dst - 1, 0)]
     if calibration.gdna_bulk_density is None or src.size == 0:
-        return c_region, c_boundary, np.ones(src.size, dtype=np.float64)
-    c_sj = _junction_prices(
+        one = np.ones(src.size, dtype=np.float64)
+        return c_region, c_boundary, one, one, low, high
+    c_sj, c_sj_crossing = _junction_prices(
         src,
-        np.asarray(geo.dst_region, dtype=np.int64),
-        region_right_boundary(np.asarray(region_arrays.ref_id)),
+        dst,
+        right_of,
         c_region,
         c_boundary,
         np.asarray(calibration.gdna_region_eff_len, dtype=np.float64),
         junction_cap,
     )
-    return c_region, c_boundary, c_sj
+    return c_region, c_boundary, c_sj, c_sj_crossing, low, high
 
 
 def place_log_weights(
@@ -537,10 +694,14 @@ def place_log_weights(
     c_region: np.ndarray,
     c_boundary: np.ndarray,
     c_sj: np.ndarray,
+    c_sj_crossing: np.ndarray,
+    sj_low_boundary: np.ndarray,
+    sj_high_boundary: np.ndarray,
 ) -> np.ndarray:
     """``log w`` per buffered row: a multimapper's place's capture weight, ``w(x) = Σ_o m_o(x) c_o``, the deposit
     rule's mass of the place at every object it deposits on (CSR over rows, ``rigel.native.PLACE_*`` kinds, flat
-    ids) times the object's capture efficiency (:func:`place_efficiencies`). Its sum over the gDNA component's
+    ids) times the object's capture efficiency (:func:`place_efficiencies`), a place across junctions binding its
+    best part (:func:`_place_best_part`). Its sum over the gDNA component's
     placements, on the law the efficiencies are read on, is that component's capture-contracted length, and its excess
     over 1 summed over a transcript's is the excess of the transcript's length over its own (where every efficiency is
     at least 1), so every candidate at the place carries it.
@@ -560,12 +721,58 @@ def place_log_weights(
         sel = kind == code
         c[sel] = np.asarray(eff, dtype=np.float64)[index[sel]]
     per_row = np.diff(offsets)
+    row = np.repeat(np.arange(n_rows), per_row)
+    c = _place_best_part(row, kind, index, c, c_sj_crossing, sj_low_boundary, sj_high_boundary)
     w = np.zeros(n_rows, dtype=np.float64)
-    np.add.at(w, np.repeat(np.arange(n_rows), per_row), mass * c)
+    np.add.at(w, row, mass * c)
     out = np.zeros(n_rows, dtype=np.float32)
     weighted = (per_row > 0) & ~np.asarray(intergenic, dtype=bool)
     with np.errstate(divide="ignore"):
         out[weighted] = np.log(w[weighted])
+    return out
+
+
+def _place_best_part(
+    row: np.ndarray,
+    kind: np.ndarray,
+    index: np.ndarray,
+    c: np.ndarray,
+    c_sj_crossing: np.ndarray,
+    sj_low_boundary: np.ndarray,
+    sj_high_boundary: np.ndarray,
+) -> np.ndarray:
+    """Every deposit's efficiency with a place across junctions binding its best part: a boundary the place crosses
+    and a junction it uses each read the larger of their own efficiency and the crossing level of the nearest junction
+    the place uses on each side of them. It is :func:`_best_part` one placement at a time: the junction ending the
+    object's home below is the nearest the place uses below it, and a place that stays home uses none there. ``row``
+    is each object's row; a place's objects lie on one reference, where a boundary's index orders them."""
+    from ..native import PLACE_BOUNDARY, PLACE_SJ
+
+    is_sj = kind == PLACE_SJ
+    j = np.flatnonzero(is_sj)
+    if j.size == 0:
+        return c
+    low_of = np.asarray(sj_low_boundary, dtype=np.int64)
+    high_of = np.asarray(sj_high_boundary, dtype=np.int64)
+    o = np.flatnonzero(is_sj | (kind == PLACE_BOUNDARY))
+    o_low = np.where(is_sj[o], low_of[np.where(is_sj[o], index[o], 0)], index[o])
+    o_high = np.where(is_sj[o], high_of[np.where(is_sj[o], index[o], 0)], index[o])
+    # the places' junctions, by row then position: one alignment's introns do not overlap, so either end orders them
+    j = j[np.lexsort((low_of[index[j]], row[j]))]
+    span = int(o_high.max()) + 2
+    key_low = row[j] * span + low_of[index[j]]
+    key_high = row[j] * span + high_of[index[j]]
+    out = c.copy()
+    crossing = np.asarray(c_sj_crossing, dtype=np.float64)[index[j]]
+    last = j.size - 1
+    # below: the last of the row's junctions that ends at or below the object
+    at = np.clip(np.searchsorted(key_high, row[o] * span + o_low, side="right") - 1, 0, last)
+    there = (row[j[at]] == row[o]) & (high_of[index[j[at]]] <= o_low)
+    out[o] = np.maximum(out[o], np.where(there, crossing[at], 0.0))
+    # above: the first of the row's junctions that starts at or above the object
+    at = np.clip(np.searchsorted(key_low, row[o] * span + o_high, side="left"), 0, last)
+    there = (row[j[at]] == row[o]) & (low_of[index[j[at]]] >= o_high)
+    out[o] = np.maximum(out[o], np.where(there, crossing[at], 0.0))
     return out
 
 
@@ -580,8 +787,9 @@ def transcript_capture_eff_lengths(
     """``eff_em_t = fl_t · Σ_o share_o(T_R) ĉ_o / Σ_o share_o(T_R)`` over the transcript's pieces and cuts.
 
     The efficiencies ``c_o`` are the result's (a piece's region's, a contiguous cut's boundary's, a junction's from the
-    objects beside it, capped at ``junction_cap``, :func:`fit_junction_cap`): gDNA's yields, read on gDNA's uncaptured
-    law ``g`` (``tables.anchor``). Capture adds to the uncaptured yield, and the uncaptured part is RNA's own share on
+    objects beside it, capped at ``junction_cap``, :func:`fit_junction_cap`; a cut's placements that leave its exons
+    across a junction at that junction's crossing level where it is higher, :func:`_best_part`): gDNA's yields, read on gDNA's
+    uncaptured law ``g`` (``tables.anchor``). Capture adds to the uncaptured yield, and the uncaptured part is RNA's own share on
     its own table, so only the excess is carried to the scorer's gDNA table ``T_G`` (``tables.gdna``):
     ``ĉ_o = 1 + (c_o − 1)·share_o(g)/share_o(T_G)`` where ``c_o > 1``, and ``c_o`` as read elsewhere and where ``T_G``
     cannot reach (:func:`_carried`). Every efficiency exactly 1 gives ``fl`` to the bit, whatever the tables; where
@@ -597,6 +805,8 @@ def transcript_capture_eff_lengths(
     pieces = transcript_pieces(index, region_arrays)
     obj = object_shares(pieces, tables.rna)
     c_piece = c_region[obj.piece]
+    carry = _carry_shares(pieces, obj, tables)
+    # a cut's placements are split on the law its efficiencies are read on, as its excess is carried from there
     c_cut = cut_efficiencies(
         obj,
         region_arrays,
@@ -604,8 +814,8 @@ def transcript_capture_eff_lengths(
         c_boundary,
         gdna_contained,
         junction_cap,
+        obj if carry is None else carry[0],
     )
-    carry = _carry_shares(pieces, obj, tables)
     if carry is not None:
         on_anchor, on_table = carry
         c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)

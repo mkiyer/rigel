@@ -766,6 +766,10 @@ def test_the_place_weight_sums_to_gdnas_normaliser_over_every_placement():
         c_region=c_region,
         c_boundary=c_boundary,
         c_sj=np.ones(len(SJ)),
+        c_sj_crossing=np.ones(len(SJ)),
+        # no placement here is spliced, so no junction is placed among the boundaries
+        sj_low_boundary=np.zeros(len(SJ), dtype=np.int64),
+        sj_high_boundary=np.zeros(len(SJ), dtype=np.int64),
     )
     log_w = np.asarray(log_w, dtype=np.float64)
     lhs = float(np.sum(np.asarray(f) * np.exp(log_w)))
@@ -788,24 +792,41 @@ def test_a_place_weighs_its_objects_by_mass_and_an_intergenic_place_weighs_one()
     import rigel.native as N
 
     R, B, J = int(N.PLACE_REGION), int(N.PLACE_BOUNDARY), int(N.PLACE_SJ)
-    # rows: a unique fragment (no objects), one contained place, one crossing two boundaries, one spliced, and an
-    # intergenic place whose region reads captured
-    offsets = np.asarray([0, 0, 1, 3, 5, 6], dtype=np.int64)
-    kinds = np.asarray([R, B, B, B, J, R], dtype=np.int8)
-    ids = np.asarray([2, 0, 1, 1, 0, 3], dtype=np.int64)
-    masses = np.asarray([1.0, 0.4, 0.6, 0.5, 0.5, 1.0])
+    # rows: a unique fragment (no objects), one contained place, one crossing two boundaries, three spliced, and an
+    # intergenic place whose region reads captured. Junction 0 joins boundaries 2 and 3 and junction 1 boundaries 5
+    # and 6, so boundary 1 lies below both and boundary 4 between them.
+    offsets = np.asarray([0, 0, 1, 3, 5, 7, 10, 11], dtype=np.int64)
+    kinds = np.asarray([R, B, B, B, J, B, J, J, B, J, R], dtype=np.int8)
+    ids = np.asarray([2, 0, 1, 1, 0, 4, 0, 0, 4, 1, 3], dtype=np.int64)
+    masses = np.asarray([1.0, 0.4, 0.6, 0.5, 0.5, 0.5, 0.5, 0.3, 0.3, 0.4, 1.0])
     log_w = place_log_weights(
         offsets,
         kinds,
         ids,
         masses,
-        intergenic=np.asarray([False, False, False, False, True]),
+        intergenic=np.asarray([False, False, False, False, False, False, True]),
         c_region=np.asarray([1.0, 1.0, 3.0, 17.0]),
-        c_boundary=np.asarray([2.0, 5.0]),
-        c_sj=np.asarray([11.0]),
+        c_boundary=np.asarray([2.0, 5.0, 1.0, 1.0, 13.0, 1.0, 1.0]),
+        c_sj=np.asarray([11.0, 7.0]),
+        c_sj_crossing=np.asarray([9.0, 7.0]),
+        sj_low_boundary=np.asarray([2, 5]),
+        sj_high_boundary=np.asarray([3, 6]),
     )
+    # A place across a junction binds its best part. Junction 0 is priced 11 at its best object and its crossing
+    # level, which is what it passes on, is 9: the boundary below it reads 9 over its own 5 while the junction keeps
+    # its 11; the boundary above it keeps its own 13; and across both junctions the boundary between them keeps 13
+    # while junction 1 reads junction 0's 9 over its own 7. An unspliced place reads each object's own.
     assert np.exp(np.asarray(log_w, dtype=np.float64)) == pytest.approx(
-        [1.0, 3.0, 0.4 * 2.0 + 0.6 * 5.0, 0.5 * 5.0 + 0.5 * 11.0, 1.0], rel=1e-6
+        [
+            1.0,
+            3.0,
+            0.4 * 2.0 + 0.6 * 5.0,
+            0.5 * 9.0 + 0.5 * 11.0,
+            0.5 * 13.0 + 0.5 * 11.0,
+            0.3 * 11.0 + 0.3 * 13.0 + 0.4 * 9.0,
+            1.0,
+        ],
+        rel=1e-6,
     )
 
 
