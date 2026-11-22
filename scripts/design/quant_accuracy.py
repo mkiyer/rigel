@@ -87,7 +87,7 @@ from _scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
 #: absorbing, so every silent transcript is switched off for free).
 #:
 #: The ruler arms substitute the lengths the EM divides by. The ruler (``transcript_capture_eff_lengths``) is built
-#: by ``pipeline.setup_geometry_and_estimator`` before ``assemble_priors`` runs, so no prior arm reaches it::
+#: by ``pipeline.transcript_geometry`` before ``assemble_priors`` runs, so no prior arm reaches it::
 #:
 #:     calibrate(...)
 #:       |-- transcript_capture_eff_lengths()  <- the ruler arms substitute here: `effective_lengths_em`
@@ -509,7 +509,7 @@ def install_ruler_arm(arm: str, factor: np.ndarray, held: np.ndarray):
 
     ``held`` marks the transcripts on a reference the condition drew no gDNA from (``gdna_free_transcripts``), where
     the factor has no gDNA length on its own scale to stand beside. ``transcript_capture_eff_lengths`` is patched as a
-    module attribute, which works because ``pipeline.setup_geometry_and_estimator`` imports it at call time. Both arms
+    module attribute, which works because ``pipeline.transcript_geometry`` imports it at call time. Both arms
     run the same wrapper: it runs the shipped ruler, builds the substitute, and records how far the substitute sits from
     the shipped lengths (``truth_delta``), how far the returned lengths do (``max_abs_delta``) and how many transcripts
     it held (``held``); ``oracle_ruler_noop`` returns the shipped object. ``check_ruler_arm`` reads the counter.
@@ -522,8 +522,8 @@ def install_ruler_arm(arm: str, factor: np.ndarray, held: np.ndarray):
     orig_ruler = CEL.transcript_capture_eff_lengths
     fired = {"n": 0, "ruler": 0, "max_abs_delta": 0.0, "truth_delta": 0.0, "held": int(held.sum())}
 
-    def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths, tables, junction_cap):
-        shipped = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, tables, junction_cap)
+    def ruler_wrapper(calibration, frame, fl_eff_lengths, junction_cap):
+        shipped = orig_ruler(calibration, frame, fl_eff_lengths, junction_cap)
         base = np.asarray(shipped, dtype=np.float64)
         truth = np.where(held, base, np.asarray(fl_eff_lengths, dtype=np.float64) * factor)
         out = truth if substitute else shipped

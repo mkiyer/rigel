@@ -115,9 +115,10 @@ Three stages, in `pipeline.run_pipeline`:
 2. **Second pass, then calibration**: `drain_side_buffer` draws one explanation per held fragment and re-deposits it
    (§4); `calibration.calibrate` deconvolves every region and boundary of the drained tally into gDNA, RNA+ and RNA− by
    message passing over the region chain (§5–§7).
-3. **Quantify** (`quant_from_buffer`): the length tables are decided (§8), the buffer is scored and routed, and a
-   per-locus EM assigns fragments to the locus's transcripts and one gDNA component; calibration enters each locus as
-   two scalars, a gDNA count and a gDNA effective length, never per transcript (§9).
+3. **Quantify** (`transcript_geometry`, then `quant_from_buffer`): the length tables are decided (§8) and the
+   transcripts' lengths priced under them, the buffer is scored and routed, and a per-locus EM assigns fragments to the
+   locus's transcripts and one gDNA component; calibration enters each locus as two scalars, a gDNA count and a gDNA
+   effective length, never per transcript (§9).
 
 An optional pass re-reads the BAM and stamps every record (§10). The native modules (`native.py`) are `_bam_impl`
 (`native/scan/`, `native/calibration/`), `_resolve_impl` (`native/resolve/`), `_scoring_impl`, `_em_impl` (`em_solver.cpp` with `em_*.h`

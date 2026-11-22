@@ -62,14 +62,15 @@ from _oracle_arms import load_or_build_oracle  # noqa: E402
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.capture_eff_length import fit_junction_cap  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import (  # noqa: E402
     drain_side_buffer,
+    length_models,
     length_tables,
     quant_from_buffer,
     scan_and_buffer,
+    transcript_geometry,
 )
 
 #: The ``LocusPriors`` fields: the noop gate holds every one byte-identical.
@@ -132,7 +133,7 @@ def score_arm(arm: np.ndarray, ref: np.ndarray, select: np.ndarray | None = None
 
 
 def capture_priors(buffer, index, strand_models, tables, region_arrays, stats, calibration,
-                   junction_cap, pipeline_config):
+                   junction_cap, geometry, pipeline_config):
     """Run the production quant path far enough to get ``(multi_loci, LocusPriors)``, then stop.
 
     The loci depend on the scoring stage, so they are taken from production's own call by wrapping
@@ -154,7 +155,7 @@ def capture_priors(buffer, index, strand_models, tables, region_arrays, stats, c
     PRIORS.assemble_priors = _wrapper
     try:
         quant_from_buffer(
-            buffer, index, strand_models, tables, region_arrays, stats, calibration, junction_cap,
+            buffer, index, strand_models, tables, region_arrays, stats, calibration, junction_cap, geometry,
             em_config=pipeline_config.em, scoring=pipeline_config.scoring,
         )
     except _StopAfterPriors:
@@ -244,9 +245,9 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
     )
     # the EM's length tables and the junction cap, as production decides them
     tables = length_tables(fl, cal, ra)
+    junction_cap, geometry = transcript_geometry(index, length_models(tables)[0], cal, ra, tables)
     multi_loci, priors = capture_priors(
-        buffer, index, strand_model, tables, ra, stats, cal,
-        fit_junction_cap(cal, ra, index, tables), pipeline_config,
+        buffer, index, strand_model, tables, ra, stats, cal, junction_cap, geometry, pipeline_config,
     )
     return cal, multi_loci, priors
 

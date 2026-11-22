@@ -335,6 +335,22 @@ def test_the_row_tiles_change_nothing_and_equal_the_dense_reader(monkeypatch):
         assert np.array_equal(got, tiled), f"rows {rows}: {int((got != tiled).sum())} objects moved"
 
 
+def test_the_reading_is_the_same_at_every_thread_count(monkeypatch):
+    """The tiles are read on calibration's thread budget, each whole by one thread into its own rows, so the count moves
+    no bit, and every tile is read: a tile no thread reached would leave its objects at 1, off the dense reader."""
+    ls = _hand([1e-5, 1e-3, 0.03, 0.2, 1.0], [0.02, 0.80, 0.03, 0.03, 0.12])
+    rng = np.random.default_rng(12)
+    S = np.where(rng.random(1000) < 0.05, 0.0, rng.uniform(1.0, 1e5, 1000))
+    k = np.floor(np.exp(rng.uniform(np.log(1e-6), np.log(5.0), 1000)) * S)
+    monkeypatch.setattr(CE, "block_rows", lambda n_grid, n_arrays: 7)
+    one = capture_efficiencies(ls, k, S, k[::-1], S[::-1], n_threads=1)
+    np.testing.assert_allclose(one.efficiency_region, _dense_reference(ls, k, S), rtol=1e-12)
+    for n_threads in (2, 5, 0):
+        got = capture_efficiencies(ls, k, S, k[::-1], S[::-1], n_threads=n_threads)
+        assert np.array_equal(got.efficiency_region, one.efficiency_region), n_threads
+        assert np.array_equal(got.efficiency_boundary, one.efficiency_boundary), n_threads
+
+
 def test_the_saturation_level_is_the_most_massive_enriched_basins_peak():
     """Of two enriched basins the most massive sets the saturated level, not the highest: the junction's bound is
     the level capture fills, and a lighter basin above it is a stronger probe's own level."""

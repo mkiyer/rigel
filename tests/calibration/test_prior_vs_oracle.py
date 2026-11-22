@@ -291,7 +291,7 @@ def test_a_run_that_never_reaches_assemble_priors_raises(measured, monkeypatch):
     monkeypatch.setattr(prior_vs_oracle, "quant_from_buffer", lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="never called"):
         prior_vs_oracle.capture_priors(
-            None, None, None, None, None, None, None, None, PipelineConfig()
+            None, None, None, None, None, None, None, None, None, PipelineConfig()
         )
 
 

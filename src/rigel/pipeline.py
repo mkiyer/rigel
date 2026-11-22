@@ -647,23 +647,33 @@ def _wire_calibration_regions(
 # ---------------------------------------------------------------------------
 
 
-def setup_geometry_and_estimator(
+def length_models(tables: "LengthTables") -> tuple[FragmentLengthModel, FragmentLengthModel]:
+    """``(rna_fl, gdna_fl)``: the scorer's two length models, on the EM's tables (:func:`length_tables`)."""
+    max_size = int(tables.rna.size) - 1
+    return (
+        FragmentLengthModel.from_pmf(tables.rna, max_size),
+        FragmentLengthModel.from_pmf(tables.gdna, max_size),
+    )
+
+
+def transcript_geometry(
     index: TranscriptIndex,
     rna_fl,
-    em_config: EMConfig,
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
     tables: "LengthTables",
-    junction_cap: float,
-) -> AbundanceEstimator:
-    """Compute the transcripts' effective lengths and create the AbundanceEstimator.
+) -> tuple[float, TranscriptGeometry]:
+    """``(junction_cap, geometry)``: the cap on a junction's capture price and the transcripts' effective lengths, read
+    from one frame of the index's pieces and cuts (``calibration.capture_eff_length.TranscriptFrame``). The frame is
+    ten million rows on a whole genome and is dropped on return, before a fragment is scored.
 
-    ``effective_lengths_em`` are capture-contracted by the rule the gDNA component's length takes too (each
-    transcript's share of every region, boundary and junction its fragments deposit on, at that object's capture
-    efficiency, a junction's capped at ``junction_cap``), so every component competes on one footing under capture.
-    ``effective_lengths``, TPM's, stay the full FL-marginal length over the observable starts. Where every capture
-    efficiency is exactly 1 (no landscape, or a reading of 1 everywhere) the two are bit-identical, whatever the
-    length tables (``calibration/capture_eff_length.py``).
+    The cap is the saturated level calibration publishes, raised as far as RNA's spliced fragments support
+    (``fit_junction_cap``). ``effective_lengths_em`` are capture-contracted by the rule the gDNA component's length
+    takes too (each transcript's share of every region, boundary and junction its fragments deposit on, at that
+    object's capture efficiency, a junction's capped at the cap), so every component competes on one footing under
+    capture. ``effective_lengths``, TPM's, stay the full FL-marginal length over the observable starts. Where every
+    capture efficiency is exactly 1 (no landscape, or a reading of 1 everywhere) the two are bit-identical, whatever
+    the length tables (``calibration/capture_eff_length.py``).
     """
     if rna_fl.n_observations <= 0:
         raise ValueError(
@@ -671,28 +681,22 @@ def setup_geometry_and_estimator(
             "effective length; nothing can be quantified."
         )
     from .calibration.capture_eff_length import (
+        TranscriptFrame,
+        fit_junction_cap,
         observable_fl_eff_lengths,
         transcript_capture_eff_lengths,
     )
 
-    effective_lengths = observable_fl_eff_lengths(index, region_arrays, rna_fl)
-
+    frame = TranscriptFrame(index, region_arrays, tables)
+    junction_cap = fit_junction_cap(calibration, frame)
+    effective_lengths = observable_fl_eff_lengths(frame, rna_fl)
     effective_lengths_em = transcript_capture_eff_lengths(
-        calibration, region_arrays, index, effective_lengths, tables, junction_cap
+        calibration, frame, effective_lengths, junction_cap
     )
-
-    geometry = TranscriptGeometry(
+    return junction_cap, TranscriptGeometry(
         effective_lengths=effective_lengths,
         effective_lengths_em=effective_lengths_em,
     )
-
-    estimator = AbundanceEstimator(
-        index.num_transcripts,
-        em_config=em_config,
-        geometry=geometry,
-        is_synthetic=index.t_df["is_synthetic"].values,
-    )
-    return estimator
 
 
 def score_fragments(
@@ -972,6 +976,7 @@ def quant_from_buffer(
     stats: PipelineStats,
     calibration: "CalibrationResult",
     junction_cap: float,
+    geometry: TranscriptGeometry,
     *,
     em_config: EMConfig | None = None,
     scoring: FragmentScoringConfig | None = None,
@@ -982,8 +987,8 @@ def quant_from_buffer(
     """Quantify buffered fragments: calibration prior → per-locus EM.
 
     Scores the buffer with the EM's two length tables (:func:`length_tables`), prices every junction under one cap
-    (``junction_cap``, `calibration.capture_eff_length.fit_junction_cap`) in the transcripts' lengths and in a
-    multimapper's place weights alike, builds connected-component loci, turns the per-region ``CalibrationResult``
+    (``junction_cap``, :func:`transcript_geometry`) in a multimapper's place weights as the transcripts' lengths
+    (``geometry``) were priced, builds connected-component loci, turns the per-region ``CalibrationResult``
     into each locus's gDNA count, fragment count and gDNA length (``assemble_priors``), partitions
     the global CSR, and runs the per-locus EM, whose pseudocounts read the gDNA count
     against the fragment count (``em_pseudocounts``). Returns the populated
@@ -999,12 +1004,13 @@ def quant_from_buffer(
 
     # The scorer's two tables: one shared law unless the data show a difference capture cannot make. The
     # transcripts' geometry and RNA's normaliser read the same tables; calibration and the priors keep `gdna_pmf`.
-    max_size = int(tables.rna.size) - 1
-    rna_fl = FragmentLengthModel.from_pmf(tables.rna, max_size)
-    gdna_fl = FragmentLengthModel.from_pmf(tables.gdna, max_size)
+    rna_fl, gdna_fl = length_models(tables)
 
-    estimator = setup_geometry_and_estimator(
-        index, rna_fl, em_config, calibration, region_arrays, tables, junction_cap
+    estimator = AbundanceEstimator(
+        index.num_transcripts,
+        em_config=em_config,
+        geometry=geometry,
+        is_synthetic=index.t_df["is_synthetic"].values,
     )
 
     em_data = score_fragments(
@@ -1100,10 +1106,11 @@ def run_pipeline(
         # The EM's two length tables: one shared law unless the data show a difference capture cannot make
         tables = length_tables(fl_models, calibration, region_arrays)
         _log_length_tables(tables)
-        # The cap on a junction's capture price: the saturated level, raised as far as RNA's spliced fragments support
-        from .calibration.capture_eff_length import fit_junction_cap
-
-        junction_cap = fit_junction_cap(calibration, region_arrays, index, tables)
+        # The cap on a junction's capture price (the saturated level, raised as far as RNA's spliced fragments
+        # support) and the transcripts' lengths priced under it
+        junction_cap, geometry = transcript_geometry(
+            index, length_models(tables)[0], calibration, region_arrays, tables
+        )
         _log_junction_cap(calibration.gdna_capture_saturation, junction_cap)
         annotations = None if config.annotated_bam_path is None else _annotation_table(buffer)
         estimator = quant_from_buffer(
@@ -1115,6 +1122,7 @@ def run_pipeline(
             stats,
             calibration,
             junction_cap,
+            geometry,
             em_config=config.em,
             scoring=config.scoring,
             log_every=scan.log_every,

@@ -80,7 +80,7 @@ PROBES: tuple[tuple[str, str, str], ...] = (
     ("region deconv", "rigel.calibration.sweep", "chain_region_deconv"),
     ("boundary deconv", "rigel.calibration.sweep", "chain_boundary_deconv"),
     ("quant", "rigel.pipeline", "quant_from_buffer"),
-    ("setup geometry + estimator", "rigel.pipeline", "setup_geometry_and_estimator"),
+    ("transcript geometry", "rigel.pipeline", "transcript_geometry"),
     ("junction cap", "rigel.calibration.capture_eff_length", "fit_junction_cap"),
     ("capture effective lengths", "rigel.calibration.capture_eff_length", "transcript_capture_eff_lengths"),
     ("score fragments", "rigel.pipeline", "score_fragments"),

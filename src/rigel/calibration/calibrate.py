@@ -518,7 +518,13 @@ def _result(
         rna_neg_frac_boundary=boundaries.rna_neg_frac,
         gdna_density_global=_gdna_density_global(regions, boundaries, region_eff, boundary_eff),
         **_capture_fields(
-            landscape, regions, boundaries, region_eff, boundary_eff, _capture_weight(s, belief)
+            landscape,
+            regions,
+            boundaries,
+            region_eff,
+            boundary_eff,
+            _capture_weight(s, belief),
+            int(s.config.n_threads),
         ),
         rna_sense_frac=s.strand.rna_sense_frac,
         n_regions=n_regions,
@@ -567,11 +573,12 @@ def _capture_fields(
     region_eff: np.ndarray,
     boundary_eff: np.ndarray,
     weight: float,
+    n_threads: int,
 ) -> dict:
     """The result's capture reading: each object's own gDNA density read against the last landscape's bulk, with the
     landscape as a two-group prior and the object's count as the likelihood (`capture_efficiency`), raised to the
-    library's capture weight. With no landscape every efficiency is exactly 1, there is no bulk density and the
-    saturation level is 1; the weight is published either way."""
+    library's capture weight, on calibration's thread budget. With no landscape every efficiency is exactly 1, there is
+    no bulk density and the saturation level is 1; the weight is published either way."""
     if landscape is None:
         return dict(
             gdna_bulk_density=None,
@@ -582,7 +589,12 @@ def _capture_fields(
         )
     reading: CaptureReading = weighted(
         capture_efficiencies(
-            landscape, regions.gdna_mass, region_eff, boundaries.gdna_mass, boundary_eff
+            landscape,
+            regions.gdna_mass,
+            region_eff,
+            boundaries.gdna_mass,
+            boundary_eff,
+            n_threads=n_threads,
         ),
         weight,
     )

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
     from .shared_length_law import LengthTables
 
 __all__ = [
+    "TranscriptFrame",
     "TranscriptObjects",
     "fit_junction_cap",
     "observable_fl_eff_lengths",
@@ -106,6 +108,35 @@ class TranscriptPieces:
     leave_hi: np.ndarray
 
 
+class TranscriptFrame:
+    """Every template's pieces and cuts (:func:`transcript_pieces`) and their shares on the EM's length tables
+    (:func:`object_shares`, and :func:`_carry_shares` where capture's excess is carried), each built on first use and
+    kept. The junction cap's fit, the observable lengths and the capture-contracted lengths read the same frame; on a
+    whole genome it is ten million rows and each table's shares a second's work, so it is built once and dropped once
+    the lengths are."""
+
+    def __init__(
+        self, index: "TranscriptIndex", region_arrays: "RegionArrays", tables: "LengthTables"
+    ) -> None:
+        self.index = index
+        self.region_arrays = region_arrays
+        self.tables = tables
+
+    @cached_property
+    def pieces(self) -> TranscriptPieces:
+        return transcript_pieces(self.index, self.region_arrays)
+
+    @cached_property
+    def rna(self) -> TranscriptObjects:
+        """The shares on RNA's table."""
+        return object_shares(self.pieces, self.tables.rna)
+
+    @cached_property
+    def carry(self) -> tuple[TranscriptObjects, TranscriptObjects] | None:
+        """``(on_anchor, on_table)``, or ``None`` where nothing is carried (:func:`_carry_shares`)."""
+        return _carry_shares(self.pieces, self.rna, self.tables)
+
+
 def _observable_parts(
     t: np.ndarray,
     piece: np.ndarray,
@@ -145,12 +176,18 @@ def _observable_parts(
             rows.append(i)
             lo.append(pos)
             hi.append(int(b[i]))
+    # every piece keeps its place: one part where no run touches it, its parts in order where one does (the loop
+    # writes them ascending), none where a run covers it
+    rows = np.asarray(rows, dtype=np.int64)
+    n_parts = np.where(hit, 0, 1)
+    n_parts[hit] = np.bincount(rows, minlength=t.size)[hit]
+    row = np.repeat(np.arange(t.size), n_parts)
+    slot = np.cumsum(n_parts) - n_parts
+    pa, pb = np.empty(row.size, dtype=np.int64), np.empty(row.size, dtype=np.int64)
     keep = np.flatnonzero(~hit)
-    row = np.concatenate([keep, np.asarray(rows, dtype=np.int64)])
-    pa = np.concatenate([a[keep], np.asarray(lo, dtype=np.int64)])
-    pb = np.concatenate([b[keep], np.asarray(hi, dtype=np.int64)])
-    order = np.lexsort((pa, row))
-    row, pa, pb = row[order], pa[order], pb[order]
+    pa[slot[keep]], pb[slot[keep]] = a[keep], b[keep]
+    split = slot[rows] + (np.arange(rows.size) - np.searchsorted(rows, rows, side="left"))
+    pa[split], pb[split] = np.asarray(lo, dtype=np.int64), np.asarray(hi, dtype=np.int64)
     return t[row], piece[row], k[row], (pb - pa).astype(np.float64), u[row] + (pa - a[row])
 
 
@@ -288,16 +325,14 @@ def _homes(cut: np.ndarray, is_junction: np.ndarray, full_start: np.ndarray, ful
     )
 
 
-def observable_fl_eff_lengths(
-    index: "TranscriptIndex", region_arrays: "RegionArrays", rna_fl
-) -> np.ndarray:
+def observable_fl_eff_lengths(frame: TranscriptFrame, rna_fl) -> np.ndarray:
     """Every template's fl-marginal length over the starts the index's mask leaves: ``Σ_runs Σ_w f(w) (run − w + 1)₊``
     over its runs, the stretches no masked base interrupts, since a fragment touching a masked base is never observed.
     A template the mask does not touch keeps the closed form of its whole length, to the bit; every template keeps the
     closed form's floor of one base, as one shorter than every fragment does."""
-    lengths = index.t_df["length"].to_numpy(np.int64)
+    lengths = frame.index.t_df["length"].to_numpy(np.int64)
     eff = rna_fl.compute_all_transcript_eff_lens(lengths)
-    pieces = transcript_pieces(index, region_arrays)
+    pieces = frame.pieces
     touched = pieces.masked > 0.0
     if not touched.any():
         return eff
@@ -470,12 +505,7 @@ def _junction_parts(
     return summed, best
 
 
-def fit_junction_cap(
-    calibration: "CalibrationResult",
-    region_arrays: "RegionArrays",
-    index: "TranscriptIndex",
-    tables: "LengthTables",
-) -> float:
+def fit_junction_cap(calibration: "CalibrationResult", frame: TranscriptFrame) -> float:
     """The level a junction's price is capped at (:func:`_junction_prices`): the saturated level calibration publishes
     (the landscape's, at the capture weight), raised as far as RNA's own spliced fragments support.
 
@@ -510,16 +540,16 @@ def fit_junction_cap(
     saturation = float(calibration.gdna_capture_saturation)
     if saturation == 1.0:
         return saturation
+    index, region_arrays = frame.index, frame.region_arrays
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
-    pieces = transcript_pieces(index, region_arrays)
-    obj = object_shares(pieces, tables.rna)
+    obj = frame.rna
     # the ruler's own terms: a piece enters at its share times its region's efficiency as carried, and a junction
     # priced p above 1 at its share plus the carried excess, ``share + slope·(p − 1)`` (:func:`_carried`)
     c_piece = c_region[obj.piece]
     cut_slope = obj.cut_share
     law = obj
-    carry = _carry_shares(pieces, obj, tables)
+    carry = frame.carry
     if carry is not None:
         on_anchor, on_table = carry
         c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)
@@ -778,10 +808,8 @@ def _place_best_part(
 
 def transcript_capture_eff_lengths(
     calibration: "CalibrationResult",
-    region_arrays: "RegionArrays",
-    index: "TranscriptIndex",
+    frame: TranscriptFrame,
     fl_eff_lengths: np.ndarray,
-    tables: "LengthTables",
     junction_cap: float,
 ) -> np.ndarray:
     """``eff_em_t = fl_t · Σ_o share_o(T_R) ĉ_o / Σ_o share_o(T_R)`` over the transcript's pieces and cuts.
@@ -802,14 +830,13 @@ def transcript_capture_eff_lengths(
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     gdna_contained = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
-    pieces = transcript_pieces(index, region_arrays)
-    obj = object_shares(pieces, tables.rna)
+    obj = frame.rna
     c_piece = c_region[obj.piece]
-    carry = _carry_shares(pieces, obj, tables)
+    carry = frame.carry
     # a cut's placements are split on the law its efficiencies are read on, as its excess is carried from there
     c_cut = cut_efficiencies(
         obj,
-        region_arrays,
+        frame.region_arrays,
         c_region,
         c_boundary,
         gdna_contained,

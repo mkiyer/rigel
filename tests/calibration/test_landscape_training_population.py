@@ -323,9 +323,9 @@ def test_a_failed_later_refit_keeps_the_landscape_the_final_solve_ran_under(
         fits.append(out)
         return out
 
-    def read_spy(ls, *a):
+    def read_spy(ls, *a, **k):
         reads.append(ls)
-        return orig_read(ls, *a)
+        return orig_read(ls, *a, **k)
 
     monkeypatch.setattr(CAL, "fit_landscape", first_fit_then_none)
     monkeypatch.setattr(CAL, "capture_efficiencies", read_spy)
@@ -393,8 +393,8 @@ def test_the_result_publishes_the_capture_reading_of_the_last_landscape_at_its_w
         fits.append(out)
         return out
 
-    def read_spy(ls, *a):
-        out = orig_read(ls, *a)
+    def read_spy(ls, *a, **k):
+        out = orig_read(ls, *a, **k)
         reads.append((ls, out))
         return out
 
@@ -430,7 +430,7 @@ def test_the_result_publishes_the_capture_reading_of_the_last_landscape_at_its_w
         bulk_density=0.01,
         saturation=25.0,
     )
-    monkeypatch.setattr(CAL, "capture_efficiencies", lambda ls, *a: forced)
+    monkeypatch.setattr(CAL, "capture_efficiencies", lambda ls, *a, **k: forced)
     monkeypatch.setattr(CAL, "visible_share", lambda *a: 0.5)
     res2 = CAL.calibrate(
         payload=sweep_inputs["payload"],

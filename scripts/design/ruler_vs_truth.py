@@ -72,6 +72,7 @@ from _shared import (  # noqa: E402
 )
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import (  # noqa: E402
+    TranscriptFrame,
     fit_junction_cap,
     transcript_capture_eff_lengths,
 )
@@ -434,14 +435,12 @@ def run_condition(index, region_arrays, index_dir, panel_dir, condition, config,
     truth = load_truth(index, index_dir, panel_dir, condition)
     cal, inputs = calibrate_condition(index, region_arrays, panel_dir, condition, config)
     out = {}
-    tables = inputs["length_tables"]
+    frame = TranscriptFrame(index, region_arrays, inputs["length_tables"])
 
     def shipped_ruler(result):
         # each result's lengths at its own junction cap, as the pipeline fits it
-        cap = fit_junction_cap(result, region_arrays, index, tables)
-        return transcript_capture_eff_lengths(
-            result, region_arrays, index, truth.L_plain, tables, cap
-        )
+        cap = fit_junction_cap(result, frame)
+        return transcript_capture_eff_lengths(result, frame, truth.L_plain, cap)
 
     out["shipped"] = (shipped_ruler(cal), cal)
     if (panel_dir / "oracle_cache" / condition / "slot_truth.npz").is_file():
@@ -636,11 +635,11 @@ def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
         cap["fl_models"] = models  # the last fit is calibration's
         return models
 
-    def ruler_hook(calibration, region_arrays, index_, fl_eff_lengths, tables, junction_cap):
-        out = orig_ruler(calibration, region_arrays, index_, fl_eff_lengths, tables, junction_cap)
+    def ruler_hook(calibration, frame, fl_eff_lengths, junction_cap):
+        out = orig_ruler(calibration, frame, fl_eff_lengths, junction_cap)
         cap["fl"] = np.asarray(fl_eff_lengths, dtype=np.float64).copy()
-        cap["rna_pmf"] = np.asarray(tables.rna, dtype=np.float64).copy()
-        cap["length_tables"] = tables
+        cap["rna_pmf"] = np.asarray(frame.tables.rna, dtype=np.float64).copy()
+        cap["length_tables"] = frame.tables
         cap["ruler"] = np.asarray(out, dtype=np.float64).copy()
         return out
 

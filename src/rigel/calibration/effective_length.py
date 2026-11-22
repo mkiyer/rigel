@@ -156,26 +156,33 @@ def _side_share(p: np.ndarray, a: np.ndarray, near: np.ndarray, far: np.ndarray)
     cum1 = np.concatenate([[0.0], np.cumsum(live * w)])
     cumr = np.concatenate([[0.0], np.cumsum(live / np.maximum(w, 1.0))])
 
-    def over(cum, lo, hi):
-        """``Σ`` of the table's summand over the integer lengths ``lo < w ≤ hi``."""
+    def window(lo, hi):
+        """The integer lengths ``lo < w ≤ hi`` as rows of the tables, read once and summed on each table."""
         i0 = np.clip(np.floor(lo).astype(np.int64) + 1, 0, n)
         i1 = np.clip(np.floor(hi).astype(np.int64) + 1, 0, n)
-        return np.where(i1 > i0, cum[np.maximum(i1, i0)] - cum[i0], 0.0)
+        return i0, np.maximum(i1, i0), i1 > i0
+
+    def over(cum, rows):
+        """``Σ`` of the table's summand over the window's lengths."""
+        i0, i1, live = rows
+        return np.where(live, cum[i1] - cum[i0], 0.0)
 
     top = near + far
     starts_inside = np.minimum(a + 1.0, top)
     runs_through = np.minimum(near + 1.0, top)
+    inside = window(-1.0, starts_inside)
     kept = (
-        0.5 * (over(cum1, -1.0, starts_inside) - over(cum0, -1.0, starts_inside))
-        + 0.5 * a * over(cum0, starts_inside, runs_through)
-        + 0.5 * a * (near + 1.0) * over(cumr, runs_through, top)
+        0.5 * (over(cum1, inside) - over(cum0, inside))
+        + 0.5 * a * over(cum0, window(starts_inside, runs_through))
+        + 0.5 * a * (near + 1.0) * over(cumr, window(runs_through, top))
     )
     lo, hi = far + 1.0, np.minimum(far + 1.0 + a, top)
+    near_far, beyond = window(lo, hi), window(hi, top)
     removed = 0.5 * (
-        over(cum1, lo, hi)
-        - (2.0 * far + 1.0) * over(cum0, lo, hi)
-        + far * (far + 1.0) * over(cumr, lo, hi)
-    ) + 0.5 * a * (over(cum0, hi, top) - far * over(cumr, hi, top))
+        over(cum1, near_far)
+        - (2.0 * far + 1.0) * over(cum0, near_far)
+        + far * (far + 1.0) * over(cumr, near_far)
+    ) + 0.5 * a * (over(cum0, beyond) - far * over(cumr, beyond))
     return np.maximum(kept - removed, 0.0)
 
 

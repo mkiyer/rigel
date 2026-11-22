@@ -27,6 +27,7 @@ from _synthetic import contained_support, normal_pmf
 from rigel.calibration.capture_eff_length import (
     cut_efficiencies,
     fit_junction_cap,
+    TranscriptFrame,
     object_shares,
     transcript_pieces,
     rna_captured_fraction,
@@ -57,7 +58,7 @@ def _lengths(cal, ra, idx, fl, tables, junction_cap: float | None = None) -> np.
     """The ruler at a stated junction cap: by default the result's saturated level, the cap of a library whose spliced
     counts raise nothing (``fit_junction_cap``'s starting point)."""
     cap = cal.gdna_capture_saturation if junction_cap is None else junction_cap
-    return transcript_capture_eff_lengths(cal, ra, idx, fl, tables, cap)
+    return transcript_capture_eff_lengths(cal, TranscriptFrame(idx, ra, tables), fl, cap)
 
 
 def _flank_mean(ra: RegionArrays, c) -> np.ndarray:
@@ -914,16 +915,13 @@ def test_a_templates_length_counts_only_the_starts_the_mask_leaves(masked_index)
     starts whose fragment touches no masked base; a wholly masked template keeps the floor of one base, as does a
     transcript shorter than every fragment.
     """
-    from rigel.config import EMConfig
     from rigel.frag_length_model import FragmentLengthModel
-    from rigel.pipeline import setup_geometry_and_estimator
+    from rigel.pipeline import transcript_geometry
 
     idx = masked_index
     ra = RegionArrays.from_index(idx)
     fl = FragmentLengthModel.from_pmf(PMF)
-    est = setup_geometry_and_estimator(
-        idx, fl, EMConfig(), _cal(ra, np.ones(ra.n_regions), None), ra, _one_law(PMF), 1.0
-    )
+    _, est = transcript_geometry(idx, fl, _cal(ra, np.ones(ra.n_regions), None), ra, _one_law(PMF))
     for t in range(len(idx.t_df)):
         assert est.effective_lengths[t] == pytest.approx(
             max(_observable_starts(idx, t), 1.0), rel=1e-12
@@ -933,7 +931,7 @@ def test_a_templates_length_counts_only_the_starts_the_mask_leaves(masked_index)
     # the EM's yield too, before the estimator's own floor on its output: no landscape hands it over verbatim
     from rigel.calibration.capture_eff_length import observable_fl_eff_lengths
 
-    assert observable_fl_eff_lengths(idx, ra, fl)[tz] == 1.0
+    assert observable_fl_eff_lengths(TranscriptFrame(idx, ra, _one_law(PMF)), fl)[tz] == 1.0
 
 
 def test_a_masked_templates_shares_partition_its_observable_starts(masked_index):
@@ -953,17 +951,14 @@ def test_a_masked_templates_shares_partition_its_observable_starts(masked_index)
 def test_with_nothing_masked_the_lengths_and_shares_are_todays_bit_for_bit(multiexon_index):
     """An index whose genome holds no unknown base gives every template the closed-form length and the partition's
     pieces and cuts, to the bit."""
-    from rigel.config import EMConfig
     from rigel.frag_length_model import FragmentLengthModel
-    from rigel.pipeline import setup_geometry_and_estimator
+    from rigel.pipeline import transcript_geometry
 
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     assert len(idx.unobservable_df) == 0
     fl = FragmentLengthModel.from_pmf(PMF)
-    est = setup_geometry_and_estimator(
-        idx, fl, EMConfig(), _cal(ra, np.ones(ra.n_regions), None), ra, _one_law(PMF), 1.0
-    )
+    _, est = transcript_geometry(idx, fl, _cal(ra, np.ones(ra.n_regions), None), ra, _one_law(PMF))
     lengths = idx.t_df["length"].to_numpy(np.int64)
     np.testing.assert_array_equal(
         est.effective_lengths, np.maximum(fl.compute_all_transcript_eff_lens(lengths), 1.0)
@@ -1030,7 +1025,9 @@ def test_a_templates_place_weights_carry_its_lengths_excess_on_the_uncaptured_la
     )
     g = np.zeros(PMF.shape[0])
     g[[120, 190, 260]] = [0.4, 0.35, 0.25]
-    fl = observable_fl_eff_lengths(idx, ra, FragmentLengthModel.from_pmf(PMF))
+    fl = observable_fl_eff_lengths(
+        TranscriptFrame(idx, ra, _one_law(PMF)), FragmentLengthModel.from_pmf(PMF)
+    )
     eff = _lengths(cal, ra, idx, fl, LengthTables(PMF, PMF, g, None), junction_cap)
 
     bounds, _ref_offsets, types = build_region_partition_arrays(idx)
@@ -1498,7 +1495,7 @@ def test_the_junction_cap_is_the_level_rnas_spliced_split_supports(cap_index):
     """
     idx = cap_index
     ra = RegionArrays.from_index(idx)
-    cap = fit_junction_cap(_cap_library(idx, ra, 600.0), ra, idx, _one_law(PMF))
+    cap = fit_junction_cap(_cap_library(idx, ra, 600.0), TranscriptFrame(idx, ra, _one_law(PMF)))
     assert cap == pytest.approx(600.0, rel=_grid_step(100.0, _SUMMED))
     cal = _cap_library(idx, ra, 600.0)
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
@@ -1524,8 +1521,11 @@ def test_the_junction_cap_reads_the_split_on_the_multipliers_the_ruler_applies(c
     tables = LengthTables(PMF, PMF, g, None)
     cal = _cap_library(idx, ra, 600.0, tables=tables)
     step = _grid_step(100.0, _SUMMED)
-    assert fit_junction_cap(cal, ra, idx, tables) == pytest.approx(600.0, rel=step)
-    assert abs(fit_junction_cap(cal, ra, idx, _one_law(PMF)) / 600.0 - 1.0) > 2.0 * step
+    assert fit_junction_cap(cal, TranscriptFrame(idx, ra, tables)) == pytest.approx(600.0, rel=step)
+    assert (
+        abs(fit_junction_cap(cal, TranscriptFrame(idx, ra, _one_law(PMF))) / 600.0 - 1.0)
+        > 2.0 * step
+    )
 
 
 def test_the_junction_cap_reads_the_split_on_the_rulers_own_terms_near_one(cap_index):
@@ -1548,7 +1548,9 @@ def test_the_junction_cap_reads_the_split_on_the_rulers_own_terms_near_one(cap_i
         rna_region=rna,
         sj_mass=spliced,
     )
-    assert fit_junction_cap(cal, ra, idx, tables) == pytest.approx(4.0, rel=_grid_step(1.5, 5.0))
+    assert fit_junction_cap(cal, TranscriptFrame(idx, ra, tables)) == pytest.approx(
+        4.0, rel=_grid_step(1.5, 5.0)
+    )
 
 
 def test_the_spliced_counts_raise_the_junction_cap_and_never_lower_it(cap_index):
@@ -1573,7 +1575,7 @@ def test_the_spliced_counts_raise_the_junction_cap_and_never_lower_it(cap_index)
             rna_region=rna,
             sj_mass=spliced,
         )
-        return fit_junction_cap(cal, ra, idx, _one_law(PMF))
+        return fit_junction_cap(cal, TranscriptFrame(idx, ra, _one_law(PMF)))
 
     assert cap_at(70.0) == 100.0
     assert cap_at(110.0) == pytest.approx(110.0, rel=_grid_step(100.0, 119.0))
@@ -1587,7 +1589,10 @@ def test_a_cap_the_counts_cannot_tell_apart_stays_the_saturated_level(cap_index)
     """
     idx = cap_index
     ra = RegionArrays.from_index(idx)
-    assert fit_junction_cap(_cap_library(idx, ra, 150.0), ra, idx, _one_law(PMF)) == 100.0
+    assert (
+        fit_junction_cap(_cap_library(idx, ra, 150.0), TranscriptFrame(idx, ra, _one_law(PMF)))
+        == 100.0
+    )
 
 
 def test_the_junction_cap_is_the_saturated_level_where_no_capture_is_read(cap_index):
@@ -1611,13 +1616,13 @@ def test_the_junction_cap_is_the_saturated_level_where_no_capture_is_read(cap_in
             rna_region=rna,
             sj_mass=spliced,
         )
-        return fit_junction_cap(cal, ra, idx, _one_law(PMF))
+        return fit_junction_cap(cal, TranscriptFrame(idx, ra, _one_law(PMF)))
 
     assert cap_at(1.0) == 1.0
     # the same counts under a library that does read capture (a saturated level a hair above 1) are fitted
     assert cap_at(1.0 + 1e-9) == pytest.approx(1.5, rel=_grid_step(1.0, 1.8))
     none = _cal(ra, np.ones(ra.n_regions), None, rna_region=rna, sj_mass=spliced)
-    assert fit_junction_cap(none, ra, idx, _one_law(PMF)) == 1.0
+    assert fit_junction_cap(none, TranscriptFrame(idx, ra, _one_law(PMF))) == 1.0
 
 
 def test_a_junctions_evidence_is_the_exon_regions_only_its_own_transcripts_cover(cap_index):
@@ -1647,7 +1652,7 @@ def test_a_junctions_evidence_is_the_exon_regions_only_its_own_transcripts_cover
             rna_region=r,
             sj_mass=spliced,
         )
-        return fit_junction_cap(cal, ra, idx, _one_law(PMF))
+        return fit_junction_cap(cal, TranscriptFrame(idx, ra, _one_law(PMF)))
 
     base = cap_with()
     assert base == pytest.approx(600.0, rel=_grid_step(100.0, _SUMMED))
@@ -1697,7 +1702,7 @@ def test_a_junctions_own_exon_keeps_its_evidence_where_the_mask_splits_it(cap_ma
             rna_region=r,
             sj_mass=spliced,
         )
-        return fit_junction_cap(cal, ra, idx, _one_law(PMF))
+        return fit_junction_cap(cal, TranscriptFrame(idx, ra, _one_law(PMF)))
 
     base = cap_with()
     assert base == pytest.approx(600.0, rel=_grid_step(100.0, _SUMMED))
@@ -1774,7 +1779,7 @@ def test_the_junction_cap_reads_a_junction_through_the_placements_that_leave_acr
     assert price[second] == pytest.approx(700.0)
     cal = _cal(ra, c, 1e-3, boundary=boundary, saturation=100.0, rna_region=rna, sj_mass=spliced)
     # the grid runs to the second junction's sum, its two splice sites less the intron: 400 + 700 − 1
-    assert fit_junction_cap(cal, ra, idx, tables) == pytest.approx(
+    assert fit_junction_cap(cal, TranscriptFrame(idx, ra, tables)) == pytest.approx(
         600.0, rel=_grid_step(100.0, 1099.0)
     )
 
@@ -1798,7 +1803,7 @@ def test_a_junction_with_no_exon_region_of_its_own_is_not_fitted(multiexon_index
         rna_region=rna,
         sj_mass=spliced,
     )
-    assert fit_junction_cap(cal, ra, idx, _one_law(PMF)) == 100.0
+    assert fit_junction_cap(cal, TranscriptFrame(idx, ra, _one_law(PMF))) == 100.0
 
 
 @pytest.mark.filterwarnings("ignore:.*strand-coincident splice junction")
@@ -1824,7 +1829,7 @@ def test_a_junction_is_its_two_regions_and_its_strand(antisense_index, abundant)
         rna_region=rna,
         sj_mass=spliced,
     )
-    assert fit_junction_cap(cal, ra, idx, _one_law(PMF)) == 100.0
+    assert fit_junction_cap(cal, TranscriptFrame(idx, ra, _one_law(PMF))) == 100.0
 
 
 def test_the_lengths_and_the_place_weights_read_the_cap_they_are_handed(cap_index):
@@ -1850,9 +1855,39 @@ def test_the_lengths_and_the_place_weights_read_the_cap_they_are_handed(cap_inde
     np.testing.assert_array_equal(c_sj, np.full(n_sj, 600.0))
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     a1 = _tidx(idx, "a1")
-    assert transcript_capture_eff_lengths(cal, ra, idx, fl, _one_law(PMF), 600.0)[
+    assert transcript_capture_eff_lengths(cal, TranscriptFrame(idx, ra, _one_law(PMF)), fl, 600.0)[
         a1
     ] == pytest.approx(_mrna_length(fl[a1], [_LEVEL] * 3, [600.0] * 2), rel=1e-12)
+
+
+def test_a_run_builds_the_pieces_once_and_each_tables_shares_once(tmp_path_factory, monkeypatch):
+    """The junction cap's fit, the observable lengths and the capture-contracted lengths read one frame: a run builds
+    the transcripts' pieces once and each length table's shares once. On a whole genome the pieces are ten million rows
+    and a table's shares a second's work, so a reader that rebuilt them would cost seconds and move no number."""
+    from _prior_toy import build_toy
+
+    import rigel.calibration.capture_eff_length as CEL
+    from rigel.config import PipelineConfig
+    from rigel.pipeline import run_pipeline
+
+    toy = build_toy(tmp_path_factory)
+    built = {"pieces": 0, "shares": []}
+    pieces, shares = CEL.transcript_pieces, CEL.object_shares
+
+    def count_pieces(index, region_arrays):
+        built["pieces"] += 1
+        return pieces(index, region_arrays)
+
+    def count_shares(frame_pieces, pmf):
+        built["shares"].append(np.asarray(pmf, dtype=np.float64).tobytes())
+        return shares(frame_pieces, pmf)
+
+    monkeypatch.setattr(CEL, "transcript_pieces", count_pieces)
+    monkeypatch.setattr(CEL, "object_shares", count_shares)
+    run_pipeline(str(toy.bam_path), toy.index, PipelineConfig())
+    assert built["pieces"] == 1
+    assert built["shares"], "the toy never priced a transcript: no shares were built"
+    assert len(built["shares"]) == len(set(built["shares"]))
 
 
 def test_the_pipeline_fits_the_cap_once_and_hands_it_to_both_readers(tmp_path_factory, monkeypatch):
@@ -1869,15 +1904,15 @@ def test_the_pipeline_fits_the_cap_once_and_hands_it_to_both_readers(tmp_path_fa
     toy = build_toy(tmp_path_factory)
     fitted, handed = [], {}
 
-    def fit(calibration, region_arrays, index, tables):
+    def fit(calibration, frame):
         fitted.append(calibration.gdna_capture_saturation)
         return 7.25
 
     ruler, place = CEL.transcript_capture_eff_lengths, CEL.place_efficiencies
 
-    def spy_ruler(calibration, region_arrays, index, fl_eff_lengths, tables, junction_cap):
+    def spy_ruler(calibration, frame, fl_eff_lengths, junction_cap):
         handed["lengths"] = junction_cap
-        return ruler(calibration, region_arrays, index, fl_eff_lengths, tables, junction_cap)
+        return ruler(calibration, frame, fl_eff_lengths, junction_cap)
 
     def spy_place(calibration, region_arrays, index, junction_cap):
         handed["place weights"] = junction_cap

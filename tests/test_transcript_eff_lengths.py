@@ -124,7 +124,7 @@ def test_the_eff_lengths_move_when_the_rna_pmf_moves(scenario):
 def test_the_n_observations_guard_on_that_path_cannot_fire(scenario):
     """A finding, pinned so it is not mistaken for a live safety net.
 
-    ``setup_geometry_and_estimator`` refuses a model with ``rna_fl.n_observations <= 0`` (the gate
+    ``transcript_geometry`` refuses a model with ``rna_fl.n_observations <= 0`` (the gate
     below). On the production path ``rna_fl`` always comes from
     :meth:`FragmentLengthModel.from_pmf`, which sets ``_total_weight = 1.0`` — so ``n_observations`` is
     **exactly 1, always**, whatever went into the pmf, and the refusal cannot fire there.
@@ -149,9 +149,7 @@ def test_an_rna_length_model_with_no_observations_is_refused_not_defaulted(mini_
     pipeline must say so rather than substitute a constant: production reaches this function with a
     pmf-built model that always carries observations, so a fallback here is a magic number nothing
     can exercise. The refusal names the condition."""
-    from rigel.pipeline import setup_geometry_and_estimator
+    from rigel.pipeline import transcript_geometry
 
     with pytest.raises(ValueError, match="no RNA fragment-length observation"):
-        setup_geometry_and_estimator(
-            mini_index, FragmentLengthModel(), EMConfig(n_threads=1), None, None, None, 1.0
-        )
+        transcript_geometry(mini_index, FragmentLengthModel(), None, None, None)

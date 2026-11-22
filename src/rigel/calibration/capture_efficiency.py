@@ -36,6 +36,8 @@ Gate: ``tests/calibration/test_capture_efficiency.py``.
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
@@ -111,16 +113,18 @@ def _two_groups(landscape: DensityLandscape) -> _TwoGroups:
     )
 
 
-def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray) -> np.ndarray:
+def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray, n_threads: int) -> np.ndarray:
     """``exp(E[x] − x_b)`` per object: the two-group posterior of its own count ``k`` on its support ``S``, the bulk as
-    the one level ``x_b`` with its basin's mass. ``S = 0``: 1."""
+    the one level ``x_b`` with its basin's mass. ``S = 0``: 1. Each tile of rows is read whole by one of ``n_threads``
+    threads (``0`` is every core) into its own rows, so the reading is the same at every thread count."""
     x = prior.x
     xb = float(x[prior.ib])
     rate = np.exp(x)
     n = k.shape[0]
     out = np.ones(n)
     rows = block_rows(x.size, CONSTANTS.resources.capture_tile_cell_bytes)
-    for r0 in range(0, n, rows):
+
+    def tile(r0: int) -> None:
         sl = slice(r0, min(r0 + rows, n))
         lam = rate[None, :] * S[sl, None]
         ll = np.where(
@@ -140,6 +144,9 @@ def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray) -> np.ndarray:
         # in one order at every tile height, and the height is a resource setting
         mean_level = (w_null * xb + (w_alt * x).sum(1)) / den
         out[sl] = np.where(S[sl] > 0.0, np.exp(mean_level - xb), 1.0)
+
+    with ThreadPoolExecutor(max_workers=int(n_threads) or os.cpu_count() or 1) as pool:
+        list(pool.map(tile, range(0, n, rows)))
     return out
 
 
@@ -149,12 +156,15 @@ def capture_efficiencies(
     eff_region: np.ndarray,
     count_boundary: np.ndarray,
     eff_boundary: np.ndarray,
+    *,
+    n_threads: int = 1,
 ) -> CaptureReading:
     """Every region's efficiency from its contained count on its contained support, every boundary's from its
     crossing count on its crossing support, with the bulk density and the saturation level they are read against.
 
     The counts are the deconvolved gDNA masses, the supports the objects' own gDNA opportunities. Both must be
-    finite; a negative value (a deconvolution's rounding) reads as 0.
+    finite; a negative value (a deconvolution's rounding) reads as 0. ``n_threads`` is the reading's thread budget
+    (``0`` is every core); the reading is the same at every count.
     """
     prior = _two_groups(landscape)
 
@@ -171,8 +181,8 @@ def capture_efficiencies(
             "capture_efficiencies: every count needs its own support, on the same axis."
         )
     return CaptureReading(
-        efficiency_region=_read(prior, k_r, s_r),
-        efficiency_boundary=_read(prior, k_b, s_b),
+        efficiency_region=_read(prior, k_r, s_r, n_threads),
+        efficiency_boundary=_read(prior, k_b, s_b, n_threads),
         bulk_density=float(np.exp(prior.x[prior.ib])),
         saturation=prior.saturation,
     )
