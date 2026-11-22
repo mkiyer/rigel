@@ -6,7 +6,12 @@ no re-scan. ``O`` keeps ``P``'s efficiencies and lengths, so the capture-contrac
 `ruler_vs_truth.py` beside a capture-ON arm. ``--set SECTION.FIELD=VALUE`` (repeatable) applies to both arms, so a
 run prices one config value. The report, per stratum and tagged in scope or deferred: the pool ledger in
 fragments, the composition per axis, the library gDNA fraction, the signed per-object error histogram, the
-conditions ranked worst first (take the worst in-scope row), and a per-condition table.
+conditions ranked worst first (take the worst in-scope row) with each one's chance floor, and a per-condition table.
+
+The chance floor is the per-object Σ|Δ| a calibration would still score if it knew every object's true gDNA share and
+nothing else. Within one object and one genome strand, and among unspliced fragments, calibration sees counts only, so
+which of them are gDNA is a binomial draw at the true share; spliced fragments are certain RNA and carry none. The
+floor averages Σ|X − E X| over draws of those cells. The share is the realised one, so the floor is approximate.
 
 Usage::
 
@@ -103,12 +108,40 @@ def signed_histogram(delta: np.ndarray) -> dict:
     return out
 
 
+#: How many times the chance floor draws every cell's gDNA count; the floor is their mean. On the ladder's 5 % rows
+#: (3–5·10⁴ objects with mass) one draw varies by 0.7 % between seeds and eight by 0.3 %, about a hundred fragments:
+#: two hundredths of a percent of the library's gDNA, against bar 1's 5 %.
+_CHANCE_DRAWS = 8
+#: The chance floor's seed, fixed so that a rerun reproduces the floor to the bit.
+_CHANCE_SEED = 0
+
+
+def chance_floor(true_gdna: np.ndarray, total: np.ndarray, seed: int = _CHANCE_SEED) -> float:
+    """Σ over objects of E|X − E X|, X an object's gDNA count drawn by chance from its true shares.
+
+    ``true_gdna`` and ``total`` are [objects, cells] counts: the cells are what calibration tells apart within an
+    object (its genome strands, among unspliced fragments). Each cell's gDNA count is drawn ~ Binomial(n, g / n), the
+    cells independently, and the object's error is its cells' summed deviation, so a strand that is all gDNA beside
+    one that is all RNA carries no chance at all.
+    """
+    g = np.asarray(true_gdna, np.float64)
+    n = np.asarray(total, np.int64)
+    share = np.divide(g, n, out=np.zeros_like(g), where=n > 0)
+    expected = g.sum(axis=1)
+    rng = np.random.default_rng(seed)
+    acc = 0.0
+    for _ in range(_CHANCE_DRAWS):
+        acc += float(np.abs(rng.binomial(n, share).sum(axis=1) - expected).sum())
+    return acc / _CHANCE_DRAWS
+
+
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
 
 
-def score_axis_row(p_arm, o_arm, axis: str) -> dict:
+def score_axis_row(p_arm, o_arm, axis: str, cells: tuple[np.ndarray, np.ndarray]) -> dict:
     """``P`` against ``O`` on one axis: the ``AxisScore``, the signed per-object histogram over the objects with
-    mass, and the gate that RNA mirrors gDNA per object."""
+    mass, the gate that RNA mirrors gDNA per object, and the chance floor over ``cells``, the oracle's
+    (true gDNA, total) per object and strand."""
     def arr(arm, population):
         return np.asarray(getattr(arm, f"count_{population}_{axis}"), np.float64)
 
@@ -121,6 +154,10 @@ def score_axis_row(p_arm, o_arm, axis: str) -> dict:
     row["rna_mirrors_gdna_max_dev"] = float(
         np.abs((rp - ro)[live] + (gp - go)[live]).max() if live.any() else 0.0
     )
+    cell_gdna, cell_total = cells
+    if not np.array_equal(np.asarray(cell_gdna, np.float64).sum(axis=1), go):
+        raise RuntimeError(f"the chance floor's {axis} cells do not sum to O's gDNA per object")
+    row["chance_floor"] = chance_floor(cell_gdna, cell_total)
     return row
 
 
@@ -145,6 +182,12 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     OA.check_same_basis("P", p_arm, substrate)
     OA.check_same_basis("O", o_arm, substrate)
+    # the chance floor's cells: per object and genome strand, the unspliced fragments and the true gDNA among them
+    gdna_part = CalibrationSubstrate.from_payload(oracle.parts["gdna"], region_arrays)
+    cells = {
+        "region": (gdna_part.region_contained.count, substrate.region_contained.count),
+        "boundary": (gdna_part.boundary_unspliced.count, substrate.boundary_unspliced.count),
+    }
 
     row = {
         "condition": condition,
@@ -154,7 +197,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
         "seconds": time.perf_counter() - start,
         "library_f_gdna_P": OA.library_f_gdna(p_arm),
         "library_f_gdna_O": OA.library_f_gdna(o_arm),
-        "axes": {axis: score_axis_row(p_arm, o_arm, axis) for axis in AXES},
+        "axes": {axis: score_axis_row(p_arm, o_arm, axis, cells[axis]) for axis in AXES},
     }
     # ── the pool ledger, in fragments ──
     truth = pool_ledger(Path(suite) / condition)
@@ -303,18 +346,23 @@ def _print_ranking(rows: list[dict]) -> None:
     print("  ④ ⭐⭐⭐ SCENARIOS RANKED BY TOTAL Σ|Δ| IN FRAGMENTS (region + boundary) — worst first.")
     print("     ⛔ The scope tag is the ranking. The worst row overall is the DEFERRED stratum every")
     print("        time; take the worst IN-SCOPE row instead.")
+    print("     `chance` is the Σ|Δ| a calibration that knew every object's true share would still score;")
+    print("     `above %` is Σ|Δ| TOTAL less chance, as a share of the library's true gDNA (n/a at none).")
     print(f"    {'#':>3} {'condition':<44} {'scope':<9} {'Σ|Δ| region':>13} {'Σ|Δ| bnd':>13} "
-          f"{'Σ|Δ| TOTAL':>13} {'over':>12} {'under':>12}")
-    print("    " + "-" * 126)
+          f"{'Σ|Δ| TOTAL':>13} {'over':>12} {'under':>12} {'chance':>12} {'above %':>8}")
+    print("    " + "-" * 160)
     ranked = sorted(
         rows, key=lambda r: -(r["axes"]["region"]["abs_err"] + r["axes"]["boundary"]["abs_err"])
     )
     for i, r in enumerate(ranked, 1):
         reg, bnd = r["axes"]["region"], r["axes"]["boundary"]
+        total, chance = reg["abs_err"] + bnd["abs_err"], reg["chance_floor"] + bnd["chance_floor"]
+        gdna = r["pools"]["true_gdna"]
+        above = f"{100.0 * (total - chance) / gdna:>8.2f}" if gdna > 0 else f"{'n/a':>8}"
         print(f"    {i:>3} {r['condition']:<44} {scope(r['stratum']):<9} {reg['abs_err']:>13,.0f} "
-              f"{bnd['abs_err']:>13,.0f} {reg['abs_err'] + bnd['abs_err']:>13,.0f} "
+              f"{bnd['abs_err']:>13,.0f} {total:>13,.0f} "
               f"{reg['over_call'] + bnd['over_call']:>12,.0f} "
-              f"{reg['under_call'] + bnd['under_call']:>12,.0f}")
+              f"{reg['under_call'] + bnd['under_call']:>12,.0f} {chance:>12,.0f} {above}")
     in_scope = [r for r in ranked if scope(r["stratum"]) == "IN SCOPE"]
     if in_scope:
         w = in_scope[0]
@@ -448,6 +496,25 @@ def _check_histogram(check) -> None:
           == [b["n"] for b in signed_histogram(np.array([-7.0]))["buckets"]][::-1])
 
 
+def _check_chance_floor(check) -> None:
+    """The chance floor matches the exact binomial mean deviation, conditions on the strand, and reproduces."""
+    from scipy.stats import binom
+
+    n_obj, n, p = 4000, 40, 0.2
+    k = np.arange(n + 1)
+    exact = n_obj * float((np.abs(k - n * p) * binom.pmf(k, n, p)).sum())
+    one_cell = chance_floor(np.full((n_obj, 1), n * p), np.full((n_obj, 1), n))
+    check("chance floor matches the exact binomial E|X − np| within 1 %", abs(one_cell / exact - 1.0) < 0.01)
+    # a strand that is all gDNA beside one that is all RNA: calibration sees the strands, so nothing is left to chance
+    split_g, split_n = np.array([[30, 0]] * 50), np.array([[30, 70]] * 50)
+    check("chance floor is zero where every cell is pure", chance_floor(split_g, split_n) == 0.0)
+    check("pooling the strands would put chance there",
+          chance_floor(split_g.sum(1, keepdims=True), split_n.sum(1, keepdims=True)) > 0.0)
+    g, t = np.array([[3, 5], [0, 9], [7, 7]]), np.array([[10, 20], [4, 30], [7, 12]])
+    check("chance floor reproduces to the bit", chance_floor(g, t) == chance_floor(g, t))
+    check("chance floor is zero on empty objects", chance_floor(np.zeros((5, 2)), np.zeros((5, 2))) == 0.0)
+
+
 def _check_pool_ledger(check) -> None:
     """The pool ledger reads the file, and a pool it cannot find reads 0."""
     with tempfile.TemporaryDirectory() as td:
@@ -508,6 +575,7 @@ def self_test() -> int:
     _check_override_gate(cal, check)
     _check_aggregate(check)
     _check_histogram(check)
+    _check_chance_floor(check)
     _check_pool_ledger(check)
     _check_scope(check)
     _check_set(check)

@@ -42,18 +42,22 @@ for robustness, so a number measured at the panel's nascent share is a stress re
   unstranded capture OFF; the stranded strata hold; VCaP is unchanged; sparse unstranded libraries book about 1 % of
   their gDNA as nascent (issue #82).
 - The **unclamped capture reader** landed 2026-11-20: an object reads its own level, not its enriched basin's peak.
-  Under stranded capture the annotated pool passes 0.7.1's bar at 5 % gDNA and above on every row but the
-  simulator's g05, which misses by 565 fragments (issue #76). Transcripts rise 4.6 % on the simulator and 9.7 % on
-  STAR, between the isoforms of genes with many (issue #83). This tree is the baseline.
+  Transcripts rise 4.6 % on the simulator and 9.7 % on STAR, between the isoforms of genes with many (issue #83).
+- The simulator's **probes bind by their own GC** (2026-11-21), and the capture panels are regenerated with them.
+- **A locked object reads its strands** (2026-11-21, issue #1): a stranded library's one-stranded fragments on an
+  object the annotation admits no RNA at are no longer booked gDNA whole. Only stranded STAR rows move: transcript
+  error falls on all six, most at no gDNA (431,143 → 287,469). This tree is the baseline.
+- **Every error is read per object** (the owner, 2026-11-21): Σ|estimate − truth| over objects, never a library net
+  (`docs/SUCCESS.md`). Bar 5 holds on every row it covers, transcripts at most 0.72 of 0.7.1's and genes 0.55.
+  Bar 1 holds on every row but one: stranded capture ON at 5 % gDNA, 9.5 % of the library's gDNA above chance.
 - The validation of ec996bba beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
   (`docs/ROADMAP.md`).
 - **No preview ships.** 0.8.0 waits for every `release-blocker` issue in the milestone; the milestone's other issues
   ship stated in the MANUAL.
-- **The order of work** (`docs/ROADMAP.md`, Next): the cuts' prices (issue #76) → false capture (issue #1) →
-  performance → code review → the release, with CI alongside. No session has a pass bar: each improves the current
-  state, and what is left ships stated. One `src/` writer at a time, in the main checkout.
-- The **capture reader** is developed together with the owner; one session of its two is left, for issue #1. Its
-  working memory is `docs/dev/CAPTURE_IDEAS.md`.
+- **The order of work** (`docs/ROADMAP.md`, Next): the cuts' prices (issue #76) → performance → code review → the
+  release, with CI alongside. No session has a pass bar: each improves the current state, and what is left ships
+  stated. One `src/` writer at a time, in the main checkout.
+- The **capture reader** is developed together with the owner. Its working memory is `docs/dev/CAPTURE_IDEAS.md`.
 - Everything retired at the 2026-11-03 reset is in `$RIGEL_RUNS/archive/cleanup_2026-11-03/`.
 
 ## The 0.8.0 scope

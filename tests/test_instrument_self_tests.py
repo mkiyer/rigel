@@ -18,7 +18,7 @@ import pytest
 #: instrument's own output rather than adjusting it here: a self-test that quietly lost a case reads
 #: exactly like one that never had it.
 INSTRUMENTS = [
-    ("calibration_vs_oracle", 26, "{n}/{n} self-test gates fired"),
+    ("calibration_vs_oracle", 31, "{n}/{n} self-test gates fired"),
     ("ruler_vs_truth", 50, "{n}/{n} self-test gates fired"),
     ("paired_score", 47, "{n}/{n} self-test gates fired"),
 ]

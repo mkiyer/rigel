@@ -15,6 +15,11 @@ for a current number), and lessons (`TRAPS.md`).
 - **In three pools.** gDNA, annotated RNA (the reference transcripts) and nascent RNA (Rigel's synthetic spans),
   never RNA against DNA. The annotated pool is what a user counts, so DNA called annotated RNA is the severe error and
   the annotated pool is read first; DNA called nascent RNA is reported beside it and is the milder one.
+- **Per object, never as a library net.** An error is Σ|estimate − truth| over the objects the number is about
+  (calibration's regions and boundaries, transcripts, genes), with the over- and under-calls beside it. A library
+  total lets too much in one place cancel too little in another, so it is reported and never judged. Nor is one
+  fragment judged: two fragments with one sequence can come from either source, so the question is how many of each
+  an object holds, never whether a fragment was called right (owner, 2026-11-21).
 - **Against truth.** Every scorer reads the simulator's per-fragment truth — the oracle BAM's read names, the oracle
   caches split from them, the truth tables beside each condition — never the previous run.
 - **In a pinned, fractional pair.** An end-to-end arm runs with `--set scan.total_threads=1` (`OMP_NUM_THREADS=1` does
@@ -93,10 +98,12 @@ chromosome's three probe designs at stranded capture-ON (`test_reference.yaml` a
 
 Each bar names its quantity, its strata and its truth. The thresholds are the owner's rulings.
 
-1. **`P − O` is small on the three in-scope strata**: on every in-scope row at 5 % gDNA and above, |`P − O`| is at
-   most 5 % of the library's gDNA. A row below 5 % gDNA is read in fragments against the no-capture line. The residual
-   is attributed: to the assembler (`prior_vs_oracle.py`'s `O − S`), to the composition, or to a node class
-   (`policy_benchmark.py --by-class`).
+1. **`P − O` is small on the three in-scope strata**: on every in-scope row at 5 % gDNA and above, Σ|`P − O`| over
+   the regions and boundaries, less its chance floor, is at most 5 % of the library's true gDNA. The chance floor is
+   what a calibration that knew every object's true share would still score: among one object's unspliced fragments
+   on one strand, which are gDNA is a binomial draw no calibration can see (`calibration_vs_oracle.py`'s ranking). A
+   row below 5 % gDNA is read in fragments against the no-capture line. The residual is attributed: to the assembler
+   (`prior_vs_oracle.py`'s `O − S`), to the composition, or to a node class (`policy_benchmark.py --by-class`).
 2. **The zero controls read zero**: the `g00` rung, on every instrument that reads it. A stratum can read healthy on
    every contaminated row and still claim gDNA in a library holding none.
 3. **The capture-contracted length is right because the composition is**, never patched: at `g00`, where no gDNA
@@ -110,8 +117,8 @@ Each bar names its quantity, its strata and its truth. The thresholds are the ow
    by the arms, with the deferred stratum and the rest of the screen (the fl-gap panels, the low-gDNA panel, the
    probe designs) reported beside them.
 5. **At 5 % gDNA and above, the annotated pool is no worse than 0.7.1's.** On every in-scope row at 5 % gDNA and
-   above, on the ladder on both inputs and on both fl-gap panels, the |net| annotated error is at most that of 0.7.1
-   re-scored on the same reads (`$RIGEL_RUNS/prototypes/2026-11-16_v071_rescore/tables_v071.md`), with bar 4 still
+   above, on the ladder on both inputs and on both fl-gap panels, Σ|Δ| over transcripts and over genes is at most
+   that of 0.7.1 re-scored on the same reads (`$RIGEL_RUNS/prototypes/2026-11-21_regen/v071/`), with bar 4 still
    holding.
 
 The accumulator's own correctness (fidelity to the specification, worker-order independence, conservation) is a

@@ -148,7 +148,10 @@ def calibration_rows(path: Path) -> list[dict]:
                     "deferred": strand == "unstranded" and cap == "ON",
                     "f_P": r["library_f_gdna_P"], "f_O": r["library_f_gdna_O"],
                     "region_mwae": ax["region"]["mwae"], "boundary_mwae": ax["boundary"]["mwae"],
-                    "region_net": ax["region"]["net_err"], "boundary_net": ax["boundary"]["net_err"]})
+                    # bar 1: the per-object error, what chance alone leaves, and the library's true gDNA
+                    "abs_err": ax["region"]["abs_err"] + ax["boundary"]["abs_err"],
+                    "chance": ax["region"]["chance_floor"] + ax["boundary"]["chance_floor"],
+                    "true_gdna": r["pools"]["true_gdna"]})
     return out
 
 

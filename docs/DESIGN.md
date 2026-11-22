@@ -90,9 +90,8 @@ at κ = ½ the gDNA fraction cancels from the strand mean. Every score is read p
   driver; state its unit, since a span covers a gene while a mature transcript is spliced. A background pooled over
   intergenic and intron slots is safe on real data, not on the panel.
 - **The release holds for the annotated pool.** At 5 % gDNA and above, 0.8.0 does not ship while an in-scope row's
-  annotated error exceeds 0.7.1's on the same reads (`SUCCESS.md`, bar 5; issue #76, issue #9). This bar has no
-  stated-limitation fallback. One row is excepted (the owner, 2026-11-20): the simulator's stranded capture-ON g05,
-  which 7b254a9c misses by 565 fragments, does not hold the release.
+  annotated error, summed per transcript and per gene, exceeds 0.7.1's on the same reads (`SUCCESS.md`, bar 5). This
+  bar has no stated-limitation fallback.
 - **The last sessions before 0.8.0 have no pass bar** (the owner, 2026-11-20): what is achievable is not known. Each
   improves the tool's current state toward a simple, robust tool that performs well across many kinds of data, and
   what is left ships stated.

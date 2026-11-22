@@ -45,9 +45,10 @@ The intron abundance model landed on 2026-11-19 (`DESIGN.md` §5.4, `EQUATIONS.m
 read against the gDNA law of the library's own intergenic regions, with a departure prior a stranded library measures
 from its introns' strands. Pinned and fractional, against the tree before it:
 - On unstranded capture OFF transfer now beats silent on every row. Calibration's Σ|gDNA error| on the ladder falls
-  from 618,686 to 337,648, and the simulator's gDNA net from −325,530 to −77,872 fragments. Bar 1's worst in-scope row
-  goes from −3.03 % to −1.76 % of the library's gDNA.
-- The stranded strata hold, transcripts and genes within 0.7 %, and bar 5 holds and fails on the same rows.
+  from 618,686 to 337,648, and the simulator's gDNA net from −325,530 to −77,872 fragments. The worst in-scope library
+  net goes from −3.03 % to −1.76 % of the library's gDNA.
+- The stranded strata hold, transcripts and genes within 0.7 %, and the annotated library net holds and fails on the
+  same rows.
 - On the VCaP mix the introns' strands read the departure prior as 0.995, so the model steps aside there: every pool
   is within 79 fragments of the tree before it.
 - STAR's unstranded capture OFF transcripts rise from 657,739 to 711,513, all of it g05's giant locus at the EM's cap
@@ -61,13 +62,14 @@ The capture reader's first fixes landed the same day. The junction cap counts a 
 mask splits an exon (issue #61). An efficiency of exactly 1 gives RNA's own length, and only capture's excess over 1 is
 carried between length tables (issue #65). A landscape trained on anchors alone reads one basin, gated by a test
 (issue #6, which no longer reproduced). Off capture the identity references are bit-identical; under capture
-transcript error moves by at most 0.35 % and gene error by 0.9 %, and bar 5 holds and fails on the same rows. The
+transcript error moves by at most 0.35 % and gene error by 0.9 %, and the annotated library net holds and fails on
+the same rows. The
 capture-ON references and the VCaP mix's are re-frozen on that tree.
 
 The capture reader's clamp went on 2026-11-20 (`DESIGN.md` §7.2), on the owner's go with its cost stated: an object
 reads its own level, not its enriched basin's peak. Pinned and fractional, against the tree before it:
-- Under stranded capture the annotated pool passes 0.7.1's bar on every row at 5 % gDNA and above but the
-  simulator's g05, which misses it by 565 fragments (+27,644 → +18,647, against 18,082). The simulator's g50 goes
+- Under stranded capture the annotated library net is below 0.7.1's on every row at 5 % gDNA and above but the
+  simulator's g05 (+27,644 → +18,647, against 18,082). The simulator's g50 goes
   from +53,207 to +30,002, its g98 from +25,398 to +18,575 and STAR's g50 from +34,964 to +22,297.
 - Transcripts on that stratum rise 4.6 % on the simulator and 9.7 % on STAR, 24 % and 29 % at 5 % gDNA, where
   fragments move between the isoforms of genes with many (issue #83); genes fall 5.0 % on the simulator and
@@ -78,6 +80,17 @@ reads its own level, not its enriched basin's peak. Pinned and fractional, again
   8,899.
 
 The capture-ON references and the VCaP mix's are re-frozen on that tree.
+
+A locked object reads its strands, landed on 2026-11-21 (`DESIGN.md` §5, `EQUATIONS.md` §7.3; issue #1), after the
+simulator's probes came to bind by their own GC and the capture panels were regenerated. Pinned and fractional,
+against the tree before it:
+- Every unstranded row, STAR at 98 % gDNA and every ladder and fl-gap row on the simulator's own alignments are
+  bit-identical.
+- On STAR's stranded rows transcript error falls on all six, most at no gDNA (431,143 → 287,469 off capture), and
+  gene error rises on one, 5 % under capture, by 421 fragments, in duplicated gene families multimappers join into
+  one EM locus.
+- On the VCaP mix the DNA-origin share holds: 0.257245 against 0.257226, the truth 0.2518. Its identity reference is
+  re-frozen on this tree.
 
 The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
 alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
@@ -97,14 +110,21 @@ but those marked closed:
 - annotation omission: unannotated unspliced RNA booked gDNA, and retained genes damaged ×1.4–3.0
   (issue #12).
 
-Against 0.7.1 re-scored on the same reads (2026-11-16), HEAD's transcript and gene errors are lower on every in-scope
-rung of the ladder, on both inputs. At 5 % gDNA and above, one stranded capture-ON row calls more of the library
-annotated than 0.7.1 does: the simulator's g05, by 565 fragments (issue #76). The release holds for it
-(`DESIGN.md` §0b).
+Every error is read per object (the owner, 2026-11-21; `SUCCESS.md`). Against 0.7.1 re-scored on the same reads
+(2026-11-21), at 5 % gDNA and above, on every in-scope row of the ladder on both inputs and of both fl-gap panels,
+HEAD's error is below 0.7.1's on transcripts (at most 0.72 of it), genes (0.55) and each pool per locus (0.90), so
+bar 5 holds. The library nets that missed were 0.7.1's cancellation: at STAR's stranded capture-ON 50 %, its −1,380
+is +16,265 over and −17,645 under across loci. Below 5 %, stranded capture ON at 0.1 % gDNA is worse than 0.7.1, with
+about 120,000 nascent fragments read as annotated (genes 262,037 against 192,554), on the no-capture line too.
+
+Calibration per object, Σ|P − O| less chance as a share of the library's gDNA: at 5 % gDNA 4.5 % unstranded capture
+OFF, 4.5 % stranded capture OFF and 9.5 % stranded capture ON, which fails bar 1; at 50 % and 98 %, and on both fl-gap
+panels, at most 3.0 %.
 
 No preview ships (the owner's ruling, 2026-11-04): 0.8.0 waits for every `release-blocker` issue, in the order under
-Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_preview_validation/`, and the re-score's in
-`$RIGEL_RUNS/prototypes/2026-11-16_v071_rescore/`.
+Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_preview_validation/`, the re-score's in
+`$RIGEL_RUNS/prototypes/2026-11-21_regen/v071/`, and the per-object scores in `$RIGEL_RUNS/prototypes/2026-11-21_objects/`
+and `$RIGEL_RUNS/prototypes/2026-11-21_bars/`.
 
 ## Claims that hold
 
@@ -126,15 +146,13 @@ The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the 
 tool's current state, simply and robustly across many kinds of data, and what is left ships stated. In order, one
 `src/` writer at a time:
 
-1. **The cuts' prices** (issue #76 with issue #9; running): read RNA's capture on the cuts from RNA's own crossings,
-   not from gDNA's objects beside them. The simulator's stranded capture-ON g05 misses bar 5 by 565 fragments, which
-   the owner accepted; with every junction at its true price that row reads +9,375.
-2. **False capture** (issue #1): the capture reader's last session, with the owner, on the tree item 1 leaves.
-3. **Performance** (issue #84): compute and memory, every change a proven numeric no-op.
-4. **Code review** (issue #85): clean, concise, readable and maintainable, with no hard-coded constants.
-5. **The release:** one ladder re-score; a MANUAL limitation for issue #2, issue #3, issue #4 with issue #5, issue #7,
-   issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and for what items 1 and
-   2 leave of issue #76, issue #9 and issue #1; the CHANGELOG; then issue #11.
+1. **The cuts' prices** (issue #76 with issue #9): read RNA's capture on the cuts from RNA's own crossings, not from
+   gDNA's objects beside them. The candidate is built; it is re-measured on this tree, beside bar 1's one failing row.
+2. **Performance** (issue #84): compute and memory, every change a proven numeric no-op.
+3. **Code review** (issue #85): clean, concise, readable and maintainable, with no hard-coded constants.
+4. **The release:** one ladder re-score; a MANUAL limitation for issue #1, issue #2, issue #3, issue #4 with issue #5,
+   issue #7, issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and for what
+   item 1 leaves of issue #76 and issue #9; the CHANGELOG; then issue #11.
 
 CI runs alongside from now (issue #11). On its first run since September (fe0e3183) the native build compiled on Linux
 and macOS. Two tests stopped the runs: one asserts a native kernel equals NumPy to the bit, which x86-64 misses by

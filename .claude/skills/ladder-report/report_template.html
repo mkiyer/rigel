@@ -267,8 +267,11 @@ footer code{background:none;padding:0;word-break:break-all}
   <section id="calib">
     <div class="sec-h"><span class="sec-n">07</span><h2>Calibration against oracle calibration</h2></div>
     <p class="sec-sub">The number that ranks a calibration mechanism, upstream of the EM. <b>f<sub>gDNA</sub></b> is
-      the library gDNA fraction calibration reads (P) against the origin-split truth (O). <b>MWAE</b> is the
-      mass-weighted absolute error of the per-object gDNA split, on regions and on boundaries.</p>
+      the library gDNA fraction calibration reads (P) against the origin-split truth (O). <b>Σ|P − O|</b> is the gDNA
+      error summed over regions and boundaries, object by object, so nothing cancels. <b>Chance</b> is what a
+      calibration that knew every object&rsquo;s true share would still score, because it cannot know which of the
+      object&rsquo;s fragments are gDNA. <b>Above chance</b> is the rest, as a share of the library&rsquo;s gDNA: bar 1
+      holds it to 5&nbsp;% at 5&nbsp;% gDNA and above.</p>
     <div class="scroll"><table class="mt" id="calib-table"></table></div>
   </section>
 
@@ -562,7 +565,7 @@ metricTable("gene-table","gene");
 /* calibration */
 (function(){
   const C = DATA.calibration || {};
-  const cols = ["condition","f gDNA (P)","truth (O)","Δ","region MWAE","boundary MWAE","region net","boundary net"];
+  const cols = ["condition","f gDNA (P)","truth (O)","Δ","Σ|P − O|","chance","above chance","region MWAE","boundary MWAE"];
   let h = "<thead><tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr></thead><tbody>";
   for (const [panel,label] of [["ladder","Ladder"],["flgap_rna_long","RNA longer than gDNA"],["flgap_rna_short","RNA shorter than gDNA"]]){
     const rows = C[panel] || [];
@@ -576,8 +579,9 @@ metricTable("gene-table","gene");
         const d = r.f_P - r.f_O;
         h += `<tr class="${r.level==="g00"?"ctl":""}"><td>${LEVEL[r.level]} gDNA</td><td class="num">${r.f_P.toFixed(4)}</td>`
           + `<td class="num was">${r.f_O.toFixed(4)}</td><td class="num">${(d>=0?"+":"−")+Math.abs(d).toFixed(4)}</td>`
-          + `<td class="num">${r.region_mwae.toFixed(4)}</td><td class="num">${r.boundary_mwae.toFixed(4)}</td>`
-          + `<td class="num">${sgn(r.region_net)}</td><td class="num">${sgn(r.boundary_net)}</td></tr>`;
+          + `<td class="num">${Math.round(r.abs_err).toLocaleString()}</td><td class="num was">${Math.round(r.chance).toLocaleString()}</td>`
+          + `<td class="num">${r.true_gdna>0 ? (100*(r.abs_err-r.chance)/r.true_gdna).toFixed(2)+" %" : "n/a"}</td>`
+          + `<td class="num">${r.region_mwae.toFixed(4)}</td><td class="num">${r.boundary_mwae.toFixed(4)}</td></tr>`;
       }
     }
   }
