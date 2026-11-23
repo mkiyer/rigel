@@ -352,22 +352,30 @@ def observable_fl_eff_lengths(frame: TranscriptFrame, rna_fl) -> np.ndarray:
 def object_shares(pieces: TranscriptPieces, pmf: np.ndarray) -> TranscriptObjects:
     """The pieces' contained shares and the cuts' conserved shares on one pmf. A zero-length fragment places
     nowhere — the accumulator deposits none — so the pmf's mass at ``w = 0`` is dropped, and the shares partition
-    the fl-marginal length the pipeline builds, which excludes it too."""
+    the fl-marginal length the pipeline builds, which excludes it too. Every cut's shares are its own, so the cuts are
+    priced a block at a time (``CONSTANTS.resources.share_block_rows``) and the temporaries stay a block's size."""
     pmf = np.asarray(pmf, dtype=np.float64).copy()
     pmf[0] = 0.0
     cut = pieces.cut_row
-    below, above = pieces.length[cut], pieces.length[cut + 1]
+    n = cut.shape[0]
+    whole, low, high, both = (np.empty(n, dtype=np.float64) for _ in range(4))
+    rows = CONSTANTS.resources.share_block_rows
+    for lo in range(0, n, rows):
+        hi = min(lo + rows, n)
+        block = cut[lo:hi]
+        below, above = pieces.length[block], pieces.length[block + 1]
 
-    def share(reach_lo, reach_hi):
-        left, right = conserved_cut_shares(pmf, below, above, reach_lo, reach_hi)
-        return left + right
+        def share(reach_lo, reach_hi):
+            left, right = conserved_cut_shares(pmf, below, above, reach_lo[lo:hi], reach_hi[lo:hi])
+            return left + right
 
-    # a placement leaves the cut's home where it holds more bases on a side than the home does: the share at the
-    # template's reach less the share at the home's is the part that leaves
-    whole = share(pieces.through, pieces.rest)
-    inside = share(pieces.home_lo, pieces.home_hi)
-    low = np.maximum(share(pieces.through, pieces.home_hi) - inside, 0.0)
-    high = np.maximum(share(pieces.home_lo, pieces.rest) - inside, 0.0)
+        # a placement leaves the cut's home where it holds more bases on a side than the home does: the share at the
+        # template's reach less the share at the home's is the part that leaves
+        whole[lo:hi] = share(pieces.through, pieces.rest)
+        inside = share(pieces.home_lo, pieces.home_hi)
+        low[lo:hi] = np.maximum(share(pieces.through, pieces.home_hi) - inside, 0.0)
+        high[lo:hi] = np.maximum(share(pieces.home_lo, pieces.rest) - inside, 0.0)
+        both[lo:hi] = np.maximum(whole[lo:hi] - inside - low[lo:hi] - high[lo:hi], 0.0)
     return TranscriptObjects(
         t=pieces.t,
         piece=pieces.piece,
@@ -380,7 +388,7 @@ def object_shares(pieces: TranscriptPieces, pmf: np.ndarray) -> TranscriptObject
         leave_hi=pieces.leave_hi,
         leave_lo_share=low,
         leave_hi_share=high,
-        leave_both_share=np.maximum(whole - inside - low - high, 0.0),
+        leave_both_share=both,
     )
 
 

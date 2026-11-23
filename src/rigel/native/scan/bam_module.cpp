@@ -1,7 +1,10 @@
 // bam_module.cpp — the rigel._bam_impl module (built against htslib): the scan, the annotated-BAM pass, and the
 // per-reference accumulator the second pass and the scan cache rebuild.
+#include <climits>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nanobind/nanobind.h>
@@ -42,6 +45,78 @@ template <class Row, class T>
 constexpr int64_t stride_of() {
     return sizeof(Row) / sizeof(T);
 }
+
+/// The held bank's arrays (`DeferredFragments`), read in place: placement `p` with a run of its hypotheses becomes
+/// the `OfferedFragment` the per-record bindings marshal from the same record, so a batch over the bank answers as
+/// those calls would, one Python call per reference instead of one per placement and hypothesis.
+struct HeldBank {
+    InArray<int64_t> start, end, align_strand, sj_strand, observed_intron_offsets, observed_introns,
+        hypothesis_offsets, hypothesis_sj_strand, hypothesis_intron_offsets, hypothesis_introns;
+
+    HeldBank(InArray<int64_t> start, InArray<int64_t> end, InArray<int64_t> align_strand, InArray<int64_t> sj_strand,
+             InArray<int64_t> observed_intron_offsets, InArray<int64_t> observed_introns,
+             InArray<int64_t> hypothesis_offsets, InArray<int64_t> hypothesis_sj_strand,
+             InArray<int64_t> hypothesis_intron_offsets, InArray<int64_t> hypothesis_introns)
+        : start(start), end(end), align_strand(align_strand), sj_strand(sj_strand),
+          observed_intron_offsets(observed_intron_offsets), observed_introns(observed_introns),
+          hypothesis_offsets(hypothesis_offsets), hypothesis_sj_strand(hypothesis_sj_strand),
+          hypothesis_intron_offsets(hypothesis_intron_offsets), hypothesis_introns(hypothesis_introns) {
+        const size_t n = start.shape(0);
+        if (end.shape(0) != n || align_strand.shape(0) != n || sj_strand.shape(0) != n ||
+            observed_intron_offsets.shape(0) != n + 1 || hypothesis_offsets.shape(0) != n + 1 ||
+            hypothesis_intron_offsets.shape(0) != hypothesis_sj_strand.shape(0) + 1)
+            throw std::invalid_argument("HeldBank: the arrays do not describe one bank");
+    }
+    std::vector<IntronBlock> observed, implied;
+    std::vector<accumulator::GapHypothesis> spans;
+    std::vector<size_t> first_implied;
+
+    /// A coordinate as the per-record bindings cast it, refused where it would not fit.
+    static int32_t coordinate(int64_t x) {
+        if (x < INT32_MIN || x > INT32_MAX) throw std::overflow_error("held bank: an intron coordinate exceeds int32");
+        return static_cast<int32_t>(x);
+    }
+
+    int64_t n_placements() const { return static_cast<int64_t>(start.shape(0)); }
+
+    /// The hypotheses of placement `p`, as a run `[h0, h1)` of the flat hypothesis axis.
+    std::pair<int64_t, int64_t> hypotheses_of(int64_t p) const {
+        if (p < 0 || p >= n_placements()) throw std::out_of_range("held bank: placement out of range");
+        return {hypothesis_offsets.data()[p], hypothesis_offsets.data()[p + 1]};
+    }
+
+    /// Placement `p` offered with hypotheses `[h0, h1)`; the pointers stay valid until the next call.
+    accumulator::OfferedFragment offer(int64_t p, int64_t h0, int64_t h1) {
+        observed.clear();
+        implied.clear();
+        spans.clear();
+        first_implied.clear();
+        const int64_t* oo = observed_intron_offsets.data();
+        const int64_t* oi = observed_introns.data();
+        for (int64_t i = oo[p]; i < oo[p + 1]; ++i)
+            observed.push_back(IntronBlock{0, coordinate(oi[2 * i]), coordinate(oi[2 * i + 1]), 0});
+        const int64_t* ho = hypothesis_intron_offsets.data();
+        const int64_t* hi = hypothesis_introns.data();
+        for (int64_t h = h0; h < h1; ++h) {
+            first_implied.push_back(implied.size());
+            for (int64_t i = ho[h]; i < ho[h + 1]; ++i)
+                implied.push_back(IntronBlock{0, coordinate(hi[2 * i]), coordinate(hi[2 * i + 1]), 0});
+            spans.push_back({nullptr, implied.size() - first_implied.back(),
+                             static_cast<int32_t>(hypothesis_sj_strand.data()[h])});
+        }
+        for (size_t s = 0; s < spans.size(); ++s) spans[s].introns = implied.data() + first_implied[s];
+        accumulator::OfferedFragment f{};
+        f.start = start.data()[p];
+        f.end = end.data()[p];
+        f.observed_introns = observed.data();
+        f.n_observed_introns = observed.size();
+        f.align_strand = static_cast<int32_t>(align_strand.data()[p]);
+        f.sj_strand = static_cast<int32_t>(sj_strand.data()[p]);
+        f.hypotheses = spans.data();
+        f.n_hypotheses = spans.size();
+        return f;
+    }
+};
 
 /// The Accumulator's banks as numpy views, under the specification's `Tally` field names: what the second pass adds
 /// up after its drain, and what the scan cache's key hashes.
@@ -199,7 +274,66 @@ void bind_accumulator(nb::module_& m) {
                                        vec_to_ndarray(std::move(masses)));
              },
              nb::arg("start"), nb::arg("end"), nb::arg("observed_introns") = nb::tuple(),
-             nb::arg("align_strand") = STRAND_POS, nb::arg("sj_strand") = STRAND_NONE);
+             nb::arg("align_strand") = STRAND_POS, nb::arg("sj_strand") = STRAND_NONE)
+        // The second pass's reads of a batch of this reference's held placements, off the held bank in place:
+        // `length_under` at every hypothesis of each placement, in the flat axis's order, and each placement's
+        // observed path (`placement_masses`' kinds and ref-local ids, CSR over the batch). Returns
+        // `(lengths, path_offsets, path_kinds, path_ids)`.
+        .def("held_reads",
+             [](const Accumulator& a, InArray<int64_t> placements, HeldBank& bank) {
+                 accumulator::DepositScratch& scratch = binding_scratch();
+                 std::vector<int64_t> lengths, path_offsets{0}, path_ids;
+                 std::vector<int8_t> path_kinds;
+                 std::vector<accumulator::PlaceMass> masses;
+                 for (size_t i = 0; i < placements.shape(0); ++i) {
+                     const int64_t p = placements.data()[i];
+                     const auto [h0, h1] = bank.hypotheses_of(p);
+                     const accumulator::OfferedFragment all = bank.offer(p, h0, h1);
+                     for (int64_t k = 0; k < h1 - h0; ++k)
+                         lengths.push_back(a.length_under(all, static_cast<size_t>(k), scratch));
+                     accumulator::OfferedFragment bare = all;  // the path binding offers no hypothesis
+                     bare.n_hypotheses = 0;
+                     a.placement_masses(bare, scratch, masses);
+                     for (const auto& x : masses) {
+                         path_kinds.push_back(x.kind);
+                         path_ids.push_back(x.index);
+                     }
+                     path_offsets.push_back(static_cast<int64_t>(path_ids.size()));
+                 }
+                 return nb::make_tuple(vec_to_ndarray(std::move(lengths)), vec_to_ndarray(std::move(path_offsets)),
+                                       vec_to_ndarray(std::move(path_kinds)), vec_to_ndarray(std::move(path_ids)));
+             },
+             nb::arg("placements"), nb::arg("bank"))
+        // The drain's replay of a batch of this reference's held records, in the order given: placement
+        // `placements[i]` deposited with hypothesis `hypotheses[i]` (flat ids) alone, as `deposit` would. Returns
+        // the count of each outcome by its key.
+        .def("deposit_held",
+             [](Accumulator& a, InArray<int64_t> placements, InArray<int64_t> hypotheses, HeldBank& bank) {
+                 if (hypotheses.shape(0) != placements.shape(0))
+                     throw std::invalid_argument("deposit_held: one hypothesis per placement");
+                 accumulator::DepositScratch& scratch = binding_scratch();
+                 nb::dict counts;
+                 for (size_t i = 0; i < placements.shape(0); ++i) {
+                     const int64_t p = placements.data()[i];
+                     const int64_t h = hypotheses.data()[i];
+                     const auto [h0, h1] = bank.hypotheses_of(p);
+                     if (h < h0 || h >= h1) throw std::out_of_range("deposit_held: a hypothesis of another placement");
+                     const char* key = accumulator::outcome_key(a.deposit(bank.offer(p, h, h + 1), scratch));
+                     counts[key] = (counts.contains(key) ? nb::cast<int64_t>(counts[key]) : int64_t{0}) + 1;
+                 }
+                 return counts;
+             },
+             nb::arg("placements"), nb::arg("hypotheses"), nb::arg("bank"));
+}
+
+/// The held bank as the batch reads take it: built once from `DeferredFragments`' arrays, which it keeps alive.
+void bind_held_bank(nb::module_& m) {
+    nb::class_<HeldBank>(m, "HeldBank")
+        .def(nb::init<InArray<int64_t>, InArray<int64_t>, InArray<int64_t>, InArray<int64_t>, InArray<int64_t>,
+                      InArray<int64_t>, InArray<int64_t>, InArray<int64_t>, InArray<int64_t>, InArray<int64_t>>(),
+             nb::arg("start"), nb::arg("end"), nb::arg("align_strand"), nb::arg("sj_strand"),
+             nb::arg("observed_intron_offsets"), nb::arg("observed_introns"), nb::arg("hypothesis_offsets"),
+             nb::arg("hypothesis_sj_strand"), nb::arg("hypothesis_intron_offsets"), nb::arg("hypothesis_introns"));
 }
 
 void bind_scanner(nb::module_& m) {
@@ -345,6 +479,7 @@ NB_MODULE(_bam_impl, m) {
     m.attr("PLACE_BOUNDARY") = static_cast<int>(accumulator::kPlaceBoundary);
     m.attr("PLACE_SJ") = static_cast<int>(accumulator::kPlaceSj);
 
+    bind_held_bank(m);
     bind_accumulator(m);
     bind_scanner(m);
     bind_annotation_writer(m);

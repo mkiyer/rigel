@@ -27,6 +27,7 @@ from .calibration.effective_length import observable_contained_eff_length
 from .calibration.signature import coarse_type_array
 from .native import PLACE_BOUNDARY, PLACE_REGION, PLACE_SJ
 from .native import Accumulator as NativeAccumulator
+from .native import HeldBank as NativeHeldBank
 from .scoring import sequence_log_penalties
 from .scan_payload import (
     ADDITIVE_AXES,
@@ -104,6 +105,21 @@ def _distinguishing_boundaries(
 P_ORIENTATION_GIVEN_GDNA = 0.5
 
 
+def _strand_terms(
+    align: np.ndarray, implied_strand: np.ndarray, rna_sense_frac: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """:func:`strand_terms` over arrays, element by element."""
+    align = np.asarray(align, dtype=np.int64)
+    implied = np.asarray(implied_strand, dtype=np.int64)
+    named = (implied == int(Strand.POS)) | (implied == int(Strand.NEG))
+    spliced = np.where(
+        named,
+        np.where(implied == align, rna_sense_frac, 1.0 - rna_sense_frac),
+        P_ORIENTATION_GIVEN_GDNA,
+    )
+    return spliced, np.full(spliced.shape, P_ORIENTATION_GIVEN_GDNA)
+
+
 def strand_terms(*, align: int, implied_strand: int, rna_sense_frac: float) -> tuple[float, float]:
     """``(spliced, genomic)``: the likelihood of the observed alignment orientation under each hypothesis.
 
@@ -115,14 +131,69 @@ def strand_terms(*, align: int, implied_strand: int, rna_sense_frac: float) -> t
 
     The genomic hypothesis's unspliced-RNA part would give the same ``p`` / ``1 - p`` as the spliced candidate and
     cancel, so only its gDNA component discriminates. That term must stay orientation-independent: a fitted
-    library-wide strand marginal would move it with the spliced term and cancel most of the discrimination.
+    library-wide strand marginal would move it with the spliced term and cancel most of the discrimination. An
+    ambiguous or absent implied strand names no orientation to compare against.
     """
-    if implied_strand in (int(Strand.POS), int(Strand.NEG)):
-        spliced = rna_sense_frac if implied_strand == align else 1.0 - rna_sense_frac
-    else:
-        # An ambiguous or absent implied strand names no orientation to compare against.
-        spliced = P_ORIENTATION_GIVEN_GDNA
-    return spliced, P_ORIENTATION_GIVEN_GDNA
+    spliced, genomic = _strand_terms(np.array([align]), np.array([implied_strand]), rna_sense_frac)
+    return float(spliced[0]), float(genomic[0])
+
+
+def _expand(starts: np.ndarray, counts: np.ndarray) -> np.ndarray:
+    """The flat indices ``starts[i] + k`` for ``0 ≤ k < counts[i]``, run after run."""
+    counts = np.asarray(counts, dtype=np.int64)
+    total = int(counts.sum())
+    return np.repeat(
+        np.asarray(starts, dtype=np.int64) - (np.cumsum(counts) - counts), counts
+    ) + np.arange(total, dtype=np.int64)
+
+
+def _segment_min(values: np.ndarray, offsets: np.ndarray, empty: float) -> np.ndarray:
+    """The least of ``values[offsets[i]:offsets[i + 1]]`` per segment, *empty* where the segment is empty: a path's
+    bottleneck (a minimum is exact in any order)."""
+    out = np.full(offsets.shape[0] - 1, empty, dtype=np.float64)
+    filled = offsets[1:] > offsets[:-1]
+    if filled.any():
+        out[filled] = np.minimum.reduceat(values, offsets[:-1][filled])
+    return out
+
+
+def _per_run(values: np.ndarray, runs: np.ndarray, reduce) -> np.ndarray:
+    """``reduce(values[runs[i]:runs[i + 1]])`` for every run, each run nonempty. The runs of one length are reduced at
+    once, as the rows of one block: numpy reduces each row as it reduces the run alone, a sum's pairwise order
+    included, so the result is the per-run reduction's to the bit."""
+    lengths = np.diff(runs)
+    out = np.empty(lengths.shape[0], dtype=values.dtype)
+    for n in np.unique(lengths):
+        rows = np.flatnonzero(lengths == n)
+        out[rows] = reduce(values[runs[:-1][rows, None] + np.arange(n)], axis=1)
+    return out
+
+
+def _combine_runs(
+    runs: np.ndarray, factors: list[tuple[np.ndarray, np.ndarray | None]]
+) -> tuple[np.ndarray, np.ndarray]:
+    """:func:`combine_factors` over every run of ``runs`` at once: ``factors`` is the list, in the order they are
+    applied, of ``(log factor, in_run)``, where ``in_run`` marks per run whether the factor belongs to its list (``None``
+    where it belongs to every run's). Returns ``(scores, undecided)``, scores flat over the runs and ``undecided`` per
+    run."""
+    lengths = np.diff(runs)
+    n = int(runs[-1])
+    alive = np.ones(n, dtype=bool)
+    total = np.zeros(n, dtype=np.float64)
+    for factor, in_run in factors:
+        live = np.isfinite(factor)
+        applies = _per_run(live & alive, runs, np.any)  # zero for every survivor: uninformative
+        if in_run is not None:
+            applies &= in_run
+        applied = np.repeat(applies, lengths)
+        alive &= live | ~applied
+        total += np.where(applied & live, factor, 0.0)
+    lead = _per_run(np.where(alive, total, -np.inf), runs, np.max)
+    weight = np.where(alive, np.exp(total - np.repeat(lead, lengths)), 0.0)
+    scores = weight / np.repeat(_per_run(weight, runs, np.sum), lengths)
+    # Exact equality: identical inputs give bit-identical scores, and a 0.50001 / 0.49999 split is decided.
+    top = scores == np.repeat(_per_run(scores, runs, np.max), lengths)
+    return scores, _per_run(top.astype(np.int64), runs, np.sum) > 1
 
 
 def combine_factors(
@@ -148,36 +219,20 @@ def combine_factors(
     product rather than cancel; a factor zero for only some candidates stays decisive, and nothing is floored. Factors
     are applied from the most evidence behind them to the least (length pmf, strand fraction, sequence price, then
     ``A_p`` and ``rho``), so a record whose traffic is zero for every candidate falls to its length term, not to a
-    coin toss.
+    coin toss. One record of :func:`score_held_fragments`' combination, which runs every record at once.
     """
     n = density.shape[0]
     if n == 0:
         return np.zeros(0), False
     with np.errstate(divide="ignore"):
-        logs = [np.log(length_likelihood), np.log(strand)]
+        factors = [(np.log(length_likelihood), None), (np.log(strand), None)]
         if sequence is not None:
-            logs.append(np.asarray(sequence, dtype=np.float64))
+            factors.append((np.asarray(sequence, dtype=np.float64), None))
         if placement_abundance is not None:
-            logs.append(np.log(placement_abundance))
-        logs.append(np.log(density))
-    alive = np.ones(n, dtype=bool)
-    total = np.zeros(n, dtype=np.float64)
-    for factor in logs:
-        live = np.isfinite(factor)
-        if not live[alive].any():
-            continue  # zero for every survivor: uninformative
-        alive &= live
-        total += np.where(live, factor, 0.0)
-    weight = np.where(alive, np.exp(total - total[alive].max()), 0.0)
-    scores = weight / weight.sum()
-    # Exact equality: identical inputs give bit-identical scores, and a 0.50001 / 0.49999 split is decided.
-    return scores, bool(int((scores == scores.max()).sum()) > 1)
-
-
-def _bottleneck(values: list[float]) -> float:
-    """The density of a path that needs several objects: the scarcest one's, since a molecule on the path was present
-    at every object on it."""
-    return float(min(values)) if values else 0.0
+            factors.append((np.log(placement_abundance), None))
+        factors.append((np.log(density), None))
+    scores, undecided = _combine_runs(np.array([0, n], dtype=np.int64), factors)
+    return scores, bool(undecided[0])
 
 
 def resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -314,25 +369,70 @@ class PlacementPath:
         return bool(self.sj.size)
 
 
-def _placement_path(
-    payload: AccumulatorPayload, p: int, accumulator: NativeAccumulator
-) -> PlacementPath:
-    """Placement ``p``'s :class:`PlacementPath`, from the accumulator of its reference."""
-    d = payload.deferred
-    ref = int(d.ref[p])
-    kinds, ids, _masses = accumulator.placement_masses(
-        start=int(d.start[p]),
-        end=int(d.end[p]),
-        observed_introns=[tuple(q) for q in d.observed_introns_of(p).tolist()],
-        align_strand=int(d.align_strand[p]),
-        sj_strand=int(d.sj_strand[p]),
-    )
-    kinds, ids = np.asarray(kinds), np.asarray(ids, dtype=np.int64)
-    return PlacementPath(
-        sj=ids[kinds == PLACE_SJ] + int(payload.ref_sj_offsets[ref]),
-        boundaries=ids[kinds == PLACE_BOUNDARY] + int(payload.ref_boundary_offsets[ref]),
-        regions=ids[kinds == PLACE_REGION] + int(payload.ref_region_offsets[ref]),
-    )
+@dataclass(frozen=True, slots=True)
+class _Paths:
+    """Every held placement's :class:`PlacementPath` at once: per placement, its junctions' count, their
+    ``sj_inv_length_sum`` bottleneck and the strands of the transcripts holding them (OR-ed); its boundaries' count
+    and their ``boundary_unspliced_inv_length_sum`` bottleneck; and its containing region (-1 for none)."""
+
+    n_sj: np.ndarray
+    sj_traffic: np.ndarray
+    sj_strand: np.ndarray
+    n_boundaries: np.ndarray
+    boundary_traffic: np.ndarray
+    region: np.ndarray
+
+    @classmethod
+    def from_objects(
+        cls,
+        payload: AccumulatorPayload,
+        offsets: np.ndarray,
+        kinds: np.ndarray,
+        ids: np.ndarray,
+        junction_strands: np.ndarray | None = None,
+    ) -> "_Paths":
+        """From the placements' objects, CSR over placements by ``offsets``: each object's kind
+        (``rigel.native.PLACE_*``) and flat id, the objects of one kind of a placement contiguous. Without
+        ``junction_strands`` no strand is read (every ``sj_strand`` 0)."""
+        n = offsets.shape[0] - 1
+        owner = np.repeat(np.arange(n, dtype=np.int64), np.diff(offsets))
+
+        def of_kind(kind):
+            mine = kinds == kind
+            count = np.bincount(owner[mine], minlength=n).astype(np.int64)
+            return ids[mine], np.r_[0, np.cumsum(count)], count
+
+        sj, sj_offsets, n_sj = of_kind(PLACE_SJ)
+        boundaries, boundary_offsets, n_boundaries = of_kind(PLACE_BOUNDARY)
+        regions, _region_offsets, n_regions = of_kind(PLACE_REGION)
+        if int(n_regions.max(initial=0)) > 1:
+            raise ValueError("a placement's path is contained in at most one region")
+        sj_strand = np.zeros(n, dtype=np.int64)
+        has_sj = n_sj > 0
+        if junction_strands is not None and has_sj.any():
+            sj_strand[has_sj] = np.bitwise_or.reduceat(
+                junction_strands[sj], sj_offsets[:-1][has_sj]
+            )
+        region = np.full(n, -1, dtype=np.int64)
+        region[n_regions > 0] = regions
+        return cls(
+            n_sj=n_sj,
+            sj_traffic=_segment_min(
+                np.asarray(payload.sj_inv_length_sum, dtype=np.float64)[sj], sj_offsets, 0.0
+            ),
+            sj_strand=sj_strand,
+            n_boundaries=n_boundaries,
+            boundary_traffic=_segment_min(
+                np.asarray(payload.boundary_unspliced_inv_length_sum, dtype=np.float64)[boundaries],
+                boundary_offsets,
+                0.0,
+            ),
+            region=region,
+        )
+
+    @property
+    def spliced(self) -> np.ndarray:
+        return self.n_sj > 0
 
 
 def pass_one_bulk(
@@ -346,6 +446,27 @@ def pass_one_bulk(
         return 0.0
     counts = np.asarray(payload.region_contained_count, dtype=np.float64)[intergenic]
     return float(counts.sum()) / support
+
+
+def _abundances(
+    payload: AccumulatorPayload, paths: _Paths, region_support: np.ndarray, bulk: float
+) -> np.ndarray:
+    """:func:`placement_abundance` for every placement of *paths*."""
+    region = paths.region
+    contained = region >= 0
+    traffic = np.zeros(region.shape[0], dtype=np.float64)
+    if contained.any():
+        count = np.asarray(payload.region_contained_count, dtype=np.float64)[region[contained]].sum(
+            axis=1
+        )
+        opportunity = np.asarray(region_support, dtype=np.float64)[region[contained]]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            traffic[contained] = np.where(opportunity > 0.0, count / opportunity, 0.0)
+    crossing = paths.n_boundaries > 0
+    traffic[crossing] = paths.boundary_traffic[crossing]
+    # gDNA's floor, where gDNA can be: the larger of the two, the traffic on a tie
+    floored = np.where(bulk > traffic, bulk, traffic)
+    return np.where(paths.spliced, paths.sj_traffic, floored)
 
 
 def placement_abundance(
@@ -370,24 +491,38 @@ def placement_abundance(
     however much gDNA it holds. gDNA is one template at a uniform rate and capture only enriches, so a placement not
     booked spliced reads ``max(A_p, bulk)``: a max, because ``A_p`` already holds gDNA's share where pass one saw it.
     """
-    if path.spliced:
-        return _bottleneck(payload.sj_inv_length_sum[path.sj].tolist())
-    if path.boundaries.size:
-        traffic = _bottleneck(payload.boundary_unspliced_inv_length_sum[path.boundaries].tolist())
-    elif path.regions.size:
-        (region,) = path.regions.tolist()
-        count = float(np.asarray(payload.region_contained_count[region], dtype=np.float64).sum())
-        opportunity = float(region_support[region])
-        traffic = count / opportunity if opportunity > 0.0 else 0.0
-    else:
-        traffic = 0.0
-    return max(traffic, bulk)
+    kinds = np.concatenate(
+        [
+            np.full(path.sj.shape[0], PLACE_SJ, dtype=np.int8),
+            np.full(path.boundaries.shape[0], PLACE_BOUNDARY, dtype=np.int8),
+            np.full(path.regions.shape[0], PLACE_REGION, dtype=np.int8),
+        ]
+    )
+    ids = np.concatenate([path.sj, path.boundaries, path.regions]).astype(np.int64)
+    paths = _Paths.from_objects(payload, np.array([0, ids.shape[0]]), kinds, ids)
+    return float(_abundances(payload, paths, region_support, bulk)[0])
+
+
+def _held_bank(deferred) -> NativeHeldBank:
+    """The held bank as the accumulator's batch reads take it, over the bank's own arrays."""
+    return NativeHeldBank(
+        start=deferred.start,
+        end=deferred.end,
+        align_strand=deferred.align_strand,
+        sj_strand=deferred.sj_strand,
+        observed_intron_offsets=deferred.observed_intron_offsets,
+        observed_introns=deferred.observed_introns,
+        hypothesis_offsets=deferred.hypothesis_offsets,
+        hypothesis_sj_strand=deferred.hypothesis_sj_strand,
+        hypothesis_intron_offsets=deferred.hypothesis_intron_offsets,
+        hypothesis_introns=deferred.hypothesis_introns,
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class _HeldScorer:
-    """What scoring a held fragment reads beyond the fragment itself: the length laws, the strand fraction, the
-    pass-one tallies' derived terms and the per-reference accumulators (:func:`score_held_fragments`)."""
+    """What scoring the held fragments reads beyond the fragments themselves: the length laws, the strand fraction,
+    the pass-one tallies' derived terms and the per-reference accumulators (:func:`score_held_fragments`)."""
 
     payload: AccumulatorPayload
     rna_pmf: np.ndarray
@@ -441,104 +576,112 @@ class _HeldScorer:
             intron_offsets=np.asarray(payload.deferred.hypothesis_intron_offsets, dtype=np.int64),
         )
 
-    def score_placement(self, p: int, multi: bool, terms: HypothesisTerms) -> None:
-        """Write placement ``p``'s factors into *terms*, one slot per hypothesis; the placement's own terms (``A_p``
-        and the sequence price) only on a multi-placement record."""
-        d = self.payload.deferred
-        accumulator = self.accumulators[int(d.ref[p])]
-        h0, h1 = int(d.hypothesis_offsets[p]), int(d.hypothesis_offsets[p + 1])
-        path = _placement_path(self.payload, p, accumulator)
-        if multi:
-            terms.placement_abundance[h0:h1] = placement_abundance(
-                self.payload, path, self.region_support, self.bulk
+    def reads(self) -> tuple[np.ndarray, _Paths]:
+        """Every hypothesis's ``L`` (``Accumulator.length_under``) and every placement's :class:`PlacementPath`
+        (``Accumulator.placement_masses``), the deposit's own reads, one batch per reference."""
+        payload = self.payload
+        d = payload.deferred
+        bank = _held_bank(d)
+        length = np.zeros(d.n_hypotheses, dtype=np.int64)
+        n_objects = np.zeros(d.n_placements, dtype=np.int64)
+        batches = []
+        for ref in np.unique(d.ref):
+            ref = int(ref)
+            placements = np.flatnonzero(d.ref == ref)
+            lengths, offsets, kinds, ids = self.accumulators[ref].held_reads(placements, bank)
+            length[
+                _expand(d.hypothesis_offsets[placements], np.diff(d.hypothesis_offsets)[placements])
+            ] = lengths
+            n_objects[placements] = np.diff(offsets)
+            kinds = np.asarray(kinds)
+            base = np.select(
+                [kinds == PLACE_SJ, kinds == PLACE_BOUNDARY],
+                [int(payload.ref_sj_offsets[ref]), int(payload.ref_boundary_offsets[ref])],
+                int(payload.ref_region_offsets[ref]),
             )
-            nm, clip = int(d.nm[p]), int(d.clip[p])
-            terms.sequence[h0:h1] = (nm * self.mismatch_price if nm else 0.0) + (
-                clip * self.clip_price if clip else 0.0
-            )
-        hypotheses = [
-            (
-                [tuple(q) for q in d.hypothesis_introns_of(h).tolist()],
-                int(d.hypothesis_sj_strand[h]),
-            )
-            for h in range(h0, h1)
-        ]
-        # `length_under` needs the hypothesis objects back in the shape the binding reads.
-        spans = [_Span(introns, implied) for introns, implied in hypotheses]
-        observed = [tuple(q) for q in d.observed_introns_of(p).tolist()]
-        align, observed_motif = int(d.align_strand[p]), int(d.sj_strand[p])
-        for local, (introns, implied_strand) in enumerate(hypotheses):
-            slot = h0 + local
-            L = int(
-                accumulator.length_under(
-                    start=int(d.start[p]),
-                    end=int(d.end[p]),
-                    observed_introns=observed,
-                    align_strand=align,
-                    sj_strand=observed_motif,
-                    hypotheses=spans,
-                    hypothesis_index=local,
-                )
-            )
-            terms.length[slot] = L
-            terms.density[slot] = self._density(p, slot, implies_introns=bool(introns))
-            pmf = self.rna_pmf if (introns or path.spliced) else self.global_pmf
-            terms.length_likelihood[slot] = float(pmf[L]) if 0 <= L <= self.max_size else 0.0
-            terms.strand[slot] = self._strand(
-                align, observed_motif, path, implied_strand, implies_introns=bool(introns)
-            )
+            batches.append((placements, kinds, np.asarray(ids, dtype=np.int64) + base))
+        offsets = np.r_[0, np.cumsum(n_objects)]
+        kinds = np.empty(int(offsets[-1]), dtype=np.int8)
+        ids = np.empty(int(offsets[-1]), dtype=np.int64)
+        for placements, batch_kinds, batch_ids in batches:
+            at = _expand(offsets[placements], n_objects[placements])
+            kinds[at], ids[at] = batch_kinds, batch_ids
+        return length, _Paths.from_objects(payload, offsets, kinds, ids, self.junction_strands)
 
-    def _density(self, p: int, slot: int, *, implies_introns: bool) -> float:
+    def terms(self) -> HypothesisTerms:
+        """Every hypothesis's factors; the placement's own terms (``A_p`` and the sequence price) only on a
+        multi-placement record."""
+        payload = self.payload
+        d = payload.deferred
+        length, paths = self.reads()
+        per_placement = np.diff(d.hypothesis_offsets)
+        placement = np.repeat(np.arange(d.n_placements, dtype=np.int64), per_placement)
+        implies = np.diff(self.intron_offsets) > 0
+        spliced = paths.spliced[placement]
+        # the length pmf: RNA's where the path is certified spliced, the unconditional anchor's otherwise
+        inside = (length >= 0) & (length <= self.max_size)
+        at = np.where(inside, length, 0)
+        length_likelihood = np.where(
+            inside,
+            np.where(implies | spliced, self.rna_pmf[at], self.global_pmf[at]),
+            0.0,
+        )
+        # the strand: the observed motif's, else the junctions' the path uses, else the hypothesis's own
+        motif = d.sj_strand[placement]
+        observed = motif != int(Strand.NONE)
+        reading = np.where(
+            observed, motif, np.where(spliced, paths.sj_strand[placement], d.hypothesis_sj_strand)
+        )
+        spliced_term, genomic_term = _strand_terms(
+            d.align_strand[placement], reading, self.rna_sense_frac
+        )
+        strand = np.where(observed | spliced | implies, spliced_term, genomic_term)
+        # the placement's own terms, on a multi-placement record
+        per_record = np.diff(d.placement_offsets)
+        multi = np.repeat(per_record > 1, per_record)
+        nm, clip = d.nm.astype(np.float64), d.clip.astype(np.float64)
+        with np.errstate(invalid="ignore"):  # a price of -inf at no edit is never read
+            sequence = np.where(d.nm != 0, nm * self.mismatch_price, 0.0) + np.where(
+                d.clip != 0, clip * self.clip_price, 0.0
+            )
+        abundance = _abundances(payload, paths, self.region_support, self.bulk)
+        return HypothesisTerms(
+            length=length,
+            density=self._density(implies, placement),
+            length_likelihood=length_likelihood,
+            strand=strand,
+            placement_abundance=np.where(multi, abundance, 1.0)[placement],
+            sequence=np.where(multi, sequence, 0.0)[placement],
+        )
+
+    def _density(self, implies: np.ndarray, placement: np.ndarray) -> np.ndarray:
         """``rho``: a spliced path's evidence is its junctions' ``sj_inv_length_sum``, deposited by the same rule as a
         contiguous boundary's, so it is on ∅'s scale; the genomic path's is the unspliced crossing density where the
         others jump. ∅ is scored only over the union of the competing implied introns, the stretch it claims
         contiguous and every spliced path jumps, so it is not penalised for touching more objects than they do; that
-        union is the placement's contiguous run of the flat hypothesis-intron axis."""
-        payload, offsets = self.payload, self.intron_offsets
-        if implies_introns:
-            observed_densities = []
-            for t in range(int(offsets[slot]), int(offsets[slot + 1])):
-                jid = int(self.sj_of[t])
-                observed_densities.append(0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid]))
-            return _bottleneck(observed_densities)
-        d = payload.deferred
-        h0, h1 = int(d.hypothesis_offsets[p]), int(d.hypothesis_offsets[p + 1])
-        boundary_base = int(payload.ref_boundary_offsets[int(d.ref[p])])
-        boundary_densities = []
-        for t in range(int(offsets[h0]), int(offsets[h1])):
-            for boundary in range(int(self.first_of[t]), int(self.last_of[t])):
-                boundary_densities.append(
-                    float(payload.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1])
-                )
-        return _bottleneck(boundary_densities)
-
-    def _strand(
-        self,
-        align: int,
-        observed_motif: int,
-        path: PlacementPath,
-        implied_strand: int,
-        *,
-        implies_introns: bool,
-    ) -> float:
-        """The probability of the observed orientation under the placement's own reading. An observed motif makes
-        every hypothesis RNA on the motif's strand, since its intron is cut under all of them: constant within the
-        placement, not across a multimapper's, where an unspliced hit carries gDNA's ½. An annotated splice the
-        aligner wrote no motif for is RNA on the strand of the transcripts holding its junctions, as the deposit books
-        it; both strands say nothing."""
-        if observed_motif != int(Strand.NONE):
-            reading = observed_motif
-        elif path.spliced:
-            reading = int(np.bitwise_or.reduce(self.junction_strands[path.sj]))
-        else:
-            spliced_term, genomic_term = strand_terms(
-                align=align, implied_strand=implied_strand, rna_sense_frac=self.rna_sense_frac
-            )
-            return spliced_term if implies_introns else genomic_term
-        term, _ = strand_terms(
-            align=align, implied_strand=reading, rna_sense_frac=self.rna_sense_frac
-        )
-        return term
+        union is the placement's contiguous run of the flat hypothesis-intron axis. Each is the bottleneck of its
+        objects, 0 where it has none."""
+        payload, d, offsets = self.payload, self.payload.deferred, self.intron_offsets
+        sj_traffic = np.asarray(payload.sj_inv_length_sum, dtype=np.float64)
+        annotated = self.sj_of >= 0
+        junction = np.zeros(self.sj_of.shape[0], dtype=np.float64)
+        junction[annotated] = sj_traffic[self.sj_of[annotated]]
+        spliced = _segment_min(junction, offsets, 0.0)
+        # ∅: every boundary in each intron's distinguishing range, over the placement's run of introns
+        run = offsets[d.hypothesis_offsets]
+        n_boundaries = np.maximum(self.last_of - self.first_of, 0)
+        boundary = _expand(self.first_of, n_boundaries)
+        intron = np.repeat(np.arange(n_boundaries.shape[0], dtype=np.int64), n_boundaries)
+        intron_placement = np.repeat(np.arange(d.n_placements, dtype=np.int64), np.diff(run))
+        base = np.asarray(payload.ref_boundary_offsets, dtype=np.int64)[d.ref][intron_placement]
+        crossing = np.asarray(payload.boundary_unspliced_inv_length_sum, dtype=np.float64)[
+            base[intron] + boundary - 1
+        ]
+        by_placement = np.r_[
+            0, np.cumsum(np.bincount(intron_placement[intron], minlength=d.n_placements))
+        ]
+        genomic = _segment_min(crossing, by_placement, 0.0)
+        return np.where(implies, spliced, genomic[placement])
 
 
 def score_held_fragments(
@@ -566,35 +709,20 @@ def score_held_fragments(
         the unobservable mask, giving region types and observable support) and ``build_sj_arrays``.
     """
     deferred = payload.deferred
-    n_hyp = deferred.n_hypotheses
-    terms = HypothesisTerms(
-        length=np.zeros(n_hyp, np.int64),
-        density=np.zeros(n_hyp, np.float64),
-        length_likelihood=np.zeros(n_hyp, np.float64),
-        strand=np.ones(n_hyp, np.float64),
-        placement_abundance=np.ones(n_hyp, np.float64),
-        sequence=np.zeros(n_hyp, np.float64),
-    )
-    scorer = _HeldScorer.build(payload, fl_models, rna_sense_frac, regions, sj)
-    score = np.zeros(n_hyp, np.float64)
-    record_runs = deferred.record_hypothesis_offsets
-    n_undecided = 0
-    for i in range(deferred.n_fragments):
-        placements = deferred.placements_of(i)
-        multi = len(placements) > 1
-        for p in placements:
-            scorer.score_placement(p, multi, terms)
-        # Combined over the record's whole run, every placement's hypotheses at once.
-        r0, r1 = int(record_runs[i]), int(record_runs[i + 1])
-        score[r0:r1], undecided = combine_factors(
-            terms.density[r0:r1],
-            terms.length_likelihood[r0:r1],
-            terms.strand[r0:r1],
-            terms.placement_abundance[r0:r1] if multi else None,
-            terms.sequence[r0:r1] if multi else None,
-        )
-        n_undecided += undecided
-    return HeldScores(score=score, terms=terms, n_undecided=n_undecided)
+    terms = _HeldScorer.build(payload, fl_models, rna_sense_frac, regions, sj).terms()
+    # Combined over each record's whole run, every placement's hypotheses at once.
+    per_record = np.diff(deferred.placement_offsets)
+    multi = per_record > 1
+    with np.errstate(divide="ignore"):
+        factors = [
+            (np.log(terms.length_likelihood), None),
+            (np.log(terms.strand), None),
+            (terms.sequence, multi),
+            (np.log(terms.placement_abundance), multi),
+            (np.log(terms.density), None),
+        ]
+    score, undecided = _combine_runs(deferred.record_hypothesis_offsets, factors)
+    return HeldScores(score=score, terms=terms, n_undecided=int(undecided.sum()))
 
 
 def choose_hypotheses(scores: HeldScores, payload: AccumulatorPayload, *, seed: int) -> np.ndarray:
@@ -641,7 +769,8 @@ def drain(
     arbitration is degenerate and the ordinary deposit rules apply: there is one tally path.
 
     Pure: the delta accumulates into fresh per-reference accumulators and is added to pass one's arrays, so both
-    tallies exist afterwards. The bank is already merged and ordered, so the drain is single-threaded and reproducible.
+    tallies exist afterwards. The bank is already merged and ordered, so the drain is single-threaded and reproducible:
+    each reference's records are replayed in the bank's order, and its accumulator is built when the first of them is.
     """
     deferred = payload.deferred
     n = deferred.n_fragments
@@ -652,48 +781,43 @@ def drain(
             f"in the bank's canonical order — a mismatch means the scores and the draw walked different "
             f"queues."
         )
+    # The choice indexes the record's run of hypotheses over all its placements, so it names a placement and a
+    # hypothesis at once; the replay goes onto that placement's reference.
+    record_runs = deferred.record_hypothesis_offsets
+    chosen = record_runs[:-1] + choices
+    outside = np.flatnonzero((choices < 0) | (chosen >= record_runs[1:]))
+    if outside.size:
+        i = int(outside[0])
+        raise ValueError(f"choice {choices[i]} is outside record {i}'s hypothesis set")
+    placement = np.searchsorted(deferred.hypothesis_offsets, chosen, side="right") - 1
     accumulators = _Accumulators(payload, region_types, sj)
+    bank = _held_bank(deferred)
     counts = {
         "deposited": 0,
         "dropped_too_long": 0,
         "dropped_empty": 0,
         "dropped_strand_undefined": 0,
     }
-    chose_no_implied_intron = 0
-    offered_multimapper = 0
-    record_runs = deferred.record_hypothesis_offsets
-
-    for i in range(n):
-        # The choice indexes the record's run of hypotheses over all its placements, so it names a placement and a
-        # hypothesis at once; the replay goes onto that placement's reference.
-        h = int(record_runs[i]) + int(choices[i])
-        if not (int(record_runs[i]) <= h < int(record_runs[i + 1])):
-            raise ValueError(f"choice {choices[i]} is outside record {i}'s hypothesis set")
-        p = deferred.placement_of_hypothesis(h)
-        offered_multimapper += int(len(deferred.placements_of(i)) > 1)
-        introns = [tuple(pair) for pair in deferred.hypothesis_introns_of(h).tolist()]
-        chose_no_implied_intron += not introns
-        outcome = accumulators[int(deferred.ref[p])].deposit(
-            start=int(deferred.start[p]),
-            end=int(deferred.end[p]),
-            observed_introns=[tuple(q) for q in deferred.observed_introns_of(p).tolist()],
-            align_strand=int(deferred.align_strand[p]),
-            sj_strand=int(deferred.sj_strand[p]),
-            hypotheses=[_Span(introns, int(deferred.hypothesis_sj_strand[h]))],
-        )
-        if outcome == "deferred_undetermined_gap":
-            raise AssertionError(
-                "a hypothesis set of size one deferred, which is unreachable: arbitration defers only "
-                "when two or more hypotheses survive."
-            )
-        counts[outcome] += 1
-
+    ref = deferred.ref[placement]
+    _refs, first = np.unique(ref, return_index=True)
+    for r in ref[np.sort(first)]:
+        mine = ref == r
+        for outcome, k in (
+            accumulators[int(r)].deposit_held(placement[mine], chosen[mine], bank).items()
+        ):
+            if outcome == "deferred_undetermined_gap":
+                raise AssertionError(
+                    "a hypothesis set of size one deferred, which is unreachable: arbitration defers only "
+                    "when two or more hypotheses survive."
+                )
+            counts[outcome] += k
+    chose_no_implied_intron = int((np.diff(deferred.hypothesis_intron_offsets)[chosen] == 0).sum())
     delta = _gather_delta(payload, accumulators)
     return payload.with_drain(
         delta,
         DrainQC(
             offered=n,
-            offered_multimapper=offered_multimapper,
+            offered_multimapper=int((np.diff(deferred.placement_offsets) > 1).sum()),
             **counts,
             chose_no_implied_intron=chose_no_implied_intron,
             chose_implied_intron=n - chose_no_implied_intron,
@@ -724,15 +848,3 @@ def _gather_delta(
                 lo = int(axis_offsets[axis][ref])
                 delta[name][lo : lo + block.shape[0]] += block
     return delta
-
-
-@dataclass(frozen=True, slots=True)
-class _Span:
-    """A hypothesis in the shape ``Accumulator.length_under`` and ``deposit`` read.
-
-    The binding reads ``introns`` and ``sj_strand`` off whatever it is handed (the specification's ``GapHypothesis``
-    names), so a test can pass the reference's own objects.
-    """
-
-    introns: list
-    sj_strand: int

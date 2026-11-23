@@ -517,6 +517,133 @@ def test_a_payload_cannot_be_drained_twice(scanned_two_contigs):
     assert len(choices) == 10
 
 
+def _record(d, p: int, hypotheses: range) -> dict:
+    """Placement ``p`` of the held bank as the per-record bindings take it, offered *hypotheses* of the flat axis."""
+    return dict(
+        start=int(d.start[p]),
+        end=int(d.end[p]),
+        observed_introns=[tuple(q) for q in d.observed_introns_of(p).tolist()],
+        align_strand=int(d.align_strand[p]),
+        sj_strand=int(d.sj_strand[p]),
+        hypotheses=[
+            GapHypothesis(
+                introns=tuple(tuple(q) for q in d.hypothesis_introns_of(h).tolist()),
+                sj_strand=int(d.hypothesis_sj_strand[h]),
+            )
+            for h in hypotheses
+        ],
+    )
+
+
+@pytest.fixture(scope="module")
+def spliced_multimappers(tmp_path_factory):
+    """The strand module's library: spliced multimappers held on both placements, on two contigs."""
+    from test_second_pass_strand import _scan
+
+    return _scan(tmp_path_factory, "tagged", "+")
+
+
+def _held_banks(scanned_two_contigs, spliced_multimappers):
+    """``(bank, fresh accumulators)`` of the two held fixtures, both on two contigs: this module's, whose gap-held
+    placements carry three hypotheses of different lengths, and the strand module's spliced multimappers, whose held
+    placements carry observed introns."""
+    from rigel.calibration.signature import coarse_type_array
+    from rigel.second_pass import _Accumulators
+
+    payload, region_types, sj, _strand, _regions = scanned_two_contigs
+    spliced, regions, spliced_sj, _strand_model = spliced_multimappers
+    return [
+        (payload.deferred, lambda: _Accumulators(payload, region_types, sj)),
+        (
+            spliced.deferred,
+            lambda: _Accumulators(spliced, coarse_type_array(regions.signature), spliced_sj),
+        ),
+    ]
+
+
+def test_the_batch_reads_answer_as_the_per_record_bindings(
+    scanned_two_contigs, spliced_multimappers
+):
+    """``held_reads`` reads one reference's held placements straight off the bank. Every hypothesis's ``L`` and every
+    placement's path must be what ``length_under`` and ``placement_masses`` give for the same record marshalled one at a
+    time, in the bank's order, on both contigs of both fixtures.
+
+    Perturbation: reading the next hypothesis's ``L``, or offering the placement without its observed introns, fires it.
+    """
+    from rigel.second_pass import _held_bank
+
+    distinct_runs, observed, objects = 0, 0, 0
+    for d, accumulators in _held_banks(scanned_two_contigs, spliced_multimappers):
+        accumulators, bank = accumulators(), _held_bank(d)
+        for ref in np.unique(d.ref).tolist():
+            accumulator = accumulators[ref]
+            placements = np.flatnonzero(d.ref == ref)
+            lengths, offsets, kinds, ids = accumulator.held_reads(placements, bank)
+            k = 0
+            for i, p in enumerate(placements.tolist()):
+                h0, h1 = int(d.hypothesis_offsets[p]), int(d.hypothesis_offsets[p + 1])
+                record = _record(d, p, range(h0, h1))
+                expected = [
+                    accumulator.length_under(**record, hypothesis_index=local)
+                    for local in range(h1 - h0)
+                ]
+                assert lengths[k : k + h1 - h0].tolist() == expected, f"placement {p}"
+                distinct_runs += len(set(expected)) > 1
+                k += h1 - h0
+                del record["hypotheses"]
+                observed += len(record["observed_introns"])
+                want_kinds, want_ids, _masses = accumulator.placement_masses(**record)
+                lo, hi = int(offsets[i]), int(offsets[i + 1])
+                assert np.asarray(kinds[lo:hi]).tolist() == np.asarray(want_kinds).tolist(), (
+                    f"placement {p}"
+                )
+                assert np.asarray(ids[lo:hi]).tolist() == np.asarray(want_ids).tolist(), (
+                    f"placement {p}"
+                )
+                objects += hi - lo
+            assert k == len(lengths)
+    assert distinct_runs > 0, "some placement must hold hypotheses of different lengths"
+    assert observed > 0 and objects > 0, (
+        "some held placement must carry an observed intron, and a path"
+    )
+
+
+def test_the_batch_deposit_tallies_as_the_per_record_deposits(
+    scanned_two_contigs, spliced_multimappers
+):
+    """``deposit_held`` replays a reference's chosen records off the bank. Its tally and outcomes must be byte-identical
+    to ``deposit`` called on each record alone, with the chosen hypothesis and nothing else, in the bank's order, on
+    both fixtures. The choices cycle through each record's hypotheses, so every hypothesis of a gap and both placements
+    of a multimapper are replayed.
+
+    Perturbation: depositing each record's first hypothesis instead of its chosen one fires it."""
+    from collections import Counter
+
+    from rigel.second_pass import _held_bank
+
+    for d, accumulators in _held_banks(scanned_two_contigs, spliced_multimappers):
+        runs = d.record_hypothesis_offsets
+        chosen = runs[:-1] + np.arange(d.n_fragments) % np.diff(runs)
+        assert (chosen != runs[:-1]).any(), (
+            "some record must choose other than its first hypothesis"
+        )
+        placement = np.searchsorted(d.hypothesis_offsets, chosen, side="right") - 1
+        batch, single, bank = accumulators(), accumulators(), _held_bank(d)
+        got, want = Counter(), Counter()
+        for ref in np.unique(d.ref[placement]).tolist():
+            mine = d.ref[placement] == ref
+            got.update(batch[ref].deposit_held(placement[mine], chosen[mine], bank))
+            for p, h in zip(placement[mine].tolist(), chosen[mine].tolist()):
+                want[single[ref].deposit(**_record(d, p, range(h, h + 1)))] += 1
+        assert got == want and got["deposited"] > 0
+        assert len(single.built) == 2, "both contigs must be replayed"
+        for ref in single.built:
+            for name, _axis in ADDITIVE_AXES:
+                left = np.asarray(getattr(batch[ref], name))
+                right = np.asarray(getattr(single[ref], name))
+                assert left.tobytes() == right.tobytes(), f"reference {ref}: {name}"
+
+
 def test_the_drained_payload_is_byte_identical_at_1_2_4_8_workers(tmp_path_factory):
     """Worker independence, composed through the drain.
 

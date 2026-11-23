@@ -22,6 +22,9 @@ from ._bam_impl import UnpairedRecordError
 # -- The accumulator: the native class itself, so a caller reads the banks it exports -----------------
 from ._bam_impl import Accumulator
 
+# the held bank as the accumulator's batch reads take it
+from ._bam_impl import HeldBank
+
 # the kinds of object a placement's mass lands on, which the place weight reads
 from ._bam_impl import PLACE_REGION, PLACE_BOUNDARY, PLACE_SJ
 
@@ -77,6 +80,7 @@ __all__ = [
     "UnpairedRecordError",
     # The accumulator
     "Accumulator",
+    "HeldBank",
     "PLACE_REGION",
     "PLACE_BOUNDARY",
     "PLACE_SJ",

@@ -890,6 +890,12 @@ class ResourceConstants:
     #: sum runs along one object's own row.
     capture_tile_cell_bytes: int = 16
 
+    #: Cuts priced at once when the transcripts' shares are built (``capture_eff_length.object_shares``): each cut's
+    #: shares are its own, so the block sets the size of the temporaries (about a dozen float64 arrays of this many
+    #: rows, a few tens of MB, where the whole genome's ten million cuts at once took 1.7 GB) and no bit. A resource
+    #: choice, timed on the whole genome: smaller blocks pay numpy's call overhead, larger ones the memory.
+    share_block_rows: int = 1 << 17
+
     #: Read size when the index digests its input files.
     digest_chunk_bytes: int = 1 << 20
 
