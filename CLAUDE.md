@@ -131,8 +131,12 @@ floor.
   session, and score against the oracle BAM's read names, never against the previous run.
 - **No legacy, no backwards compatibility, no speculative code.** No version suffixes in file names, and no Greek
   letters in identifiers.
-- **Real data is a test input, never a design input.** Read a timing only from back-to-back A/B pairs. Prove every
-  speed-up is a numeric no-op.
+- **Real data is a test input, never a design input.** Read a timing only from back-to-back A/B pairs.
+- **A speed-up is held to a tolerance, not to the bit** (the owner, 2026-11-22): the payload, the calibration result
+  and the tables' lengths and priors within `rename_identity.py --check --rtol 1e-9` of the tree it starts from, and
+  the EM's counts unmoved beyond noise against truth on the ladder (`panel.py score`, A/B per stratum): the EM's split of
+  near-tied isoforms moves with any last-bit change, main's own scan thread count included. Write the clean, fast
+  formulation; no contortion to keep the last bit.
 - **Renames and refactors:** run `rename_identity.py --check` after each stage.
 - **The owner drives commits.** Do not commit unless asked.
 
@@ -175,7 +179,7 @@ Each instrument's module docstring and `--help` are its manual. `docs/SUCCESS.md
 | `design/policy_benchmark.py` | How does each message policy score per condition? `--by-class` shows where the error sits. Per stratum, never pooled |
 | `design/calibration_oracle.py` | What is the certified per-object truth? `--build` makes the oracle caches |
 | `design/build_scan_cache.py` | Scan once, calibrate many times. After a change to which fragments are offered, `--force` |
-| `design/rename_identity.py` | Is a refactor numerically a no-op? Checked against frozen references in `$RIGEL_RUNS/arms/` |
+| `design/rename_identity.py` | Is a refactor or speed-up numerically the same? Bit-identical, or within `--rtol`, against frozen references in `$RIGEL_RUNS/arms/` |
 | `sim/panel.py` | Build, simulate, cache, align (the STAR rung), score and report a panel from one YAML. `status` names the next stage |
 | `sim/build_test_reference.py` | Renders the test chromosome from `test_chr.yaml` (`docs/TESTING.md` §0a) |
 | `sim/configs/gdna_ladder.yaml` | The 16-condition panel the tool is ranked on |

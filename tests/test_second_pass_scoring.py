@@ -524,22 +524,3 @@ def test_the_length_term_has_support_at_every_hypothesis_length(scored):
         "every hypothesis in this fixture must have positive length likelihood, or the gates above are "
         "measuring the length term's support rather than the density"
     )
-
-
-def test_a_run_sum_is_numpys_own_sum_of_the_run_to_the_bit():
-    """Every record's scores are normalised by their own sum, and the records are summed together (``_per_run``), so the
-    batched sum must be numpy's sum of each run alone, to the bit, at every run length where its pairwise order
-    changes.
-
-    Perturbation: ``np.add.reduceat``, which adds a run's first value to the pairwise sum of the rest, differs."""
-    from rigel.second_pass import _per_run
-
-    rng = np.random.default_rng(0)
-    lengths = np.r_[np.arange(1, 300), rng.integers(1, 20, 2000)]
-    runs = np.r_[0, np.cumsum(lengths)]
-    x = rng.random(int(runs[-1])) * 10.0 ** rng.uniform(-8, 8, int(runs[-1]))
-    want = np.array([x[a:b].sum() for a, b in zip(runs[:-1].tolist(), runs[1:].tolist())])
-    assert _per_run(x, runs, np.sum).tobytes() == want.tobytes()
-    assert np.add.reduceat(x, runs[:-1]).tobytes() != want.tobytes(), (
-        "the perturbation must be able to fire"
-    )

@@ -116,11 +116,16 @@ class TranscriptFrame:
     the lengths are."""
 
     def __init__(
-        self, index: "TranscriptIndex", region_arrays: "RegionArrays", tables: "LengthTables"
+        self,
+        index: "TranscriptIndex",
+        region_arrays: "RegionArrays",
+        tables: "LengthTables",
+        n_threads: int = 1,
     ) -> None:
         self.index = index
         self.region_arrays = region_arrays
         self.tables = tables
+        self.n_threads = n_threads
 
     @cached_property
     def pieces(self) -> TranscriptPieces:
@@ -129,12 +134,12 @@ class TranscriptFrame:
     @cached_property
     def rna(self) -> TranscriptObjects:
         """The shares on RNA's table."""
-        return object_shares(self.pieces, self.tables.rna)
+        return object_shares(self.pieces, self.tables.rna, self.n_threads)
 
     @cached_property
     def carry(self) -> tuple[TranscriptObjects, TranscriptObjects] | None:
         """``(on_anchor, on_table)``, or ``None`` where nothing is carried (:func:`_carry_shares`)."""
-        return _carry_shares(self.pieces, self.rna, self.tables)
+        return _carry_shares(self.pieces, self.rna, self.tables, self.n_threads)
 
 
 def _observable_parts(
@@ -349,7 +354,9 @@ def observable_fl_eff_lengths(frame: TranscriptFrame, rna_fl) -> np.ndarray:
     return eff
 
 
-def object_shares(pieces: TranscriptPieces, pmf: np.ndarray) -> TranscriptObjects:
+def object_shares(
+    pieces: TranscriptPieces, pmf: np.ndarray, n_threads: int = 1
+) -> TranscriptObjects:
     """The pieces' contained shares and the cuts' conserved shares on one pmf. A zero-length fragment places
     nowhere — the accumulator deposits none — so the pmf's mass at ``w = 0`` is dropped, and the shares partition
     the fl-marginal length the pipeline builds, which excludes it too. Every cut's shares are its own, so the cuts are
@@ -366,7 +373,9 @@ def object_shares(pieces: TranscriptPieces, pmf: np.ndarray) -> TranscriptObject
         below, above = pieces.length[block], pieces.length[block + 1]
 
         def share(reach_lo, reach_hi):
-            left, right = conserved_cut_shares(pmf, below, above, reach_lo[lo:hi], reach_hi[lo:hi])
+            left, right = conserved_cut_shares(
+                pmf, below, above, reach_lo[lo:hi], reach_hi[lo:hi], n_threads=n_threads
+            )
             return left + right
 
         # a placement leaves the cut's home where it holds more bases on a side than the home does: the share at the
@@ -867,7 +876,7 @@ def transcript_capture_eff_lengths(
 
 
 def _carry_shares(
-    pieces: TranscriptPieces, obj: TranscriptObjects, tables: "LengthTables"
+    pieces: TranscriptPieces, obj: TranscriptObjects, tables: "LengthTables", n_threads: int = 1
 ) -> tuple[TranscriptObjects, TranscriptObjects] | None:
     """``(on_anchor, on_table)``: the objects' shares on gDNA's uncaptured law and on the scorer's gDNA table, by
     which an efficiency is carried to that table (:func:`_carried`); ``None`` where the table is the uncaptured law
@@ -875,9 +884,11 @@ def _carry_shares(
     if np.array_equal(tables.gdna, tables.anchor):
         return None
     on_table = (
-        obj if np.array_equal(tables.gdna, tables.rna) else object_shares(pieces, tables.gdna)
+        obj
+        if np.array_equal(tables.gdna, tables.rna)
+        else object_shares(pieces, tables.gdna, n_threads)
     )
-    return object_shares(pieces, tables.anchor), on_table
+    return object_shares(pieces, tables.anchor, n_threads), on_table
 
 
 def _carry_factor(share_anchor: np.ndarray, share_table: np.ndarray) -> np.ndarray:

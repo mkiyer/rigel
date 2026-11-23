@@ -294,12 +294,16 @@ untouched stages drift between sittings, so alternate the arms in one sitting an
 (`--set`, `--scan-only`, `--compare`). A native port inside the sweep is held to the transfer gates
 (`tests/calibration/_transfer_harness.py`, against `_solve_impl.testing`'s `transfer_prepare` and `transfer_pass`).
 
-**Every speed-up, rename or refactor is a proven numeric no-op** (`scripts/design/rename_identity.py`): `--freeze` a
-reference once from the tree a stage starts on, then `--check` each step against it, on a ladder condition and on a
-real library (`--bam`). The default `--reference` does not exist and prints ⛔ rather than failing, so pass it and read
-the log. The current references, frozen with the full digest (all four output tables, every payload and
-calibration value) on the tree the 0.8.0 plan starts from (2026-11-17); the same directory holds
-`identity_head_{g00off,g50u_on,g50s_on}.json` for the zero control and the two capture-ON strata:
+**Every rename or refactor is a proven numeric no-op, and every speed-up the same within a tolerance**
+(`scripts/design/rename_identity.py`): `--freeze` a reference once from the tree a stage starts on, then `--check` each
+step against it, on a ladder condition and on a real library (`--bam`). A speed-up runs `--check --rtol 1e-9`, which
+holds the payload, the calibration result and the tables' lengths and priors to the frozen values and reports the EM's
+outputs (its counts, and the gene's count-weighted length); those are judged against truth on the ladder (`panel.py
+score` on both trees, `RIGEL_ARMS` apart, per stratum), since the EM's split of near-tied isoforms moves with any
+last-bit change. The default `--reference` does not exist and prints ⛔ rather than failing, so pass it and read the log.
+The current references, frozen with the full digest (all four output tables, every payload and calibration value) on the
+tree the 0.8.0 plan starts from (2026-11-17); the same directory holds `identity_head_{g00off,g50u_on,g50s_on}.json` for
+the zero control and the two capture-ON strata:
 
     P=$RIGEL_RUNS/arms/2026-11-17_identity S=$RIGEL_RUNS/suite
     python scripts/design/rename_identity.py --check --suite $S/ladder --index $S/rigel_index \

@@ -1,9 +1,9 @@
-// fast_exp.h — Vectorized exp() for the EM E-step hot path
+// fast_exp.h — Vectorized exp() of a non-positive argument, for the hot loops that exponentiate a max-shifted log row
+// (the EM's E-step, the calibration sweep's cubes and blurs)
 //
-// Exploits two properties of the call site in em_step_kernel():
-//   1. Input x is a number <= 0  (log-sum-exp normalization subtracts max_val, and the E-step skips a row whose
-//      max is -inf, where x would be NaN)
-//   2. Moderate accuracy suffices (posteriors are normalized; ~25 ULP is fine)
+// Exploits two properties of every call site:
+//   1. Input x is a number <= 0 (log-sum-exp normalization subtracts the row's max), or -inf
+//   2. Moderate accuracy suffices (the results are normalized or summed; ~25 ULP is fine)
 //
 // Inputs below EXP_CUTOFF return 0.0 (std::exp there is below 3.3e-308). Variants: scalar and NEON (2-wide, on
 // AArch64). The E-step kernel skips a whole vector block when every lane is below EXP_CUTOFF.
@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>  // memcpy for type-punning
 
@@ -159,5 +160,14 @@ inline float64x2_t fast_exp_neon(float64x2_t x) {
 }
 
 #endif // RIGEL_HAS_NEON
+
+// x[i] <- exp(x[i]) for every x[i] <= 0 (or -inf): the NEON lanes, then the scalar tail.
+inline void fast_exp_inplace(double* x, std::size_t n) {
+    std::size_t i = 0;
+#if RIGEL_HAS_NEON
+    for (; i + 2 <= n; i += 2) vst1q_f64(x + i, fast_exp_neon(vld1q_f64(x + i)));
+#endif
+    for (; i < n; ++i) x[i] = fast_exp_scalar(x[i]);
+}
 
 } // namespace rigel

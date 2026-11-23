@@ -662,6 +662,7 @@ def transcript_geometry(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
     tables: "LengthTables",
+    n_threads: int = 1,
 ) -> tuple[float, TranscriptGeometry]:
     """``(junction_cap, geometry)``: the cap on a junction's capture price and the transcripts' effective lengths, read
     from one frame of the index's pieces and cuts (``calibration.capture_eff_length.TranscriptFrame``). The frame is
@@ -673,7 +674,7 @@ def transcript_geometry(
     object's capture efficiency, a junction's capped at the cap), so every component competes on one footing under
     capture. ``effective_lengths``, TPM's, stay the full FL-marginal length over the observable starts. Where every
     capture efficiency is exactly 1 (no landscape, or a reading of 1 everywhere) the two are bit-identical, whatever
-    the length tables (``calibration/capture_eff_length.py``).
+    the length tables (``calibration/capture_eff_length.py``). The frame's shares run on ``n_threads`` threads.
     """
     if rna_fl.n_observations <= 0:
         raise ValueError(
@@ -687,7 +688,7 @@ def transcript_geometry(
         transcript_capture_eff_lengths,
     )
 
-    frame = TranscriptFrame(index, region_arrays, tables)
+    frame = TranscriptFrame(index, region_arrays, tables, n_threads)
     junction_cap = fit_junction_cap(calibration, frame)
     effective_lengths = observable_fl_eff_lengths(frame, rna_fl)
     effective_lengths_em = transcript_capture_eff_lengths(
@@ -1109,7 +1110,12 @@ def run_pipeline(
         # The cap on a junction's capture price (the saturated level, raised as far as RNA's spliced fragments
         # support) and the transcripts' lengths priced under it
         junction_cap, geometry = transcript_geometry(
-            index, length_models(tables)[0], calibration, region_arrays, tables
+            index,
+            length_models(tables)[0],
+            calibration,
+            region_arrays,
+            tables,
+            n_threads=config.calibration.n_threads,
         )
         _log_junction_cap(calibration.gdna_capture_saturation, junction_cap)
         annotations = None if config.annotated_bam_path is None else _annotation_table(buffer)

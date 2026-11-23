@@ -1,9 +1,15 @@
 #!/usr/bin/env python
-"""Is this rename stage numerically a no-op? Every stage proven bit-identical to a frozen reference.
+"""Is this stage numerically the same? Every stage checked against a frozen reference: bit-identical, or within a
+tolerance.
 
-A rename, refactor or speed-up must change no number, and this makes that claim falsifiable. `--freeze` runs
-the whole pipeline once on one condition and reduces it to digests; `--check` runs it again after a stage and
-compares. It compares content, never names, because the names are what changes. Two views:
+A rename or refactor must change no number, and a speed-up no number beyond a tight tolerance; this makes either
+claim falsifiable. `--freeze` runs the whole pipeline once on one condition and keeps both its digests and its
+values; `--check` runs it again after a stage and compares the digests (bit-identity), and with `--rtol` the values
+within that relative tolerance (and `--atol`): every array and scalar of the payload and the calibration result, by
+name, and the output tables' lengths and priors. The EM's outputs are reported and not held to it (its counts in
+fragments, and the gene's length its transcripts' counts weight): the EM's split of near-tied isoforms moves with any
+last-bit change (main's own scan thread count moves it), so they are judged against truth on the ladder (`panel.py
+score`, A/B per stratum). It compares content, never names, because the names are what changes. Two views:
 - the content multiset of the calibration payload and of the calibration result: every value either holds,
   recursing into the dataclasses they nest (the payload's deferred bank, gap census, scan QC and drain QC), each
   array as `dtype|shape|sha256` and each scalar as `type|value` at full precision (the capture weight, the
@@ -13,7 +19,8 @@ compares. It compares content, never names, because the names are what changes. 
 - the tool's output: the transcript, gene, loci and nascent tables, each sorted by its id (its first column) at
   full precision.
 The pair is needed: the multiset cannot see two values swapping names, and the table digests can. Every source of
-run-to-run variation is pinned (one scan thread, one BGZF thread, `OMP_NUM_THREADS=1`, a fixed EM seed), so a
+run-to-run variation is pinned (one scan thread, one BGZF thread, `OMP_NUM_THREADS=1`, a fixed EM seed, and the EM's
+fractional assignment, since a sampled one turns a last-bit difference into whole fragments drawn elsewhere), so a
 `--check` is a statement about the code, not about the shipped thread configuration. The reference is frozen,
 never rolling: every stage compares to the same capture, so one stage's defect cannot become the next stage's
 truth, and `--freeze` refuses to overwrite it. A reference frozen by an older digest does not hold this record's
@@ -24,6 +31,7 @@ Usage::
     python scripts/design/rename_identity.py --self-test          # perturb the comparator; no I/O
     python scripts/design/rename_identity.py --freeze             # capture the reference, once
     python scripts/design/rename_identity.py --check --stage s1   # after every stage
+    python scripts/design/rename_identity.py --check --rtol 1e-9   # a speed-up: the values within a tolerance
     python scripts/design/rename_identity.py --check --suite DIR --index DIR --condition NAME
     python scripts/design/rename_identity.py --freeze --bam real.bam --index DIR --reference REF.json
 """
@@ -57,6 +65,13 @@ REFERENCE = RUNS / "arms" / "rename_identity_reference.json"
 #: ``total_threads=1`` is the load-bearing one: float addition is not associative across worker threads.
 DETERMINISM = dict(total_threads=1, bgzf_threads=1)
 EM_SEED = 20260807
+#: the EM's assignment, pinned continuous: a sampled one moves whole fragments on a last-bit difference
+EM_ASSIGNMENT = "fractional"
+#: the output-table columns the EM's split of the fragments makes, by prefix: reported in fragments under --rtol, never
+#: held to it, since near-tied isoforms re-split on any last-bit change
+EM_COLUMNS = ("count", "tpm", "posterior", "fraction")
+#: the columns the EM's counts weight, reported beside them: a gene's length is its transcripts' weighted by their counts
+EM_WEIGHTED = ("gene.effective_length",)
 
 #: the tool's output tables, every one the estimator writes; a record that lacks one gates less than it claims
 TABLES = ("transcript", "gene", "loci", "nascent")
@@ -130,7 +145,7 @@ def capture(suite: Path, index_dir: Path, condition: str, bam: Path | None = Non
     cfg = dataclasses.replace(
         base,
         scan=dataclasses.replace(base.scan, **DETERMINISM),
-        em=dataclasses.replace(base.em, seed=EM_SEED),
+        em=dataclasses.replace(base.em, seed=EM_SEED, assignment_mode=EM_ASSIGNMENT),
     )
     # the payload is not on `PipelineResult`, so it is captured at the `calibrate` boundary; the pipeline
     # imports `calibrate` function-locally, so patching the module attribute is picked up at call time
@@ -159,7 +174,9 @@ def capture(suite: Path, index_dir: Path, condition: str, bam: Path | None = Non
         "loci": est.get_loci_df(index),
         "nascent": est.get_nascent_quant_df(index),
     }
-    return reduce_run(condition, tables, box["payload"], result.calibration)
+    return reduce_run(condition, tables, box["payload"], result.calibration), run_values(
+        tables, box["payload"], result.calibration
+    )
 
 
 def reduce_run(condition: str, tables: dict, payload, calibration) -> dict:
@@ -173,6 +190,112 @@ def reduce_run(condition: str, tables: dict, payload, calibration) -> dict:
         "payload_multiset": content_multiset(payload),
         "calibration_multiset": content_multiset(calibration),
     }
+
+
+def run_values(tables: dict, payload, calibration) -> dict:
+    """One run's numbers by name, for a tolerance check: each output table sorted by its id (its first column), and
+    every numeric array and scalar the payload and the calibration result hold, by dotted field name."""
+    arrays: dict[str, np.ndarray] = {}
+
+    def walk(obj, where):
+        for f in dataclasses.fields(obj):
+            v, key = getattr(obj, f.name), f"{where}.{f.name}"
+            if isinstance(v, np.ndarray) and not v.dtype.hasobject:
+                arrays[key] = v
+            elif isinstance(v, (bool, int, float, np.bool_, np.integer, np.floating)):
+                arrays[key] = np.asarray(v)
+            elif dataclasses.is_dataclass(v) and not isinstance(v, type):
+                walk(v, key)
+
+    walk(payload, "payload")
+    walk(calibration, "calibration")
+    ordered = {n: t.sort_values(t.columns[0], kind="stable").reset_index(drop=True) for n, t in tables.items()}
+    return {"tables": ordered, "arrays": arrays}
+
+
+def values_dir(reference: Path) -> Path:
+    """Where a reference keeps its values: beside its digests."""
+    return reference.with_suffix(".values")
+
+
+def save_values(values: dict, directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, table in values["tables"].items():
+        table.to_pickle(directory / f"{name}.pkl")
+    np.savez(directory / "arrays.npz", **values["arrays"])
+
+
+def load_values(directory: Path) -> dict:
+    import pandas as pd
+
+    with np.load(directory / "arrays.npz") as data:
+        arrays = {k: data[k] for k in data.files}
+    return {"tables": {n: pd.read_pickle(directory / f"{n}.pkl") for n in TABLES}, "arrays": arrays}
+
+
+def _deviation(a: np.ndarray, b: np.ndarray, rtol: float, atol: float) -> tuple[int, float]:
+    """``(values outside the tolerance, the largest relative difference)`` of two aligned numeric arrays; NaN agrees
+    with NaN, and an integer or boolean must be equal."""
+    a, b = np.atleast_1d(a), np.atleast_1d(b)
+    if a.dtype.kind in "biu" and b.dtype.kind in "biu":
+        off = a != b
+        return int(off.sum()), float(np.inf if off.any() else 0.0)
+    a, b = a.astype(np.float64), b.astype(np.float64)
+    close = np.isclose(a, b, rtol=rtol, atol=atol, equal_nan=True)
+    scale = np.maximum(np.abs(a), np.abs(b))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rel = np.where((a == b) | (np.isnan(a) & np.isnan(b)), 0.0, np.abs(a - b) / scale)
+    return int((~close).sum()), float(np.nanmax(rel, initial=0.0)) if rel.size else 0.0
+
+
+def compare_values(ref: dict, now: dict, rtol: float, atol: float) -> tuple[list[str], list[str], list[str]]:
+    """``(beyond, moved, em)``: each named array and non-EM table column outside the tolerance; every one that moved
+    at all, with its largest relative difference; and each EM count column's movement in fragments (``EM_COLUMNS``)
+    and each column those counts weight (``EM_WEIGHTED``), which the tolerance does not hold. An empty ``beyond`` means the stage is the same within the tolerance."""
+    import pandas as pd
+
+    beyond, moved, em = [], [], []
+    for name in TABLES:
+        a, b = ref["tables"][name], now["tables"][name]
+        if a.shape != b.shape or list(a.columns) != list(b.columns):
+            beyond.append(f"⛔ the {name} table: shape or columns {a.shape} {list(a.columns)[:4]} -> {b.shape}")
+            continue
+        for col in a.columns:
+            numeric = pd.api.types.is_numeric_dtype(a[col].dtype) and not pd.api.types.is_bool_dtype(a[col].dtype)
+            if numeric and str(col).startswith(EM_COLUMNS):
+                x, y = a[col].to_numpy(np.float64), b[col].to_numpy(np.float64)
+                d = np.abs(np.nan_to_num(x) - np.nan_to_num(y))
+                if d.max(initial=0.0) > 0.0:
+                    em.append(f"{name}.{col}: Σ|Δ| {d.sum():,.2f} of {np.nansum(np.abs(x)):,.0f}, max |Δ| {d.max():,.2f}")
+                continue
+            if numeric and f"{name}.{col}" in EM_WEIGHTED:
+                n_off, worst = _deviation(a[col].to_numpy(), b[col].to_numpy(), rtol, atol)
+                if worst > 0.0:
+                    em.append(f"{name}.{col}, weighted by the counts: {n_off} rows beyond, largest relative {worst:.2e}")
+                continue
+            if numeric:
+                n_off, worst = _deviation(a[col].to_numpy(), b[col].to_numpy(), rtol, atol)
+            else:
+                n_off = int((a[col].astype(str) != b[col].astype(str)).sum())
+                worst = np.inf if n_off else 0.0
+            if worst > 0.0:
+                moved.append(f"{name}.{col}: {worst:.2e}")
+            if n_off:
+                beyond.append(f"⛔ {name}.{col}: {n_off} values beyond the tolerance (largest relative {worst:.2e})")
+    for key in sorted(set(ref["arrays"]) | set(now["arrays"])):
+        if key not in ref["arrays"] or key not in now["arrays"]:
+            beyond.append(f"⛔ {key}: present in one run and not the other")
+            continue
+        a, b = ref["arrays"][key], now["arrays"][key]
+        if a.shape != b.shape:
+            beyond.append(f"⛔ {key}: shape {a.shape} -> {b.shape}")
+            continue
+        n_off, worst = _deviation(a, b, rtol, atol)
+        if worst > 0.0:
+            moved.append(f"{key}: {worst:.2e}")
+        if n_off:
+            beyond.append(f"⛔ {key}: {n_off} values beyond the tolerance (largest relative {worst:.2e})")
+    return beyond, moved, em
 
 
 def compare(ref: dict, now: dict) -> list[str]:
@@ -294,6 +417,52 @@ def _run_perturbations() -> list[tuple[str, bool]]:
     return out
 
 
+def _value_perturbations() -> list[tuple[str, bool]]:
+    """The tolerance comparator on a run's values: a difference inside the tolerance passes, one outside it, a moved
+    integer, a NaN against a number, a missing field and a changed table are caught, and agreeing NaNs are not."""
+    import pandas as pd
+
+    Calibration = dataclasses.make_dataclass("Calibration", [("x", np.ndarray), ("n", int)])
+    Payload = dataclasses.make_dataclass("Payload", [("counts", np.ndarray)])
+
+    def values(x=(1.0, 2.0, np.nan), n=3, counts=(1, 2), count=(1.0, 2.0), length=(10.0, 20.0), gene_length=None,
+               extra=False):
+        tables = {
+            name: pd.DataFrame({"id": ["b", "a"], "count": list(count), "effective_length": list(length)})
+            for name in TABLES
+        }
+        if gene_length is not None:
+            tables["gene"]["effective_length"] = list(gene_length)
+        cal = Calibration(x=np.array(x), n=n)
+        out = run_values(tables, Payload(counts=np.array(counts)), cal)
+        if extra:
+            out["arrays"]["calibration.y"] = np.zeros(1)
+        return out
+
+    base = values()
+
+    def caught(**kw) -> bool:
+        return compare_values(base, values(**kw), 1e-9, 0.0)[0] != []
+
+    def reported(**kw) -> bool:
+        beyond, _moved, em = compare_values(base, values(**kw), 1e-9, 0.0)
+        return beyond == [] and em != []
+
+    return [
+        ("values: the same run twice => within", not caught()),
+        ("values: a relative 1e-12 move => within", not caught(x=(1.0 + 1e-12, 2.0, np.nan))),
+        ("values: a relative 1e-6 move => caught", caught(x=(1.0 + 1e-6, 2.0, np.nan))),
+        ("values: a moved integer => caught", caught(counts=(1, 3))),
+        ("values: a moved integer scalar => caught", caught(n=4)),
+        ("values: a NaN become a number => caught", caught(x=(1.0, 2.0, 0.0))),
+        ("values: a field appearing => caught", caught(extra=True)),
+        ("values: an EM count moved => reported in fragments, not held", reported(count=(1.0, 2.0 + 1e-6))),
+        ("values: a length column beyond => caught", caught(length=(10.0, 20.0 + 1e-6))),
+        ("values: a length column within => within", not caught(length=(10.0, 20.0 * (1 + 1e-12)))),
+        ("values: the gene's count-weighted length moved => reported, not held", reported(gene_length=(10.0, 20.5))),
+    ]
+
+
 def self_test() -> int:
     """The comparator's own falsification. No pipeline, no I/O, pure perturbation."""
     ref = {
@@ -363,6 +532,8 @@ def self_test() -> int:
     # a whole run through the reduction `capture` uses: every value the record certifies must move it
     for name, ok in _run_perturbations():
         checks.append((name, ok))
+    for name, ok in _value_perturbations():
+        checks.append((name, ok))
 
     width = max(len(n) for n, _ in checks)
     for name, ok in checks:
@@ -384,6 +555,9 @@ def main() -> int:
                     help="a BAM to capture directly (a real library); the label is its library directory")
     ap.add_argument("--reference", type=Path, default=REFERENCE)
     ap.add_argument("--stage", default="", help="label recorded with a --check, for the log")
+    ap.add_argument("--rtol", type=float, default=None,
+                    help="with --check: compare the values within this relative tolerance instead of bit for bit")
+    ap.add_argument("--atol", type=float, default=0.0, help="with --rtol: the absolute tolerance beside it")
     args = ap.parse_args()
 
     if args.self_test:
@@ -392,7 +566,7 @@ def main() -> int:
         raise SystemExit("one of --freeze / --check / --self-test is required")
 
     condition = args.condition if args.bam is None else args.bam.resolve().parent.parent.name
-    now = capture(args.suite, args.index, condition, bam=args.bam)
+    now, values = capture(args.suite, args.index, condition, bam=args.bam)
 
     if args.freeze:
         if args.reference.is_file():
@@ -404,7 +578,8 @@ def main() -> int:
             )
         args.reference.parent.mkdir(parents=True, exist_ok=True)
         args.reference.write_text(json.dumps(now, indent=2))
-        print(f"  ⭐ frozen -> {args.reference}")
+        save_values(values, values_dir(args.reference))
+        print(f"  ⭐ frozen -> {args.reference} (values in {values_dir(args.reference)})")
         for name, t in now["tables"].items():
             print(f"     {name:<10s} {t['sha'][:16]}…  ({t['rows']:,} rows)")
         for k in ("payload_multiset", "calibration_multiset"):
@@ -416,6 +591,25 @@ def main() -> int:
     ref = json.loads(args.reference.read_text())
     bad = compare(ref, now)
     label = f" [{args.stage}]" if args.stage else ""
+    if args.rtol is not None:
+        if not values_dir(args.reference).is_dir():
+            raise SystemExit(f"⛔ {args.reference} was frozen without its values; re-freeze it to check a tolerance")
+        beyond, moved, em = compare_values(load_values(values_dir(args.reference)), values, args.rtol, args.atol)
+        print(f"  {'bit-identical' if not bad else 'not bit-identical'}; {len(moved)} columns and fields moved")
+        for m in moved:
+            print(f"     {m}")
+        print(f"  the EM's outputs (judged against truth on the ladder, not here): {len(em)} columns moved")
+        for m in em:
+            print(f"     {m}")
+        tol = f"rtol {args.rtol:g}, atol {args.atol:g}"
+        if beyond:
+            print(f"  ⛔ BEYOND THE TOLERANCE{label} ({tol})")
+            for b in beyond:
+                print(f"     {b}")
+            return 1
+        print(f"  ✅ WITHIN THE TOLERANCE{label} ({tol}) — every payload and calibration value, and the tables' lengths and "
+              "priors")
+        return 0
     if bad:
         print(f"  ⛔ NOT BIT-IDENTICAL{label} — this stage changed a number, so it is not a rename")
         for b in bad:

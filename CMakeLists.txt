@@ -172,5 +172,3 @@ target_compile_options(_em_impl PRIVATE ${RIGEL_FMA_ONLY})
 # _solve_impl: the calibration solve, the sweep's block pipeline in one call per sweep
 rigel_extension(_solve_impl src/rigel/native/solve_kernel.cpp src/rigel/native/testing/solve.cpp
                 src/rigel/native/cut_shares.cpp)
-# numpy's element-wise arithmetic to the bit: no product fused into a sum
-set_source_files_properties(src/rigel/native/cut_shares.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)

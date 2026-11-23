@@ -137,7 +137,9 @@ def crossing_eff_length(
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def _side_share(p: np.ndarray, a: np.ndarray, near: np.ndarray, far: np.ndarray) -> np.ndarray:
+def _side_share(
+    p: np.ndarray, a: np.ndarray, near: np.ndarray, far: np.ndarray, n_threads: int = 1
+) -> np.ndarray:
     """``Σ_w f(w)/w · Σ_x L_a(x)`` — the share a cut takes from the bases of the piece of length ``a`` on
     one side of it, with ``near`` bases of template on that side (``near ≥ a``) and ``far`` on the other.
 
@@ -157,20 +159,13 @@ def _side_share(p: np.ndarray, a: np.ndarray, near: np.ndarray, far: np.ndarray)
     cum1 = np.concatenate([[0.0], np.cumsum(live * w)])
     cumr = np.concatenate([[0.0], np.cumsum(live / np.maximum(w, 1.0))])
 
-    # each window of lengths ``lo < w ≤ hi`` is a pair of rows of the tables and each sum over it a difference of two
-    # entries; per cut in native code (``native.side_shares``), every operation in numpy's order, so the bits are numpy's.
-    # With f the live pmf (w ≥ 2):
-    #   top = near + far; starts_inside = min(a + 1, top); runs_through = min(near + 1, top)
-    #   kept = ½ Σ_{w ≤ starts_inside} (w − 1) f + ½ a Σ_{starts_inside < w ≤ runs_through} f
-    #          + ½ a (near + 1) Σ_{runs_through < w ≤ top} f/w
-    #   removed = ½ Σ_{far + 1 < w ≤ min(far + 1 + a, top)} (w − (2 far + 1) + far (far + 1)/w) f
-    #             + ½ a Σ_{min(far + 1 + a, top) < w ≤ top} (1 − far/w) f
+    # per cut in native code (``native.side_shares``)
     shape = np.broadcast(a, near, far).shape
     a, near, far = (
         np.ascontiguousarray(np.broadcast_to(x, shape), dtype=np.float64).ravel()
         for x in (a, near, far)
     )
-    return side_shares(cum0, cum1, cumr, a, near, far).reshape(shape)
+    return side_shares(cum0, cum1, cumr, a, near, far, n_threads=int(n_threads)).reshape(shape)
 
 
 def conserved_cut_shares(
@@ -179,6 +174,8 @@ def conserved_cut_shares(
     b: np.ndarray,
     reach_lo: np.ndarray,
     reach_hi: np.ndarray,
+    *,
+    n_threads: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """``(left, right)`` — a template's conserved share at each cut between two of its consecutive pieces,
     split into the part its left piece's bases carry and the part its right piece's carry.
@@ -189,7 +186,8 @@ def conserved_cut_shares(
     :data:`UNBOUNDED_REACH` for gDNA, whose template does not end). A junction is a cut like any other in a
     spliced template's own coordinates. Where neither reach binds, ``left = ½ E_f[min(a, w − 1)]`` and
     ``right = ½ E_f[min(b, w − 1)]``. With the pieces' contained shares, a template's shares total its fl-marginal
-    length ``E_f[(L − w + 1)⁺]`` exactly, and each object's share is what the deposit rule gives it.
+    length ``E_f[(L − w + 1)⁺]`` exactly, and each object's share is what the deposit rule gives it. ``n_threads`` is
+    the thread budget (0: every core).
     """
     p = _as_pmf(fl_pmf)
     a = np.asarray(a, dtype=np.float64)
@@ -199,7 +197,7 @@ def conserved_cut_shares(
     a, b, lo, hi = np.broadcast_arrays(a, b, lo, hi)
     if np.any(lo < a) or np.any(hi < b):
         raise ValueError("a cut's reach on each side must include the piece beside it.")
-    return _side_share(p, a, lo, hi), _side_share(p, b, hi, lo)
+    return _side_share(p, a, lo, hi, n_threads), _side_share(p, b, hi, lo, n_threads)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════

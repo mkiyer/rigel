@@ -115,16 +115,17 @@ struct SlotInputs {
 
 struct Grid {
     const double* lam; int K;
-    // σ(λ); the two Jeffreys arms ½ log f_g + ½ log(1 − f_g); log of the clipped σ(λ), the fitted arm's abscissa
-    std::vector<double> fg, jeffreys, log_frac;
+    // σ(λ); the two Jeffreys arms ½ log f_g + ½ log(1 − f_g); log of the clipped σ(λ), the fitted arm's abscissa; log σ(λ)
+    std::vector<double> fg, jeffreys, log_frac, log_fg;
     double kappa;
     int n_tilt;
     const Arm* arm;  // the fitted gDNA arm, built or not
     explicit Grid(const double* lam_, int K_, double kappa_, int n_tilt_, const Arm* arm_)
-        : lam(lam_), K(K_), fg(K_), jeffreys(K_), log_frac(K_), kappa(kappa_), n_tilt(n_tilt_), arm(arm_) {
+        : lam(lam_), K(K_), fg(K_), jeffreys(K_), log_frac(K_), log_fg(K_), kappa(kappa_), n_tilt(n_tilt_), arm(arm_) {
         for (int k = 0; k < K; ++k) {
             fg[k] = sigmoid(lam[k]);
-            jeffreys[k] = JEFFREYS_REF * log_expit(lam[k]) + JEFFREYS_REF * log_expit(-lam[k]);
+            log_fg[k] = log_expit(lam[k]);
+            jeffreys[k] = JEFFREYS_REF * log_fg[k] + JEFFREYS_REF * log_expit(-lam[k]);
             log_frac[k] = arm_abscissa(fg[k]);
         }
     }
@@ -170,28 +171,27 @@ inline void tilt_grid(const Grid& g, const SlotInputs& s, bool ambig, double n, 
 // implies, f_s·n/a_r relative to ρ_ref, summed over the strands and max-normalised over the whole cube.
 inline void add_delivered_row(const Grid& g, const Delivered& row, int C, const double* tau, double* psi) {
     const int K = g.K;
-    std::vector<double> rv(static_cast<size_t>(K) * C, 0.0);
+    const size_t cells = static_cast<size_t>(K) * C;
+    std::vector<double> rv(cells, 0.0), u(cells), r(cells);
     const double scale = row.total / row.opportunity, log_rho = std::log(row.rho_ref);
-    double rmax = NEG_INF;
-    for (int k = 0; k < K; ++k) {
-        const double f_act = 1.0 - g.fg[k];
-        for (int t = 0; t < C; ++t) {
-            const size_t at = static_cast<size_t>(k) * C + t;
-            double v = 0.0;
-            for (int strand = 0; strand < 2; ++strand) {
-                const double* prof = strand == 0 ? row.pos : row.neg;
-                if (prof == nullptr) continue;
-                const double sign = strand == 0 ? 1.0 : -1.0;
-                const double u_s = std::log(f_act * (1.0 + sign * tau[at]) / 2.0 * scale) - log_rho;
-                double r;
-                interp(&u_s, 1, row.u, prof, K, prof[0], prof[K - 1], &r);
-                v += r;
+    for (int strand = 0; strand < 2; ++strand) {
+        const double* prof = strand == 0 ? row.pos : row.neg;
+        if (prof == nullptr) continue;
+        const double sign = strand == 0 ? 1.0 : -1.0;
+        for (int k = 0; k < K; ++k) {
+            const double f_act = 1.0 - g.fg[k];
+            for (int t = 0; t < C; ++t) {
+                const size_t at = static_cast<size_t>(k) * C + t;
+                u[at] = std::log(f_act * (1.0 + sign * tau[at]) / 2.0 * scale) - log_rho;
             }
-            rv[at] = v;
-            if (v > rmax) rmax = v;
         }
+        // every cell at once: a row's cells ascend along its tilt nodes, which the interpolation walks
+        interp(u.data(), static_cast<int>(cells), row.u, prof, K, prof[0], prof[K - 1], r.data());
+        for (size_t at = 0; at < cells; ++at) rv[at] += r[at];
     }
-    for (size_t at = 0; at < rv.size(); ++at) psi[at] += rv[at] - rmax;
+    double rmax = NEG_INF;
+    for (size_t at = 0; at < cells; ++at) rmax = std::max(rmax, rv[at]);
+    for (size_t at = 0; at < cells; ++at) psi[at] += rv[at] - rmax;
 }
 
 // ψ over one slot's (K, C) cube, with the tilt and the two strand-fraction grids beside it; C = 1 for a
@@ -290,12 +290,14 @@ inline void solve_slot(const Grid& g, const SlotInputs& s, Scratch& S, double& f
     for (size_t at = 0; at < cells; ++at) if (S.psi[at] > m) m = S.psi[at];
     if (!std::isfinite(m)) m = 0.0;
     S.post_lam.assign(K, 0.0);
+    for (size_t at = 0; at < cells; ++at) S.psi[at] -= m;
+    rigel::fast_exp_inplace(S.psi.data(), cells);  // the cube's weights, in place of ψ
     double z = 0.0, m_pos = 0.0, m_neg = 0.0;
     for (int k = 0; k < K; ++k) {
         double row = 0.0;
         for (int t = 0; t < C; ++t) {
             const size_t at = static_cast<size_t>(k) * C + t;
-            const double p = std::exp(S.psi[at] - m);
+            const double p = S.psi[at];
             row += p;
             m_pos += p * S.f_pos[at];
             m_neg += p * S.f_neg[at];
@@ -310,7 +312,7 @@ inline void solve_slot(const Grid& g, const SlotInputs& s, Scratch& S, double& f
     const double f_g = posterior_median(S.post_lam.data(), g.lam, K, S.cdf);
     double e1 = 0.0, e2 = 0.0;
     for (int k = 0; k < K; ++k) {
-        const double lf = log_expit(g.lam[k]);
+        const double lf = g.log_fg[k];
         e1 += S.post_lam[k] * lf;
         e2 += S.post_lam[k] * (lf * lf);
     }

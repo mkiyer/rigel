@@ -160,7 +160,8 @@ for C in gdna_ladder_lowg flgap_rna_long flgap_rna_short test_reference test_ref
   python scripts/sim/panel.py score --config scripts/sim/configs/$C.yaml --arms base no_capture --jobs 2
 done
 
-# 4. A RENAME, REFACTOR OR SPEED-UP must be a numeric no-op against a frozen reference (TESTING.md §6).
+# 4. A RENAME OR REFACTOR must be a numeric no-op against a frozen reference; a SPEED-UP the same within --rtol 1e-9 up
+#    to the EM, and its counts unmoved against truth on the ladder (TESTING.md §6).
 python scripts/design/rename_identity.py --check --suite $LADDER --index $INDEX \
        --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference <frozen reference>
 ```

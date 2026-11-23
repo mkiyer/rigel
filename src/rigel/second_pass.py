@@ -149,23 +149,11 @@ def _expand(starts: np.ndarray, counts: np.ndarray) -> np.ndarray:
 
 def _segment_min(values: np.ndarray, offsets: np.ndarray, empty: float) -> np.ndarray:
     """The least of ``values[offsets[i]:offsets[i + 1]]`` per segment, *empty* where the segment is empty: a path's
-    bottleneck (a minimum is exact in any order)."""
+    bottleneck."""
     out = np.full(offsets.shape[0] - 1, empty, dtype=np.float64)
     filled = offsets[1:] > offsets[:-1]
     if filled.any():
         out[filled] = np.minimum.reduceat(values, offsets[:-1][filled])
-    return out
-
-
-def _per_run(values: np.ndarray, runs: np.ndarray, reduce) -> np.ndarray:
-    """``reduce(values[runs[i]:runs[i + 1]])`` for every run, each run nonempty. The runs of one length are reduced at
-    once, as the rows of one block: numpy reduces each row as it reduces the run alone, a sum's pairwise order
-    included, so the result is the per-run reduction's to the bit."""
-    lengths = np.diff(runs)
-    out = np.empty(lengths.shape[0], dtype=values.dtype)
-    for n in np.unique(lengths):
-        rows = np.flatnonzero(lengths == n)
-        out[rows] = reduce(values[runs[:-1][rows, None] + np.arange(n)], axis=1)
     return out
 
 
@@ -176,24 +164,25 @@ def _combine_runs(
     applied, of ``(log factor, in_run)``, where ``in_run`` marks per run whether the factor belongs to its list (``None``
     where it belongs to every run's). Returns ``(scores, undecided)``, scores flat over the runs and ``undecided`` per
     run."""
-    lengths = np.diff(runs)
+    lengths, starts = np.diff(runs), runs[:-1]
     n = int(runs[-1])
     alive = np.ones(n, dtype=bool)
     total = np.zeros(n, dtype=np.float64)
     for factor, in_run in factors:
         live = np.isfinite(factor)
-        applies = _per_run(live & alive, runs, np.any)  # zero for every survivor: uninformative
+        applies = np.logical_or.reduceat(
+            live & alive, starts
+        )  # zero for every survivor: uninformative
         if in_run is not None:
             applies &= in_run
         applied = np.repeat(applies, lengths)
         alive &= live | ~applied
         total += np.where(applied & live, factor, 0.0)
-    lead = _per_run(np.where(alive, total, -np.inf), runs, np.max)
+    lead = np.maximum.reduceat(np.where(alive, total, -np.inf), starts)
     weight = np.where(alive, np.exp(total - np.repeat(lead, lengths)), 0.0)
-    scores = weight / np.repeat(_per_run(weight, runs, np.sum), lengths)
-    # Exact equality: identical inputs give bit-identical scores, and a 0.50001 / 0.49999 split is decided.
-    top = scores == np.repeat(_per_run(scores, runs, np.max), lengths)
-    return scores, _per_run(top.astype(np.int64), runs, np.sum) > 1
+    scores = weight / np.repeat(np.add.reduceat(weight, starts), lengths)
+    top = scores == np.repeat(np.maximum.reduceat(scores, starts), lengths)
+    return scores, np.add.reduceat(top.astype(np.int64), starts) > 1
 
 
 def combine_factors(
@@ -770,7 +759,7 @@ def drain(
 
     Pure: the delta accumulates into fresh per-reference accumulators and is added to pass one's arrays, so both
     tallies exist afterwards. The bank is already merged and ordered, so the drain is single-threaded and reproducible:
-    each reference's records are replayed in the bank's order, and its accumulator is built when the first of them is.
+    each reference's records are replayed in the bank's order.
     """
     deferred = payload.deferred
     n = deferred.n_fragments
@@ -799,8 +788,7 @@ def drain(
         "dropped_strand_undefined": 0,
     }
     ref = deferred.ref[placement]
-    _refs, first = np.unique(ref, return_index=True)
-    for r in ref[np.sort(first)]:
+    for r in np.unique(ref):
         mine = ref == r
         for outcome, k in (
             accumulators[int(r)].deposit_held(placement[mine], chosen[mine], bank).items()

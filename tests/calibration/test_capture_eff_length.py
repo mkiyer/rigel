@@ -1878,9 +1878,9 @@ def test_a_run_builds_the_pieces_once_and_each_tables_shares_once(tmp_path_facto
         built["pieces"] += 1
         return pieces(index, region_arrays)
 
-    def count_shares(frame_pieces, pmf):
+    def count_shares(frame_pieces, pmf, *rest):
         built["shares"].append(np.asarray(pmf, dtype=np.float64).tobytes())
-        return shares(frame_pieces, pmf)
+        return shares(frame_pieces, pmf, *rest)
 
     monkeypatch.setattr(CEL, "transcript_pieces", count_pieces)
     monkeypatch.setattr(CEL, "object_shares", count_shares)

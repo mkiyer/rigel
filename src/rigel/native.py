@@ -66,7 +66,7 @@ from ._em_impl import EM_CLASSES
 from ._solve_impl import solve_blocks
 from ._solve_impl import psi_solve
 
-# one side's conserved cut share per cut, numpy's arithmetic to the bit (`effective_length._side_share`)
+# one side's conserved cut share per cut (`effective_length._side_share`)
 from ._solve_impl import side_shares
 
 # the policy codes the block pipeline switches on; it refuses any other

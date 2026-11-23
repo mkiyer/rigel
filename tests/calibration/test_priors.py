@@ -973,39 +973,34 @@ def test_a_region_split_between_loci_is_shared_and_one_outside_every_locus_dropp
 
 
 def _region_shares_by_loop(region_arrays, multi_loci):
-    """``region_locus_shares`` as a loop over each region's blocks: the specification. A region's blocks are read in
-    sorted (reference, start, end, locus) order; a locus's overlaps add in that order, then the region's loci in the order
-    its blocks first reach them, and each share is its locus's sum over the region's."""
-    blocks = sorted(
+    """``region_locus_shares`` as a loop over each region's blocks: the specification. Each locus's overlap fraction of
+    the region, summed over its blocks, over the total of all its loci's; ``{(region, locus): share}``."""
+    blocks = [
         (int(b.ref_id), int(b.start), int(b.end), int(ml.multi_locus_id))
         for ml in multi_loci
         for b in ml.loci
         if b.end > b.start
-    )
+    ]
     starts, ends = np.asarray(region_arrays.start), np.asarray(region_arrays.end)
     rid = np.asarray(region_arrays.ref_id)
-    out = []
+    out = {}
     for r in range(int(region_arrays.n_regions)):
         r_start, r_end = int(starts[r]), int(ends[r])
-        if r_end <= r_start:
-            continue
         raw: dict[int, float] = {}
         for ref, s, e, lid in blocks:
             overlap = min(e, r_end) - max(s, r_start)
-            if ref == int(rid[r]) and overlap > 0:
+            if ref == int(rid[r]) and overlap > 0 and r_end > r_start:
                 raw[lid] = raw.get(lid, 0.0) + overlap / (r_end - r_start)
         total = sum(raw.values())
-        if total > 0.0:
-            out += [(r, lid, share / total) for lid, share in raw.items()]
+        out.update({(r, lid): share / total for lid, share in raw.items()})
     return out
 
 
-def test_region_shares_are_the_loops_sums_to_the_bit():
-    """Every region's loci are summed at once, not region by region, so the order of every float sum must be the
-    loop's: a locus's overlaps in its blocks' order, then the region's loci in the order its blocks reach them. Dense
-    random loci put many loci, and several blocks of one locus, on one region.
+def test_region_shares_are_the_loops():
+    """Every region's loci are computed at once; each share must be the loop's: a locus's overlap fractions summed over
+    its blocks, over the region's total. Dense random loci put many loci, and several blocks of one locus, on one region.
 
-    Perturbation: summing a region's loci in locus order, or a locus's overlaps in any other order, fires it."""
+    Perturbation: normalising each block rather than each locus, or dropping a locus's second block, fires it."""
     rng = np.random.default_rng(13)
     bounds = np.unique(np.r_[0, np.sort(rng.integers(1, 200_000, 3_000)), 200_000])
     ra = _regions_from_bounds(bounds)
@@ -1019,7 +1014,8 @@ def test_region_shares_are_the_loops_sums_to_the_bit():
         multi_loci.append(_ml(lid, blocks))
     want = _region_shares_by_loop(ra, multi_loci)
     r_idx, l_idx, share = region_locus_shares(ra, multi_loci, n_loci)
-    assert list(zip(r_idx.tolist(), l_idx.tolist())) == [(r, lid) for r, lid, _ in want]
-    assert share.tobytes() == np.array([s for _, _, s in want], dtype=np.float64).tobytes()
-    per_region = np.bincount(r_idx)
-    assert per_region.max() >= 8, "some region must hold many loci, or the sum order is untested"
+    got = dict(zip(zip(r_idx.tolist(), l_idx.tolist()), share.tolist()))
+    assert got.keys() == want.keys()
+    np.testing.assert_allclose([got[k] for k in want], list(want.values()), rtol=1e-12, atol=0.0)
+    assert np.bincount(r_idx).max() >= 8, "some region must hold many loci"
+    assert any(len(ml.loci) > 1 for ml in multi_loci)

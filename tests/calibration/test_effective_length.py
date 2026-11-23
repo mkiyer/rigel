@@ -461,7 +461,7 @@ def test_a_length_model_with_mass_at_zero_length_shares_without_a_nan():
 
 
 def _numpy_side_share(p, a, near, far):
-    """``_side_share``'s arithmetic as numpy evaluates it: the specification the native kernel reproduces to the bit."""
+    """``_side_share``'s arithmetic in numpy: the specification the native kernel computes."""
     n = p.shape[0]
     w = np.arange(n, dtype=np.float64)
     live = np.where(w >= 2.0, p, 0.0)
@@ -497,13 +497,12 @@ def _numpy_side_share(p, a, near, far):
     return np.maximum(kept - removed, 0.0)
 
 
-def test_the_native_side_share_is_numpys_arithmetic_to_the_bit():
-    """The per-cut share runs in native code built without contraction, every operation in the numpy expression's order,
-    so on any cut it is numpy's value to the bit: real-valued and integer lengths, a piece filling its side, unbounded
-    and empty reaches, zero-length pieces, and a scalar and a broadcast call keeping their shapes.
+def test_the_native_side_share_is_the_numpy_expression():
+    """The per-cut share runs in native code; on any cut it must be the numpy expression's value: real-valued and
+    integer lengths, a piece filling its side, unbounded and empty reaches, zero-length pieces, and a scalar and a
+    broadcast call keeping their shapes.
 
-    Perturbation: building the kernel with contraction on (a product fused into a sum), or re-associating ``kept``'s
-    three segments, fires it."""
+    Perturbation: a window one length off, or the far side's removal dropped, fires it."""
     rng = np.random.default_rng(5)
     m = 200_000
     a = np.floor(rng.exponential(300.0, m))
@@ -515,26 +514,39 @@ def test_the_native_side_share_is_numpys_arithmetic_to_the_bit():
     near[fills] = a[fills]
     near[rng.random(m) < 0.1] = el.UNBOUNDED_REACH
     far[rng.random(m) < 0.1] = el.UNBOUNDED_REACH
-    differing = 0
     for mu, sd, n in ((250.0, 60.0, 1001), (30.0, 5.0, 64), (900.0, 300.0, 1500)):
-        w = np.arange(n, dtype=np.float64)
-        p = np.exp(-0.5 * ((w - mu) / sd) ** 2)
-        p = el._as_pmf(p)
+        p = el._as_pmf(np.exp(-0.5 * ((np.arange(n, dtype=np.float64) - mu) / sd) ** 2))
         want, got = _numpy_side_share(p, a, near, far), el._side_share(p, a, near, far)
-        assert got.shape == want.shape
-        differing += int((want.view(np.int64) != got.view(np.int64)).sum())
+        np.testing.assert_allclose(got, want, rtol=1e-12, atol=1e-12)
         assert np.count_nonzero(want) > m // 2, (
             "most cuts must take a share, or the comparison is vacuous"
         )
-    assert differing == 0, f"{differing} shares differ from numpy's in some bit"
     p = el._as_pmf(np.exp(-0.5 * ((np.arange(1001.0) - 250.0) / 60.0) ** 2))
     scalar = el._side_share(p, 100.0, el.UNBOUNDED_REACH, el.UNBOUNDED_REACH)
-    assert (
-        np.shape(scalar) == ()
-        and np.float64(scalar).tobytes()
-        == np.float64(_numpy_side_share(p, 100.0, el.UNBOUNDED_REACH, el.UNBOUNDED_REACH)).tobytes()
+    assert np.shape(scalar) == ()
+    np.testing.assert_allclose(
+        scalar, _numpy_side_share(p, 100.0, el.UNBOUNDED_REACH, el.UNBOUNDED_REACH), rtol=1e-12
     )
     lengths, reach = np.full((3, 4), 50.0), np.arange(12.0).reshape(3, 4) * 100.0
     broadcast = el._side_share(p, lengths, 80.0, reach)
     assert broadcast.shape == (3, 4)
-    assert broadcast.tobytes() == _numpy_side_share(p, lengths, 80.0, reach).tobytes()
+    np.testing.assert_allclose(
+        broadcast, _numpy_side_share(p, lengths, 80.0, reach), rtol=1e-12, atol=1e-12
+    )
+
+
+def test_the_native_side_share_is_the_same_on_every_thread_count():
+    """The cuts split into one contiguous range per thread and each is computed alone, so the shares are the same
+    whatever the thread budget.
+
+    Perturbation: a range boundary that skips or repeats a cut fires it."""
+    rng = np.random.default_rng(9)
+    m = 300_001
+    a = np.floor(rng.exponential(300.0, m))
+    near = a + np.floor(rng.exponential(2000.0, m))
+    far = np.floor(rng.exponential(2000.0, m))
+    p = el._as_pmf(np.exp(-0.5 * ((np.arange(1001.0) - 250.0) / 60.0) ** 2))
+    one = el._side_share(p, a, near, far, n_threads=1)
+    assert np.count_nonzero(one) > m // 2
+    for n_threads in (2, 3, 8, 0):
+        assert np.array_equal(el._side_share(p, a, near, far, n_threads=n_threads), one), n_threads

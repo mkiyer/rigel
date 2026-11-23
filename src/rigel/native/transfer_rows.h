@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "fast_exp.h"
+
 namespace transfer_rows {
 
 constexpr double EPS = 1.0e-9;
@@ -92,17 +94,24 @@ inline void norm_inplace(double* r, int K) {
 // numpy.interp(x, xp, fp, left, right) for increasing (not necessarily strictly) xp of length K.
 inline void interp(const double* x, int n, const double* xp, const double* fp, int K, double left,
                    double right, double* out) {
+    int j = -1;  // the last query's interval, which an ascending query walks forward from instead of searching
+    double last = 0.0;
     for (int i = 0; i < n; ++i) {
         const double xv = x[i];
         if (std::isnan(xv)) { out[i] = xv; continue; }
         if (xv < xp[0]) { out[i] = left; continue; }
         if (xv > xp[K - 1]) { out[i] = right; continue; }
-        int lo = 0, hi = K;  // upper_bound: the largest j with xp[j] <= xv
-        while (lo < hi) {
-            const int mid = (lo + hi) >> 1;
-            if (xp[mid] <= xv) lo = mid + 1; else hi = mid;
+        if (j >= 0 && xv >= last) {
+            while (j + 1 < K && xp[j + 1] <= xv) ++j;
+        } else {
+            int lo = 0, hi = K;  // upper_bound: the largest j with xp[j] <= xv
+            while (lo < hi) {
+                const int mid = (lo + hi) >> 1;
+                if (xp[mid] <= xv) lo = mid + 1; else hi = mid;
+            }
+            j = lo - 1;
         }
-        const int j = lo - 1;
+        last = xv;
         if (j >= K - 1 || xv == xp[j]) { out[i] = fp[j]; continue; }
         out[i] = fp[j] + (fp[j + 1] - fp[j]) / (xp[j + 1] - xp[j]) * (xv - xp[j]);
     }
@@ -124,29 +133,34 @@ inline void blur_row_at_step(const double* row, int K, double dlam, double v, do
     if (v > 0.0 && K > 1) {
         const int half = blur_radius(v, dlam);
         const int W = 2 * half + 1;
-        scratch.resize(2u * static_cast<size_t>(W) + static_cast<size_t>(K + 2 * half) + static_cast<size_t>(K));
+        scratch.resize(2u * static_cast<size_t>(W) + static_cast<size_t>(K + 2 * half) + 2u * static_cast<size_t>(K));
         double* kern = scratch.data();
         double* logkern = kern + W;
         double* edged = logkern + W;
         double* pr = edged + (K + 2 * half);
-        double ksum = 0.0;
+        double* sum = pr + K;
         for (int t = 0; t < W; ++t) {
             const double x = (t - half) * dlam;
-            logkern[t] = -0.5 * x * x / v;
-            kern[t] = std::exp(logkern[t]);
-            ksum += kern[t];
+            logkern[t] = kern[t] = -0.5 * x * x / v;
         }
+        rigel::fast_exp_inplace(kern, W);
+        double ksum = 0.0;
+        for (int t = 0; t < W; ++t) ksum += kern[t];
         for (int t = 0; t < W; ++t) kern[t] /= ksum;
-        const double e0 = std::exp(out[0]), e1 = std::exp(out[K - 1]);
-        for (int t = 0; t < half; ++t) edged[t] = e0;
-        for (int j = 0; j < K; ++j) edged[half + j] = std::exp(out[j]);
-        for (int t = 0; t < half; ++t) edged[half + K + t] = e1;
-        // numpy.convolve(edged, kern, "valid") reads the kernel reversed; it is symmetric term for
-        // term (kern[t] and kern[W-1-t] are the same expression of the same |x|), so read it forward
+        // the row's probabilities, edge-padded
+        std::copy(out, out + K, edged + half);
+        rigel::fast_exp_inplace(edged + half, K);
+        std::fill(edged, edged + half, edged[half]);
+        std::fill(edged + half + K, edged + K + 2 * half, edged[half + K - 1]);
+        // the convolution, every output at once per kernel weight (the kernel is symmetric)
+        std::fill(sum, sum + K, 0.0);
+        for (int t = 0; t < W; ++t) {
+            const double kt = kern[t];
+            const double* e = edged + t;
+            for (int j = 0; j < K; ++j) sum[j] += e[j] * kt;
+        }
         for (int j = 0; j < K; ++j) {
-            double s = 0.0;
-            const double* e = edged + j;
-            for (int t = 0; t < W; ++t) s += e[t] * kern[t];
+            const double s = sum[j];
             if (s >= std::numeric_limits<double>::min()) {
                 pr[j] = std::log(s);
             } else {
@@ -208,7 +222,8 @@ inline void face_map_lambda(const double* lam, int K, double n_u, double a_g_b, 
 struct Scratch {
     std::vector<double> a, b, c, d, e, f, g, h, blur;
     std::vector<double> extended_axis, extended_source, extended_blur;
-    explicit Scratch(int K) : a(K), b(K), c(K), d(K), e(K), f(K), g(K), h(K) {}
+    std::vector<double> level_count;  // a level row's expected count at each grid point
+    explicit Scratch(int K) : a(K), b(K), c(K), d(K), e(K), f(K), g(K), h(K), level_count(K) {}
 };
 
 // transport_row(row, lam, lam_e_of_u, n_u, n_s)
@@ -250,7 +265,8 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
         const double s = splice_rate * std::exp(nodes[t] * sd);
         for (int j = 0; j < K; ++j) S.b[j] = g_log[j] - std::log(std::max((r_unspl[j] + s) * a_r_e, TINY));
         interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
-        for (int j = 0; j < K; ++j) S.d[j] += std::exp(S.c[j]);
+        rigel::fast_exp_inplace(S.c.data(), K);
+        for (int j = 0; j < K; ++j) S.d[j] += S.c[j];
     }
     for (int j = 0; j < K; ++j) out[j] = std::log(std::max(S.d[j] / n_nodes, TINY));
     norm_inplace(out, K);
@@ -331,11 +347,12 @@ inline void level_of_profile(const double* row, const double* lam, const double*
     for (int j = 0; j < K; ++j) S.a[j] = row[j] - m;
     for (int j = 0; j < K; ++j) {
         const double c = rho_ref * std::exp(u[j]) * a;
+        S.level_count[j] = c;
         const double f = std::clamp(c / n, EPS, 1.0 - EPS);
         S.b[j] = std::log(f / (1.0 - f));
     }
     interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], out);
-    for (int j = 0; j < K; ++j) out[j] += total_tail(rho_ref * std::exp(u[j]) * a, n);
+    for (int j = 0; j < K; ++j) out[j] += total_tail(S.level_count[j], n);
     norm_inplace(out, K);
 }
 
@@ -346,11 +363,12 @@ inline void rna_level_of_profile(const double* row, const double* lam, const dou
     for (int j = 0; j < K; ++j) S.a[j] = row[j] - m;
     for (int j = 0; j < K; ++j) {
         const double c = rho_ref * std::exp(u[j]) * a_r;
+        S.level_count[j] = c;
         const double f_r = std::clamp(c / n, EPS, 1.0 - EPS);
         S.b[j] = std::log((1.0 - f_r) / f_r);
     }
     interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], out);
-    for (int j = 0; j < K; ++j) out[j] += total_tail(rho_ref * std::exp(u[j]) * a_r, n);
+    for (int j = 0; j < K; ++j) out[j] += total_tail(S.level_count[j], n);
     norm_inplace(out, K);
 }
 
