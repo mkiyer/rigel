@@ -54,6 +54,8 @@ find_package(nanobind CONFIG REQUIRED)
 # build, tuned to the build host's CPU, dies with an illegal instruction on an older one; build one only for the
 # machine it runs on, with -DRIGEL_PORTABLE=OFF (e.g. CMAKE_ARGS="-DRIGEL_PORTABLE=OFF" pip install ...).
 option(RIGEL_PORTABLE "Build for every machine of the architecture (no -march=native)" ON)
+# RIGEL_PROFILE_NATIVE (default OFF): symbols and frame pointers, no LTO, for a sampling profiler. pip strips the
+# installed modules too unless told not to: -C cmake.define.RIGEL_PROFILE_NATIVE=ON -C install.strip=false.
 option(RIGEL_PROFILE_NATIVE "Build with debug symbols and frame pointers, and without LTO, for a profiler" OFF)
 
 # The flags are GCC's and Clang's; another compiler builds with its defaults.
@@ -75,7 +77,12 @@ check_ipo_supported(RESULT RIGEL_IPO_SUPPORTED)
 # One native module, built and installed like every other: optimised, link-time optimised unless profiling, and
 # importable as rigel.<name>. The headers in native/ and the vendored cgranges are visible to every module.
 function(rigel_extension name)
-  nanobind_add_module(${name} NOMINSIZE STABLE_ABI ${ARGN})
+  # nanobind strips a Release module's symbols unless told not to, which a profiler needs
+  set(rigel_symbols "")
+  if(RIGEL_PROFILE_NATIVE)
+    set(rigel_symbols NOSTRIP)
+  endif()
+  nanobind_add_module(${name} NOMINSIZE STABLE_ABI ${rigel_symbols} ${ARGN})
   target_include_directories(${name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges)
@@ -163,4 +170,7 @@ rigel_extension(_em_impl src/rigel/native/em_solver.cpp src/rigel/native/testing
 target_compile_options(_em_impl PRIVATE ${RIGEL_FMA_ONLY})
 
 # _solve_impl: the calibration solve, the sweep's block pipeline in one call per sweep
-rigel_extension(_solve_impl src/rigel/native/solve_kernel.cpp src/rigel/native/testing/solve.cpp)
+rigel_extension(_solve_impl src/rigel/native/solve_kernel.cpp src/rigel/native/testing/solve.cpp
+                src/rigel/native/cut_shares.cpp)
+# numpy's element-wise arithmetic to the bit: no product fused into a sum
+set_source_files_properties(src/rigel/native/cut_shares.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)

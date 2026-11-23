@@ -44,84 +44,67 @@ def region_locus_shares(
     The overlaps are normalised across the loci a region touches; a region overlapping no locus (intergenic) emits
     nothing. They are returned as triples so the boundary projection (:func:`boundary_locus_shares`) reuses them
     rather than re-deriving the overlap.
+
+    Each block overlaps one contiguous run of regions (`overlapping_region_runs`). A region's blocks are read in sorted
+    order (reference, start, end, locus): a locus's overlaps add in that order, and the region's loci, in the order its
+    blocks reach them, total by Python's ``sum``, so every float sum has a fixed order; the triples come in region
+    order, a region's loci in that order.
     """
-    r_idx: list[int] = []
-    l_idx: list[int] = []
-    weight: list[float] = []
+    empty = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.float64))
     if n_loci == 0:
-        return (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.float64))
-    blocks_by_ref = _blocks_by_ref(multi_loci)
+        return empty
+    blocks = [
+        (int(blk.ref_id), int(blk.start), int(blk.end), int(ml.multi_locus_id))
+        for ml in multi_loci
+        for blk in ml.loci
+        if blk.end > blk.start
+    ]
+    if not blocks:
+        return empty
+    ref, b_start, b_end, lid = (np.array(column, dtype=np.int64) for column in zip(*blocks))
+    order = np.lexsort((lid, b_end, b_start, ref))
+    ref, b_start, b_end, lid = ref[order], b_start[order], b_end[order], lid[order]
     starts = np.asarray(region_arrays.start, dtype=np.int64)
     ends = np.asarray(region_arrays.end, dtype=np.int64)
-    for ref_id in range(int(region_arrays.n_refs)):
-        blocks = blocks_by_ref.get(ref_id)
-        if not blocks:
-            continue
-        for r, shares in _ref_region_shares(
-            ref_id, blocks, starts, ends, region_arrays.ref_offsets
-        ):
-            for lid, share in shares.items():
-                r_idx.append(r)
-                l_idx.append(lid)
-                weight.append(share)
-    return (
-        np.asarray(r_idx, dtype=np.int64),
-        np.asarray(l_idx, dtype=np.int64),
-        np.asarray(weight, dtype=np.float64),
-    )
-
-
-def _blocks_by_ref(multi_loci: "list[MultiLocus]") -> dict[int, list[tuple[int, int, int]]]:
-    """Every non-empty locus block as ``(start, end, multi_locus_id)``, grouped by reference and sorted by start."""
-    blocks_by_ref: dict[int, list[tuple[int, int, int]]] = {}
-    for ml in multi_loci:
-        lid = int(ml.multi_locus_id)
-        for blk in ml.loci:
-            if blk.end > blk.start:
-                blocks_by_ref.setdefault(int(blk.ref_id), []).append(
-                    (int(blk.start), int(blk.end), lid)
-                )
-    for blocks in blocks_by_ref.values():
-        blocks.sort()
-    return blocks_by_ref
-
-
-def _ref_region_shares(ref_id: int, blocks, starts, ends, ref_offsets):
-    """``(region, {locus: share})`` for each of one reference's regions a block overlaps, in region order.
-
-    Each block overlaps one contiguous run of regions, ``[first, last)`` (`overlapping_region_runs`). A region's blocks
-    are visited in sorted-block order, so every float sum has a fixed order and only overlapping pairs are touched.
-    """
-    b_start = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
-    b_end = np.fromiter((b[1] for b in blocks), dtype=np.int64, count=len(blocks))
     first, last = overlapping_region_runs(
-        np.full(len(blocks), ref_id, dtype=np.int64), b_start, b_end, starts, ends, ref_offsets
+        ref, b_start, b_end, starts, ends, np.asarray(region_arrays.ref_offsets, dtype=np.int64)
     )
     width = np.maximum(last - first, 0)
-    pair_block = np.repeat(np.arange(len(blocks), dtype=np.int64), width)
+    pair_block = np.repeat(np.arange(ref.shape[0], dtype=np.int64), width)
     pair_region = np.repeat(first, width) + (
         np.arange(int(width.sum()), dtype=np.int64) - np.repeat(np.cumsum(width) - width, width)
     )
-    order = np.argsort(pair_region, kind="stable")
-    pair_region, pair_block = pair_region[order], pair_block[order]
-    cut = np.flatnonzero(np.diff(pair_region)) + 1
-    for run in np.split(np.arange(pair_region.size), cut):
-        if run.size == 0:
-            continue
-        r = int(pair_region[run[0]])
-        r_start, r_end = int(starts[r]), int(ends[r])
-        r_len = r_end - r_start
-        if r_len <= 0:
-            continue
-        raw: dict[int, float] = {}
-        for j in pair_block[run]:
-            bs, be, lid = blocks[int(j)]
-            overlap = min(be, r_end) - max(bs, r_start)
-            if overlap > 0:
-                raw[lid] = raw.get(lid, 0.0) + overlap / r_len
-        total = sum(raw.values())
-        if total > 0.0:
-            yield r, {lid: raw_share / total for lid, raw_share in raw.items()}
+    by_region = np.argsort(pair_region, kind="stable")
+    region, block = pair_region[by_region], pair_block[by_region]
+    r_start, r_end = starts[region], ends[region]
+    overlap = np.minimum(b_end[block], r_end) - np.maximum(b_start[block], r_start)
+    kept = (r_end > r_start) & (overlap > 0)
+    region, block, overlap = region[kept], block[kept], overlap[kept]
+    # each (region, locus) once, in the order the region's blocks reach it
+    key = region * np.int64(n_loci) + lid[block]
+    _keys, first_at, group = np.unique(key, return_index=True, return_inverse=True)
+    rank = np.empty(first_at.shape[0], dtype=np.int64)
+    rank[np.argsort(first_at, kind="stable")] = np.arange(first_at.shape[0])
+    group = rank[group]
+    raw = np.zeros(first_at.shape[0], dtype=np.float64)
+    np.add.at(raw, group, overlap / (r_end[kept] - r_start[kept]))
+    group_region = np.empty(first_at.shape[0], dtype=np.int64)
+    group_region[group] = region
+    group_locus = np.empty(first_at.shape[0], dtype=np.int64)
+    group_locus[group] = lid[block]
+    # each region's total over its loci in that order, by Python's own float sum (compensated), as the shares are read
+    first = np.flatnonzero(np.r_[True, group_region[1:] != group_region[:-1]])
+    counts = np.diff(np.r_[first, group_region.shape[0]])
+    values = raw.tolist()
+    total = np.repeat(
+        np.array(
+            [sum(values[lo : lo + n]) for lo, n in zip(first.tolist(), counts.tolist())],
+            dtype=np.float64,
+        ),
+        counts,
+    )
+    out = total > 0.0
+    return group_region[out], group_locus[out], raw[out] / total[out]
 
 
 def boundary_locus_shares(

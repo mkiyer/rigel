@@ -1029,6 +1029,37 @@ def _key_runs(*keys: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return order, first, np.append(first[1:], n)
 
 
+def _ref_codes(refs) -> np.ndarray:
+    """Each row's reference as its rank among the distinct names in sorted order, the codes ``np.unique`` gives, by
+    hashing rather than sorting the strings."""
+    return pd.factorize(pd.Series(refs), sort=True)[0].astype(np.int64)
+
+
+def _run_members(
+    order: np.ndarray,
+    first: np.ndarray,
+    last: np.ndarray,
+    values: np.ndarray,
+    *,
+    drop_negative: bool,
+):
+    """``(flat, offsets)``: each run's distinct *values* in ascending order, the negative ones dropped where asked, as a
+    CSR over the runs. The runs are ``_key_runs``' over the rows *order* sorts."""
+    run = np.repeat(np.arange(first.shape[0], dtype=np.int64), last - first)
+    v = np.asarray(values)[order]
+    if drop_negative:
+        kept = v >= 0
+        run, v = run[kept], v[kept]
+    by = np.lexsort((v, run))
+    run, v = run[by], v[by]
+    new = np.ones(v.shape[0], dtype=bool)
+    new[1:] = (run[1:] != run[:-1]) | (v[1:] != v[:-1])
+    run, v = run[new], v[new]
+    offsets = np.zeros(first.shape[0] + 1, dtype=np.int64)
+    np.cumsum(np.bincount(run, minlength=first.shape[0]), out=offsets[1:])
+    return v, offsets
+
+
 def _collapsed_intervals(iv_df: pd.DataFrame) -> tuple[list, list, list, list, list, list]:
     """The resolver's overlap index, as the six lists ``FragmentResolver.build_overlap_index`` takes: one interval per
     unique ``(ref, start, end, interval_type)`` — refs, starts, ends and types — and, in CSR, the sorted transcripts
@@ -1037,89 +1068,95 @@ def _collapsed_intervals(iv_df: pd.DataFrame) -> tuple[list, list, list, list, l
     starts = iv_df["start"].values
     ends = iv_df["end"].values
     itypes = iv_df["interval_type"].values
-    _unique_refs, ref_codes = np.unique(refs, return_inverse=True)
-    order, first, last = _key_runs(ref_codes, starts, ends, itypes)
-    t_sorted = iv_df["t_index"].values[order].tolist()
-    t_flat: list[int] = []
-    t_offsets: list[int] = [0]
-    for lo, hi in zip(first.tolist(), last.tolist()):
-        t_flat.extend(sorted({t for t in t_sorted[lo:hi] if t >= 0}))
-        t_offsets.append(len(t_flat))
+    order, first, last = _key_runs(_ref_codes(refs), starts, ends, itypes)
+    t_flat, t_offsets = _run_members(
+        order, first, last, iv_df["t_index"].values, drop_negative=True
+    )
     logger.debug(f"Interval index: {len(iv_df)} rows → {len(first)} collapsed")
     return (
         refs[order][first].tolist(),
         starts[order][first].tolist(),
         ends[order][first].tolist(),
         itypes[order][first].tolist(),
-        t_flat,
-        t_offsets,
+        t_flat.tolist(),
+        t_offsets.tolist(),
     )
 
 
-def _exon_intervals(iv_df: pd.DataFrame, t_df: pd.DataFrame) -> dict[int, np.ndarray]:
-    """Each transcript's exons, ``(n_exons, 2)`` int32 ``[start, end)`` sorted by start, by ``t_index``. Synthetics are
-    absent from the interval table (see :func:`_gen_transcript_intervals`), but the exon CSR the native code reads
-    still needs their single exon, ``[start, end)`` from the transcript table."""
-    exon = (iv_df["interval_type"].values == int(IntervalType.EXON)) & (
-        iv_df["t_index"].values >= 0
+def _exon_csr(
+    iv_df: pd.DataFrame, t_df: pd.DataFrame
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """``(offsets, starts, ends, cumsum_before)``: every transcript's exons as CSR over ``t_index``, int32, sorted by
+    start, with each exon's cumulative exon length before it in its transcript. Synthetics are absent from the interval
+    table (see :func:`_gen_transcript_intervals`), but the native code still needs their single exon, ``[start, end)``
+    from the transcript table; a synthetic's own span replaces anything the table holds for it."""
+    n_t = int(t_df.shape[0])
+    syn = t_df["is_synthetic"].to_numpy(dtype=bool)
+    tidx = iv_df["t_index"].values
+    exon = (iv_df["interval_type"].values == int(IntervalType.EXON)) & (tidx >= 0)
+    exon[exon] = ~syn[tidx[exon]]
+    syn_t = np.flatnonzero(syn)
+    t = np.concatenate([tidx[exon].astype(np.int64), syn_t])
+    start = np.concatenate(
+        [iv_df["start"].values[exon].astype(np.int32), t_df["start"].to_numpy(dtype=np.int32)[syn]]
     )
-    ex_tidx = iv_df["t_index"].values[exon]
-    ex_start = iv_df["start"].values[exon]
-    ex_end = iv_df["end"].values[exon]
-    # Sorted by (t_index, start) so exons within each transcript are ordered, then split at the group boundaries
-    order = np.lexsort((ex_start, ex_tidx))
-    ex_tidx = ex_tidx[order]
-    coords = np.column_stack((ex_start[order], ex_end[order])).astype(np.int32)
-    unique_tidx, group_starts, group_counts = np.unique(
-        ex_tidx, return_index=True, return_counts=True
+    end = np.concatenate(
+        [iv_df["end"].values[exon].astype(np.int32), t_df["end"].to_numpy(dtype=np.int32)[syn]]
     )
-    t_exon_intervals: dict[int, np.ndarray] = {
-        int(t): coords[s : s + n] for t, s, n in zip(unique_tidx, group_starts, group_counts)
+    order = np.lexsort((start, t))
+    t, start, end = t[order], start[order], end[order]
+    offsets = np.zeros(n_t + 1, dtype=np.int32)
+    np.cumsum(np.bincount(t, minlength=n_t), out=offsets[1:])
+    length = (end - start).astype(np.int64)
+    within = np.cumsum(length) - length
+    cumsum_before = (within - within[offsets[:-1]][t] if t.size else within).astype(np.int32)
+    return offsets, start, end, cumsum_before
+
+
+def _exon_intervals(exon_csr) -> dict[int, np.ndarray]:
+    """Each transcript's exons, ``(n_exons, 2)`` int32 ``[start, end)`` sorted by start, by ``t_index``, from the exon
+    CSR; a transcript with none is absent."""
+    offsets, starts, ends, _ = exon_csr
+    return {
+        t: np.column_stack((starts[lo:hi], ends[lo:hi]))
+        for t, (lo, hi) in enumerate(zip(offsets[:-1].tolist(), offsets[1:].tolist()))
+        if hi > lo
     }
-    syn_mask = t_df["is_synthetic"].to_numpy(dtype=bool)
-    if syn_mask.any():
-        syn_starts = t_df["start"].to_numpy(dtype=np.int32)[syn_mask]
-        syn_ends = t_df["end"].to_numpy(dtype=np.int32)[syn_mask]
-        for t_idx, start, end in zip(np.where(syn_mask)[0].tolist(), syn_starts, syn_ends):
-            t_exon_intervals[t_idx] = np.array([[start, end]], dtype=np.int32)
-    logger.debug(f"Cached exon intervals for {len(t_exon_intervals)} transcripts")
-    return t_exon_intervals
 
 
-def _sj_exact_match_map(sj_df: pd.DataFrame) -> dict[tuple, frozenset[int]]:
-    """``(ref, start, end, strand) → frozenset(t_index)``: every annotated junction with the transcripts holding it."""
+def _sj_csr(sj_df: pd.DataFrame) -> tuple[list, list, list, list, list, list]:
+    """Every annotated junction with the transcripts holding it, as the six lists ``FragmentResolver.build_sj_map``
+    takes: refs, starts, ends, strands and, in CSR, each junction's sorted transcripts; the junctions in
+    ``(ref, start, end, strand)`` order."""
     refs = sj_df["ref"].values
     starts = sj_df["start"].values
     ends = sj_df["end"].values
     strands = sj_df["strand"].values
-    _unique_refs, ref_codes = np.unique(refs, return_inverse=True)
-    order, first, last = _key_runs(ref_codes, starts, ends, strands)
-    keys = list(
-        zip(
-            refs[order].tolist(),
-            starts[order].tolist(),
-            ends[order].tolist(),
-            strands[order].tolist(),
-        )
+    order, first, last = _key_runs(_ref_codes(refs), starts, ends, strands)
+    t_flat, t_offsets = _run_members(
+        order, first, last, sj_df["t_index"].values, drop_negative=False
     )
-    t_sorted = sj_df["t_index"].values[order].tolist()
-    sj_map = {keys[lo]: frozenset(t_sorted[lo:hi]) for lo, hi in zip(first.tolist(), last.tolist())}
-    logger.debug(f"Splice junctions: {len(sj_map)} unique, {len(sj_df)} total")
-    return sj_map
+    logger.debug(f"Splice junctions: {len(first)} unique, {len(sj_df)} total")
+    return (
+        refs[order][first].tolist(),
+        starts[order][first].tolist(),
+        ends[order][first].tolist(),
+        strands[order][first].tolist(),
+        t_flat.tolist(),
+        t_offsets.tolist(),
+    )
 
 
-def _sj_map_csr(sj_map: dict[tuple, frozenset[int]]) -> tuple[list, list, list, list, list, list]:
-    """The junction map as the six lists ``FragmentResolver.build_sj_map`` takes: refs, starts, ends, strands and,
-    in CSR, each junction's sorted transcripts."""
-    refs, starts, ends, strands, t_flat, t_offsets = [], [], [], [], [], [0]
-    for (ref, start, end, strand), tset in sj_map.items():
-        refs.append(ref)
-        starts.append(start)
-        ends.append(end)
-        strands.append(strand)
-        t_flat.extend(sorted(tset))
-        t_offsets.append(len(t_flat))
-    return refs, starts, ends, strands, t_flat, t_offsets
+def _sj_exact_match_map(sj_csr) -> dict[tuple, frozenset[int]]:
+    """``(ref, start, end, strand) → frozenset(t_index)``: every annotated junction with the transcripts holding it,
+    from the junction CSR."""
+    refs, starts, ends, strands, t_flat, t_offsets = sj_csr
+    return {
+        (ref, start, end, strand): frozenset(t_flat[lo:hi])
+        for ref, start, end, strand, lo, hi in zip(
+            refs, starts, ends, strands, t_offsets[:-1], t_offsets[1:]
+        )
+    }
 
 
 def _nrna_parents(t_df: pd.DataFrame) -> np.ndarray:
@@ -1433,20 +1470,23 @@ class TranscriptIndex:
         iv_df = pd.read_feather(os.path.join(index_dir, INTERVALS_FEATHER))
         logger.debug("Building collapsed interval index")
         overlap_index = _collapsed_intervals(iv_df)
-        self._t_exon_intervals = _exon_intervals(iv_df, self.t_df)
+        self._exon_csr_cache = _exon_csr(iv_df, self.t_df)
         logger.debug("Reading splice junctions")
         sj_df = pd.read_feather(os.path.join(index_dir, SJ_FEATHER))
         logger.debug("Building splice junction exact-match map")
-        self.sj_map = _sj_exact_match_map(sj_df)
+        sj_csr = _sj_csr(sj_df)
+        if self._retain_lookup_maps:
+            self._t_exon_intervals = _exon_intervals(self._exon_csr_cache)
+            self.sj_map = _sj_exact_match_map(sj_csr)
 
-        self.resolver = self._build_resolver(overlap_index)
+        self.resolver = self._build_resolver(overlap_index, sj_csr)
         logger.debug("Built native FragmentResolver for C++ resolution")
         return self
 
-    def _build_resolver(self, overlap_index: tuple):
+    def _build_resolver(self, overlap_index: tuple, sj_csr: tuple):
         """The native ``FragmentResolver``: every index fact fragment resolution reads, installed once, so every use
-        of the resolver has them, a scan or not. It owns the junction map afterwards, so the Python copy is freed
-        unless the index retains its lookup maps."""
+        of the resolver has them, a scan or not. It owns the junction map; a Python copy is kept only where the index
+        retains its lookup maps."""
         from .native import FragmentResolver
 
         resolver = FragmentResolver()
@@ -1455,11 +1495,8 @@ class TranscriptIndex:
         # ref id, would be mis-routed on a multi-reference genome (one reference hides it).
         resolver.set_ref_names([str(name) for name in self.ref_names])
         resolver.build_overlap_index(*overlap_index)
-        resolver.build_sj_map(*_sj_map_csr(self.sj_map))
-        if not self._retain_lookup_maps:
-            self.sj_map = None
-        # Each candidate's introns, for its path through the gaps and its length. build_exon_csr() is the one owner of
-        # this CSR (scoring reads it too), and it frees ``_t_exon_intervals`` unless retain_lookup_maps.
+        resolver.build_sj_map(*sj_csr)
+        # Each candidate's introns, for its path through the gaps and its length: the exon CSR, which scoring reads too
         exon_offsets, exon_starts_flat, exon_ends_flat, _ = self.build_exon_csr()
         resolver.build_exon_index(
             exon_offsets.tolist(),
@@ -1478,8 +1515,7 @@ class TranscriptIndex:
     def get_exon_intervals(self, t_idx: int) -> np.ndarray | None:
         """Return sorted exon ``[start, end)`` intervals for a transcript.
 
-        Needs the per-transcript dict, which :meth:`build_exon_csr` frees at load unless the index was
-        loaded with ``retain_lookup_maps``.
+        Needs the per-transcript dict, which load builds only for an index loaded with ``retain_lookup_maps``.
 
         Parameters
         ----------
@@ -1494,18 +1530,16 @@ class TranscriptIndex:
         """
         if self._t_exon_intervals is None:
             raise RuntimeError(
-                "get_exon_intervals() unavailable: the exon intervals were freed after the exon CSR "
-                "was built. Load the index with retain_lookup_maps=True."
+                "get_exon_intervals() unavailable: the per-transcript exon intervals are kept only for an index "
+                "loaded with retain_lookup_maps=True."
             )
         return self._t_exon_intervals.get(t_idx)
 
     def build_exon_csr(
         self,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Build CSR arrays for per-transcript exon positions.
-
-        Flattens the per-transcript exon dict into CSR arrays the native code reads directly. The result is
-        cached, and the first call frees ``_t_exon_intervals`` unless the index keeps ``retain_lookup_maps``.
+        """The per-transcript exon positions as the CSR arrays the native code reads directly, built once at load
+        (:func:`_exon_csr`).
 
         Returns
         -------
@@ -1518,45 +1552,12 @@ class TranscriptIndex:
         cumsum_before : np.ndarray
             int32[total_exons] — cumulative exon length before each exon.
         """
-        if self._exon_csr_cache is not None:
-            return self._exon_csr_cache
-
-        n_t = self.num_transcripts
-        offsets = np.zeros(n_t + 1, dtype=np.int32)
-        empty = np.empty(0, dtype=np.int32)
-
-        if self._t_exon_intervals is None or len(self._t_exon_intervals) == 0:
-            result = (offsets, empty, empty, empty)
-            self._exon_csr_cache = result
-            return result
-
-        # Pass 1: count exons per transcript
-        for t_idx, ivs in self._t_exon_intervals.items():
-            offsets[t_idx + 1] = len(ivs)
-        np.cumsum(offsets, out=offsets)
-        total = int(offsets[n_t])
-
-        starts = np.empty(total, dtype=np.int32)
-        ends = np.empty(total, dtype=np.int32)
-        cumsum_before = np.empty(total, dtype=np.int32)
-
-        # Pass 2: fill exon data
-        for t_idx, ivs in self._t_exon_intervals.items():
-            off = offsets[t_idx]
-            n = len(ivs)
-            s = ivs[:, 0]
-            e = ivs[:, 1]
-            starts[off : off + n] = s
-            ends[off : off + n] = e
-            lengths = e - s
-            cumsum_before[off] = 0
-            if n > 1:
-                np.cumsum(lengths[:-1], out=cumsum_before[off + 1 : off + n])
-
-        # CSR arrays now hold all exon data; free the per-transcript dict.
-        if not self._retain_lookup_maps:
-            self._t_exon_intervals = None
-        result = (offsets, starts, ends, cumsum_before)
-        self._exon_csr_cache = result
-
-        return result
+        if self._exon_csr_cache is None:
+            empty = np.empty(0, dtype=np.int32)
+            self._exon_csr_cache = (
+                np.zeros(self.num_transcripts + 1, dtype=np.int32),
+                empty,
+                empty,
+                empty,
+            )
+        return self._exon_csr_cache

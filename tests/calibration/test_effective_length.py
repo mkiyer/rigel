@@ -458,3 +458,83 @@ def test_a_length_model_with_mass_at_zero_length_shares_without_a_nan():
     dirty = np.add(*conserved_cut_shares(with_zero, a, b, lo, hi))
     assert np.all(np.isfinite(dirty))
     np.testing.assert_allclose(dirty, clean / 1.05, rtol=1e-12)
+
+
+def _numpy_side_share(p, a, near, far):
+    """``_side_share``'s arithmetic as numpy evaluates it: the specification the native kernel reproduces to the bit."""
+    n = p.shape[0]
+    w = np.arange(n, dtype=np.float64)
+    live = np.where(w >= 2.0, p, 0.0)
+    cum0 = np.concatenate([[0.0], np.cumsum(live)])
+    cum1 = np.concatenate([[0.0], np.cumsum(live * w)])
+    cumr = np.concatenate([[0.0], np.cumsum(live / np.maximum(w, 1.0))])
+
+    def window(lo, hi):
+        i0 = np.clip(np.floor(lo).astype(np.int64) + 1, 0, n)
+        i1 = np.clip(np.floor(hi).astype(np.int64) + 1, 0, n)
+        return i0, np.maximum(i1, i0), i1 > i0
+
+    def over(cum, rows):
+        i0, i1, held = rows
+        return np.where(held, cum[i1] - cum[i0], 0.0)
+
+    top = near + far
+    starts_inside = np.minimum(a + 1.0, top)
+    runs_through = np.minimum(near + 1.0, top)
+    inside = window(-1.0, starts_inside)
+    kept = (
+        0.5 * (over(cum1, inside) - over(cum0, inside))
+        + 0.5 * a * over(cum0, window(starts_inside, runs_through))
+        + 0.5 * a * (near + 1.0) * over(cumr, window(runs_through, top))
+    )
+    lo, hi = far + 1.0, np.minimum(far + 1.0 + a, top)
+    near_far, beyond = window(lo, hi), window(hi, top)
+    removed = 0.5 * (
+        over(cum1, near_far)
+        - (2.0 * far + 1.0) * over(cum0, near_far)
+        + far * (far + 1.0) * over(cumr, near_far)
+    ) + 0.5 * a * (over(cum0, beyond) - far * over(cumr, beyond))
+    return np.maximum(kept - removed, 0.0)
+
+
+def test_the_native_side_share_is_numpys_arithmetic_to_the_bit():
+    """The per-cut share runs in native code built without contraction, every operation in the numpy expression's order,
+    so on any cut it is numpy's value to the bit: real-valued and integer lengths, a piece filling its side, unbounded
+    and empty reaches, zero-length pieces, and a scalar and a broadcast call keeping their shapes.
+
+    Perturbation: building the kernel with contraction on (a product fused into a sum), or re-associating ``kept``'s
+    three segments, fires it."""
+    rng = np.random.default_rng(5)
+    m = 200_000
+    a = np.floor(rng.exponential(300.0, m))
+    a[rng.random(m) < 0.05] = 0.0
+    a[rng.random(m) < 0.1] += rng.random()
+    near = a + np.floor(rng.exponential(2000.0, m))
+    far = np.floor(rng.exponential(2000.0, m)) + rng.random(m) * (rng.random(m) < 0.1)
+    fills = rng.random(m) < 0.05
+    near[fills] = a[fills]
+    near[rng.random(m) < 0.1] = el.UNBOUNDED_REACH
+    far[rng.random(m) < 0.1] = el.UNBOUNDED_REACH
+    differing = 0
+    for mu, sd, n in ((250.0, 60.0, 1001), (30.0, 5.0, 64), (900.0, 300.0, 1500)):
+        w = np.arange(n, dtype=np.float64)
+        p = np.exp(-0.5 * ((w - mu) / sd) ** 2)
+        p = el._as_pmf(p)
+        want, got = _numpy_side_share(p, a, near, far), el._side_share(p, a, near, far)
+        assert got.shape == want.shape
+        differing += int((want.view(np.int64) != got.view(np.int64)).sum())
+        assert np.count_nonzero(want) > m // 2, (
+            "most cuts must take a share, or the comparison is vacuous"
+        )
+    assert differing == 0, f"{differing} shares differ from numpy's in some bit"
+    p = el._as_pmf(np.exp(-0.5 * ((np.arange(1001.0) - 250.0) / 60.0) ** 2))
+    scalar = el._side_share(p, 100.0, el.UNBOUNDED_REACH, el.UNBOUNDED_REACH)
+    assert (
+        np.shape(scalar) == ()
+        and np.float64(scalar).tobytes()
+        == np.float64(_numpy_side_share(p, 100.0, el.UNBOUNDED_REACH, el.UNBOUNDED_REACH)).tobytes()
+    )
+    lengths, reach = np.full((3, 4), 50.0), np.arange(12.0).reshape(3, 4) * 100.0
+    broadcast = el._side_share(p, lengths, 80.0, reach)
+    assert broadcast.shape == (3, 4)
+    assert broadcast.tobytes() == _numpy_side_share(p, lengths, 80.0, reach).tobytes()

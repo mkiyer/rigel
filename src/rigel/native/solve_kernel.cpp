@@ -626,11 +626,14 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
 
 }  // namespace
 
+void bind_cut_shares(nb::module_& m);  // cut_shares.cpp
+
 NB_MODULE(_solve_impl, m) {
     m.doc() = "The calibration solve: the block pipeline in one call per sweep, and ψ over a slot list.";
     // the policy codes `solve_blocks` switches on; the silent policy runs no message layer
     m.attr("POLICY_SILENT") = rigel::POLICY_SILENT;
     m.attr("POLICY_TRANSFER") = rigel::POLICY_TRANSFER;
+    bind_cut_shares(m);
     m.def("solve_blocks", &solve_blocks, nb::arg("is_boundary"), nb::arg("is_exon"), nb::arg("free_pos"), nb::arg("free_neg"),
           nb::arg("exon_pos"), nb::arg("exon_neg"), nb::arg("terminal"), nb::arg("left"), nb::arg("right"), nb::arg("flags"),
           nb::arg("cnt"), nb::arg("spliced"), nb::arg("sj_count"), nb::arg("sj_count_lo"), nb::arg("sj_count_hi"),

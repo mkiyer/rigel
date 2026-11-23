@@ -1037,3 +1037,76 @@ def test_touching_transcripts_coalesce():
     genic = [s for s in spans if isinstance(s, GenicSpan)]
     assert len(genic) == 1
     assert (genic[0].start, genic[0].end) == (100, 300)
+
+
+def test_the_resolver_inputs_are_the_per_run_specification():
+    """The index load builds the resolver's inputs vectorised: the collapsed overlap index (one interval per distinct
+    ``(ref, start, end, type)``, its distinct non-negative transcripts sorted), the junction map (each distinct
+    ``(ref, start, end, strand)`` with its distinct transcripts sorted) and the exon CSR (each transcript's exons by
+    start, a synthetic's own span replacing anything the table holds for it). Each must equal a run-by-run construction
+    on a table with duplicate rows, the intergenic sentinel, several references and synthetic transcripts.
+
+    Perturbation: keeping the sentinel, losing a run's sort, or letting a synthetic keep the table's exons fires it."""
+    from rigel.index import _collapsed_intervals, _exon_csr, _sj_csr
+    from rigel.types import IntervalType
+
+    rng = np.random.default_rng(17)
+    n, n_t = 4_000, 300
+    iv = pd.DataFrame(
+        {
+            "ref": rng.choice(["chr10", "chr2", "chrX"], n),
+            "start": rng.integers(0, 500, n),
+            "t_index": rng.integers(-1, n_t, n),
+            "interval_type": rng.choice([int(t) for t in IntervalType], n),
+        }
+    )
+    iv["end"] = iv["start"] + rng.integers(1, 50, n)
+    iv = pd.concat([iv, iv.sample(500, random_state=1)], ignore_index=True)
+
+    def runs(df, keys):
+        groups: dict[tuple, set] = {}
+        for row in df.itertuples(index=False):
+            groups.setdefault(tuple(getattr(row, k) for k in keys), set()).add(int(row.t_index))
+        return sorted(groups.items())
+
+    collapsed = _collapsed_intervals(iv)
+    want = runs(iv, ("ref", "start", "end", "interval_type"))
+    assert [tuple(x) for x in zip(*collapsed[:4])] == [k for k, _ in want]
+    members = [sorted(t for t in ts if t >= 0) for _, ts in want]
+    assert collapsed[5] == list(np.cumsum([0] + [len(m) for m in members]))
+    assert collapsed[4] == [t for m in members for t in m]
+    assert any(-1 in ts for _, ts in want) and any(len(m) > 1 for m in members)
+
+    sj = iv.rename(columns={"interval_type": "strand"})
+    sj["t_index"] = sj["t_index"].abs()
+    csr = _sj_csr(sj)
+    want = runs(sj, ("ref", "start", "end", "strand"))
+    assert [tuple(x) for x in zip(*csr[:4])] == [k for k, _ in want]
+    assert csr[4] == [t for _, ts in want for t in sorted(ts)]
+
+    synthetic = np.zeros(n_t, dtype=bool)
+    synthetic[rng.choice(n_t, 40, replace=False)] = True
+    t_df = pd.DataFrame(
+        {
+            "is_synthetic": synthetic,
+            "start": rng.integers(0, 500, n_t),
+            "end": rng.integers(600, 900, n_t),
+        }
+    )
+    offsets, starts, ends, before = _exon_csr(iv, t_df)
+    exon = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
+    for t in range(n_t):
+        if synthetic[t]:
+            expected = [(int(t_df["start"][t]), int(t_df["end"][t]))]
+        else:
+            rows = exon[exon["t_index"] == t].sort_values("start", kind="stable")
+            expected = list(zip(rows["start"].tolist(), rows["end"].tolist()))
+        lo, hi = int(offsets[t]), int(offsets[t + 1])
+        assert list(zip(starts[lo:hi].tolist(), ends[lo:hi].tolist())) == expected, (
+            f"transcript {t}"
+        )
+        lengths = [e - s for s, e in expected]
+        assert before[lo:hi].tolist() == np.cumsum([0] + lengths)[:-1].tolist(), f"transcript {t}"
+    assert synthetic[exon["t_index"]].any(), (
+        "some synthetic must hold table exons, which its span replaces"
+    )

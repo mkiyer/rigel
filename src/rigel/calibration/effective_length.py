@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..native import side_shares
 from .region_arrays import boundary_reaches, boundary_region_indices, observable_pieces
 
 if TYPE_CHECKING:
@@ -156,34 +157,20 @@ def _side_share(p: np.ndarray, a: np.ndarray, near: np.ndarray, far: np.ndarray)
     cum1 = np.concatenate([[0.0], np.cumsum(live * w)])
     cumr = np.concatenate([[0.0], np.cumsum(live / np.maximum(w, 1.0))])
 
-    def window(lo, hi):
-        """The integer lengths ``lo < w ≤ hi`` as rows of the tables, read once and summed on each table."""
-        i0 = np.clip(np.floor(lo).astype(np.int64) + 1, 0, n)
-        i1 = np.clip(np.floor(hi).astype(np.int64) + 1, 0, n)
-        return i0, np.maximum(i1, i0), i1 > i0
-
-    def over(cum, rows):
-        """``Σ`` of the table's summand over the window's lengths."""
-        i0, i1, live = rows
-        return np.where(live, cum[i1] - cum[i0], 0.0)
-
-    top = near + far
-    starts_inside = np.minimum(a + 1.0, top)
-    runs_through = np.minimum(near + 1.0, top)
-    inside = window(-1.0, starts_inside)
-    kept = (
-        0.5 * (over(cum1, inside) - over(cum0, inside))
-        + 0.5 * a * over(cum0, window(starts_inside, runs_through))
-        + 0.5 * a * (near + 1.0) * over(cumr, window(runs_through, top))
+    # each window of lengths ``lo < w ≤ hi`` is a pair of rows of the tables and each sum over it a difference of two
+    # entries; per cut in native code (``native.side_shares``), every operation in numpy's order, so the bits are numpy's.
+    # With f the live pmf (w ≥ 2):
+    #   top = near + far; starts_inside = min(a + 1, top); runs_through = min(near + 1, top)
+    #   kept = ½ Σ_{w ≤ starts_inside} (w − 1) f + ½ a Σ_{starts_inside < w ≤ runs_through} f
+    #          + ½ a (near + 1) Σ_{runs_through < w ≤ top} f/w
+    #   removed = ½ Σ_{far + 1 < w ≤ min(far + 1 + a, top)} (w − (2 far + 1) + far (far + 1)/w) f
+    #             + ½ a Σ_{min(far + 1 + a, top) < w ≤ top} (1 − far/w) f
+    shape = np.broadcast(a, near, far).shape
+    a, near, far = (
+        np.ascontiguousarray(np.broadcast_to(x, shape), dtype=np.float64).ravel()
+        for x in (a, near, far)
     )
-    lo, hi = far + 1.0, np.minimum(far + 1.0 + a, top)
-    near_far, beyond = window(lo, hi), window(hi, top)
-    removed = 0.5 * (
-        over(cum1, near_far)
-        - (2.0 * far + 1.0) * over(cum0, near_far)
-        + far * (far + 1.0) * over(cumr, near_far)
-    ) + 0.5 * a * (over(cum0, beyond) - far * over(cumr, beyond))
-    return np.maximum(kept - removed, 0.0)
+    return side_shares(cum0, cum1, cumr, a, near, far).reshape(shape)
 
 
 def conserved_cut_shares(
