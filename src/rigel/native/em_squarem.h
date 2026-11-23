@@ -53,24 +53,14 @@ inline void compute_grouped_warm_start(
     std::fill(warm_counts_out, warm_counts_out + n_components_all, 0.0);
     std::vector<double> warm_raw(static_cast<size_t>(n_components_all), 0.0);
     std::copy(unambig_totals, unambig_totals + n_components, warm_raw.begin());
+    // the coverage shares, each unit's weights already normalised within its candidate set (`build_equiv_classes`)
     for (const auto& ec : ec_data) {
         const int k = ec.k;
         const int32_t* cidx = ec.comp_idx.data();
         const double* wt = ec.wt_flat.data();
-        for (int i = 0; i < ec.n; ++i) {
-            // the coverage weights normalised within the candidate set
-            double row_sum = 0.0;
-            for (int j = 0; j < k; ++j) {
-                if (cidx[j] == ig_idx) continue;
-                row_sum += wt[i * k + j];
-            }
-            if (row_sum == 0.0) row_sum = 1.0;
-            double inv_row_sum = 1.0 / row_sum;
-            for (int j = 0; j < k; ++j) {
-                if (cidx[j] == ig_idx) continue;
-                warm_raw[cidx[j]] += wt[i * k + j] * inv_row_sum;
-            }
-        }
+        for (int i = 0; i < ec.n; ++i)
+            for (int j = 0; j < k; ++j)
+                if (cidx[j] != ig_idx) warm_raw[cidx[j]] += wt[i * k + j];
     }
     apply_grouped_prior_update(warm_raw.data(), nullptr, aggregate_prior, warm_counts_out, n_components);
 }

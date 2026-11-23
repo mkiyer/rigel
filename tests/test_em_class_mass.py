@@ -144,3 +144,40 @@ def test_asking_for_the_masses_changes_no_count(mode):
 def test_no_masses_are_made_unless_asked():
     _, out = _run("fractional", emit_class_mass=False)
     assert len(out) == 6
+
+
+
+def _stats_and_counts(parts):
+    est = AbundanceEstimator(
+        4, em_config=EMConfig(assignment_mode="fractional", n_threads=1, seed=7), is_synthetic=IS_SYNTHETIC
+    )
+    _, loci, _ = _fixture()
+    est.run_batch_locus_em_partitioned(
+        parts,
+        loci,
+        np.array([5.0, 0.0]),
+        rna_prior_count=np.array([3.0, 2.0]),
+        intergenic_rate=20.0,
+        em_iterations=300,
+        emit_locus_stats=True,
+    )
+    return sum(s["ec_total_elements"] for s in est.locus_stats), est.em_counts.sum(axis=1)
+
+
+def test_units_with_identical_rows_share_one_row_of_the_e_step():
+    """The fixture's 87 units hold 6 distinct log-likelihood rows, gDNA and intergenic terms included (4 in the first
+    locus's 3 candidate sets, 2 in the second's one), so the E-step reads 16 entries, not 228. Its answer is the one
+    the units give as distinct rows: nudging each unit's first log-likelihood by its own few parts in 1e7 merges
+    nothing and moves no count beyond the nudge, while a merged row that lost its units' weight would move whole
+    fragments."""
+    parts, _, _ = _fixture()
+    entries, merged = _stats_and_counts(parts)
+    assert entries == 16
+    nudged = []
+    for offsets, t_idx, ll, *rest in parts:
+        ll = ll.copy()
+        ll[offsets[:-1]] += np.arange(len(offsets) - 1, dtype=np.float32) * np.float32(2e-7)
+        nudged.append((offsets, t_idx, ll, *rest))
+    entries_distinct, distinct = _stats_and_counts(nudged)
+    assert entries_distinct == 228
+    np.testing.assert_allclose(merged, distinct, rtol=1e-3, atol=1e-3)

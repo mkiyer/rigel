@@ -52,9 +52,9 @@ struct LocusProfile {
     int n_units = 0;
     int n_components = 0;        // n_t + 1, or n_t + 2 with the intergenic term
     int n_equiv_classes = 0;
-    int64_t ec_total_elements = 0; // sum of n*k across all ECs
+    int64_t ec_total_elements = 0; // sum of n*k across all ECs: the E-step's entries, each distinct row once
     int max_ec_width = 0;        // max k across ECs
-    int max_ec_depth = 0;        // max n across ECs
+    int max_ec_depth = 0;        // max n (distinct rows) across ECs
     int estep_threads_used = 0;
     bool is_mega_locus = false;
     SquaremStats squarem;
@@ -210,11 +210,11 @@ struct BatchEM {
                                   scratch.local_map);
         const auto t_extract = now();
         if (sub.n_local_units == 0 || sub.t_indices.empty()) return;
+        const IntergenicTerm ig = intergenic_term(sub, log_intergenic_rate);
         const auto ec_data = build_equiv_classes(sub.offsets.data(), sub.t_indices.data(), sub.log_liks.data(),
-                                                 sub.coverage_wts.data(), sub.n_local_units);
+                                                 sub.coverage_wts.data(), sub.n_local_units, ig.idx);
         const auto t_classes = now();
 
-        const IntergenicTerm ig = intergenic_term(sub, log_intergenic_rate);
         const AggregatePrior prior{nonnegative_finite(gdna_prior[li]), nonnegative_finite(rna_prior[li]), sub.gdna_idx,
                                    sub.has_gdna_candidate,
                                    sub.component_rna_prior_weight.empty() ? nullptr

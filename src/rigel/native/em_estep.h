@@ -1,13 +1,17 @@
 // em_estep.h — the locus EM's equivalence classes and its E-step over them.
 //
-// The units sharing one candidate component set form an equivalence class, held as dense (n, k) matrices. The E-step
-// turns the components' log-weights into every unit's posterior and adds the posteriors' column sums into the
-// components' totals, in an order that is the same at every thread count.
+// The units sharing one candidate component set form an equivalence class, held as dense (n, k) matrices. Units whose
+// log-likelihood rows are identical have identical posteriors at every step, so a class holds each distinct row once,
+// with the number of units it stands for: every unit and every candidate stays in the likelihood, and the E-step's
+// arithmetic shrinks to the distinct rows. The E-step turns the components' log-weights into every row's posterior
+// and adds the weighted posteriors' column sums into the components' totals, in an order that is the same at every
+// thread count.
 #pragma once
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <numeric>
 #include <unordered_map>
@@ -19,10 +23,12 @@
 namespace rigel {
 
 struct EmEquivClass {
-    std::vector<int32_t> comp_idx;  // k component indices
-    std::vector<double>  ll_flat;   // n*k log-likelihoods (row-major)
-    std::vector<double>  wt_flat;   // n*k coverage weights (row-major)
-    int n;  // number of units in this class
+    std::vector<int32_t> comp_idx;   // k component indices
+    std::vector<double>  ll_flat;    // n*k log-likelihoods (row-major), each distinct row once
+    std::vector<double>  wt_flat;    // n*k coverage shares: each unit's coverage weights normalised over its
+                                     // candidates (the intergenic slot excluded), summed over the units a row holds
+    std::vector<double>  row_units;  // n: the units each row stands for
+    int n;  // number of distinct rows in this class
     int k;  // number of components per unit
 };
 
@@ -38,13 +44,28 @@ struct VecHash {
     }
 };
 
-// The units of a candidate CSR grouped by their (sorted) candidate set, in comp_idx order.
+// FNV-1a hash of a row of doubles, by their bit patterns.
+inline uint64_t row_hash(const double* row, int k) {
+    uint64_t h = 14695981039346656037ULL;
+    for (int j = 0; j < k; ++j) {
+        uint64_t bits;
+        std::memcpy(&bits, row + j, sizeof bits);
+        h ^= bits;
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+// The units of a candidate CSR grouped by their (sorted) candidate set, in comp_idx order; within a class, units
+// whose log-likelihood rows are bit-identical share one row, in first-seen order, with their count in row_units and
+// their coverage shares summed. ig_idx is the intergenic component (-1 for none), which takes no coverage share.
 inline std::vector<EmEquivClass> build_equiv_classes(
     const int64_t* offsets,
     const int32_t* t_indices,
     const double*  log_liks,
     const double*  coverage_wts,
-    int n_units)
+    int n_units,
+    int ig_idx)
 {
     if (n_units == 0) return {};
 
@@ -60,29 +81,57 @@ inline std::vector<EmEquivClass> build_equiv_classes(
 
     std::vector<EmEquivClass> result;
     result.reserve(class_map.size());
+    std::unordered_map<uint64_t, std::vector<int>> rows_by_hash;
+    std::vector<double> share;
     for (auto& [key, unit_list] : class_map) {
-        int k = static_cast<int>(key.size());
-        int n = static_cast<int>(unit_list.size());
+        const int k = static_cast<int>(key.size());
         EmEquivClass ec;
         ec.comp_idx = key;
-        ec.n = n;
         ec.k = k;
-        ec.ll_flat.resize(static_cast<size_t>(n) * k);
-        ec.wt_flat.resize(static_cast<size_t>(n) * k);
-        for (int i = 0; i < n; ++i) {
-            auto s = static_cast<size_t>(offsets[unit_list[i]]);
-            for (int j = 0; j < k; ++j) {
-                ec.ll_flat[static_cast<size_t>(i) * k + j] = log_liks[s + static_cast<size_t>(j)];
-                ec.wt_flat[static_cast<size_t>(i) * k + j] = coverage_wts[s + static_cast<size_t>(j)];
+        ec.ll_flat.reserve(unit_list.size() * static_cast<size_t>(k));
+        ec.wt_flat.reserve(unit_list.size() * static_cast<size_t>(k));
+        rows_by_hash.clear();
+        share.assign(static_cast<size_t>(k), 0.0);
+        int n = 0;
+        for (int u : unit_list) {
+            const auto s = static_cast<size_t>(offsets[u]);
+            const double* ll = log_liks + s;
+            // the unit's coverage weights normalised over its candidates, the intergenic slot excluded
+            double row_sum = 0.0;
+            for (int j = 0; j < k; ++j)
+                if (key[j] != ig_idx) row_sum += coverage_wts[s + static_cast<size_t>(j)];
+            const double inv_row_sum = 1.0 / (row_sum == 0.0 ? 1.0 : row_sum);
+            for (int j = 0; j < k; ++j)
+                share[j] = key[j] == ig_idx ? 0.0 : coverage_wts[s + static_cast<size_t>(j)] * inv_row_sum;
+
+            auto& bucket = rows_by_hash[row_hash(ll, k)];
+            int row = -1;
+            for (int r : bucket) {
+                if (std::memcmp(ec.ll_flat.data() + static_cast<size_t>(r) * k, ll, sizeof(double) * k) == 0) {
+                    row = r;
+                    break;
+                }
+            }
+            if (row < 0) {
+                row = n++;
+                bucket.push_back(row);
+                ec.ll_flat.insert(ec.ll_flat.end(), ll, ll + k);
+                ec.wt_flat.insert(ec.wt_flat.end(), share.begin(), share.end());
+                ec.row_units.push_back(1.0);
+            } else {
+                double* wt = ec.wt_flat.data() + static_cast<size_t>(row) * k;
+                for (int j = 0; j < k; ++j) wt[j] += share[j];
+                ec.row_units[row] += 1.0;
             }
         }
+        ec.n = n;
         result.push_back(std::move(ec));
     }
 
     // Sort the classes by comp_idx. `unordered_map` iterates in no fixed order, and the E-step's column sums
     // depend on addition order in floating point, so an unstable order gives ULP differences that SQUAREM
     // amplifies. Rows within a class need no sort: `build_multi_loci` orders each locus's units by `frag_id`
-    // (BAM order), so `unit_list` is already canonical.
+    // (BAM order), so `unit_list`, and the first-seen order of the distinct rows, is already canonical.
     std::sort(result.begin(), result.end(),
               [](const EmEquivClass& a, const EmEquivClass& b) { return a.comp_idx < b.comp_idx; });
     return result;
@@ -135,8 +184,8 @@ inline double exp_shifted_sum(double* row, int k, double max_val) {
     return row_sum;
 }
 
-// For every row of one equivalence class: the posteriors from log_weights, normalised by log-sum-exp, with the k
-// column sums Kahan-summed in row order into col_sums. Thread-safe: the class is read-only, each row's posteriors
+// For every row of one equivalence class: the posteriors from log_weights, normalised by log-sum-exp, times the units
+// the row stands for, with the k column sums Kahan-summed in row order into col_sums. Thread-safe: the class is read-only, each row's posteriors
 // live in a stack-local buffer, and col_sums is the caller's slot. A row no component can emit (every weight -inf)
 // is outside the model and skipped.
 inline void em_step_kernel(
@@ -171,11 +220,8 @@ inline void em_step_kernel(
         if (max_val == -std::numeric_limits<double>::infinity()) continue;
         const double row_sum = exp_shifted_sum(row, k, max_val);
         if (row_sum > 0.0 && std::isfinite(row_sum)) {
-            double inv_sum = 1.0 / row_sum;
-            for (int c = 0; c < k; ++c) {
-                row[c] *= inv_sum;
-                col_acc[c].add(row[c]);
-            }
+            const double scale = ec.row_units[i] / row_sum;
+            for (int c = 0; c < k; ++c) col_acc[c].add(row[c] * scale);
         }
     }
     for (int j = 0; j < k; ++j) col_sums[j] = col_acc[j].sum;
@@ -269,7 +315,7 @@ inline double marginal_data_loglik(const std::vector<EmEquivClass>& ec_data, con
             if (!(mx > -std::numeric_limits<double>::infinity())) continue;  // no component can emit it
             double s = 0.0;
             for (int j = 0; j < k; ++j) s += std::exp((ll[i * k + j] + log_weights[cidx[j]]) - mx);
-            total += mx + std::log(s);
+            total += ec.row_units[i] * (mx + std::log(s));
         }
     }
     return total;
