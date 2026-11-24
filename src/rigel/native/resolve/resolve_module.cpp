@@ -49,7 +49,7 @@ NB_MODULE(_resolve_impl, m) {
              "enumeration an annotated intron in an unsequenced gap may overlap up\n"
              "to K aligned bases on either side and is still cut whole, and a\n"
              "transcript is contradicted only by an intron overlapping more than K\n"
-             "bases of an aligned block. Negative K is clamped to 0; the resolver's\n"
+             "bases of an aligned block. A negative K is refused; the resolver's\n"
              "own default, before this is called, is 0.");
 
     rigel::bind_testing(m.def_submodule("testing", "The resolver's test seams; production never imports them."));

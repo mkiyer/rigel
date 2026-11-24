@@ -102,8 +102,8 @@ void BamScanner::set_regions(InArray<int64_t> region_bounds, InArray<int64_t> re
     if (acc_set_) {
         throw std::runtime_error("set_regions: regions already set on this BamScanner; create a new instance");
     }
-    // Validated here, at the boundary, because `BamScanConfig.max_frag_length` has no CLI flag and is validated
-    // nowhere else. It gates L and sizes the pool histograms, so at 0 every fragment would drop as too long.
+    // Validated at the boundary as `BamScanConfig.max_frag_length` is: it gates L and sizes the pool histograms, so
+    // at 0 every fragment would drop as too long.
     if (max_length < 1) {
         throw std::invalid_argument(
             "set_regions: max_length must be >= 1, got " + std::to_string(max_length) +
@@ -623,9 +623,11 @@ std::exception_ptr hand_chunks_to_python(BoundedQueue<FragmentAccumulator>& outp
 
 nb::dict BamScanner::scan(const std::string& bam_path, nb::callable chunk_callback, int64_t chunk_size, int n_workers,
                           int n_decomp_threads, int qname_batch_size) {
-    n_workers = std::max(n_workers, 1);
-    chunk_size = std::max<int64_t>(chunk_size, 1);
-    qname_batch_size = std::max(qname_batch_size, 1);
+    if (n_workers < 1 || chunk_size < 1 || qname_batch_size < 1) {
+        throw std::invalid_argument("scan: n_workers, chunk_size and qname_batch_size must each be >= 1; got " +
+                                    std::to_string(n_workers) + ", " + std::to_string(chunk_size) + " and " +
+                                    std::to_string(qname_batch_size));
+    }
     require_partition();
 
     BoundedQueue<QnameBatch> input(static_cast<size_t>(n_workers * INPUT_BATCHES_PER_WORKER));

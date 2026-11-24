@@ -291,3 +291,29 @@ def test_read_pairs_lacking_a_mate_their_flags_call_mapped_are_counted_and_warne
         stats = _scan_counts(bam, built.index)
     assert stats.n_read_pairs_lacking_mate == expected
     assert f"{expected:,} of {stats.n_read_pairs:,} read pairs lack a mate" in caplog.text
+
+
+def test_a_fragment_length_limit_below_one_is_refused():
+    """``max_frag_length`` gates every fragment's length and sizes the pool histograms; at 0 every fragment would drop
+    as too long, so the config refuses it when built."""
+    with pytest.raises(ValueError, match="max_frag_length"):
+        BamScanConfig(max_frag_length=0)
+
+
+@pytest.mark.parametrize("bad", ["n_workers", "chunk_size", "qname_batch_size"])
+def test_the_scanner_refuses_a_count_below_one(built, bad):
+    """The scanner refuses no workers, an empty chunk or an empty read-name batch, rather than reading each as one."""
+    from rigel.pipeline import _native_scanner
+
+    scanner = _native_scanner(built.index, BamScanConfig(sj_strand_tag="ts"))
+    counts = {"n_workers": 1, "chunk_size": 1, "qname_batch_size": 1, bad: 0}
+    with pytest.raises(ValueError, match="must each be >= 1"):
+        scanner.scan(
+            str(built.bam_path), chunk_callback=lambda raw: None, n_decomp_threads=0, **counts
+        )
+
+
+def test_the_resolver_refuses_a_negative_overhang_tolerance(built):
+    """A negative intron-overhang tolerance is refused, rather than read as 0."""
+    with pytest.raises(ValueError, match="overhang"):
+        built.index.resolver.set_intron_overhang_tolerance(-1)

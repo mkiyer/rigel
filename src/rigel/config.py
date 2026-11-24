@@ -268,6 +268,8 @@ class BamScanConfig:
             )
         # the router's progress log divides by it
         _check_integer("BamScanConfig.log_every", self.log_every, 1)
+        # it gates every fragment's length and sizes the pool histograms: at 0 every fragment would drop as too long
+        _check_integer("BamScanConfig.max_frag_length", self.max_frag_length, 1)
         # the scanner's tag modes; anything else is refused here rather than reinterpreted by the scanner
         tags = self.sj_strand_tag
         if not isinstance(tags, (str, list, tuple)) or self.sj_tag_spec not in (
