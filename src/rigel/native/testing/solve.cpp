@@ -408,6 +408,17 @@ void bind_predicates(nb::module_& t) {
     rule_codes["edge"] = transfer_rows::EDGE;
     rule_codes["level"] = transfer_rows::LEVEL;
     t.attr("RULE_CODES") = rule_codes;
+    // the boundary flags the kernel reads, mirrored for the parity gate against calibration.splice_graph
+    nb::dict boundary_flags;
+    boundary_flags["TSS_POS"] = TSS_POS;
+    boundary_flags["TSS_NEG"] = TSS_NEG;
+    boundary_flags["TES_POS"] = TES_POS;
+    boundary_flags["TES_NEG"] = TES_NEG;
+    boundary_flags["DON_POS"] = DON_POS;
+    boundary_flags["DON_NEG"] = DON_NEG;
+    boundary_flags["ACC_POS"] = ACC_POS;
+    boundary_flags["ACC_NEG"] = ACC_NEG;
+    t.attr("BOUNDARY_FLAGS") = boundary_flags;
     t.attr("MARGINAL_NODES") = vec_to_ndarray(std::vector<double>(MARGINAL_NODES, MARGINAL_NODES + N_MARGINAL_NODES));
     t.attr("OWN_EVIDENCE_EPS") = rigel::OWN_EVIDENCE_EPS;
     t.attr("JEFFREYS_REF") = P::JEFFREYS_REF;

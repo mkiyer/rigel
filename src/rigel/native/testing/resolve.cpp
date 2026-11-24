@@ -109,6 +109,20 @@ void bind_testing(nb::module_ m) {
     m.attr("SPLICE_UNSPLICED") = SPLICE_UNSPLICED;
     m.attr("SPLICE_SPLICED_ANNOT") = SPLICE_SPLICED_ANNOT;
     m.attr("SPLICE_IMPLICIT") = SPLICE_IMPLICIT;
+    // The Strand, IntervalType and ZF codes, mirrored for the parity gates against rigel.types and rigel.annotate
+    m.attr("STRAND_NONE") = STRAND_NONE;
+    m.attr("STRAND_POS") = STRAND_POS;
+    m.attr("STRAND_NEG") = STRAND_NEG;
+    m.attr("STRAND_AMBIGUOUS") = STRAND_AMBIGUOUS;
+    m.attr("ITYPE_EXON") = ITYPE_EXON;
+    m.attr("ITYPE_TRANSCRIPT") = ITYPE_TRANSCRIPT;
+    m.attr("AF_RESOLVED_BIT") = AF_RESOLVED_BIT;
+    m.attr("AF_GDNA_BIT") = AF_GDNA_BIT;
+    m.attr("AF_INTERGENIC_BIT") = AF_INTERGENIC_BIT;
+    m.attr("AF_MULTIMAPPER_DROP_BIT") = AF_MULTIMAPPER_DROP_BIT;
+    m.attr("AF_UNRESOLVED") = AF_UNRESOLVED;
+    m.attr("AF_GDNA_INTERGENIC") = AF_GDNA_INTERGENIC;
+    m.attr("AF_MULTIMAPPER_DROP") = AF_MULTIMAPPER_DROP;
 }
 
 }  // namespace rigel
