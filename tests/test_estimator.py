@@ -8,6 +8,8 @@ prior, and its share to every RNA component in proportion to the evidence. The t
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -216,9 +218,9 @@ class TestLocusEM:
 
         assert rc.em_counts[0].sum() > rc.em_counts[1].sum()
 
-    def test_zero_iterations_uses_unambig_priors(self):
-        """em_iterations=0 does not skip the EM: one SQUAREM step always runs, so every unit is
-        assigned, and the unambig counts tilt the split toward t0."""
+    def test_the_least_budget_uses_unambig_priors(self):
+        """The least budget, one EM step, still runs one SQUAREM step, so every unit is assigned, and the unambig
+        counts tilt the split toward t0."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         rc.unambig_counts[0, 0] = 10.0
         rc.unambig_counts[1, 0] = 5.0
@@ -228,7 +230,7 @@ class TestLocusEM:
             num_transcripts=3,
             rc=rc,
         )
-        _run_and_assign(rc, bundle, em_iterations=0)
+        _run_and_assign(rc, bundle, em_iterations=1)
 
         # t0 gets more prior weight than t1
         assert rc.em_counts[0].sum() > rc.em_counts[1].sum()
@@ -813,7 +815,9 @@ def _one_locus(units, *, mode, seed=0, unambig=(), n_t=3, include_gdna=False, lo
     stats and every unit's winner (a global t_index, or -2 for gDNA)."""
     from rigel.locus_partition import partition_and_free
 
-    rc = AbundanceEstimator(n_t, em_config=EMConfig(seed=seed, assignment_mode=mode, n_threads=1))
+    rc = AbundanceEstimator(
+        n_t, em_config=EMConfig(seed=seed, assignment_mode=mode, n_threads=1, iterations=200)
+    )
     for t, n in unambig:
         rc.unambig_counts[t, _UNSPLICED_SENSE] = n
     em_data, loci, gdna_prior = _make_locus_em_data(
@@ -836,7 +840,6 @@ def _one_locus(units, *, mode, seed=0, unambig=(), n_t=3, include_gdna=False, lo
         tuples,
         [loci[0].transcript_indices],
         gdna_prior,
-        em_iterations=200,
         emit_locus_stats=True,
         emit_assignments=True,
     )
@@ -1551,10 +1554,8 @@ def _warm_start_run(
     gdna_prior=0.0,
     iterations=500,
 ):
-    # `em_iterations` is an explicit argument of the estimator entry point, not read from
-    # `em_config`: a helper that sets it on the config alone silently runs the default 1000.
+    est.em_config = dataclasses.replace(est.em_config, iterations=iterations)
     est.run_batch_locus_em_partitioned(
-        em_iterations=iterations,
         partition_tuples=[partition],
         locus_transcript_indices=[np.asarray(t_idx, dtype=np.int32)],
         gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
@@ -1670,12 +1671,12 @@ def test_a_component_at_its_floor_is_assigned_exactly_nothing():
     and gDNA still hold every unit."""
     part = _warm_start_partition(n_units=200, log_liks=(0.0, -3.0), gdna_log_lik=-8.0)
     est = _warm_start_estimator(2)
+    est.em_config = dataclasses.replace(est.em_config, iterations=2000)
     gdna, _, _ = est.run_batch_locus_em_partitioned(
         [part],
         [np.arange(2, dtype=np.int32)],
         np.array([1.0]),
         rna_prior_count=np.array([1.0]),
-        em_iterations=2000,
     )
     counts = est.em_counts.sum(axis=1)
     assert counts[1] == 0.0, f"the dead component was assigned {counts[1]!r}"

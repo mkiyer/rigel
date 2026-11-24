@@ -77,7 +77,7 @@ def build_scorer(
     return NativeFragmentScorer(
         log_p_sense=math.log(max(p_sense, floor)),
         log_p_antisense=math.log(max(p_antisense, floor)),
-        r1_antisense=bool(p_sense < 0.5),
+        r1_antisense=not strand_models.read1_sense,
         overhang_log_penalty=float(overhang_log_penalty),
         mismatch_log_penalty=float(mismatch_log_penalty),
         clip_log_penalty=float(clip_log_penalty),

@@ -873,8 +873,6 @@ def run_locus_em_partitioned(
         rna_prior_count=rna_prior,
         gdna_eff_len=np.ascontiguousarray(gdna_eff_len[ids], dtype=np.float64),
         intergenic_rate=intergenic_rate,
-        em_iterations=em_config.iterations,
-        em_convergence_delta=em_config.convergence_delta,
         emit_locus_stats=emit_locus_stats,
         emit_assignments=annotations is not None,
     )

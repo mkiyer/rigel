@@ -182,9 +182,8 @@ def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
     longest = int(np.iinfo(np.int32).max)
     too_long = [name for name, length in ref_lengths.items() if length > longest]
     if too_long:
-        k = CONSTANTS.qc.report_examples
-        listed = "; ".join(f"{name} ({ref_lengths[name]:,} bp)" for name in too_long[:k]) + (
-            f"; and {len(too_long) - k:,} more" if len(too_long) > k else ""
+        listed = CONSTANTS.qc.examples(
+            (f"{name} ({ref_lengths[name]:,} bp)" for name in too_long), sep="; "
         )
         raise ValueError(
             f"{len(too_long):,} reference(s) are longer than {longest:,} bp, the most an int32 coordinate "
@@ -291,10 +290,7 @@ def _on_the_fasta(
             return f"{t.t_id} on {t.ref}, which the FASTA lacks"
         return f"{t.t_id} ending at {t.ref}:{t.end:,}, past its end at {ref_lengths[t.ref]:,}"
 
-    k = CONSTANTS.qc.report_examples
-    names = "; ".join(where(t) for t in off[:k]) + (
-        f"; and {len(off) - k:,} more" if len(off) > k else ""
-    )
+    names = CONSTANTS.qc.examples((where(t) for t in off), sep="; ")
     if gtf_parse_mode == "strict":
         raise ValueError(f"{len(off):,} transcript(s) lie off the FASTA: {names}")
     logger.warning("Skipping %s transcript(s) that lie off the FASTA: %s", f"{len(off):,}", names)
@@ -319,11 +315,10 @@ def _one_reference_per_gene(
     split = {g_id: on for g_id, on in refs.items() if len(on) > 1}
     if not split:
         return transcripts
-    k = CONSTANTS.qc.report_examples
-    shown = list(split.items())[:k]
-    more = f"; and {len(split) - k:,} more" if len(split) > k else ""
     if gtf_parse_mode == "strict" or ref_lengths is None:
-        names = "; ".join(f"{g_id} on {', '.join(on)}" for g_id, on in shown) + more
+        names = CONSTANTS.qc.examples(
+            (f"{g_id} on {', '.join(on)}" for g_id, on in split.items()), sep="; "
+        )
         why = (
             ""
             if gtf_parse_mode == "strict"
@@ -338,12 +333,12 @@ def _one_reference_per_gene(
         for g_id, on in split.items()
     }
     on_kept = [t for t in transcripts if kept.get(t.g_id, t.ref) == t.ref]
-    names = (
-        "; ".join(
+    names = CONSTANTS.qc.examples(
+        (
             f"{g_id} kept on {kept[g_id]}, dropped on {', '.join(ref for ref in on if ref != kept[g_id])}"
-            for g_id, on in shown
-        )
-        + more
+            for g_id, on in split.items()
+        ),
+        sep="; ",
     )
     logger.warning(
         "%s gene(s) have transcripts on more than one reference. Each keeps its copy on the longest of them (the "

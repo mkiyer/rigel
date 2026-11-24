@@ -882,11 +882,12 @@ class QcConstants:
             position_mb_decimals=self.position_mb_decimals >= 0,
         )
 
-    def examples(self, names) -> str:
-        """*names* as an error or warning lists them: the first :attr:`report_examples`, and how many more."""
+    def examples(self, names, sep: str = ", ") -> str:
+        """*names* as an error or warning lists them: the first :attr:`report_examples`, joined by *sep* (``"; "``
+        where a name holds a comma), and how many more."""
         names = list(names)
         k = self.report_examples
-        return ", ".join(names[:k]) + (f" and {len(names) - k:,} more" if len(names) > k else "")
+        return sep.join(names[:k]) + (f" and {len(names) - k:,} more" if len(names) > k else "")
 
 
 @dataclass(frozen=True)

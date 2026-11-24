@@ -856,6 +856,7 @@ def _locus(n_units, *, gdna_ll, intergenic_ll, deterministic, mode="map", assign
 
 
 def _run(em, part, *, gdna_eff_len, rate):
+    em.em_config = dataclasses.replace(em.em_config, iterations=100_000, convergence_delta=1e-13)
     out = em.run_batch_locus_em_partitioned(
         [part],
         [np.zeros(1, dtype=np.int32)],
@@ -863,8 +864,6 @@ def _run(em, part, *, gdna_eff_len, rate):
         rna_prior_count=np.zeros(1),
         gdna_eff_len=np.asarray([gdna_eff_len]),
         intergenic_rate=rate,
-        em_iterations=100_000,
-        em_convergence_delta=1e-13,
     )
     return float(out[1][0]), float(out[2][0]), float(em.gdna_intergenic_em_count)
 
@@ -919,6 +918,7 @@ def test_under_the_grouped_prior_the_em_maximises_the_derived_objective():
     em, part = _locus(
         n_units, gdna_ll=math.log(q), intergenic_ll=math.log(b), deterministic=deterministic
     )
+    em.em_config = dataclasses.replace(em.em_config, iterations=100_000, convergence_delta=1e-13)
     out = em.run_batch_locus_em_partitioned(
         [part],
         [np.zeros(1, dtype=np.int32)],
@@ -926,8 +926,6 @@ def test_under_the_grouped_prior_the_em_maximises_the_derived_objective():
         rna_prior_count=np.asarray([rna_prior]),
         gdna_eff_len=np.asarray([length]),
         intergenic_rate=rate,
-        em_iterations=100_000,
-        em_convergence_delta=1e-13,
     )
     assert float(em.gdna_intergenic_em_count) == pytest.approx(expected, rel=1e-6)
     assert float(out[2][0]) == pytest.approx(n_units - expected, rel=1e-6)
@@ -1099,6 +1097,7 @@ def _native(p, *, mode, gdna_prior, rna_prior):
         p.gdna,
         p.background,
     )
+    em.em_config = dataclasses.replace(em.em_config, iterations=1_000_000, convergence_delta=1e-14)
     out = em.run_batch_locus_em_partitioned(
         [part],
         [np.arange(n_t, dtype=np.int32)],
@@ -1106,8 +1105,6 @@ def _native(p, *, mode, gdna_prior, rna_prior):
         rna_prior_count=np.asarray([rna_prior]),
         gdna_eff_len=np.asarray([p.gdna_length]),
         intergenic_rate=p.rate,
-        em_iterations=1_000_000,
-        em_convergence_delta=1e-14,
     )
     return float(out[1][0]), float(out[2][0]), float(em.gdna_intergenic_em_count)
 

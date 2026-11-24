@@ -385,8 +385,6 @@ class AbundanceEstimator:
         rna_prior_weight: np.ndarray | None = None,
         gdna_eff_len: np.ndarray | None = None,
         intergenic_rate: float = 0.0,
-        em_iterations: int = EMConfig.iterations,
-        em_convergence_delta: float = EMConfig.convergence_delta,
         emit_locus_stats: bool = False,
         emit_assignments: bool = False,
         emit_class_mass: bool = False,
@@ -415,8 +413,7 @@ class AbundanceEstimator:
             length of each locus's gDNA component (``LocusPriors.gdna_eff_len``,
             uncontracted off capture); the pipeline always passes it, and ``None``
             means ones.
-        em_iterations, em_convergence_delta
-            EM algorithm parameters.
+
         emit_locus_stats : bool
             If True, collect per-locus profiling stats.
         emit_assignments : bool
@@ -474,8 +471,8 @@ class AbundanceEstimator:
             self.em_counts,
             self._em_posterior_sum,
             self._em_n_assigned,
-            em_iterations,
-            em_convergence_delta,
+            self.em_config.iterations,
+            self.em_config.convergence_delta,
             self.em_config.mode == "vbem",
             ASSIGNMENT_MODE_CODES[self.em_config.assignment_mode],
             rng_seed,

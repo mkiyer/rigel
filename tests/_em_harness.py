@@ -8,6 +8,8 @@ because importing `conftest` by name is ambiguous once a sub-directory has one.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 
 from rigel.locus import Locus, MultiLocus
@@ -115,8 +117,8 @@ def _make_locus_em_data(
 
 
 def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterations=10):
-    """Run batch locus EM via the partitioned path. Returns the totals assigned: ``mrna`` (every transcript's EM
-    count), ``nrna`` (the synthetic spans') and ``gdna``.
+    """Run batch locus EM via the partitioned path, with *rc*'s EM budget set to ``em_iterations`` EM steps. Returns
+    the totals assigned: ``mrna`` (every transcript's EM count), ``nrna`` (the synthetic spans') and ``gdna``.
 
     Accepts either the tuple form (em_data, loci, gdna_prior_count) separately,
     or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
@@ -146,11 +148,9 @@ def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterati
     ]
     locus_t_lists = [loc.transcript_indices for loc in loci]
 
+    rc.em_config = dataclasses.replace(rc.em_config, iterations=em_iterations)
     total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em_partitioned(
-        partition_tuples,
-        locus_t_lists,
-        gdna_prior_count,
-        em_iterations=em_iterations,
+        partition_tuples, locus_t_lists, gdna_prior_count
     )
     rc._gdna_em_total += total_gdna
 

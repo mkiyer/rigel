@@ -67,7 +67,7 @@ def _fixture():
 def _run(mode: str, *, emit_class_mass: bool):
     est = AbundanceEstimator(
         4,
-        em_config=EMConfig(assignment_mode=mode, n_threads=1, seed=7),
+        em_config=EMConfig(assignment_mode=mode, n_threads=1, seed=7, iterations=300),
         is_synthetic=IS_SYNTHETIC,
     )
     parts, loci, _ = _fixture()
@@ -77,7 +77,6 @@ def _run(mode: str, *, emit_class_mass: bool):
         np.array([5.0, 0.0]),
         rna_prior_count=np.array([3.0, 2.0]),
         intergenic_rate=20.0,
-        em_iterations=300,
         emit_assignments=True,
         emit_class_mass=emit_class_mass,
     )
@@ -149,7 +148,7 @@ def test_no_masses_are_made_unless_asked():
 def _stats_and_counts(parts):
     est = AbundanceEstimator(
         4,
-        em_config=EMConfig(assignment_mode="fractional", n_threads=1, seed=7),
+        em_config=EMConfig(assignment_mode="fractional", n_threads=1, seed=7, iterations=300),
         is_synthetic=IS_SYNTHETIC,
     )
     _, loci, _ = _fixture()
@@ -159,7 +158,6 @@ def _stats_and_counts(parts):
         np.array([5.0, 0.0]),
         rna_prior_count=np.array([3.0, 2.0]),
         intergenic_rate=20.0,
-        em_iterations=300,
         emit_locus_stats=True,
     )
     return sum(s["ec_total_elements"] for s in est.locus_stats), est.em_counts.sum(axis=1)

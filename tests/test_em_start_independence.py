@@ -99,8 +99,6 @@ def _solve(locus: str, mode: str, lean=None):
         np.array([float(fx["gdna_prior"])]),
         rna_prior_count=np.array([float(fx["rna_prior"])]),
         gdna_eff_len=np.array([float(fx["gdna_eff_len"])]),
-        em_iterations=config.iterations,
-        em_convergence_delta=config.convergence_delta,
         emit_locus_stats=True,
     )
     return np.append(rc.em_counts.sum(axis=1), gdna), rc.locus_stats[0]
