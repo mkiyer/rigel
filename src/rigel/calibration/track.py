@@ -46,25 +46,19 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     )
 
 
-def write_bedgraph(
-    track: pd.DataFrame,
-    path,
-    column: str = "gdna_density",
-    *,
-    track_name: str = "rigel_gdna_density",
-) -> None:
-    """Write a bedGraph of one track column (default gDNA density) for genome browsers.
+def write_bedgraph(track: pd.DataFrame, path) -> None:
+    """Write the track's gDNA density as a bedGraph for genome browsers.
 
     bedGraph is ``chrom  start  end  value`` (tab-separated), under a ``track`` header line that names it for
     IGV/UCSC. Rows follow the track's genomic order.
     """
     with open(path, "w") as fh:
         fh.write(
-            f'track type=bedGraph name="{track_name}" description="Rigel per-region gDNA {column}"\n'
+            'track type=bedGraph name="rigel_gdna_density" description="Rigel per-region gDNA gdna_density"\n'
         )
         refs = track["ref"].astype(str).to_numpy()
         starts = track["start"].to_numpy()
         ends = track["end"].to_numpy()
-        vals = track[column].to_numpy()
+        vals = track["gdna_density"].to_numpy()
         for r, s, e, v in zip(refs, starts, ends, vals):
             fh.write(f"{r}\t{int(s)}\t{int(e)}\t{v:.6g}\n")

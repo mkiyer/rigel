@@ -453,7 +453,6 @@ void BamScanner::Worker::offer_placements() {
 /// path (the extent `collect_placement` offers, with the CIGAR's introns cut) deposits on, on the flat axes, into the
 /// chunk's next row.
 void BamScanner::Worker::add_place_masses(const AssembledFragment& f, const ResolvedFragment& r) {
-    if (f.exons.empty()) return;
     mass_observed_.clear();
     append_observed_introns(f.introns, mass_observed_);
     const std::pair<int32_t, int32_t> extent = fragment_extent(f.exons);

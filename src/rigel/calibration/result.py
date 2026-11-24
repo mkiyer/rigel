@@ -44,12 +44,10 @@ def _check_axis_array(arr: np.ndarray, name: str, n: int) -> None:
         raise ValueError(f"CalibrationResult.{name} must be non-negative.")
 
 
-def _check_unit_interval(value: float, name: str, *, open_upper: bool = False) -> None:
+def _check_unit_interval(value: float, name: str) -> None:
     v = float(value)
-    upper_ok = v < 1.0 if open_upper else v <= 1.0
-    if not (v >= 0.0 and upper_ok):
-        bound = "[0, 1)" if open_upper else "[0, 1]"
-        raise ValueError(f"CalibrationResult.{name} must be in {bound}; got {v}.")
+    if not (v >= 0.0 and v <= 1.0):
+        raise ValueError(f"CalibrationResult.{name} must be in [0, 1]; got {v}.")
 
 
 #: The per-object arrays on each axis, each checked against its own axis length (:func:`_check_axis_array`).

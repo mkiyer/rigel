@@ -241,9 +241,7 @@ def assemble_priors(
     # accumulator's own mass-per-crossing at the boundary
     q = np.asarray(calibration.boundary_mass_per_crossing, dtype=np.float64)
     gdna_boundary = np.asarray(calibration.count_gdna_boundary, dtype=np.float64) * q
-    gdna_locus = np.maximum(
-        by_region(calibration.count_gdna_region) + by_boundary(gdna_boundary), 0.0
-    )
+    gdna_locus = by_region(calibration.count_gdna_region) + by_boundary(gdna_boundary)
 
     # every fragment on the same objects: the regions' and boundaries' whole masses by the gDNA count's own shares,
     # and the sj mass, which only the sj axis holds
@@ -254,10 +252,8 @@ def assemble_priors(
     )
 
     # the gDNA effective length: gDNA's conserved shares of the count's own objects at their efficiencies
-    region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
-    boundary_m = np.maximum(
-        np.asarray(calibration.gdna_boundary_conserved_len, dtype=np.float64), 0.0
-    )
+    region_s = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
+    boundary_m = np.asarray(calibration.gdna_boundary_conserved_len, dtype=np.float64)
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     eff_len = by_region(region_s * c_region) + by_boundary(boundary_m * c_boundary)

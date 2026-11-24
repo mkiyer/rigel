@@ -661,8 +661,6 @@ def write_bed12(
             name = t.t_id or "."
             score = 0
             strand = t.strand.to_str()
-            if strand not in ("+", "-"):
-                strand = "+"
             thick_start = ref_start
             thick_end = ref_end
             rgb = "0"
@@ -681,16 +679,11 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
     """Yield exon and transcript-span intervals for a single transcript.
 
     Each exon produces an EXON interval.  One TRANSCRIPT interval spans
-    the full transcript ``[first_exon.start, last_exon.end)``.
-
-    Synthetic nRNA transcripts yield nothing: the C++ resolver derives
-    their candidates from the transcripts a fragment hits, through each
-    one's ``span_t_index``.  An annotated single-exon transcript that
-    carries a span (``is_synthetic=False``) yields intervals like any
-    other transcript.
+    the full transcript ``[first_exon.start, last_exon.end)``. Only annotated
+    transcripts reach it (:func:`iter_reference_layout` filters the synthetic
+    spans out): the C++ resolver derives a synthetic candidate from the
+    transcripts a fragment hits, through each one's ``span_t_index``.
     """
-    if t.is_synthetic:
-        return
     # Exons
     for e in t.exons:
         yield AnnotatedInterval(t.ref, e.start, e.end, t.strand, IntervalType.EXON, t.t_index)
@@ -1142,17 +1135,6 @@ def _exon_csr(
     return offsets, start, end, cumsum_before
 
 
-def _exon_intervals(exon_csr) -> dict[int, np.ndarray]:
-    """Each transcript's exons, ``(n_exons, 2)`` int32 ``[start, end)`` sorted by start, by ``t_index``, from the exon
-    CSR; a transcript with none is absent."""
-    offsets, starts, ends, _ = exon_csr
-    return {
-        t: np.column_stack((starts[lo:hi], ends[lo:hi]))
-        for t, (lo, hi) in enumerate(zip(offsets[:-1].tolist(), offsets[1:].tolist()))
-        if hi > lo
-    }
-
-
 def _sj_csr(sj_df: pd.DataFrame) -> tuple[list, list, list, list, list, list]:
     """Every annotated junction with the transcripts holding it, as the six lists ``FragmentResolver.build_sj_map``
     takes: refs, starts, ends, strands and, in CSR, each junction's sorted transcripts; the junctions in
@@ -1174,18 +1156,6 @@ def _sj_csr(sj_df: pd.DataFrame) -> tuple[list, list, list, list, list, list]:
         t_flat.tolist(),
         t_offsets.tolist(),
     )
-
-
-def _sj_exact_match_map(sj_csr) -> dict[tuple, frozenset[int]]:
-    """``(ref, start, end, strand) → frozenset(t_index)``: every annotated junction with the transcripts holding it,
-    from the junction CSR."""
-    refs, starts, ends, strands, t_flat, t_offsets = sj_csr
-    return {
-        (ref, start, end, strand): frozenset(t_flat[lo:hi])
-        for ref, start, end, strand, lo, hi in zip(
-            refs, starts, ends, strands, t_offsets[:-1], t_offsets[1:]
-        )
-    }
 
 
 def _nrna_parents(t_df: pd.DataFrame) -> np.ndarray:
@@ -1225,20 +1195,8 @@ class TranscriptIndex:
         self.g_df: pd.DataFrame | None = None
         self.t_to_g_arr: np.ndarray | None = None
         self.t_to_strand_arr: np.ndarray | None = None
-
-        # Splice-junction exact-match map  (ref, start, end, strand) → frozenset[int]
-        self.sj_map: dict | None = None
-
-        # Per-transcript exon intervals for coverage-weight model.
-        # Maps t_index → (n_exons, 2) int32 array of [start, end) intervals
-        # sorted by genomic start position.
-        self._t_exon_intervals: dict[int, np.ndarray] | None = None
-        # The same exons as flat CSR arrays, built once by build_exon_csr().
+        #: every transcript's exons as flat CSR arrays (:func:`_exon_csr`), built once by :meth:`load`.
         self._exon_csr_cache: tuple | None = None
-
-        # When True, load() keeps the Python-side copies of what the native resolver owns
-        # (sj_map, _t_exon_intervals).
-        self._retain_lookup_maps: bool = False
 
     # -- properties -----------------------------------------------------------
 
@@ -1442,25 +1400,13 @@ class TranscriptIndex:
         return g_df
 
     @classmethod
-    def load(
-        cls,
-        index_dir: str | Path,
-        *,
-        retain_lookup_maps: bool = False,
-    ) -> "TranscriptIndex":
+    def load(cls, index_dir: str | Path) -> "TranscriptIndex":
         """Load an index from the Feather files in *index_dir*: the version gate, the references and the mask, the
         transcript and gene tables, the splice graph, and the native resolver built from the intervals and junctions.
-
-        Parameters
-        ----------
-        retain_lookup_maps : bool
-            If True, keep the Python-side copies of what the native resolver owns, ``sj_map`` and
-            the per-transcript exon intervals; :meth:`get_exon_intervals` raises without them.
         """
         index_dir = str(index_dir)
         self = cls()
         self.index_dir = index_dir
-        self._retain_lookup_maps = retain_lookup_maps
         _checked_manifest(index_dir)
 
         self.ref_lengths = load_ref_lengths(os.path.join(index_dir, REF_LENGTHS_FEATHER))
@@ -1506,9 +1452,6 @@ class TranscriptIndex:
         sj_df = pd.read_feather(os.path.join(index_dir, SJ_FEATHER))
         logger.debug("Building splice junction exact-match map")
         sj_csr = _sj_csr(sj_df)
-        if self._retain_lookup_maps:
-            self._t_exon_intervals = _exon_intervals(self._exon_csr_cache)
-            self.sj_map = _sj_exact_match_map(sj_csr)
 
         self.resolver = self._build_resolver(overlap_index, sj_csr)
         logger.debug("Built native FragmentResolver for C++ resolution")
@@ -1516,8 +1459,7 @@ class TranscriptIndex:
 
     def _build_resolver(self, overlap_index: tuple, sj_csr: tuple):
         """The native ``FragmentResolver``: every index fact fragment resolution reads, installed once, so every use
-        of the resolver has them, a scan or not. It owns the junction map; a Python copy is kept only where the index
-        retains its lookup maps."""
+        of the resolver has them, a scan or not. It owns the junction map."""
         from .native import FragmentResolver
 
         resolver = FragmentResolver()
@@ -1543,34 +1485,22 @@ class TranscriptIndex:
         resolver.set_nrna_parent_index(_nrna_parents(self.t_df).tolist())
         return resolver
 
-    def get_exon_intervals(self, t_idx: int) -> np.ndarray | None:
-        """Return sorted exon ``[start, end)`` intervals for a transcript.
-
-        Needs the per-transcript dict, which load builds only for an index loaded with ``retain_lookup_maps``.
-
-        Parameters
-        ----------
-        t_idx : int
-            Global transcript index.
-
-        Returns
-        -------
-        np.ndarray or None
-            ``(n_exons, 2)`` int32 array sorted by genomic start, or
-            ``None`` if the transcript has no cached exon intervals.
-        """
-        if self._t_exon_intervals is None:
-            raise RuntimeError(
-                "get_exon_intervals() unavailable: the per-transcript exon intervals are kept only for an index "
-                "loaded with retain_lookup_maps=True."
+    def get_exon_intervals(self, t_idx: int) -> np.ndarray:
+        """Transcript ``t_idx``'s exons, ``(n_exons, 2)`` int32 ``[start, end)`` sorted by start: its slice of the exon
+        CSR (:meth:`build_exon_csr`). A ``t_idx`` outside the transcript table raises ``IndexError``."""
+        if not 0 <= t_idx < self.num_transcripts:
+            raise IndexError(
+                f"transcript index {t_idx} is outside the index's {self.num_transcripts} transcripts"
             )
-        return self._t_exon_intervals.get(t_idx)
+        offsets, starts, ends, _ = self.build_exon_csr()
+        lo, hi = int(offsets[t_idx]), int(offsets[t_idx + 1])
+        return np.column_stack((starts[lo:hi], ends[lo:hi]))
 
     def build_exon_csr(
         self,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """The per-transcript exon positions as the CSR arrays the native code reads directly, built once at load
-        (:func:`_exon_csr`).
+        """The per-transcript exon positions as the CSR arrays the native code reads directly, built once by
+        :meth:`load` (:func:`_exon_csr`).
 
         Returns
         -------
@@ -1583,12 +1513,4 @@ class TranscriptIndex:
         cumsum_before : np.ndarray
             int32[total_exons] — cumulative exon length before each exon.
         """
-        if self._exon_csr_cache is None:
-            empty = np.empty(0, dtype=np.int32)
-            self._exon_csr_cache = (
-                np.zeros(self.num_transcripts + 1, dtype=np.int32),
-                empty,
-                empty,
-                empty,
-            )
         return self._exon_csr_cache

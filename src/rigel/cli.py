@@ -97,7 +97,7 @@ def quant_command(args: argparse.Namespace) -> int:
     from .pipeline import BamInputError, run_pipeline
 
     try:
-        resolve_quant_args(args, build_quant_defaults())
+        resolve_quant_args(args)
         bam_path, index_dir, output_dir = _quant_paths(args)
         output_dir.mkdir(parents=True, exist_ok=True)
         # YAML may deliver a bare string; the CLI always delivers a list
@@ -319,8 +319,6 @@ def _write_tables(estimator, index, output_dir: Path, tsv: bool) -> dict:
 def _write_calibration_track(track, output_dir: Path) -> None:
     """The genome-wide gDNA track, calibration's per-region gDNA level: a Feather (the report's input) and a bedGraph
     (for a genome browser)."""
-    if track is None or len(track) == 0:
-        return
     from .calibration.track import write_bedgraph
 
     track_path = output_dir / "calibration_track.feather"
@@ -354,7 +352,7 @@ def _summary(result, index, output_dir: Path, args, tables: dict, fl_summary: di
         "observable_genome": observable_genome_summary(index),
         "alignment_stats": _alignment_summary(stats),
         "read_pairs": _read_pair_summary(stats),
-        "fragment_stats": _fragment_summary(stats, index),
+        "fragment_stats": _fragment_summary(stats),
         "strand_model": _strand_model_summary(result.strand_models),
         "calibration": _calibration_summary(result.calibration, result.junction_cap),
         "gdna_em_effective_length": _series_summary(tables["loci"], "gdna_em_effective_length"),
@@ -478,7 +476,7 @@ def _read_pair_summary(stats) -> dict:
     }
 
 
-def _fragment_summary(stats, index) -> dict:
+def _fragment_summary(stats) -> dict:
     """The fragments: genic and intergenic, the hits rejected by reason, the splice census and the mismatch rate."""
     rate = stats.mismatch_rate
     return {
@@ -601,10 +599,8 @@ def strand_fit_summary(strand_models) -> dict:
     }
 
 
-def _calibration_summary(cal, junction_cap: float) -> dict | None:
+def _calibration_summary(cal, junction_cap: float) -> dict:
     """Calibration's library scalars and the junction cap fitted from them, never a per-region dict."""
-    if cal is None:
-        return None
     return {
         # full precision: a density is a few fragments per Mb, which a fixed count of decimals rounds to 0
         "gdna_density_global": float(cal.gdna_density_global),
@@ -628,8 +624,8 @@ def _calibration_summary(cal, junction_cap: float) -> dict | None:
 
 
 def _series_summary(df, column: str) -> dict[str, float]:
-    """A table column's min, median, 95th percentile and max; zeros when the table is empty or lacks it."""
-    if column not in df.columns or df.empty:
+    """A table column's min, median, 95th percentile and max; zeros when the table is empty."""
+    if df.empty:
         return {"min": 0.0, "median": 0.0, "p95": 0.0, "max": 0.0}
     values = df[column]
     return {
@@ -640,14 +636,12 @@ def _series_summary(df, column: str) -> dict[str, float]:
     }
 
 
-def _length_tables_summary(tables) -> dict | None:
+def _length_tables_summary(tables) -> dict:
     """The EM's two length tables and the decision behind them (`calibration.shared_length_law`): ``weight`` 0 is one
     shared law for both origins, 1 gDNA's own law brought into RNA's captured frame, continuous between. ``kappa`` is
     RNA's captured fraction, ``captured`` the capture mixture's fraction, ``contrast`` and ``bound`` the Hellinger
     distances the weight compares, ``noise`` the squared distance sampling noise alone adds; the three means are the
     two tables' and gDNA's uncaptured law's, in bp."""
-    if tables is None:
-        return None
     import numpy as np
 
     d = tables.decision
@@ -1101,12 +1095,14 @@ def build_quant_defaults() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def resolve_quant_args(args: argparse.Namespace, defaults: dict) -> None:
-    """Fill every option in place: an explicit CLI flag wins, then the ``--config`` YAML, then *defaults*.
+def resolve_quant_args(args: argparse.Namespace) -> None:
+    """Fill every option in place: an explicit CLI flag wins, then the ``--config`` YAML, then
+    :func:`build_quant_defaults`.
 
     Every overridable argparse default is ``None``, so a non-``None`` value on *args* is one the user gave on the
     command line.
     """
+    defaults = build_quant_defaults()
     yaml_config = _read_config_file(args.config, defaults) if args.config else {}
     for key, default_val in {**_CONFIG_FILE_KEYS, **defaults}.items():
         if getattr(args, key) is not None:

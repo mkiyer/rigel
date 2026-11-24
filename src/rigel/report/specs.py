@@ -113,9 +113,10 @@ def fl_overlay_spec(fl_df: pd.DataFrame) -> dict | None:
     }
 
 
-def fl_small_multiples_spec(fl_df: pd.DataFrame, exclude=("global",)) -> dict | None:
-    """Per-category histogram small multiples (independent y per facet), each headed by its label."""
-    cats = [c for c in fl_df["category"].unique() if c not in exclude]
+def fl_small_multiples_spec(fl_df: pd.DataFrame) -> dict | None:
+    """Per-category histogram small multiples (independent y per facet), each headed by its label; the global
+    histogram is left out."""
+    cats = [c for c in fl_df["category"].unique() if c != "global"]
     if not cats:
         return None
     sub = fl_df[fl_df["category"].isin(cats)].copy()

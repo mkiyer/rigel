@@ -43,8 +43,7 @@ class FragmentLengthModel:
         self._prob: np.ndarray | None = None
         # the log-probability the scorer decays a length past ``max_size`` from; 0 until finalized
         self._tail_base: float = 0.0
-        self._finalized: bool = False
-        # Lazy cache for _build_eff_len_cache(), populated on the first call on a finalized model.
+        # Lazy cache for _build_eff_len_cache(), populated on the first call; only a finalized model has one.
         self._cdf_cache: np.ndarray | None = None
         self._cmom_cache: np.ndarray | None = None
 
@@ -98,9 +97,6 @@ class FragmentLengthModel:
         model._prob = prob
         model._log_prob = np.log(prob)
         model._tail_base = float(model._log_prob[model.max_size])
-        model._finalized = True
-        model._cdf_cache = None
-        model._cmom_cache = None
         return model
 
     # ------------------------------------------------------------------
@@ -191,15 +187,13 @@ class FragmentLengthModel:
             cdf[k]  = sum_{l=0}^{k} P(l)
             cmom[k] = sum_{l=0}^{k} l * P(l)
         """
-        if self._finalized and self._cdf_cache is not None:
+        if self._cdf_cache is not None:
             return self._cdf_cache, self._cmom_cache
         probs = self._normalized_probs()  # shape (max_size+1,)
         cdf = np.cumsum(probs)
         l_vals = np.arange(len(probs), dtype=np.float64)
         cmom = np.cumsum(probs * l_vals)
-        if self._finalized:
-            self._cdf_cache = cdf
-            self._cmom_cache = cmom
+        self._cdf_cache, self._cmom_cache = cdf, cmom
         return cdf, cmom
 
     def compute_all_transcript_eff_lens(

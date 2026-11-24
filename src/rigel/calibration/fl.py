@@ -90,9 +90,9 @@ class FLModels:
     max_size: int
     #: float64[N_FRAGMENT_POOLS, max_size + 1] — the five pools unaggregated, straight off the payload, so the report
     #: can show each pool's length law on its own.
-    pool_counts: np.ndarray = None
-    rna_pmf_var: np.ndarray = None
-    gdna_pmf_var: np.ndarray = None
+    pool_counts: np.ndarray
+    rna_pmf_var: np.ndarray
+    gdna_pmf_var: np.ndarray
 
     def _empirical(self, counts: np.ndarray) -> "FragmentLengthModel":
         """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``, so its summary statistics read the

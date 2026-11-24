@@ -199,7 +199,7 @@ def _quant_args(result, out: Path, *flags: str) -> argparse.Namespace:
         ["quant", "--bam", str(result.bam_path), "--index", str(result.index_dir), "-o", str(out)]
         + list(flags)
     )
-    cli.resolve_quant_args(args, cli.build_quant_defaults())
+    cli.resolve_quant_args(args)
     return args
 
 

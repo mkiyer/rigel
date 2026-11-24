@@ -44,20 +44,19 @@ from scipy.stats import binom, nbinom, poisson
 from ..config import CONSTANTS
 from .gdna_density import BackgroundLaw
 
-__all__ = ["DepartureFit", "departure_evidence", "fit_departure_prior"]
+__all__ = ["DepartureFit", "fit_departure_prior"]
 
 
 @dataclass(frozen=True, slots=True)
 class DepartureFit:
     """The introns' departure prior for one library, with the evidence it rests on.
 
-    ``departure`` is ε̂, the posterior mode, and ``prior_mode`` the run setting the prior is centred on. ``n_introns``
-    counts the single-strand introns holding a fragment. ``evidence`` is what the data say for ε̂ over the setting, in
-    nats: the log-likelihood of the introns' strands at ε̂ less that at the setting. Near 0 the setting explains the
-    strands as well, and the estimate is the prior's; at tens of nats the library decides."""
+    ``departure`` is ε̂, the posterior mode of a prior centred on the run setting. ``n_introns`` counts the
+    single-strand introns holding a fragment. ``evidence`` is what the data say for ε̂ over the setting, in nats: the
+    log-likelihood of the introns' strands at ε̂ less that at the setting. Near 0 the setting explains the strands as
+    well, and the estimate is the prior's; at tens of nats the library decides."""
 
     departure: float
-    prior_mode: float
     n_introns: int
     evidence: float
 
@@ -136,13 +135,13 @@ def fit_departure_prior(
     if (
         n == 0 or kappa == 0.5 or not law.informative
     ):  # no fragment, no strand, or no background: no evidence
-        return DepartureFit(m0, m0, n, 0.0)
+        return DepartureFit(m0, n, 0.0)
     log_a, log_b = departure_evidence(s, a, e, law, kappa)
     fa, fb = np.isfinite(log_a), np.isfinite(log_b)
     # d = log b − log a; an intron impossible under both carries no evidence about ε
     d = np.where(fa & fb, log_b - log_a, np.where(fb, np.inf, -np.inf))[fa | fb]
     if not np.any(d != 0.0):
-        return DepartureFit(m0, m0, n, 0.0)
+        return DepartureFit(m0, n, 0.0)
 
     # the log posterior's derivative, Σ score_i + (α − 1)/ε − (β − 1)/(1 − ε) with α − 1 = 1 and β − 1 = n0 − 1,
     # falls from +∞ to −∞ across (0, 1)
@@ -162,4 +161,4 @@ def fit_departure_prior(
     # The mode gains at least the likelihood the prior gives up by leaving m0, so the data's gain is not negative; a
     # rounding below 0 is 0.
     evidence = float((_log_mix(d, eps) - _log_mix(d, m0)).sum())
-    return DepartureFit(eps, m0, n, max(evidence, 0.0))
+    return DepartureFit(eps, n, max(evidence, 0.0))

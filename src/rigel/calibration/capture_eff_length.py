@@ -74,7 +74,6 @@ class TranscriptObjects:
     cut_row: np.ndarray
     cut_share: np.ndarray
     is_junction: np.ndarray
-    n_transcripts: int
     leave_lo: np.ndarray
     leave_hi: np.ndarray
     leave_lo_share: np.ndarray
@@ -98,7 +97,6 @@ class TranscriptPieces:
     through: np.ndarray
     rest: np.ndarray
     is_junction: np.ndarray
-    n_transcripts: int
     run_t: np.ndarray
     run_length: np.ndarray
     masked: np.ndarray
@@ -290,7 +288,6 @@ def _runs(tk, piece, k, length, full_start, n_t: int, masked) -> TranscriptPiece
         through=full_end[cut] - run_lo[run_id[cut]],
         rest=run_hi[run_id[cut]] - full_end[cut],
         is_junction=is_junction,
-        n_transcripts=n_t,
         run_t=tk[run_first],
         run_length=run_hi - run_lo,
         masked=masked,
@@ -392,7 +389,6 @@ def object_shares(
         cut_row=cut,
         cut_share=whole,
         is_junction=pieces.is_junction,
-        n_transcripts=pieces.n_transcripts,
         leave_lo=pieces.leave_lo,
         leave_hi=pieces.leave_hi,
         leave_lo_share=low,

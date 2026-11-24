@@ -809,7 +809,7 @@ def quant_output(tmp_path_factory) -> Path:
     args = cli.build_parser().parse_args(
         ["quant", "--bam", str(oracle.bam_path), "--index", str(oracle.index_dir), "-o", str(out)]
     )
-    cli.resolve_quant_args(args, cli.build_quant_defaults())
+    cli.resolve_quant_args(args)
     cli.write_quant_outputs(result, oracle.index, out, args)
     return out
 

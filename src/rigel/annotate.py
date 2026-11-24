@@ -101,7 +101,7 @@ class AnnotationTable:
     posterior : np.ndarray
         float32 — posterior probability of assignment.
     frag_class : np.ndarray
-        int8 — fragment class code (matches buffer FRAG_* constants, -1=intergenic).
+        int8 — fragment class code, one of the buffer's ``FRAG_*`` constants.
     n_candidates : np.ndarray
         int32 — number of EM candidate components.
     locus_id : np.ndarray

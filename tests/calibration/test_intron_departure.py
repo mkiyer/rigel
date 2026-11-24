@@ -242,7 +242,7 @@ def test_the_introns_read_the_librarys_departure_and_the_pool_the_setting(monkey
     """`calibrate` fits the intergenic pool at the run setting, since intergenic regions depart at their own rate,
     which no strand measures, and then hands the introns' rows the library's own ε: the law the sweep reads carries the
     estimate and is otherwise the pool's fit at the setting."""
-    estimate = DepartureFit(0.37, M0, 1, 12.0)
+    estimate = DepartureFit(0.37, 1, 12.0)
     monkeypatch.setattr(CAL, "_departure", lambda *args, **kwargs: estimate)
     payload, region_arrays = make_synthetic_payload()
     diagnostics = CalibrationDiagnostics()

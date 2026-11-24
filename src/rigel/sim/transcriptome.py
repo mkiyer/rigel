@@ -43,12 +43,12 @@ def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
     transcript carries the ids of the duplicates folded into it (``aliases``), so a probe panel designed on the raw
     annotation still binds. Raises if the rows are not contiguous ``t_index`` 0..n-1 or a row has no exons.
     """
-    index = TranscriptIndex.load(index_dir, retain_lookup_maps=True)
+    index = TranscriptIndex.load(index_dir)
     aliases = _aliases(Path(index_dir))
     transcripts: list[Transcript] = []
     for row in index.t_df.itertuples(index=False):
         exons = index.get_exon_intervals(int(row.t_index))
-        if exons is None or len(exons) == 0:
+        if len(exons) == 0:
             raise ValueError(f"index row {row.t_index} ({row.t_id}) has no exon intervals")
         t = Transcript(
             ref=str(row.ref),

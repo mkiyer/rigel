@@ -292,10 +292,6 @@ class DeferredFragments:
         """The placements of fragment ``i``, as indices into the per-placement arrays."""
         return range(int(self.placement_offsets[i]), int(self.placement_offsets[i + 1]))
 
-    def placement_of_hypothesis(self, h: int) -> int:
-        """Which placement flat hypothesis ``h`` belongs to."""
-        return int(np.searchsorted(self.hypothesis_offsets, h, side="right")) - 1
-
     @classmethod
     def empty(cls) -> "DeferredFragments":
         """Nothing was deferred: every offset array is ``[0]`` and every other array is empty."""

@@ -711,7 +711,7 @@ def score_fragments(
     scoring: "FragmentScoringConfig",
     log_every: int,
     annotations,
-    place_efficiencies=None,
+    place_efficiencies,
 ) -> "ScoredFragments":
     """Build the scorer, route the buffer, and return ScoredFragments. A hit's sequence is priced at the mismatch
     rate the scan read on the library's unique unspliced hits."""
@@ -755,9 +755,6 @@ def populate_em_annotations(
     index,
 ):
     """Populate AnnotationTable from EM assignment output and partition metadata."""
-    if out_winner_tid is None:
-        return
-
     t_to_g = index.t_to_g_arr
     is_synth_arr = index.t_df["is_synthetic"].values.astype(bool)
 
@@ -891,7 +888,7 @@ def run_locus_em_partitioned(
         emit_assignments=annotations is not None,
     )
     total_gdna_em, rna_arr, gdna_arr = em_result[0], em_result[1], em_result[2]
-    if annotations is not None and len(em_result) > 3:
+    if annotations is not None:
         populate_em_annotations(parts, em_result[3], em_result[4], em_result[5], annotations, index)
     _record_locus_results(
         estimator,
@@ -979,8 +976,8 @@ def quant_from_buffer(
     junction_cap: float,
     geometry: TranscriptGeometry,
     *,
-    em_config: EMConfig | None = None,
-    scoring: FragmentScoringConfig | None = None,
+    em_config: EMConfig,
+    scoring: FragmentScoringConfig,
     log_every: int = BamScanConfig.log_every,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
@@ -999,9 +996,6 @@ def quant_from_buffer(
     from .calibration.priors import assemble_priors, intergenic_gdna_rate
     from .locus import build_multi_loci
     from .locus_partition import partition_and_free
-
-    em_config = em_config or EMConfig()
-    scoring_cfg = scoring or FragmentScoringConfig()
 
     # The scorer's two tables: one shared law unless the data show a difference capture cannot make. The
     # transcripts' geometry and RNA's normaliser read the same tables; calibration and the priors keep `gdna_pmf`.
@@ -1022,7 +1016,7 @@ def quant_from_buffer(
         gdna_fl,
         stats,
         estimator,
-        scoring_cfg,
+        scoring,
         log_every,
         annotations,
         # each multimapper's place weighs its candidates by its capture, a junction's at the lengths' own cap

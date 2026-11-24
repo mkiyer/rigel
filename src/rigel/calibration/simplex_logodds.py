@@ -123,9 +123,6 @@ class CubeRows:
             np.zeros(d),
         )
 
-    def __len__(self) -> int:
-        return int(self.slot.shape[0])
-
     @classmethod
     def concat(cls, parts: list) -> CubeRows:
         return cls(

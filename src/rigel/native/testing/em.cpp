@@ -24,14 +24,8 @@ namespace {
 using f64_1d = rigel::Array1<double>;
 
 nb::object fast_exp(f64_1d inputs) {
-    const size_t n = inputs.shape(0);
-    const double* src = inputs.data();
-    std::vector<double> out(n);
-    size_t i = 0;
-#if RIGEL_HAS_NEON
-    for (; i + 2 <= n; i += 2) vst1q_f64(out.data() + i, rigel::fast_exp_neon(vld1q_f64(src + i)));
-#endif
-    for (; i < n; ++i) out[i] = rigel::fast_exp_scalar(src[i]);
+    std::vector<double> out(inputs.data(), inputs.data() + inputs.shape(0));
+    rigel::fast_exp_inplace(out.data(), out.size());
     return rigel::vec_to_ndarray(std::move(out));
 }
 

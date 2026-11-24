@@ -73,14 +73,14 @@ def write_fasta(
 
 def build_index(base, gtf_text: str, refs: Mapping[str, int], unknown=None) -> TranscriptIndex:
     """Build the index of *gtf_text* under *base* (``index/``) over a FASTA of known sequence for *refs*
-    (:func:`write_fasta`, ``N`` over *unknown*'s runs), and load it with its lookup maps kept."""
+    (:func:`write_fasta`, ``N`` over *unknown*'s runs), and load it."""
     base = Path(base)
     gtf_path = base / "test.gtf"
     gtf_path.write_text(gtf_text)
     fasta_path = write_fasta(base / "genome.fa", refs, unknown)
     idx_dir = base / "index"
     TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
-    return TranscriptIndex.load(idx_dir, retain_lookup_maps=True)
+    return TranscriptIndex.load(idx_dir)
 
 
 def build_test_index(

@@ -31,6 +31,7 @@ from rigel.index import (
     TranscriptIndex,
     GenicSpan,
     IntergenicSpan,
+    _sj_csr,
     iter_reference_layout,
     read_transcripts,
 )
@@ -149,70 +150,59 @@ class TestGeneTable:
 
 
 class TestExonIntervals:
-    """Verify _t_exon_intervals dict."""
+    """Verify each transcript's exons, its slice of the exon CSR (`get_exon_intervals`)."""
 
-    def test_all_transcripts_have_entries(self, mini_index):
-        """Every transcript should have an exon interval entry."""
+    def test_all_transcripts_have_exons(self, mini_index):
+        """Every transcript, a synthetic span too, has at least one exon."""
         for t_idx in range(mini_index.num_transcripts):
-            assert t_idx in mini_index._t_exon_intervals, (
-                f"Missing exon intervals for t_idx={t_idx}"
-            )
+            assert len(mini_index.get_exon_intervals(t_idx)) > 0, f"No exons for t_idx={t_idx}"
 
     def test_t0_has_three_exons(self, mini_index):
         """t0 should have 3 exon intervals."""
-        exons = mini_index._t_exon_intervals[0]
+        exons = mini_index.get_exon_intervals(0)
         assert exons.shape == (3, 2)
         assert exons.dtype == np.int32
 
     def test_t1_has_two_exons(self, mini_index):
         """t1 should have 2 exon intervals."""
-        exons = mini_index._t_exon_intervals[1]
+        exons = mini_index.get_exon_intervals(1)
         assert exons.shape == (2, 2)
 
     def test_t2_has_two_exons(self, mini_index):
         """t2 should have 2 exon intervals."""
-        exons = mini_index._t_exon_intervals[2]
+        exons = mini_index.get_exon_intervals(2)
         assert exons.shape == (2, 2)
 
     def test_t0_exon_coordinates(self, mini_index):
         """t0 exons should be (99,200), (299,400), (499,600)."""
-        exons = mini_index._t_exon_intervals[0]
+        exons = mini_index.get_exon_intervals(0)
         expected = np.array([[99, 200], [299, 400], [499, 600]], dtype=np.int32)
         np.testing.assert_array_equal(exons, expected)
 
     def test_t1_exon_coordinates(self, mini_index):
         """t1 exons should be (99,200), (499,600)."""
-        exons = mini_index._t_exon_intervals[1]
+        exons = mini_index.get_exon_intervals(1)
         expected = np.array([[99, 200], [499, 600]], dtype=np.int32)
         np.testing.assert_array_equal(exons, expected)
 
     def test_t2_exon_coordinates(self, mini_index):
         """t2 exons should be (999,1100), (1199,1300)."""
-        exons = mini_index._t_exon_intervals[2]
+        exons = mini_index.get_exon_intervals(2)
         expected = np.array([[999, 1100], [1199, 1300]], dtype=np.int32)
         np.testing.assert_array_equal(exons, expected)
 
     def test_exons_sorted_by_start(self, mini_index):
         """Exon intervals for every transcript must be sorted by start coord."""
-        for t_idx, exons in mini_index._t_exon_intervals.items():
+        for t_idx in range(mini_index.num_transcripts):
+            exons = mini_index.get_exon_intervals(t_idx)
             starts = exons[:, 0]
             assert np.all(starts[1:] >= starts[:-1]), f"Exons not sorted for t_idx={t_idx}: {exons}"
 
-    def test_get_exon_intervals_method(self, mini_index):
-        """The get_exon_intervals(t_idx) method should return same data."""
-        for t_idx in range(mini_index.num_transcripts):
-            result = mini_index.get_exon_intervals(t_idx)
-            expected = mini_index._t_exon_intervals[t_idx]
-            np.testing.assert_array_equal(result, expected)
-
-    def test_get_exon_intervals_missing(self, mini_index):
-        """get_exon_intervals for non-existent transcript returns None."""
-        assert mini_index.get_exon_intervals(999) is None
-
-    def test_no_negative_t_index(self, mini_index):
-        """No negative t_index keys in the exon intervals dict."""
-        for t_idx in mini_index._t_exon_intervals:
-            assert t_idx >= 0
+    def test_get_exon_intervals_refuses_outside_the_table(self, mini_index):
+        """A transcript index outside the table raises; -1 would otherwise read an empty slice as a transcript."""
+        for t_idx in (mini_index.num_transcripts, 999, -1):
+            with pytest.raises(IndexError):
+                mini_index.get_exon_intervals(t_idx)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -221,16 +211,16 @@ class TestExonIntervals:
 
 
 class TestSpliceJunctions:
-    """Verify sj_map."""
+    """Verify the annotated junctions the index installs in the resolver (`_sj_map`)."""
 
     def test_sj_map_not_empty(self, mini_index):
         """mini_index has spliced transcripts so SJ map should be non-empty."""
         # t0: 2 introns (200-299, 400-499), t1: 1 intron (200-499), t2: 1 intron (1100-1199)
-        assert len(mini_index.sj_map) > 0
+        assert len(_sj_map(mini_index)) > 0
 
     def test_sj_map_keys_are_tuples(self, mini_index):
         """SJ map keys should be (ref, start, end, strand) tuples."""
-        for key in mini_index.sj_map:
+        for key in _sj_map(mini_index):
             assert isinstance(key, tuple)
             assert len(key) == 4
             ref, start, end, strand = key
@@ -241,7 +231,7 @@ class TestSpliceJunctions:
 
     def test_sj_map_values_are_frozensets(self, mini_index):
         """SJ map values should be frozensets of ints."""
-        for val in mini_index.sj_map.values():
+        for val in _sj_map(mini_index).values():
             assert isinstance(val, frozenset)
             for t_idx in val:
                 assert isinstance(t_idx, (int, np.integer))
@@ -252,7 +242,7 @@ class TestSpliceJunctions:
         # t0 intron 1: 200-299 (between exons 99-200 and 299-400)
         # t0 intron 2: 400-499 (between exons 299-400 and 499-600)
         found_t0 = set()
-        for (ref, start, end, strand), tset in mini_index.sj_map.items():
+        for (ref, start, end, strand), tset in _sj_map(mini_index).items():
             if ref == "chr1" and 0 in tset:
                 found_t0.add((start, end))
         assert len(found_t0) >= 2, f"Expected at least 2 SJs for t0, got {found_t0}"
@@ -260,27 +250,41 @@ class TestSpliceJunctions:
     def test_t2_intron_in_sj_map(self, mini_index):
         """t2's intron (1100-1199) should be in the SJ map."""
         found = False
-        for (ref, start, end, strand), tset in mini_index.sj_map.items():
+        for (ref, start, end, strand), tset in _sj_map(mini_index).items():
             if ref == "chr1" and 2 in tset and start == 1100 and end == 1199:
                 found = True
                 assert strand == 2  # neg strand
                 break
-        assert found, "t2 intron 1100-1199 not found in sj_map"
+        assert found, "t2 intron 1100-1199 not found in the junction map"
 
     def test_the_resolver_and_calibration_hold_the_same_junctions(self, mini_index):
         assert _resolver_junctions(mini_index) == _calibration_junctions(mini_index)
 
 
-def _resolver_junctions(index) -> set[tuple[str, int, int, int]]:
-    """The junctions the resolver matches a read's against (`sj_map`), as (reference, start, end, strand)."""
+def _sj_map(index) -> dict[tuple, frozenset[int]]:
+    """``(ref, start, end, strand) → frozenset(t_index)``: the junctions :meth:`TranscriptIndex.load` installs in the
+    resolver (`_sj_csr` of the index's junction table), each with the transcripts holding it."""
+    refs, starts, ends, strands, t_flat, t_offsets = _sj_csr(
+        pd.read_feather(Path(index.index_dir) / SJ_FEATHER)
+    )
     return {
-        (str(ref), int(start), int(end), int(strand)) for ref, start, end, strand in index.sj_map
+        (ref, start, end, strand): frozenset(t_flat[lo:hi])
+        for ref, start, end, strand, lo, hi in zip(
+            refs, starts, ends, strands, t_offsets[:-1], t_offsets[1:]
+        )
+    }
+
+
+def _resolver_junctions(index) -> set[tuple[str, int, int, int]]:
+    """The junctions the resolver matches a read's against (`_sj_map`), as (reference, start, end, strand)."""
+    return {
+        (str(ref), int(start), int(end), int(strand)) for ref, start, end, strand in _sj_map(index)
     }
 
 
 def _calibration_junctions(index) -> set[tuple[str, int, int, int]]:
     """The junctions calibration's deposit matches a read's against: the splice graph's sj edges on the flat
-    region-bound axis (`build_sj_arrays`), turned back into coordinates. Built along another path than `sj_map`; a
+    region-bound axis (`build_sj_arrays`), turned back into coordinates. Built along another path than `_sj_map`; a
     junction one holds and the other lacks would be spliced RNA to the EM and unspliced to calibration."""
     from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
 
@@ -337,8 +341,8 @@ class TestBuildLoadRoundTrip:
         idx_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
 
-        idx1 = TranscriptIndex.load(idx_dir, retain_lookup_maps=True)
-        idx2 = TranscriptIndex.load(idx_dir, retain_lookup_maps=True)
+        idx1 = TranscriptIndex.load(idx_dir)
+        idx2 = TranscriptIndex.load(idx_dir)
 
         # Transcript tables
         assert idx1.t_df.equals(idx2.t_df)
@@ -346,16 +350,9 @@ class TestBuildLoadRoundTrip:
         np.testing.assert_array_equal(idx1.t_to_g_arr, idx2.t_to_g_arr)
         np.testing.assert_array_equal(idx1.t_to_strand_arr, idx2.t_to_strand_arr)
 
-        # Exon intervals
-        assert set(idx1._t_exon_intervals.keys()) == set(idx2._t_exon_intervals.keys())
-        for t_idx in idx1._t_exon_intervals:
-            np.testing.assert_array_equal(
-                idx1._t_exon_intervals[t_idx],
-                idx2._t_exon_intervals[t_idx],
-            )
-
-        # Splice junctions
-        assert idx1.sj_map == idx2.sj_map
+        # Exon CSR
+        for a, b in zip(idx1.build_exon_csr(), idx2.build_exon_csr(), strict=True):
+            np.testing.assert_array_equal(a, b)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -438,7 +435,7 @@ class TestLargerIndex:
 
     def test_all_transcripts_have_exon_intervals(self, complex_index):
         for t_idx in range(complex_index.num_transcripts):
-            assert t_idx in complex_index._t_exon_intervals
+            assert len(complex_index.get_exon_intervals(t_idx)) > 0
 
     def test_exon_intervals_shape_per_transcript(self, complex_index):
         t_df = complex_index.t_df
@@ -454,7 +451,7 @@ class TestLargerIndex:
         for _, row in t_df.iterrows():
             t_idx = row["t_index"]
             t_id = row["t_id"]
-            exons = complex_index._t_exon_intervals[t_idx]
+            exons = complex_index.get_exon_intervals(t_idx)
             if t_id.startswith("RIGEL_NRNA_"):
                 # synthetic spans are single-exon
                 assert exons.shape[0] == 1, (
@@ -471,7 +468,7 @@ class TestLargerIndex:
         """tD1 is single-exon → should have no splice junctions."""
         t_df = complex_index.t_df
         td1_idx = int(t_df.loc[t_df["t_id"] == "tD1", "t_index"].iloc[0])
-        for (ref, start, end, strand), tset in complex_index.sj_map.items():
+        for (ref, start, end, strand), tset in _sj_map(complex_index).items():
             assert td1_idx not in tset, (
                 f"Single-exon transcript tD1 (t_idx={td1_idx}) should not "
                 f"appear in SJ map, but found in ({ref},{start},{end},{strand})"
@@ -481,7 +478,8 @@ class TestLargerIndex:
         assert _resolver_junctions(complex_index) == _calibration_junctions(complex_index)
 
     def test_exon_interval_values_are_int32(self, complex_index):
-        for t_idx, exons in complex_index._t_exon_intervals.items():
+        for t_idx in range(complex_index.num_transcripts):
+            exons = complex_index.get_exon_intervals(t_idx)
             assert exons.dtype == np.int32, f"t_idx={t_idx}: expected int32, got {exons.dtype}"
 
 
@@ -512,11 +510,11 @@ class TestEdgeCases:
         assert single_exon_index.num_transcripts == 2
 
     def test_single_exon_empty_sj_map(self, single_exon_index):
-        assert len(single_exon_index.sj_map) == 0
+        assert len(_sj_map(single_exon_index)) == 0
 
     def test_single_exon_exon_intervals(self, single_exon_index):
         for t_idx in range(2):
-            exons = single_exon_index._t_exon_intervals[t_idx]
+            exons = single_exon_index.get_exon_intervals(t_idx)
             assert exons.shape == (1, 2)
 
     def test_single_exon_resolver_exists(self, single_exon_index):

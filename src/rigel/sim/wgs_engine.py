@@ -479,10 +479,8 @@ class WholeGenomeSimulator:
             fl, fc = int(width), int(fc)
             if fc <= 0:
                 continue
-            total_w = weights.sum()
-            if total_w <= 0:
-                continue
-            probs = weights / total_w
+            # a drawn width has weight: the allocation gives a weightless width no fragments
+            probs = weights / weights.sum()
             indices = rng.choice(2 * N, size=fc, p=probs)
             unique_idx, idx_counts = np.unique(indices, return_counts=True)
             for idx, cnt in zip(unique_idx, idx_counts):
@@ -524,10 +522,8 @@ class WholeGenomeSimulator:
             fl, fc = int(width), int(fc)
             if fc <= 0:
                 continue
-            total_eff = chrom_eff.sum()
-            if total_eff <= 0:
-                continue
-            chrom_probs = chrom_eff / total_eff
+            # a drawn width has weight: the allocation gives a weightless width no fragments
+            chrom_probs = chrom_eff / chrom_eff.sum()
             chrom_indices = rng.choice(len(gdna_refs), size=fc, p=chrom_probs)
             unique_chroms, chrom_counts = np.unique(chrom_indices, return_counts=True)
             for ci, cc in zip(unique_chroms, chrom_counts):
@@ -1007,8 +1003,6 @@ def _shard_task(args):
 
 def _shard_by_count(items, n_shards, *, weight):
     """Greedy LPT bin-packing: distribute items across shards by descending weight."""
-    if n_shards <= 1:
-        return [list(items)]
     sorted_items = sorted(items, key=lambda x: -weight(x))
     shards: list[list] = [[] for _ in range(n_shards)]
     loads = [0] * n_shards

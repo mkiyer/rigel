@@ -32,8 +32,6 @@ const char* frag_class_label(int code) {
         case FRAG_AMBIG_SAME_STRAND: return "ambig_same_strand";
         case FRAG_AMBIG_OPP_STRAND:  return "ambig_opp_strand";
         case FRAG_MULTIMAPPER:       return "multimapper";
-        // An intergenic fragment does not enter the EM, so its ZC is blank; ZF carries its outcome (AF_GDNA_INTERGENIC).
-        case -1:                     return ".";
         default:                     return "unknown";
     }
 }
