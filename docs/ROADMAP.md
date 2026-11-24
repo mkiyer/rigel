@@ -175,7 +175,9 @@ tool's current state, simply and robustly across many kinds of data, and what is
 2. **Code review** (issue #85): clean, concise, readable and maintainable, with no hard-coded constants.
 3. **The release:** one ladder re-score, after rebuilding the suite and VCaP indexes with the one rule (their caches
    with them; the panels' reads were drawn on the old spans, so a truth-fed arm needs the span crosswalk or regenerated
-   panels); a MANUAL limitation for issue #1, issue #2, issue #3, issue #4 with issue #5,
+   panels); a MANUAL limitation for issue #1, issue #2, issue #3, issue #4 with issue #5, issue #34 (the EM's cap: a
+   capped locus's split among near-identical components is where the solve stopped, `--emit-locus-stats` names the
+   loci, and genes and pools are stable),
    issue #7, issue #9, issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and
    for the cuts' prices' costs; the CHANGELOG; then issue #11.
 

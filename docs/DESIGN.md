@@ -829,6 +829,13 @@ contiguous alternative clips what it cannot place, and a free clip would read it
   can do without removed, beat it by 3.5–6.3 % of annotated transcript error per in-scope stratum on four replicate
   libraries of the simulator, but that gain rests on the simulator's sparse truth and is unmeasured on aligned input (issue #86).
   Annotated aliases stay separate components (issue #87).
+- **The iteration cap stays at 1,000 EM steps (333 SQUAREM iterations), a measured early stop** (the owner,
+  2026-11-24; issue #34). Where a locus stops at the cap, the likelihood is flat and VBEM drifts mass between
+  near-identical components with no gain in fit. Against truth the answer improves until about 200–333 iterations and
+  declines slowly after: run to convergence, one simulator row's transcript error rises 2.5 % and its gene error
+  7.9 %, at nine times the solve time. VBEM has no objective, so no stop can be a certificate. On a capped locus a
+  near-tie's split is where the solve stopped; genes and pools are stable. The repair is a certified MAP solve
+  (issue #86).
 
 > **Whole counts are the default (`assignment_mode = "sample"`), fractional an option; there is no argmax mode and no
 > cutoff on one fragment's posterior.** `sample` rounds each component's fractional count within its locus by largest
