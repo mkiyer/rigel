@@ -571,7 +571,7 @@ def strand_fit_summary(strand_models) -> dict:
     overdispersion, 0 by policy for gDNA and RNA alike, so the channel is binomial. Where the channel is dead the
     classes are not identified and calibration reads the pooled counts (``StrandModel.genuine_n_same``), so the
     genuine κ is the pooled one and there are no class shares."""
-    from .calibration.strand_balance import fit_strand_balance, strand_discriminability
+    from .calibration.strand_balance import fit_strand_balance
     from .junction_fit import junction_classes
 
     table = strand_models.sj_table
@@ -586,8 +586,7 @@ def strand_fit_summary(strand_models) -> dict:
             else {k: round(v, SUMMARY_DECIMALS) for k, v in zip(names, values)}
         )
 
-    balance = fit_strand_balance(strand_models)
-    live = bool(strand_discriminability(balance.rna_sense_frac, balance.n_observations) > 0.0)
+    live = fit_strand_balance(strand_models).live
     if live:
         classes = junction_classes(table.n_sense, table.depth)
         genuine = round(classes.kappa, SUMMARY_DECIMALS)

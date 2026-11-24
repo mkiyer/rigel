@@ -31,6 +31,16 @@ class StrandBalance:
     n_observations: int  # spliced strand observations (fragments) backing the posterior
     fallback_used: bool  # True when there are no spliced observations (rna_sense_frac → 0.5)
 
+    @property
+    def live(self) -> bool:
+        """Whether the strand channel is live: its :func:`strand_discriminability` is positive."""
+        return strand_discriminability(self.rna_sense_frac, self.n_observations) > 0.0
+
+    @property
+    def channel_kappa(self) -> float:
+        """κ as a reader of the strand channel takes it: the fitted κ on a live channel, ½ on a dead one."""
+        return self.rna_sense_frac if self.live else 0.5
+
 
 def fit_strand_balance(strand_model: "StrandModels") -> StrandBalance:
     """RNA strand mean: κ's posterior is ``Beta(n_same + 1, n_opp + 1)`` from the ``StrandModel``'s spliced 2×2

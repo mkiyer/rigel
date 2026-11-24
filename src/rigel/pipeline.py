@@ -253,12 +253,10 @@ def warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> No
     """Warn when calibration's strand decision (`strand_balance.strand_discriminability` on the sense fraction
     `strand_balance.fit_strand_balance` fits) reads the library as unstranded. Silent with no spliced observation,
     which is warned about where it is counted."""
-    from .calibration.strand_balance import fit_strand_balance, strand_discriminability
+    from .calibration.strand_balance import fit_strand_balance
 
     balance = fit_strand_balance(strand_models)
-    if balance.fallback_used:
-        return
-    if strand_discriminability(balance.rna_sense_frac, balance.n_observations) > 0.0:
+    if balance.fallback_used or balance.live:
         return
     logger.warning(
         "[CAL] Calibration reads the library as unstranded (n_spliced_obs=%d, "

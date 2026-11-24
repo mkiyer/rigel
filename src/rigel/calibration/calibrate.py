@@ -61,7 +61,7 @@ from .region_geometry import (
 )
 from .result import CalibrationResult
 from .signature import RegionType, coarse_type_array
-from .strand_balance import StrandBalance, fit_strand_balance, strand_discriminability
+from .strand_balance import StrandBalance, fit_strand_balance
 from .substrate import CalibrationSubstrate
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from ..config import CONSTANTS
@@ -244,9 +244,7 @@ def _lock(statics, geometry, strand: StrandBalance) -> LockFit:
         np.asarray(statics.free_pos, dtype=bool), np.asarray(statics.free_neg, dtype=bool)
     )
     count = np.asarray(geometry.unspliced_count, np.float64)
-    kappa = float(strand.rna_sense_frac)
-    live = strand_discriminability(kappa, strand.n_observations) > 0.0
-    fit = fit_lock_departure(count[locked, 0], count[locked, 1], kappa if live else 0.5)
+    fit = fit_lock_departure(count[locked, 0], count[locked, 1], strand.channel_kappa)
 
     def on_slots(values, default):
         out = np.full(locked.shape[0], default, dtype=np.float64)
@@ -261,7 +259,7 @@ def _lock(statics, geometry, strand: StrandBalance) -> LockFit:
         fit.evidence,
         float((fit.share * count[locked].sum(axis=1)).sum()),
         int(count[locked].sum()),
-        "" if live else " (the strand channel is dead, so they say nothing)",
+        "" if strand.live else " (the strand channel is dead, so they say nothing)",
     )
     return replace(
         fit,
@@ -343,14 +341,13 @@ def _departure(
     intron = (np.asarray(chain.kind) == REGION) & (region_type == RegionType.INTRON) & (fp ^ fn)
     count = np.asarray(geometry.unspliced_count, np.float64)[intron]  # by genome strand
     plus = fp[intron]
-    kappa = float(strand.rna_sense_frac)
-    live = strand_discriminability(kappa, strand.n_observations) > 0.0
+    live = strand.live
     fit = fit_departure_prior(
         np.where(plus, count[:, 0], count[:, 1]),
         np.where(plus, count[:, 1], count[:, 0]),
         np.asarray(geometry.eff_gdna, np.float64)[intron],
         law,
-        kappa if live else 0.5,
+        strand.channel_kappa,
         setting,
     )
     logger.info(
