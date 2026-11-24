@@ -13,7 +13,7 @@ inline const char* splice_type_label(int32_t code) {
     switch (code) {
         case SPLICE_UNSPLICED:       return "unspliced";
         case SPLICE_SPLICED_ANNOT:   return "spliced_annot";
-        case SPLICE_IMPLICIT:        return "spliced_implicit";
+        case SPLICE_SPLICED_IMPLICIT:        return "spliced_implicit";
         default:                     return "unknown";
     }
 }

@@ -797,7 +797,7 @@ class QcConstants:
     #: Confidence of the upper credible limit on the wrong-strand rate the strand trainer's log line reports.
     strand_ci_confidence: float = 0.99
 
-    #: The normal quantile of the strand rate's two-sided 95 % interval (``StrandModel.posterior_95ci``), which the
+    #: The normal quantile of the strand rate's two-sided 95 % interval (``StrandModel.wald_interval_95``), which the
     #: QC summary reports.
     strand_interval_quantile: float = 0.975
 

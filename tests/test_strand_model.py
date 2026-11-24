@@ -188,9 +188,9 @@ class TestStrandModelProperties:
     def test_posterior_variance_no_observations(self):
         assert StrandModel().posterior_variance() == 0.25
 
-    def test_posterior_95ci(self):
+    def test_wald_interval_95(self):
         sm = _model([(Strand.POS, Strand.POS, 95), (Strand.POS, Strand.NEG, 5)])
-        lo, hi = sm.posterior_95ci()
+        lo, hi = sm.wald_interval_95()
         assert lo < hi
         assert lo > 0.88  # should be heavily skewed towards 1.0
         assert hi <= 1.0

@@ -26,7 +26,7 @@ from rigel.annotate import (
     AF_MULTIMAPPER_DROP_BIT,
     AF_NASCENT,
     AF_NASCENT_BIT,
-    AF_RESOLVED,
+    AF_RESOLVED_BIT,
     AF_UNRESOLVED,
     AnnotationTable,
     winner_flags,
@@ -49,7 +49,7 @@ UNUSED_BITS = 0x08 | 0x40
 
 #: Every bit the table names; a ZF value carries no other.
 NAMED_BITS = (
-    AF_RESOLVED
+    AF_RESOLVED_BIT
     | AF_ANNOTATED_BIT
     | AF_GDNA_BIT
     | AF_NASCENT_BIT
@@ -60,7 +60,7 @@ NAMED_BITS = (
 
 def _assert_zf_invariants(zf: int) -> None:
     """Assert the four ZF invariants `rigel.annotate` states, and that no bit outside its table is set."""
-    is_resolved = bool(zf & AF_RESOLVED)
+    is_resolved = bool(zf & AF_RESOLVED_BIT)
     is_annotated = bool(zf & AF_ANNOTATED_BIT)
     is_gdna = bool(zf & AF_GDNA_BIT)
     is_nascent = bool(zf & AF_NASCENT_BIT)
@@ -148,11 +148,11 @@ class TestAnnotationTable:
         for v in VALID_ZF_VALUES:
             _assert_zf_invariants(v)
         # Resolved-ness is coherent
-        assert AF_ANNOTATED & AF_RESOLVED
-        assert AF_NASCENT & AF_RESOLVED
-        assert AF_GDNA_EM & AF_RESOLVED
-        assert AF_GDNA_INTERGENIC & AF_RESOLVED
-        assert not (AF_MULTIMAPPER_DROP & AF_RESOLVED)
+        assert AF_ANNOTATED & AF_RESOLVED_BIT
+        assert AF_NASCENT & AF_RESOLVED_BIT
+        assert AF_GDNA_EM & AF_RESOLVED_BIT
+        assert AF_GDNA_INTERGENIC & AF_RESOLVED_BIT
+        assert not (AF_MULTIMAPPER_DROP & AF_RESOLVED_BIT)
 
     def test_a_transcript_win_is_annotated_or_nascent(self):
         """A transcript's win reads as the output tables report its RNA: a synthetic span's is nascent
@@ -340,7 +340,7 @@ class TestAnnotatedBamIntegration:
             assert 0.0 <= w <= 1.0 + 1e-6, f"ZW out of range: {w}"
 
         # At least some records should have transcript assignment (ZF & 1 set)
-        transcript_records = [r for r in records if (r.get_tag("ZF") & AF_RESOLVED)]
+        transcript_records = [r for r in records if (r.get_tag("ZF") & AF_RESOLVED_BIT)]
         assert len(transcript_records) > 0, "No resolved assignments found"
 
     def test_annotated_bam_counts_match(self, scenario, tmp_path):
@@ -844,7 +844,7 @@ class TestAnnotatedBamIntegration:
                 f"({AF_MULTIMAPPER_DROP:#x}), got {zf:#x}"
             )
             _assert_zf_invariants(zf)
-            assert not (zf & AF_RESOLVED)
+            assert not (zf & AF_RESOLVED_BIT)
             assert rec.get_tag("ZC") == "."
 
     def test_zf_names_the_category_of_the_winning_transcript(self, winner_kinds_scenario, tmp_path):

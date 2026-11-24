@@ -355,10 +355,10 @@ void FragmentResolver::resolve(const std::vector<ExonBlock>& exons, const std::v
     // Every fragment, whatever its splice type: a spliced fragment can also carry an intron in its mate gap. This only
     // enumerates; whether the fragment deposits or waits for the second pass is decided where the outcome is reported.
     enumerate_gap_hypotheses(exons, introns, out.splice_type == SPLICE_SPLICED_ANNOT, out, scratch);
-    // SPLICE_IMPLICIT promotes unspliced fragments only. `splice_type` is the scanner's census of what it saw and feeds
-    // scoring, the buffer, strand training and `rigel report`, so relabelling an observed SPLICED_ANNOT fragment would
-    // move mass between reported categories. Deferral is a separate axis.
-    if (out.splice_type == SPLICE_UNSPLICED && out.n_gap_hypotheses() > 1) out.splice_type = SPLICE_IMPLICIT;
+    // SPLICE_SPLICED_IMPLICIT promotes unspliced fragments only. `splice_type` is the scanner's census of what it saw
+    // and feeds scoring, the buffer, strand training and `rigel report`, so relabelling an observed SPLICED_ANNOT
+    // fragment would move mass between reported categories. Deferral is a separate axis.
+    if (out.splice_type == SPLICE_UNSPLICED && out.n_gap_hypotheses() > 1) out.splice_type = SPLICE_SPLICED_IMPLICIT;
 
     out.genomic_start = fragment_extent(exons).first;
 }

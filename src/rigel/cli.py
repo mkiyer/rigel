@@ -530,7 +530,7 @@ def _strand_model_summary(sm) -> dict:
     """The strand model: the protocol and its specificity from the spliced reads, the junction table behind it, the
     junction fit (:func:`strand_fit_summary`) and the all-exonic diagnostic."""
     spliced = sm.exonic_spliced
-    ci_lo, ci_hi = spliced.posterior_95ci()
+    ci_lo, ci_hi = spliced.wald_interval_95()
     return {
         "protocol": "R1-sense" if sm.read1_sense else "R1-antisense",
         "strand_specificity": round(sm.strand_specificity, SUMMARY_DECIMALS),
@@ -997,7 +997,7 @@ class ParamSpec:
     cli_dest: str  # argparse dest, e.g. "em_iterations"
     config_path: str  # dotted config path, e.g. "em.iterations"
     transform: str = (
-        "direct"  # "direct" | "invert_bool" | "sj_tag" | "path_or_none" | "gb_to_bytes"
+        "direct"  # "direct" | "invert_bool" | "sj_tag" | "path_or_none" | "gib_to_bytes"
     )
 
 
@@ -1030,7 +1030,7 @@ PARAM_SPECS: tuple[ParamSpec, ...] = (
     ParamSpec("threads", "scan.total_threads"),
     ParamSpec("threads", "calibration.n_threads"),
     # -- BamScanConfig: buffer sizing --
-    ParamSpec("scan_buffer_size", "scan.buffer_size_bytes", "gb_to_bytes"),
+    ParamSpec("scan_buffer_size", "scan.buffer_size_bytes", "gib_to_bytes"),
     # -- Top-level PipelineConfig --
     ParamSpec("annotated_bam", "annotated_bam_path"),
     ParamSpec("emit_locus_stats", "emit_locus_stats"),
@@ -1054,7 +1054,7 @@ def _config_to_cli(val: object, transform: str) -> object:
         return [val] if isinstance(val, str) else list(val)
     if transform == "path_or_none":
         return str(val) if val else None
-    if transform == "gb_to_bytes":
+    if transform == "gib_to_bytes":
         return val / (1024**3)  # bytes → GiB for CLI display
     raise ValueError(f"Unknown transform: {transform!r}")
 
@@ -1071,7 +1071,7 @@ def _cli_to_config(val: object, transform: str) -> object:
         return val[0] if len(val) == 1 else tuple(val)
     if transform == "path_or_none":
         return Path(val) if val else None
-    if transform == "gb_to_bytes":
+    if transform == "gib_to_bytes":
         return int(val * 1024**3)  # GiB → bytes
     raise ValueError(f"Unknown transform: {transform!r}")
 

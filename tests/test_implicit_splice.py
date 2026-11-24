@@ -351,7 +351,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
         result = self._resolve_mixed(index, self.MIXED_BLOCKS, self.OBSERVED)
         assert result is not None
         assert result.splice_type == int(SpliceType.SPLICED_ANNOT), (
-            "detection is unconditional but the SPLICE_IMPLICIT PROMOTION stays unspliced-only: "
+            "detection is unconditional but the SPLICE_SPLICED_IMPLICIT PROMOTION stays unspliced-only: "
             "splice_type feeds scoring, the buffer, the strand training and the report's census, and "
             "re-labelling would silently move mass between reported categories"
         )
@@ -359,7 +359,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
 
 # ── The scanner: an implicit splice deposits when its path is determined, defers when it is not ─
 #
-# A ``SPLICE_IMPLICIT`` fragment has an annotated intron inside its unsequenced mate gap. The splice
+# A ``SPLICE_SPLICED_IMPLICIT`` fragment has an annotated intron inside its unsequenced mate gap. The splice
 # motif was never read, so ``sj_strand`` comes from the transcript that implied it, which is only
 # legitimate when the candidates agree about which intron is there. If they do not, ``L`` is
 # undetermined and nothing about the fragment can be tallied. Both cases are pinned here on scenarios
@@ -369,7 +369,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
 SEED = 4242
 
 #: Exons far enough apart, and reads short enough, that a fragment spanning the sj puts both mates
-#: wholly inside an exon and the intron wholly inside the gap, which is what SPLICE_IMPLICIT means.
+#: wholly inside an exon and the intron wholly inside the gap, which is what SPLICE_SPLICED_IMPLICIT means.
 SIM = ReadSimConfig(
     frag_mean=260,
     frag_std=20,

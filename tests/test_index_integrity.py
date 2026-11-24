@@ -890,9 +890,9 @@ def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_
         tx(2, "T2", [(1000, 1100), (1200, 1300)]),
         tx(3, "T3", [(1000, 1100), (1250, 1300)]),
     ]
-    synthetics, _t_to_span_key, covered_equiv = create_nrna_transcripts(transcripts, tolerance=20)
-    assert synthetics == [] and len(covered_equiv) == 2
-    assert all(entity is covering for entity in covered_equiv.values())
+    synthetics, _t_to_span_key, carriers = create_nrna_transcripts(transcripts, tolerance=20)
+    assert synthetics == [] and len(carriers) == 2
+    assert all(entity is covering for entity in carriers.values())
     assert covering.span_n_contributors == 3
 
 
@@ -900,13 +900,9 @@ def _span_entities(transcripts, tolerance=20):
     """The nascent entities' extents: the synthetics' and the carrying single-exon transcripts', and the carriers."""
     from rigel.index import create_nrna_transcripts
 
-    synthetics, _t_to_span_key, covered_equiv = create_nrna_transcripts(
-        transcripts, tolerance=tolerance
-    )
-    extents = {(s.start, s.end) for s in synthetics} | {
-        (t.start, t.end) for t in covered_equiv.values()
-    }
-    return sorted(extents), covered_equiv
+    synthetics, _t_to_span_key, carriers = create_nrna_transcripts(transcripts, tolerance=tolerance)
+    extents = {(s.start, s.end) for s in synthetics} | {(t.start, t.end) for t in carriers.values()}
+    return sorted(extents), carriers
 
 
 def _multi_exon(t_index, start, end):

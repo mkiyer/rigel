@@ -562,29 +562,29 @@ def create_nrna_transcripts(
        contributors only.
 
     *transcripts* is the sorted transcript list, ``t_index`` already assigned. Returns ``(synthetics, t_to_span_key,
-    covered_equiv)``: the synthetics to append, in their spans' first-seen order (the caller assigns their ``t_index``
+    carriers)``: the synthetics to append, in their spans' first-seen order (the caller assigns their ``t_index``
     and ``g_index``); each annotated multi-exon transcript's span key ``(ref, strand, start, end)``, by ``t_index``,
     from which the caller sets ``span_t_index``; and the annotated single-exon transcript carrying each carried span.
     """
     if not any(len(t.exons) >= 2 for t in transcripts):
         return [], {}, {}
-    t_to_span_key, contributors, covered_equiv = _merged_spans(transcripts, tolerance)
-    covered_equiv.update(
-        _containing_transcripts(transcripts, [k for k in contributors if k not in covered_equiv])
+    t_to_span_key, contributors, carriers = _merged_spans(transcripts, tolerance)
+    carriers.update(
+        _containing_transcripts(transcripts, [k for k in contributors if k not in carriers])
     )
-    for span_key, s_tx in covered_equiv.items():
+    for span_key, s_tx in carriers.items():
         s_tx.span_n_contributors += contributors[span_key]
     synthetics = [
         _synthetic_span(span_key, n)
         for span_key, n in contributors.items()
-        if span_key not in covered_equiv
+        if span_key not in carriers
     ]
     logger.info(
         f"nRNA: {len(contributors)} merged spans "
-        f"({len(covered_equiv)} annotated equiv, "
+        f"({len(carriers)} annotated equiv, "
         f"{len(synthetics)} synthetic)"
     )
-    return synthetics, t_to_span_key, covered_equiv
+    return synthetics, t_to_span_key, carriers
 
 
 def _add_nascent_spans(transcripts: list[Transcript], tolerance: int) -> None:
@@ -592,9 +592,7 @@ def _add_nascent_spans(transcripts: list[Transcript], tolerance: int) -> None:
     every span entity's ``span_t_index``. Each synthetic gets a ``g_index`` of its own (they are gene-neutral), which
     keeps ``t.g_index == row in g_df`` and keeps synthetics out of annotated genes' summaries."""
     logger.info("[START] Creating synthetic nRNA transcripts")
-    synthetics, t_to_span_key, covered_equiv = create_nrna_transcripts(
-        transcripts, tolerance=tolerance
-    )
+    synthetics, t_to_span_key, carriers = create_nrna_transcripts(transcripts, tolerance=tolerance)
     next_g_index = max((t.g_index for t in transcripts), default=-1) + 1
     span_entity_t_index: dict[tuple, int] = {}
     for i, syn in enumerate(synthetics):
@@ -602,7 +600,7 @@ def _add_nascent_spans(transcripts: list[Transcript], tolerance: int) -> None:
         syn.g_index = next_g_index + i
         span_entity_t_index[(syn.ref, int(syn.strand), syn.start, syn.end)] = syn.t_index
     # A carried span's entity is the annotated single-exon transcript that carries it: near its ends, or containing it
-    for span_key, equiv_tx in covered_equiv.items():
+    for span_key, equiv_tx in carriers.items():
         span_entity_t_index[span_key] = equiv_tx.t_index
         equiv_tx.span_t_index = equiv_tx.t_index
     for me_tidx, span_key in t_to_span_key.items():

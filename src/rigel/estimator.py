@@ -46,26 +46,26 @@ def _gene_locus_ids(
     t_to_g: np.ndarray,
     n_genes: int,
     locus_id_per_transcript: np.ndarray,
-    t_mrna: np.ndarray,
+    t_total: np.ndarray,
 ) -> np.ndarray:
     """For each gene, the locus_id of its highest-count transcript.
 
-    The caller passes each transcript's total count as ``t_mrna``.
+    The caller passes each transcript's total count as ``t_total``.
     """
     g_locus_id = np.full(n_genes, -1, dtype=np.int32)
-    g_best_mrna = np.full(n_genes, -1.0, dtype=np.float64)
+    g_best_total = np.full(n_genes, -1.0, dtype=np.float64)
     valid = locus_id_per_transcript >= 0
     if not valid.any():
         return g_locus_id
     v_g = t_to_g[valid]
-    v_mrna = t_mrna[valid]
+    v_total = t_total[valid]
     v_lid = locus_id_per_transcript[valid]
     # Descending count order; the first write per gene wins
-    order = np.argsort(-v_mrna, kind="stable")
+    order = np.argsort(-v_total, kind="stable")
     for i in order:
         g = int(v_g[i])
-        if v_mrna[i] > g_best_mrna[g]:
-            g_best_mrna[g] = v_mrna[i]
+        if v_total[i] > g_best_total[g]:
+            g_best_total[g] = v_total[i]
             g_locus_id[g] = int(v_lid[i])
     return g_locus_id
 

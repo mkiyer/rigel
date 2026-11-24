@@ -26,7 +26,7 @@ using rigel::STRAND_POS;
 using rigel::STRAND_NEG;
 using rigel::SPLICE_UNSPLICED;
 using rigel::SPLICE_SPLICED_ANNOT;
-using rigel::SPLICE_IMPLICIT;
+using rigel::SPLICE_SPLICED_IMPLICIT;
 using rigel::vec_to_ndarray;
 using rigel::FRAG_UNAMBIG;
 using rigel::FRAG_AMBIG_SAME_STRAND;
@@ -185,7 +185,7 @@ class NativeFragmentScorer {
     ///   SPLICED_ANNOT  no: it carries a sequenced junction.
     /// Whether gDNA then competes is the likelihood's to decide (`gdna_competes`).
     inline bool gdna_can_explain(int stype) const {
-        return stype == SPLICE_UNSPLICED || stype == SPLICE_IMPLICIT;
+        return stype == SPLICE_UNSPLICED || stype == SPLICE_SPLICED_IMPLICIT;
     }
 
     /// The locus's gDNA candidate is kept when its likelihood is within `max_ll_delta_` of the best RNA candidate at

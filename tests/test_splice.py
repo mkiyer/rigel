@@ -35,7 +35,7 @@ class TestSpliceType:
         assert native_resolve.SPLICE_UNSPLICED == int(SpliceType.UNSPLICED)
         assert not hasattr(native_resolve, "SPLICE_SPLICED_UNANNOT")
         assert native_resolve.SPLICE_SPLICED_ANNOT == int(SpliceType.SPLICED_ANNOT)
-        assert native_resolve.SPLICE_IMPLICIT == int(SpliceType.SPLICED_IMPLICIT)
+        assert native_resolve.SPLICE_SPLICED_IMPLICIT == int(SpliceType.SPLICED_IMPLICIT)
         assert not hasattr(native_resolve, "SPLICE_ARTIFACT")
 
     def test_native_splice_labels_are_the_member_names(self):

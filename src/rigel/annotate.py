@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Primitive bits
-AF_RESOLVED: int = 0x01
+AF_RESOLVED_BIT: int = 0x01
 AF_ANNOTATED_BIT: int = 0x02
 AF_GDNA_BIT: int = 0x04
 AF_NASCENT_BIT: int = 0x10
@@ -67,9 +67,9 @@ AF_MULTIMAPPER_DROP_BIT: int = 0x80
 
 # Canonical composed values (the only legitimate ZF outputs).
 AF_UNRESOLVED: int = 0x00
-AF_ANNOTATED: int = AF_RESOLVED | AF_ANNOTATED_BIT  # 0x03
-AF_NASCENT: int = AF_RESOLVED | AF_NASCENT_BIT  # 0x11
-AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT  # 0x05
+AF_ANNOTATED: int = AF_RESOLVED_BIT | AF_ANNOTATED_BIT  # 0x03
+AF_NASCENT: int = AF_RESOLVED_BIT | AF_NASCENT_BIT  # 0x11
+AF_GDNA_EM: int = AF_RESOLVED_BIT | AF_GDNA_BIT  # 0x05
 AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT  # 0x25
 AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT  # 0x80
 

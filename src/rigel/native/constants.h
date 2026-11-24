@@ -29,7 +29,7 @@ static constexpr int8_t ITYPE_TRANSCRIPT      = 1;
 static constexpr int32_t SPLICE_UNSPLICED       = 0;
 static constexpr int32_t SPLICE_SPLICED_ANNOT   = 1;
 // The derived class, not a CIGAR splice:
-static constexpr int32_t SPLICE_IMPLICIT        = 2;  // PE gap spans an annotated intron
+static constexpr int32_t SPLICE_SPLICED_IMPLICIT        = 2;  // PE gap spans an annotated intron
 // Must equal `len(rigel.splice.SpliceType)`: it sizes the scanner's per-fragment splice census.
 static constexpr size_t NUM_SPLICE_TYPES        = 3;
 

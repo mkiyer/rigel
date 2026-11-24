@@ -21,7 +21,7 @@ def test_the_native_interval_types_are_rigel_types_interval_type():
 
 def test_the_zf_codes_the_native_stamp_sites_write_are_rigel_annotates():
     python = {
-        "AF_RESOLVED_BIT": annotate.AF_RESOLVED,
+        "AF_RESOLVED_BIT": annotate.AF_RESOLVED_BIT,
         "AF_GDNA_BIT": annotate.AF_GDNA_BIT,
         "AF_INTERGENIC_BIT": annotate.AF_INTERGENIC_BIT,
         "AF_MULTIMAPPER_DROP_BIT": annotate.AF_MULTIMAPPER_DROP_BIT,

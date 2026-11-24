@@ -274,7 +274,7 @@ def test_the_rna_pool_holds_every_fragment_whose_path_is_determined(payload):
 def test_u4_the_splice_census_is_unchanged_by_gap_intron_detection(
     gap_intron_index, gap_intron_bam
 ):
-    """Detection is unconditional; the ``SPLICE_IMPLICIT`` label stays unspliced-only.
+    """Detection is unconditional; the ``SPLICE_SPLICED_IMPLICIT`` label stays unspliced-only.
 
     ``splice_type`` feeds scoring, the deferred bank, the strand training and ``rigel report``'s census. The three
     fragments with an observed CIGAR-N splice count as observed splices, though ``mixed`` and ``ambig`` also hold an

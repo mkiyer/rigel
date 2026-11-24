@@ -246,7 +246,7 @@ class StrandModel:
         p = self.p_r1_sense
         return (p * (1.0 - p)) / n
 
-    def posterior_95ci(self) -> tuple[float, float]:
+    def wald_interval_95(self) -> tuple[float, float]:
         """95% Wald interval for p_r1_sense; QC only (``summary.json``'s ``strand_model.ci_95``)."""
         import math
 

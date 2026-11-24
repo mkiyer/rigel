@@ -108,7 +108,7 @@ void bind_testing(nb::module_ m) {
     // The SpliceType codes, mirrored for the parity gate against rigel.splice
     m.attr("SPLICE_UNSPLICED") = SPLICE_UNSPLICED;
     m.attr("SPLICE_SPLICED_ANNOT") = SPLICE_SPLICED_ANNOT;
-    m.attr("SPLICE_IMPLICIT") = SPLICE_IMPLICIT;
+    m.attr("SPLICE_SPLICED_IMPLICIT") = SPLICE_SPLICED_IMPLICIT;
     // The Strand, IntervalType and ZF codes, mirrored for the parity gates against rigel.types and rigel.annotate
     m.attr("STRAND_NONE") = STRAND_NONE;
     m.attr("STRAND_POS") = STRAND_POS;
