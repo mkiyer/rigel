@@ -8,9 +8,9 @@ module below it. An object's composition has three sources: the binomial strand 
 
     substrate (observation banks on three axes)
       -> chain + geometry + statics               the geometry owns every divisor
-      -> the intergenic background's gDNA law     every intron's count is read against it (the intron abundance model)
       -> strand balance: κ
       -> the locks' departure                     what each locked object's two strands can share: its gDNA
+      -> the intergenic background's gDNA law     every intron's count is read against it (the intron abundance model)
       -> the introns' departure prior ε           the library's own, read from its single-strand introns' strands
       -> signature-binary init (G1/G2/G3)         a locked object at its strands' share
       -> pass 1: solve_chain with no fitted prior, one forward and one backward pass
@@ -286,7 +286,7 @@ def _locked_at(geometry: RegionGeometry, lock: LockFit, factor: np.ndarray) -> R
 def _lock_belief(belief: RegionBelief, lock: LockFit) -> RegionBelief:
     """The initial belief with each locked slot at what its strands share: its gDNA share, the transcribed remainder
     by strand, and the share's ``Var(log f_g)``. A locked slot is never solved, so this is its answer; a lock that
-    stands is ``{0, 0, 1}`` at variance 0, as before."""
+    stands is ``{0, 0, 1}`` at variance 0."""
     if lock.departure == 0.0:
         return belief
     departed = lock.share < 1.0
@@ -632,15 +632,13 @@ def _log_summary(result: CalibrationResult, strand: StrandBalance, substrate, sj
             result.gdna_capture_saturation,
         )
     logger.debug(
-        "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "[sj sense_frac=%.3f vs κ=%.3f]",
+        "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f [sj sense_frac=%.3f]",
         result.n_regions,
         result.n_boundaries,
         result.n_sj,
         result.gdna_density_global,
         strand.rna_sense_frac,
         sj_sense_frac,
-        strand.rna_sense_frac,
     )
 
 
@@ -649,7 +647,7 @@ def _check_sj_axis(sj: "SpliceJunctionGeometry", substrate: CalibrationSubstrate
     splice on the wrong boundary."""
     if int(sj.n_sj) != int(substrate.n_sj):
         raise ValueError(
-            f"the sj axis has {int(sj.n_sj)} boundaries but the payload has "
+            f"the sj axis has {int(sj.n_sj)} splice junctions but the payload has "
             f"{int(substrate.n_sj)}. Build it with "
             "splice_graph.build_sj_geometry_arrays(index) against the SAME index the payload "
             "was scanned on — a sj axis addressing a different graph would place every splice "

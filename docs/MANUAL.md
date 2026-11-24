@@ -233,7 +233,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--seed N` | `0` | Seed of the `sample` assignment's draw; another seed is another draw from the same posterior. |
-| `--em-iterations N` | `1000` | EM iteration budget. The EM runs accelerated (SQUAREM) steps of three EM updates each, up to a third of this budget, until it converges. At least one step always runs, so `0` does not skip the EM: every fragment is still assigned. |
+| `--em-iterations N` | `1000` | EM budget in EM steps, at least 1. The EM runs accelerated (SQUAREM) steps of three EM updates each, up to a third of this budget and at least one, until it converges. The default is a measured early stop: against truth the answer improves until about 200–333 accelerated steps and declines slowly after. |
 | `--em-mode {vbem,map}` | `vbem` | EM variant. `vbem` = Variational Bayes EM (digamma soft updates); `map` = MAP-EM: each step adds the calibration's gDNA and RNA pseudocounts to the components' fragment counts and normalises. |
 | `--assignment-mode {sample,fractional}` | `sample` | Post-EM fragment assignment. `sample` gives every fragment to one transcript (or gDNA), count first: each transcript's fractional count is rounded within its EM locus, then each fragment is drawn from its own posterior toward the transcripts still short of their count, so whole counts equal the rounded fractional counts. `fractional` keeps each fragment's posterior weights. |
 

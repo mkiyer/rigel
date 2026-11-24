@@ -643,7 +643,7 @@ def _wire_calibration_regions(
 
 
 # ---------------------------------------------------------------------------
-# Quantify from buffer (locus-level EM, no global EM)
+# Quantify from buffer (the locus EM)
 # ---------------------------------------------------------------------------
 
 

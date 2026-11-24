@@ -35,8 +35,9 @@ __all__ = ["CalibrationDiagnostics", "SweepDiagnostics"]
 class SweepDiagnostics:
     """What one sweep's kernel saw, filled by ``sweep.solve_chain``.
 
-    Per slot (``(n,)`` unless stated): the message-free self-solve's ``fg_loc`` and ``tau_lam`` (the strand term's
-    precision at ``fg_loc``); the final solve's ``f_g``; ``solvable``; the observations ``count`` ``(n, 2)``,
+    Per slot (``(n,)`` unless stated): the message-free self-solve's ``fg_loc`` and ``tau_lam`` (the own evidence's
+    precision: the strand term's at ``fg_loc`` plus the intron row's); the final solve's ``f_g``; ``solvable``; the
+    observations ``count`` ``(n, 2)``,
     ``free_pos``, ``free_neg``; and the gDNA support's ``mass_global``. The message layer's delivery: ``lam_rows``
     ``(n, K)`` (zero rows where a block delivered nothing, ``None`` when no block did), ``cube_rows`` (a ``CubeRows``
     table keyed to the chain), and the received tables ``from_left`` / ``from_right``, each a dict of the kernel's

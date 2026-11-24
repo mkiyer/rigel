@@ -94,7 +94,7 @@ def build_scorer(
         exon_ends=np.ascontiguousarray(exon_ends, dtype=np.int32),
         exon_cumsum=np.ascontiguousarray(exon_cumsum, dtype=np.int32),
         # Only rigel's synthetic spans form the span pool; an annotated single-exon transcript is pruned with the
-        # annotated ones, even one covering a multi-exon transcript's span
+        # annotated ones, even one carrying a multi-exon transcript's span
         t_is_synthetic_arr=np.ascontiguousarray(t_df["is_synthetic"].values, dtype=np.uint8),
         # Each transcript's reference, as a code: a multimapper's genic places are told apart on it
         t_ref_arr=np.ascontiguousarray(

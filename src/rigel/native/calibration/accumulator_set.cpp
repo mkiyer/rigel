@@ -98,7 +98,7 @@ void AccumulatorSet::set_sj(const std::int64_t* offsets, std::size_t n_offsets, 
         ref_boundary_right.reserve(static_cast<std::size_t>(j1 - j0));
         ref_strand.reserve(static_cast<std::size_t>(j1 - j0));
         for (std::int64_t k = j0; k < j1; ++k) {
-            ref_boundary_right.push_back(to_int32(boundary_right[k] - c0, "acceptor region_bound"));
+            ref_boundary_right.push_back(to_int32(boundary_right[k] - c0, "high-end region_bound"));
             ref_strand.push_back(sj_strand[k]);
         }
         accs_[f].set_sj(ref_offsets, ref_boundary_right, ref_strand);

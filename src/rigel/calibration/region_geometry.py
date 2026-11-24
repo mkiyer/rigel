@@ -50,7 +50,7 @@ class RegionGeometry:
         spliced_count     crossed it contiguously, spliced elsewhere    certified RNA
         sj_count          never crossed it: it jumped from here         certified RNA
 
-    The last two are different molecules: at a donor the sj flux is all the RNA that splices there, while the
+    The last two are different molecules: at an sj's end the sj flux is all the RNA that splices there, while the
     spliced crossing is the few molecules that read through; inside an exon there is no sj, so ``sj_count`` is 0.
 
     The strand axes differ. ``unspliced_count`` and ``spliced_count`` are keyed by genome strand (where the read
@@ -192,7 +192,7 @@ def _sj_factors(chain: RegionChain, substrate, sj, rna_fl_pmf: np.ndarray):
     hi_end = np.asarray(chain.left)[slot_of_region[np.asarray(sj.dst_region, np.int64)]]
     if np.any(lo_end < 0) or np.any(hi_end < 0):
         raise ValueError(
-            "a sj boundary attaches to a reference terminal, which has no boundary beside it. "
+            "an sj attaches to a reference terminal, which has no boundary beside it. "
             "Both of an intron's endpoints are interior interfaces of the same reference by "
             "construction (splice_graph I5), so this is a sj axis addressing a different "
             "partition than the payload was scanned on."
@@ -404,8 +404,3 @@ def init_beliefs(
     )
     f_pos, f_neg, f_g, var_g = _type_belief(fp, fn, deconv, count.sum(axis=1))
     return RegionBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_gdna=var_g)
-
-
-# gDNA density carries no per-capture-class scaling: a gDNA level crosses a composition-unlicensed hop unscaled (the
-# transfer policy's level lane), because a pure-gDNA object's own observed total already is its gDNA density at its
-# own capture.

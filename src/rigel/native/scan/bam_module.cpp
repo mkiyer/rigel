@@ -211,8 +211,8 @@ void bind_accumulator(nb::module_& m) {
                           std::vector<int8_t>(sj_strand.data(), sj_strand.data() + sj_strand.shape(0)));
              },
              nb::arg("offsets"), nb::arg("boundary_right"), nb::arg("sj_strand"),
-             "The sj CSR for THIS reference, keyed by the ref-local donor region_bound\n"
-             "index. The sj-boundary id is the slot; slot order is a contract.");
+             "The sj CSR for THIS reference, keyed by the ref-local low-end region_bound\n"
+             "index. The sj id is the slot; slot order is a contract.");
     bind_accumulator_banks(c);
 
     // Returns the QC key the deposit incremented, the specification's `DepositOutcome.value`. `introns` are `(start,
@@ -399,20 +399,20 @@ void bind_scanner(nb::module_& m) {
              "    The fragment-length limit applied to L, and the width of the\n"
              "    pool histograms. Must be >= 1.\n")
         .def("set_sj", &BamScanner::set_sj, nb::arg("offsets"), nb::arg("boundary_right"), nb::arg("sj_strand"),
-             "Install the annotated sj boundaries, as build_sj_arrays\n"
+             "Install the annotated splice junctions, as build_sj_arrays\n"
              "emits them. A SECOND call because set_regions refuses to run twice.\n\n"
              "offsets : int64[n_region_bounds_total + 1]\n"
-             "    CSR over the flat region_bound axis, keyed by the DONOR region_bound index.\n"
+             "    CSR over the flat region_bound axis, keyed by the LOW END's region_bound index.\n"
              "boundary_right : int64[n_sj]\n"
-             "    Flat region_bound index of each sj's high end. The sj-boundary id\n"
+             "    Flat region_bound index of each sj's high end. The sj id\n"
              "    IS the slot here; edges_df.edge_row is a join key and is not\n"
              "    passed. Slot order is a contract: sort on\n"
-             "    (donor region_bound, acceptor region_bound, sj_strand).\n"
+             "    (low-end region_bound, high-end region_bound, sj_strand).\n"
              "sj_strand : int8[n_sj]\n"
              "    Each sj's ANNOTATED strand.\n\n"
              "Not optional: scan() refuses to run without it, because a missing\n"
              "table makes every observed intron read as unannotated and empties\n"
-             "the sj boundaries silently. Pass empty arrays to declare none.\n");
+             "the splice junctions silently. Pass empty arrays to declare none.\n");
 }
 
 void bind_annotation_writer(nb::module_& m) {

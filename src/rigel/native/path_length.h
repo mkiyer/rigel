@@ -15,7 +15,7 @@
 namespace rigel {
 
 /// The introns as a sorted, disjoint set clipped to [start, end). Overlapping and abutting introns both merge:
-/// overlapping ones are contradictory observations of one molecule (mates that disagree about an acceptor), and
+/// overlapping ones are contradictory observations of one molecule (mates that disagree about an intron's end), and
 /// abutting ones imply a zero-length exon, which no molecule has. The raw pairs are sorted first and clipped inside the
 /// loop, the order the specification uses.
 inline void normalise_introns(const IntronBlock* observed,

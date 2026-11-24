@@ -426,7 +426,7 @@ class AccumulatorPayload:
     ref_region_bound_offsets: np.ndarray  # int64[n_refs + 1] — CSR over region_bounds
     ref_region_offsets: np.ndarray  # int64[n_refs + 1]
     ref_boundary_offsets: np.ndarray  # int64[n_refs + 1] — contiguous boundaries
-    ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — sj boundaries
+    ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — splice junctions
 
     # -- regions: two banks, each two genome-strand columns; a contained path books both --
     region_contained_count: (
@@ -452,7 +452,7 @@ class AccumulatorPayload:
     #: and not "the number of spliced fragments here".
     boundary_spliced_mass: np.ndarray
 
-    # -- sj boundaries: one exact donor->acceptor jump. Pure RNA by construction --
+    # -- splice junctions: one exact jump from an intron's low end to its high end. Pure RNA by construction --
     #: uint32[n_sj, 2] — both genome-strand columns are kept although consumers sum them, because the split detects
     #: aligner artifacts (false-positive ``N`` operations on genomic DNA). In a stranded library a real sj inherits
     #: the library's strand specificity, while an artifact deposits on both strands; a clean and an artifactual sj

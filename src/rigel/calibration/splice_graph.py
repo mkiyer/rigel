@@ -10,7 +10,7 @@ A region is a genomic interval; regions tile each reference in genomic order. A 
 * ``CONTIGUOUS(i, i+1)`` — the genomic point ``end(i) == start(i+1)``, carrying the 8 structural flag bits
   ``TSS_s`` / ``TES_s`` / ``DONOR_s`` / ``ACCEPTOR_s`` for ``s`` in ``{+, -}``. The bits are not mutually exclusive:
   one position can be a terminus of one transcript and a splice site of another.
-* ``SJ(donor, acceptor, strand)`` — one per distinct annotated intron, carrying its exonic reaches
+* ``SJ(low end, high end, strand)`` — one per distinct annotated intron, carrying its exonic reaches
   (:class:`SpliceJunctionGeometry`); a contiguous boundary's reach columns hold 0.
 
 Every distinct exon endpoint is a region bound, and adjacent equal-signature regions are not merged, because a merged
@@ -241,7 +241,7 @@ def _reference_graph(name, length, ex: _Exons, rows, intr, i_rows, region_base: 
     """One reference's ``(regions, edges)`` frames, region ids offset by ``region_base``.
 
     Every exon endpoint and both reference ends are region bounds. A contiguous boundary sits at each interior
-    interface and carries its structural flags; there is one sj boundary per distinct ``(intron_start, intron_end,
+    interface and carries its structural flags; there is one sj per distinct ``(intron_start, intron_end,
     strand)``. A contiguous row's reach columns hold 0: the one reader of a reach takes the sj rows.
     """
     region_bounds = np.unique(
@@ -459,7 +459,7 @@ def _events_independently(ex: _Exons, rows, intr, i_rows):
 
 
 def _sj_edges(region_bounds, ma_i, mi_, ref_name):
-    """Distinct sj boundaries for one reference: ``(src, dst, strand, reach dict)``, region-local ids."""
+    """Distinct splice junctions for one reference: ``(src, dst, strand, reach dict)``, region-local ids."""
     empty = np.zeros(0, np.int64)
     keys = {
         k: empty.copy() for k in ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
@@ -562,7 +562,7 @@ def _check_regions(regions_df, reflen: dict[str, int], slices: dict) -> None:
 
 def _check_boundaries(regions_df, edges_df, ref, slices: dict) -> None:
     """I5 (a boundary stays on its reference), I7 (the contiguous boundaries are the adjacent pairs), I8 (``src <
-    dst``) and I12 (row order is the sorted id order), then the sj boundaries (:func:`_check_sj_boundaries`)."""
+    dst``) and I12 (row order is the sorted id order), then the splice junctions (:func:`_check_sj_boundaries`)."""
     n_regions = len(regions_df)
     src = edges_df["src"].to_numpy(np.int64)
     dst = edges_df["dst"].to_numpy(np.int64)
@@ -604,10 +604,10 @@ def _check_boundaries(regions_df, edges_df, ref, slices: dict) -> None:
 
 
 def _check_sj_boundaries(src, dst, strand, sig, n_regions: int) -> None:
-    """I5/I6 (the sj land on interfaces, one row per distinct ``(donor, acceptor, strand)``) and I9 (both endpoints
+    """I5/I6 (the sj land on interfaces, one row per distinct ``(low end, high end, strand)``) and I9 (both endpoints
     carry that strand's exon bit)."""
     if not np.all(np.isin(strand, [Strand.POS, Strand.NEG])):
-        raise ValueError("I6: a SJ boundary has an invalid strand.")
+        raise ValueError("I6: an sj has an invalid strand.")
     # A strand-coincident sj pair is biologically impossible (splice motifs are not palindromic: GT..AG
     # reverse-complements to CT..AC), so one means the annotation is wrong. It warns rather than raises because the
     # graph handles it correctly: strand is in the sort key, so the two boundaries stay distinct and ordered.
@@ -615,7 +615,7 @@ def _check_sj_boundaries(src, dst, strand, sig, n_regions: int) -> None:
     n_coincident = int((_cnt > 1).sum())
     if n_coincident:
         warnings.warn(
-            f"{n_coincident} strand-coincident splice junction(s): the same (donor, acceptor) "
+            f"{n_coincident} strand-coincident splice junction(s): the same (low end, high end) "
             f"annotated on BOTH strands. This is biologically impossible — splice motifs are "
             f"non-palindromic (a GT..AG intron reverse-complements to CT..AC) — so the source "
             f"annotation is likely wrong. The graph keeps them as distinct boundaries and is correct "
@@ -625,7 +625,7 @@ def _check_sj_boundaries(src, dst, strand, sig, n_regions: int) -> None:
         )
     key = np.stack([src, dst, strand.astype(np.int64)], axis=1)
     if np.unique(key, axis=0).shape[0] != key.shape[0]:
-        raise ValueError("I6: a (donor, acceptor, strand) sj appears more than once.")
+        raise ValueError("I6: a (low end, high end, strand) sj appears more than once.")
     for s, bit in ((Strand.POS, BIT_EXON_POS), (Strand.NEG, BIT_EXON_NEG)):
         m = strand == s
         if m.any() and not (np.all(sig[src[m]] & bit) and np.all(sig[dst[m]] & bit)):
@@ -769,7 +769,7 @@ def _check_exon_ends_are_interfaces(r: _Reference, ex: _Exons) -> None:
 
 
 def _check_introns_are_sj(r: _Reference, intr, jkey, n_regions: int) -> None:
-    """I11b — every annotated intron is realised by a SJ boundary on that strand."""
+    """I11b — every annotated intron is realised by an sj on that strand."""
     if not r.i_rows.size:
         return
     a, b, st = intr[1][r.i_rows], intr[2][r.i_rows], intr[3][r.i_rows].astype(np.int64)
@@ -837,7 +837,7 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.nda
 
 @dataclass(frozen=True, slots=True)
 class SpliceJunctionArrays:
-    """The sj boundaries re-indexed onto the accumulator's flat region-bound axis, as a CSR.
+    """The splice junctions re-indexed onto the accumulator's flat region-bound axis, as a CSR.
 
     It is the deposit rule's per-intron lookup: is this observed intron an annotated sj, and which one? Every annotated
     intron's endpoints are region bounds (a bound sits at every exon endpoint), so the lookup is the binary search the
@@ -846,7 +846,7 @@ class SpliceJunctionArrays:
 
         for k in range(offsets[boundary_left], offsets[boundary_left + 1]):
             if boundary_right[k] == observed_right_boundary:
-                credit sj boundary k          # the CSR slot k is the sj-boundary id
+                credit sj k                  # the CSR slot k is the sj id
 
     ``edge_row`` is only the join key back to ``index.edges_df`` and must never index an sj bank: edge rows number
     every boundary, so they run past a bank sized to the sj count and permute it even in bounds. The accumulator never
@@ -861,14 +861,14 @@ class SpliceJunctionArrays:
         np.ndarray
     )  # int64[P + 1] — CSR over the flat region_bound axis, P = region_bounds.size
     boundary_right: np.ndarray  # int64[J] — flat region_bound index of the intron's high endpoint
-    edge_row: np.ndarray  # int64[J] — row in index.edges_df: a join key, not the sj-boundary id
+    edge_row: np.ndarray  # int64[J] — row in index.edges_df: a join key, not the sj id
     strand: np.ndarray  # int8[J]  — the sj's genomic strand (Strand POS/NEG)
 
 
 def build_sj_arrays(index) -> SpliceJunctionArrays:
     """Build the :class:`SpliceJunctionArrays` CSR for ``index``.
 
-    An sj boundary stores region ids; the accumulator works in region-bound indices. For a reference whose first region
+    An sj stores region ids; the accumulator works in region-bound indices. For a reference whose first region
     is ``region_base`` and whose first bound is ``region_bound_base``::
 
         left bound  = region_bound_base + (src - region_base) + 1      # the intron starts where src ends
@@ -897,7 +897,7 @@ def build_sj_arrays(index) -> SpliceJunctionArrays:
     boundary_right = dst + shift
 
     # The sort key must match the reference accumulator's ``Partition.from_region_bounds`` exactly, since the
-    # sj-boundary id is the rank in this order. Strand matters only for a coordinate pair annotated on both strands.
+    # sj id is the rank in this order. Strand matters only for a coordinate pair annotated on both strands.
     order = np.lexsort((strand, boundary_right, boundary_left))
     boundary_left, boundary_right = boundary_left[order], boundary_right[order]
     offsets = np.zeros(n_region_bounds + 1, dtype=np.int64)
@@ -909,7 +909,7 @@ def build_boundary_flags_array(index) -> np.ndarray:
     """The structural flags on the accumulator's contiguous-boundary axis, one entry per boundary.
 
     A contiguous boundary is the interface to the right of its ``src`` region, so the flags are keyed by ``src``; a
-    reference with ``k`` regions contributes ``k - 1`` entries, with no padding. Sj boundaries are not a genomic
+    reference with ``k`` regions contributes ``k - 1`` entries, with no padding. Splice junctions are not a genomic
     position and carry no flags. Returns ``uint16[E]``, ``E == ref_boundary_offsets[-1]``, aligned with the payload's
     contiguous-boundary axis.
     """
@@ -937,7 +937,7 @@ def build_boundary_flags_array(index) -> np.ndarray:
 
 @dataclass(frozen=True, slots=True)
 class SpliceJunctionGeometry:
-    """The sj boundaries on the accumulator's sj axis, in its slot order.
+    """The splice junctions on the accumulator's sj axis, in its slot order.
 
     An sj is a factor on its two endpoint regions, never a chain slot or message channel, because the graph is a DAG
     but not a polytree; this holds what a consumer needs to place that factor. ``strand`` is the transcript strand,

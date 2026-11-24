@@ -29,7 +29,7 @@ inline constexpr GapHypothesis kUnsplicedHypothesis{nullptr, 0, STRAND_NONE};
 
 /// One fragment offered to the accumulator, with every explanation of its unsequenced gaps; the conservation
 /// identity is `deposited + deferred + dropped_* == offered`. `[start, end)` is the full extent, mate gap included.
-/// `observed_introns` may overlap or repeat (mates can disagree about an acceptor); `deposit` normalises them, so L
+/// `observed_introns` may overlap or repeat (mates can disagree about an intron's end); `deposit` normalises them, so L
 /// is always the total of the path's segments. `hypotheses` is never empty: with no gap it is the unspliced one.
 struct OfferedFragment {
     std::int64_t         start;

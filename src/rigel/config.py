@@ -53,15 +53,24 @@ class EMConfig:
     mode : {"vbem", "map"}
         Algorithm variant (default ``"vbem"``).
     iterations : int
-        Maximum EM iterations (default 1000).
+        The EM's budget in EM steps (default 1000). The EM runs accelerated (SQUAREM) iterations of three steps each,
+        ``max(iterations // 3, 1)`` of them at most (333 at the default), and stops sooner once the state changes by
+        less than ``convergence_delta``. The default is a measured early stop, not a convergence guarantee: where a
+        locus reaches it the likelihood is flat, and VBEM moves mass between near-identical components with no gain in
+        fit. Against truth the answer improves until about 200–333 SQUAREM iterations and declines slowly after; run to
+        convergence, one simulator row's transcript error rises 2.5 % and its gene error 7.9 %, at nine times the solve
+        time. VBEM has no objective, so no stop is a certificate.
     convergence_delta : float
-        Convergence threshold for theta updates (default 1e-6).
+        The EM stops once the L1 change of the component shares between two SQUAREM iterations falls below this
+        (default 1e-6).
     assignment_mode : {"sample", "fractional"}
         Post-EM fragment assignment (default ``"sample"``). ``"sample"`` gives every fragment to one
         component, count first: each component's fractional count is rounded within its EM locus, then
         each fragment is drawn from its own posterior, re-weighted toward the components still short of
         their rounded count, so whole counts land on the rounded fractional counts. ``"fractional"``
         keeps each fragment's posterior weights.
+    n_threads : int
+        Threads for the locus EM (default 0, every core); 1 is sequential, any other count caps the EM's own pool.
     """
 
     seed: int = 0
@@ -70,12 +79,6 @@ class EMConfig:
     convergence_delta: float = 1e-6
     assignment_mode: str = "sample"
     n_threads: int = 0
-    """Number of threads for parallel locus EM.
-
-    ``0`` (default) → use all available cores.
-    ``1`` → sequential.
-    Any positive value → cap at that many threads (the EM's own thread pool).
-    """
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
@@ -85,7 +88,7 @@ class EMConfig:
         # `None` would seed the draw from OS entropy, and one input would stop giving one answer; the draw's generator
         # refuses a negative seed
         _check_integer("EMConfig.seed", self.seed, 0)
-        # the EM always takes one accelerated step, so a budget below one is never what runs
+        # the EM takes at least one accelerated step of three EM steps, so a budget below one would not be what runs
         _check_integer("EMConfig.iterations", self.iterations, 1)
         # 0 is every core; a negative count would be read as 0
         _check_integer("EMConfig.n_threads", self.n_threads, 0)

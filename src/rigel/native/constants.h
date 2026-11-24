@@ -92,7 +92,7 @@ static constexpr int32_t PAIR_PLACED_UNIQUE       = N_WITHHELD + 1;
 static constexpr int32_t PAIR_PLACED_MULTIMAPPING = N_WITHHELD + 2;
 
 // ================================================================
-// Scoring constants (shared by scoring.cpp and the Python side)
+// Scoring constants (scoring.cpp's; `_scoring_impl.testing` binds them for a parity test against their definitions)
 // ================================================================
 static constexpr double LOG_HALF       = -0.6931471805599453;       // log(0.5): a strand with no preference
 static constexpr double TAIL_DECAY_LP  = -0.01005033585350145;      // log(0.99): per-bp penalty past the length table
@@ -105,8 +105,8 @@ static constexpr int SCORED_STACK_CAPACITY = 64;
 
 // The EM's log floor, log(θ + EM_LOG_EPSILON), and the smallest total it divides by.
 static constexpr double EM_LOG_EPSILON = 1e-300;
-// One SQUAREM iteration runs three EM steps (two plain, one stabilising), so `iterations / 3` SQUAREM iterations
-// spend the budget `EMConfig.iterations` names.
+// One SQUAREM iteration runs three EM steps (two plain, one stabilising), so the budget of `EMConfig.iterations` EM
+// steps buys `max(iterations / 3, 1)` SQUAREM iterations: a budget below three still runs one.
 static constexpr int SQUAREM_BUDGET_DIVISOR = 3;
 // VBEM's floor: the smallest alpha a component keeps. digamma(1e-300) ≈ −1e300, so after max-subtraction the E-step
 // gives a component at the floor exactly zero responsibility and the evidence-proportional prior gives it nothing: it
@@ -140,8 +140,8 @@ static constexpr int N_EM_CLASSES        = 4;
 // The message policies `solve_blocks` switches on; the silent policy runs no message layer.
 static constexpr int POLICY_SILENT   = 0;
 static constexpr int POLICY_TRANSFER = 1;
-// A slot holds its own composition evidence when its strand evidence exceeds this guard; the strand evidence clips
-// its fractions to it.
+// A slot holds its own composition evidence when the precision of its own strands and its own intron row exceeds this
+// guard; the strand evidence clips its fractions to it.
 static constexpr double OWN_EVIDENCE_EPS = 1.0e-9;
 
 // ================================================================

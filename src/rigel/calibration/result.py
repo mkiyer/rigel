@@ -4,7 +4,7 @@ The splice graph has three kinds of object, so the result has three axes::
 
     regions                N             deconvolved contained count and its geometric support
     contiguous boundaries  E = N − refs  deconvolved crossing count and its geometric support
-    sj boundaries          J             the jumping flux: certified RNA, never deconvolved; and the two
+    splice junctions       J             the jumping flux: certified RNA, never deconvolved; and the two
                                          regions each sj joins
 
 A contiguous boundary is a 0-bp object with one set of numbers, never a left/right pair, so no consumer pools faces
@@ -117,12 +117,12 @@ class CalibrationResult:
     #: is 1.0 where both flanking regions exceed every fragment length and falls toward the region spacing otherwise.
     boundary_mass_per_crossing: np.ndarray
 
-    # --- the jumping population, per sj boundary (float64[n_sj]) ---
+    # --- the jumping population, per sj (float64[n_sj]) ---
     #: An incidence count, not a mass: ``sj_count`` summed over the genome-strand columns. A fragment deposits +1 on
     #: every sj it uses, so this over-counts the conserved mass in proportion to how many sj a fragment spans;
-    #: :attr:`sj_conserved_mass` is the mass. Never deconvolved, since an sj boundary is pure RNA, so it is no part of
+    #: :attr:`sj_conserved_mass` is the mass. Never deconvolved, since an sj is pure RNA, so it is no part of
     #: a locus's gDNA count; ``assemble_priors`` reads its mass into the locus's fragment count, and the incidences are
-    #: exported for QC and reporting, because this population dominates a donor boundary.
+    #: exported for QC and reporting, because this population dominates the boundary at an sj's end.
     count_rna_sj: np.ndarray
 
     #: float64[n_boundaries] and float64[n_sj]: the ``boundary_spliced`` and sj twins of

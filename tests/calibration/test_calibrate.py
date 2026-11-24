@@ -228,7 +228,7 @@ def test_the_sj_axis_length_is_what_is_checked_not_its_content():
         reach_lo=np.full(2, 100.0),
         reach_hi=np.full(2, 100.0),
     )
-    with pytest.raises(ValueError, match="2 boundaries but the payload has 1"):
+    with pytest.raises(ValueError, match="2 splice junctions but the payload has 1"):
         _run(sj=two)
 
 

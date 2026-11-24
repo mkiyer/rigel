@@ -69,11 +69,11 @@ class Transcript:
     is_synthetic: bool = False
     span_t_index: int = -1
     """t_index of the transcript's span entity, -1 for none. A multi-exon transcript's is the entity over its merged
-    TSS/TES span (a synthetic span, or the annotated single-exon transcript covering it); a single-exon transcript's
-    is itself if it covers a merged span; a synthetic's is -1."""
+    TSS/TES span (a synthetic span, or the annotated single-exon transcript carrying it: near its ends or containing
+    it); a single-exon transcript's is itself if it carries a merged span; a synthetic's is -1."""
     span_n_contributors: int = 0
     """The number of annotated multi-exon transcripts whose merged spans this entity stands for; zero except on
-    synthetic spans and the single-exon transcripts that cover a span."""
+    synthetic spans and the single-exon transcripts that carry a span."""
     abundance: float | None = None
     nrna_abundance: float = 0.0
     """A simulator input, read only by ``rigel.sim``: the abundance of RNA that has not spliced, sampled contiguously

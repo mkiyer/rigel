@@ -12,7 +12,7 @@ import numpy as np
 @dataclass(slots=True)
 class ScoredFragments:
     """The EM's candidate data, scored from the fragment buffer by ``FragmentRouter``: CSR arrays linking each
-    ambiguous fragment unit to its candidate transcripts and their log-likelihoods. Transcript candidates only; the
+    fragment unit the EM resolves to its candidate transcripts and their log-likelihoods. Transcript candidates only; the
     gDNA candidate is added per locus.
 
     Attributes
@@ -49,7 +49,7 @@ class ScoredFragments:
     splice_type : np.ndarray
         uint8[n_units] — SpliceType enum value per unit.
     n_units : int
-        Number of ambiguous units.
+        Number of units the EM resolves.
     n_candidates : int
         Total number of (unit, candidate) entries.
     """

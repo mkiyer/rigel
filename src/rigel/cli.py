@@ -1354,7 +1354,7 @@ def _add_quant_io_options(grp) -> None:
     grp.add_argument(
         "--tsv",
         action=argparse.BooleanOptionalAction,
-        help="Also write TSV (.tsv) mirrors of quant tables (default: no).",
+        help=f"Also write TSV (.tsv) mirrors of quant tables (default: {_yes_no(_CONFIG_FILE_KEYS['tsv'])}).",
     )
 
 
@@ -1377,7 +1377,7 @@ def _add_quant_alignment_options(grp, qd: dict) -> None:
         help=f"BAM tag(s) for splice-junction strand (default: {' '.join(qd['sj_strand_tag'])}). "
         "'auto' reads XS and minimap2's ts on every spliced record; when both are present and disagree, the "
         "junction's strand is ambiguous. Name 'XS' (HISAT2, or STAR with --outSAMstrandField intronMotif) or "
-        "'ts' (minimap2) to read only that tag, or list two to check in order (e.g. XS ts).",
+        "'ts' (minimap2) to read only that tag, or list two to check in order (e.g. XS ts); 'none' reads no tag.",
     )
 
 
@@ -1391,9 +1391,9 @@ def _add_quant_model_options(grp, qd: dict) -> None:
     grp.add_argument(
         "--em-iterations",
         type=int,
-        help=f"EM iteration budget (default: {qd['em_iterations']}). The EM runs accelerated (SQUAREM) steps of "
-        "three EM updates each, up to a third of this budget, until it converges. At least one "
-        "step always runs, so 0 does not skip the EM: every fragment is still assigned.",
+        help=f"EM budget in EM steps, at least 1 (default: {qd['em_iterations']}, a measured early stop). The EM runs "
+        "accelerated (SQUAREM) steps of three EM updates each, up to a third of this budget and at least one, until "
+        "it converges.",
     )
     grp.add_argument(
         "--em-mode",
@@ -1421,7 +1421,7 @@ def _add_quant_performance_options(grp, qd: dict) -> None:
         type=int,
         help=f"Total thread budget for Rigel (default: {qd['threads']} = all available "
         "cores). During BAM scan, this budget is split between scan "
-        "workers and --scan-bgzf-threads; locus EM uses the same budget "
+        "workers and --scan-bgzf-threads; the calibration solve and the locus EM use the same budget "
         "because the stages run serially.",
     )
     grp.add_argument(
@@ -1478,8 +1478,8 @@ def _add_quant_advanced_options(grp, qd: dict) -> None:
         "--sweep-block-slots",
         type=int,
         help="Calibration working set: the chain is solved one locus block at a time, the pieces between "
-        f"intergenic regions merged up to this many slots per block (default {qd['sweep_block_slots']}; 'none' is not "
-        "accepted here — the whole chain is a config choice). "
+        f"intergenic regions merged up to this many slots per block (default {qd['sweep_block_slots']}; the whole "
+        "chain as one block is set only from Python, CalibrationConfig(sweep_block_slots=None)). "
         "Performance only — the answer is the same for every value; it sizes the solver's per-thread "
         "arena, so smaller blocks use less memory per sweep. Advanced "
         "calibration knob.",

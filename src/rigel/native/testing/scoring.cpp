@@ -1,5 +1,5 @@
 // testing/scoring.cpp — `_scoring_impl.testing`: the scorer's constants, bound for the parity tests that hold them to
-// Python's own values. Production never reads them from here.
+// their definitions. Production never reads them from here.
 
 #include <nanobind/nanobind.h>
 

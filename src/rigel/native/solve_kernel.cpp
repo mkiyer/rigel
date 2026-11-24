@@ -3,14 +3,15 @@
 // pieces. The gates read the same kernels through `_solve_impl.testing` (testing/solve.cpp).
 //
 //   solve_blocks     the sweep. Per locus block: the introns' abundance rows, the self-solve ψ, the own-evidence
-//                    precision, the message layer
-//                    (builders, two passes, solve; skipped under the silent policy), the final ψ, the write-back on
-//                    the owned slots, `has_composition`, and the counts of the backbone's assertions. Each block runs
-//                    on one pool thread with that thread's arena; the belief is written in place and the diagnostics
-//                    captured on request. Bit-identical at every thread count: a block's arithmetic does not depend on
-//                    its thread, and only integer counts are reduced across blocks (`sweep.solve_chain`).
+//                    precision, the message layer (builders, two passes, solve; skipped under the silent policy), the
+//                    final ψ, the write-back on the owned slots, `has_composition`, and the counts of the backbone's
+//                    assertions. Each block runs on one pool thread with that thread's arena; the belief is written
+//                    in place and the diagnostics captured on request. Bit-identical at every thread count: a block's
+//                    arithmetic does not depend on its thread, and only integer counts are reduced across blocks
+//                    (`sweep.solve_chain`).
 //   psi_solve        ψ over a slot list, one slot at a time on the same pool: the pre-sweep solve
 //                    (`simplex_logodds.solve_regions_logodds`) and the gates (`tests/calibration/_psi_reference.py`).
+//   side_shares      the cut shares the effective lengths are built from (`cut_shares.cpp`).
 //   rows             `read_column` and `ARM_EPS`, the kernel's values its Python readers share.
 
 #include <algorithm>
@@ -140,7 +141,8 @@ double log_negbinom(double g, double mu, double size) {
 // node, and at the background's mode for the node whose cell holds it
 void intron_row(const Background& bg, double count, double eff, const double* lam, int K, double* out) {
     const double mu = std::exp(bg.log_rate) * std::max(eff, P::ARM_EPS);
-    // the continuous count's mode, where ψ(g + size) − ψ(g + 1) = log((μ + size)/μ), to O(1/g²); 0 below size 1
+    // the continuous count's mode, where digamma(g + size) − digamma(g + 1) = log((μ + size)/μ), to O(1/g²); 0 below
+    // size 1
     const double mode = std::max(0.0, (std::isfinite(bg.size) ? mu * (1.0 - 1.0 / bg.size) : mu) - 0.5);
     const double half = K > 1 ? 0.5 * (lam[K - 1] - lam[0]) / (K - 1) : 0.0;
     for (int k = 0; k < K; ++k) {
@@ -629,7 +631,8 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
 void bind_cut_shares(nb::module_& m);  // cut_shares.cpp
 
 NB_MODULE(_solve_impl, m) {
-    m.doc() = "The calibration solve: the block pipeline in one call per sweep, and ψ over a slot list.";
+    m.doc() = "The calibration solve: the block pipeline in one call per sweep, ψ over a slot list, and the cut shares "
+              "of the effective lengths.";
     // the policy codes `solve_blocks` switches on; the silent policy runs no message layer
     m.attr("POLICY_SILENT") = rigel::POLICY_SILENT;
     m.attr("POLICY_TRANSFER") = rigel::POLICY_TRANSFER;
@@ -644,10 +647,9 @@ NB_MODULE(_solve_impl, m) {
           nb::arg("out_fneg").noconvert(), nb::arg("out_fg").noconvert(), nb::arg("out_var").noconvert(),
           nb::arg("out_has_composition").noconvert(), nb::arg("diagnostics").none(), nb::arg("n_threads"),
           "Solve every locus block of the chain — the introns' abundance rows, the self-solve, the own evidence, the "
-          "message layer, the "
-          "final solve, the write-back, the assertions' counts — on a pool of threads, one block at a time; the belief and "
-          "`has_composition` written in place on the owned slots; the counts and the capture returned. "
-          "Bit-identical at every thread count.");
+          "message layer, the final solve, the write-back, the assertions' counts — on a pool of threads, one block at "
+          "a time; the belief and `has_composition` written in place on the owned slots; the counts and the capture "
+          "returned. Bit-identical at every thread count.");
     m.def("psi_solve", &psi_solve, nb::arg("slots"), nb::arg("u_pos"), nb::arg("u_neg"), nb::arg("allow_pos"),
           nb::arg("allow_neg"), nb::arg("fg_ref"), nb::arg("fpos_ref"), nb::arg("fneg_ref"), nb::arg("kappa"),
           nb::arg("lam"), nb::arg("gdna").none(), nb::arg("row_logprior").none(), nb::arg("cube_slot"),

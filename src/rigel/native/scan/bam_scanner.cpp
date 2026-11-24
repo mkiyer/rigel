@@ -584,7 +584,7 @@ void BamScanner::require_partition() const {
     if (!partition_.has_sj) {
         throw std::runtime_error(
             "scan: set_regions was called but set_sj was not. The sj table is not "
-            "optional — without it every observed intron reads as unannotated, so the sj boundaries "
+            "optional — without it every observed intron reads as unannotated, so the splice junctions "
             "and the spliced banks are silently empty. Call set_sj with empty arrays if this "
             "annotation genuinely has no sj.");
     }

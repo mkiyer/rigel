@@ -390,8 +390,8 @@ void Accumulator::for_each_mass_share(std::size_t segment, std::int64_t seg_star
 
 void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
                                         const std::vector<ScoredHypothesis>& survivors) noexcept {
-    // The one site, so the subclasses cannot drift apart. The caller has established that at least one hypothesis
-    // is spliced; counting any other fragment would make the umbrella's denominator the whole library.
+    // The one site, so the census's four classes cannot drift apart. The caller has established that at least one
+    // hypothesis is spliced; counting any other fragment would make the umbrella's denominator the whole library.
     std::int64_t n_spliced = 0;
     bool unspliced_survives = false;
     for (const ScoredHypothesis& s : survivors) {

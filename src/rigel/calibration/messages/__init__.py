@@ -2,7 +2,7 @@
 
 The backbone (``sweep.solve_chain``) owns traversal and the solve. A policy supplies a name the kernel switches on
 (``"transfer"`` or ``"silent"``) and a library, ``policy.library(view)``, reduced once per sweep from observations and
-geometry. A message builder may read counts and geometry at either end of a hop but never a posterior belief: own
+geometry. A message builder may read counts and geometry at either end of a step but never a posterior belief: own
 strand claims are conditional-binomial likelihoods of the observed columns, and counting noise or observed
 disagreement may widen a received claim but never move its mode toward a belief. :class:`ChainView` holds the whole
 chain for the library (built from :func:`view_fields`); the native ``transfer_kernel::Chain`` holds one block for the
@@ -31,10 +31,10 @@ class ChainView:
     """Observations and geometry available to a policy, without posterior beliefs.
 
     A policy's ``library`` sees the whole chain; native message builders read the same
-    fields a block at a time. Counts and geometry may be read at either end of a hop.
+    fields a block at a time. Counts and geometry may be read at either end of a step.
     """
 
-    # ── observations: readable at either end of a hop ──────────────────────────────────────────────────────────
+    # ── observations: readable at either end of a step ─────────────────────────────────────────────────────────
     eff_gdna: np.ndarray  # per-slot gDNA opportunity (the capture-blind effective length)
     eff_rna: np.ndarray  # per-slot RNA opportunity
     sj_count: np.ndarray  # [n, 2] sj fragment count by transcript strand (both faces)
@@ -72,7 +72,7 @@ class ChainView:
     # ── the library's strand verdict (neither observation nor belief) ─────────────────────────────────────────────
     #: the library's strand protocol decision (``strand_balance.strand_discriminability`` > 0). When it is False every
     #: single-strand exon's strand precision is exactly zero, which a policy reading the split as an RNA witness must
-    #: know before it prices a hop
+    #: know before it prices a step
     strand_live: bool = False
 
     @property

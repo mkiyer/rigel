@@ -38,7 +38,7 @@ struct ResolvedFragment {
     // The per-junction strand table's key: the leftmost observed junction (-1 when none), completed by `sj_strand`. A
     // strand-qualified fragment carries one strand bit (mates whose XS/ts tags disagree OR to STRAND_AMBIGUOUS and are
     // rejected), so all its junctions agree, and crediting one junction per fragment keeps the 2×2 marginal identity.
-    // Every observed junction is annotated (the scan's annotated-path rule), so the pick is.
+    // Every observed junction is annotated (the scan's annotated-path rule), so the pick is an annotated junction.
     int32_t sj_key_ref = -1;
     int32_t sj_key_start = -1;
     int32_t sj_key_end = -1;
@@ -50,8 +50,8 @@ struct ResolvedFragment {
     std::vector<int32_t> gap_intron_offsets;  // n_hypotheses + 1, starting at 0
     std::vector<int32_t> gap_sj_strand;       // n_hypotheses
 
-    // The hit's own, set by the scan: the template's valid hits, R1 places times R2 places (past 16 bits in a
-    // repeat), and the hit's NM and soft-clipped bases over its records.
+    // The hit's own, set by the scan: the template's usable hits (`judge_template`'s count, which can pass 16 bits in
+    // a repeat), and the hit's NM and soft-clipped bases over its records.
     int32_t num_hits = 1;
     int32_t nm = 0;
     int32_t clip = 0;

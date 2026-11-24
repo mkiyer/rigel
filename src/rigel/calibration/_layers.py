@@ -7,6 +7,7 @@ is saying that the thing belongs lower, or that the module itself belongs higher
 =========================================  ==========================================================
 if the change is about…                    it goes in layer
 =========================================  ==========================================================
+the words everything else is written in    0 · vocabulary
 what a fragment tally means                1 · the payload view
 how many places a fragment could have sat  2 · opportunity
 one slot's own numbers, and psi            3 · geometry and the per-slot solve

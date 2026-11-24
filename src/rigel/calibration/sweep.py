@@ -22,9 +22,9 @@ message is about. It owns the shape of the solve and two invariants no policy ma
 A terminal, a region that admits no RNA strand and so is structurally pure gDNA, receives nothing. Nothing crosses a
 terminal, so the chain splits into independent loci there (``region_chain.locus_blocks``).
 
-Both gates on a slot read the region signature, never the counts. The solve gate (``solvable``): a slot is solved iff
-it admits at least one RNA strand and has unspliced mass. A slot with no admissible RNA strand is a locked all-gDNA
-object that keeps its signature-binary init. The emission gate, which messages a slot sends, is the policy's.
+The solve gate (``solvable``): a slot is solved iff its signature admits at least one RNA strand and it has unspliced
+mass. A slot with no admissible RNA strand is a locked all-gDNA object that keeps its signature-binary init. The
+emission gate, which messages a slot sends, is the policy's.
 
 Gate: ``tests/calibration/test_sweep_backbone.py``.
 """

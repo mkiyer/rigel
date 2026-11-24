@@ -46,8 +46,9 @@ class Library:
 
 
 class TransferPolicy:
-    """The composition-transfer policy. Observed strand claims use the fitted RNA sense fraction ``kappa``: eligible
-    regions and boundaries supply the conditional-binomial likelihood of their observed strand counts."""
+    """The composition-transfer policy. Its library reads each strand's RNA lane on the column ``read_column`` gives
+    at the fitted RNA sense fraction ``kappa``; the kernel's strand claims (eligible regions and boundaries supply the
+    conditional-binomial likelihood of their observed strand counts) use the same κ, which the sweep hands it."""
 
     name = "transfer"
 
@@ -72,7 +73,7 @@ class TransferPolicy:
             rho = float(n_u[a_g > 0.0].sum()) / den if den > 0.0 else 0.0
         kappa = self.kappa
         # the split is a witness of a strand's RNA only where the library's strand channel is live
-        # (``ChainView.strand_live``); each hop reads its own observations.
+        # (``ChainView.strand_live``); each step reads its own observations.
         single = fp != fn
         split_live = bool(view.strand_live)
         # the RNA lanes' coordinate: the unspliced RNA density over the single-strand exons, each strand read on its

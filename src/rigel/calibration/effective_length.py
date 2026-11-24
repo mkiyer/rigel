@@ -9,7 +9,7 @@ RNA have different length laws and different templates::
 
 ``R_lo`` / ``R_hi`` are the molecule's own remaining template either side of the boundary, so reach is per
 component: gDNA's template is the chromosome (:data:`UNBOUNDED_REACH`, and the divisor collapses to ``mu - 1``),
-RNA's ends with its transcript, which an sj boundary passes as the annotation's exonic reach. At a contiguous
+RNA's ends with its transcript, which an sj passes as the annotation's exonic reach. At a contiguous
 boundary the unspliced RNA reach is :data:`UNBOUNDED_REACH`, a value rather than a second code path. The conserved
 share (:func:`conserved_cut_shares`) reads the same placements a third way: how much of each placement's unit the
 deposit rule gives an object, so a template's objects share its fl-marginal length with nothing counted twice. The

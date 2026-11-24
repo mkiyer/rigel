@@ -242,7 +242,7 @@ class GeneBuilder:
                         seqname=t.ref,
                         source="rigel_sim",
                         feature="exon",
-                        start=exon.start,  # GTF.__str__ adds +1
+                        start=exon.start,  # GTFRecord.__str__ adds +1
                         end=exon.end,
                         score=t.abundance,
                         strand=strand_str,
@@ -259,6 +259,6 @@ class GeneBuilder:
 
         logger.info(
             f"Wrote {len(transcripts)} transcripts "
-            f"({sum(len(t.exons) for t in transcripts)} exon boundaries) → {gtf_path}"
+            f"({sum(len(t.exons) for t in transcripts)} exons) → {gtf_path}"
         )
         return gtf_path

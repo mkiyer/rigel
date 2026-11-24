@@ -7,7 +7,7 @@ where a named consumer reads it::
     regions                contained   count
     contiguous boundaries  unspliced   count  mass   the mixture being deconvolved
                            spliced     count  mass   certified RNA: gDNA cannot splice
-    sj boundaries          (one)       count  mass   pure RNA by construction
+    splice junctions       (one)       count  mass   pure RNA by construction
 
 Count columns are genome strand without exception, and the counts keep both because the strand likelihood is binomial
 in them. Sense is transcript-relative and derived by a consumer from an sj's own strand; it is never stored, because

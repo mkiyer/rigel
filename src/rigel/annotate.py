@@ -66,7 +66,7 @@ AF_INTERGENIC_BIT: int = 0x20
 AF_MULTIMAPPER_DROP_BIT: int = 0x80
 
 # Canonical composed values (the only legitimate ZF outputs).
-AF_UNRESOLVED: int = 0x00  # 0x00
+AF_UNRESOLVED: int = 0x00
 AF_ANNOTATED: int = AF_RESOLVED | AF_ANNOTATED_BIT  # 0x03
 AF_NASCENT: int = AF_RESOLVED | AF_NASCENT_BIT  # 0x11
 AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT  # 0x05
@@ -89,7 +89,7 @@ class AnnotationTable:
     Attributes
     ----------
     capacity : int
-        Pre-allocated array size (= total frag_ids).
+        Pre-allocated array size; the table grows when it is full.
     frag_ids : np.ndarray
         int64 — frag_id for each row (populated densely from 0).
     best_tid : np.ndarray

@@ -41,7 +41,7 @@ public:
 
     /// Install the sj CSR for every reference at once, from the flat arrays the index emits (`build_sj_arrays`),
     /// keyed by the flat region_bound index. Reference `f` owns region_bounds `[c0, c1)`; the CSR is sorted by
-    /// flat donor and references are region_bound-major, so its sj are the contiguous slot range
+    /// flat low end and references are region_bound-major, so its sj are the contiguous slot range
     /// `[offsets[c0], offsets[c1])`, and per reference:
     ///
     ///     offsets        -> offsets[c0 .. c1]        - offsets[c0]   (length n_region_bounds + 1)

@@ -2,7 +2,7 @@
 
 The EM starts from a coverage-weighted seed and adds a gDNA-vs-RNA prior per locus: ``a_g`` on
 gDNA and ``a_r`` on the RNA pool, shared among the RNA components in proportion to their current EM count unless
-``rna_prior_weight`` names the shares (``apply_grouped_prior_update`` in em_solver.cpp). Production passes no
+``rna_prior_weight`` names the shares (``apply_grouped_prior_update`` in em_prior.h). Production passes no
 weights, so the distribution within the RNA pool is the data's.
 
 ``ScoredFragments`` and ``LocusPartition`` live in ``rigel.scored_fragments``, ``MultiLocus`` in ``rigel.locus``,
@@ -214,7 +214,7 @@ def _locus_row(
 ) -> dict:
     """One locus's row of the loci table, from its EM result *r* and its member transcripts.
 
-    ``r["rna_total"]`` (em_solver.cpp, assign_posteriors) is the posterior count of every non-gDNA component in the
+    ``r["rna_total"]`` (em_assign.h, assign_posteriors) is the posterior count of every non-gDNA component in the
     locus, the annotated transcripts and the synthetic spans together. The table's counts do not overlap::
 
         count_nascent   = the synthetic spans' counts

@@ -465,10 +465,10 @@ NB_MODULE(_em_impl, m) {
           nb::arg("t_is_synthetic"),
           "Run locus EM from per-locus partition data.\n\n"
           "Accepts a list of 8-tuples (one per locus) of partition arrays.\n"
-          "Returns (total_gdna_em, locus_rna_total, locus_gdna, locus_stats,\n"
-          " out_winner_tid, out_winner_post, out_n_candidates, total_intergenic_em).\n"
+          "Returns (total_gdna_em, locus_rna, locus_gdna, locus_stats,\n"
+          " out_winner_tid, out_winner_post, out_n_candidates, total_intergenic_em, class_masses).\n"
           "\n"
-          "locus_rna_total is the sum of posteriors assigned to any\n"
+          "locus_rna is the sum of posteriors assigned to any\n"
           "transcript-like component (annotated transcripts and synthetic spans);\n"
           "splitting into annotated transcripts vs synthetic spans is done by\n"
           "the Python caller.");
@@ -476,7 +476,7 @@ NB_MODULE(_em_impl, m) {
     m.def("connected_components", &connected_components, nb::arg("offsets"), nb::arg("t_indices"),
           nb::arg("n_transcripts"),
           "Find connected components of the fragment→transcript overlap graph.\n\n"
-          "Uses union-find with path compression and union by rank.\n"
+          "Uses union-find with path halving and union by rank.\n"
           "All candidates are direct transcript indices.\n"
           "Returns (n_comp, comp_t_offsets, comp_t_flat, comp_u_offsets,\n"
           "comp_u_flat) where the CSR pairs (offsets, flat) give sorted\n"

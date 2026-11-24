@@ -371,6 +371,10 @@ def read_transcripts(
 
     Parameters
     ----------
+    gtf_file : str or Path
+        The annotation.
+    gtf_parse_mode : {"strict", "warn-skip"}
+        ``"strict"`` refuses a malformed record; ``"warn-skip"`` logs and skips it.
     collapse_duplicate_transcripts : bool
         Transcripts with identical exon structure raise ``ValueError`` when ``False`` (the default), and are collapsed
         by :func:`_collapse_duplicate_transcripts` when ``True``.
@@ -467,8 +471,8 @@ def _merged_spans(
     envelope. A single-exon transcript of the entity whose ends lie within *tolerance* of the span's own is that
     span: a single-exon transcript is its own nascent RNA, so no span equal to one is made; where several are, the one
     nearest the span, then the smallest ``t_id``. One that is near a member but not the span (a chain's far end) is not
-    the span's equal and stands for nothing. Returns each multi-exon transcript's span key ``(ref, strand, start, end)`` by ``t_index``, each
-    span's contributor count, and each span's single-exon transcript where it has one."""
+    the span's equal and stands for nothing. Returns each multi-exon transcript's span key ``(ref, strand, start,
+    end)`` by ``t_index``, each span's contributor count, and each span's single-exon transcript where it has one."""
     places: dict[tuple[str, int], list[Transcript]] = collections.defaultdict(list)
     for t in transcripts:
         places[(t.ref, int(t.strand))].append(t)
@@ -553,8 +557,9 @@ def create_nrna_transcripts(
     1. Each multi-exon transcript's extent and each single-exon transcript, on one reference and strand, are one
        entity with every other within *tolerance* bp at both ends, transitively (:func:`_merged_spans`); a span is
        its multi-exon members' envelope.
-    2. A single-exon transcript in a span's entity is the span: a single-exon transcript is its own nascent RNA.
-       A span no single-exon transcript is near is carried by one that contains it whole, if any
+    2. A single-exon transcript of a span's entity whose ends lie within *tolerance* of the span's own is the span: a
+       single-exon transcript is its own nascent RNA. A span no single-exon transcript is near is carried by one that
+       contains it whole, if any
        (:func:`_containing_transcripts`). Either way its ``span_n_contributors`` counts the span's transcripts.
     3. Each span not carried becomes a synthetic single-exon ``Transcript`` (``is_synthetic``, ``is_single_exon``).
        Synthetics are gene-neutral (:func:`_synthetic_span`): a merged span may draw on transcripts of several genes,
@@ -601,7 +606,7 @@ def _add_nascent_spans(transcripts: list[Transcript], tolerance: int) -> None:
         syn.t_index = len(transcripts) + i
         syn.g_index = next_g_index + i
         span_entity_t_index[(syn.ref, int(syn.strand), syn.start, syn.end)] = syn.t_index
-    # A covered span's entity is the annotated single-exon transcript that covers it
+    # A carried span's entity is the annotated single-exon transcript that carries it: near its ends, or containing it
     for span_key, equiv_tx in covered_equiv.items():
         span_entity_t_index[span_key] = equiv_tx.t_index
         equiv_tx.span_t_index = equiv_tx.t_index
@@ -681,7 +686,7 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
     Synthetic nRNA transcripts yield nothing: the C++ resolver derives
     their candidates from the transcripts a fragment hits, through each
     one's ``span_t_index``.  An annotated single-exon transcript that
-    covers a span (``is_synthetic=False``) yields intervals like any
+    carries a span (``is_synthetic=False``) yields intervals like any
     other transcript.
     """
     if t.is_synthetic:
@@ -712,8 +717,8 @@ class GenicSpan:
     """A reference span covered by one connected (strand-agnostic) transcript cluster.
 
     ``transcripts`` is the cluster's transcript list in input order; it
-    is strand-agnostic and excludes synthetic nRNAs (which are
-    constructed downstream of the layout sweep).
+    is strand-agnostic and excludes the synthetic spans, which
+    :func:`iter_reference_layout` filters out.
     """
 
     start: int
@@ -785,7 +790,7 @@ def _emit_genomic_intervals(
     Each ``IntergenicSpan`` becomes one INTERGENIC interval. Each
     ``GenicSpan`` is decomposed via :func:`_gen_transcript_intervals`
     (per-exon EXON intervals plus one TRANSCRIPT span per transcript).
-    Synthetic transcripts are filtered out by ``_gen_transcript_intervals``.
+    The synthetic spans never reach it: :func:`iter_reference_layout` filters them out.
     """
     for span in layout:
         if isinstance(span, IntergenicSpan):
@@ -1112,8 +1117,8 @@ def _exon_csr(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """``(offsets, starts, ends, cumsum_before)``: every transcript's exons as CSR over ``t_index``, int32, sorted by
     start, with each exon's cumulative exon length before it in its transcript. Synthetics are absent from the interval
-    table (see :func:`_gen_transcript_intervals`), but the native code still needs their single exon, ``[start, end)``
-    from the transcript table; a synthetic's own span replaces anything the table holds for it."""
+    table (:func:`iter_reference_layout` filters them out), but the native code still needs their single exon,
+    ``[start, end)`` from the transcript table; a synthetic's own span replaces anything the table holds for it."""
     n_t = int(t_df.shape[0])
     syn = t_df["is_synthetic"].to_numpy(dtype=bool)
     tidx = iv_df["t_index"].values
@@ -1185,8 +1190,8 @@ def _sj_exact_match_map(sj_csr) -> dict[tuple, frozenset[int]]:
 
 def _nrna_parents(t_df: pd.DataFrame) -> np.ndarray:
     """Each transcript's synthetic span, by ``t_index``, -1 where its span entity is no synthetic. Synthetics are absent
-    from the interval table (see :func:`_gen_transcript_intervals`), so the resolver derives each synthetic candidate
-    from the annotated transcripts a fragment hits, through this index."""
+    from the interval table (:func:`iter_reference_layout` filters them out), so the resolver derives each synthetic
+    candidate from the annotated transcripts a fragment hits, through this index."""
     is_synth = t_df["is_synthetic"].to_numpy(dtype=bool)
     span_idx = t_df["span_t_index"].to_numpy(dtype=np.int32)
     parent = np.full(span_idx.shape, -1, dtype=np.int32)
@@ -1287,9 +1292,10 @@ class TranscriptIndex:
 
         A tally's sj axis is meaningless against a different sj CSR, and the boundaries can change while the regions
         stay byte-identical, so this hashes ``partition_hash``'s inputs plus the sj CSR that crosses into ``set_sj``:
-        the donor offsets, the acceptor region-bound indices and the annotated strands. A payload records it, so a
-        cached tally can be checked against the index it is read with. It is not all a scan depends on: the
-        transcript models resolution reads and the scan settings are not in it. Computed on demand, never stored.
+        the offsets over each low end, the high ends' region-bound indices and the annotated strands. A payload
+        records it, so a cached tally can be checked against the index it is read with. It is not all a scan depends
+        on: the transcript models resolution reads and the scan settings are not in it. Computed on demand, never
+        stored.
         """
         import hashlib
 

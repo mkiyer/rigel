@@ -93,8 +93,9 @@ FragmentResolver::TranscriptIntrons FragmentResolver::introns_of(int32_t t) cons
 }
 
 // The candidate set needs this test because `merge_sets` falls back to a union, which can hold a contradicted
-// transcript; the pair rule's witness and the gap enumeration ask it too. Abutting is fine (an intron may start where a
-// block ends), and K is the slack the gap match uses: an aligner routinely runs a read a base or two past a donor.
+// transcript; the pair rule's witness and the gap enumeration ask it too. Abutting is fine (an intron may start where
+// a block ends), and K is the slack the gap match uses: an aligner routinely runs a read a base or two past a splice
+// site.
 bool FragmentResolver::transcript_contradicts_blocks(int32_t t,
                                                      const std::vector<std::pair<int32_t, int32_t>>& blocks,
                                                      int32_t K) const {

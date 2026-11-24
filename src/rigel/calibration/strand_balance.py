@@ -37,7 +37,9 @@ def fit_strand_balance(strand_model: "StrandModels") -> StrandBalance:
     counts, and ``rna_sense_frac`` is its mean. With ``n_obs == 0`` that is ½ and ``fallback_used`` is set.
     """
     n_obs = float(strand_model.n_observations)
-    p_sense = float(strand_model.p_r1_sense)  # MLE n_same / n_obs (0.5 when n_obs == 0)
+    p_sense = float(
+        strand_model.p_r1_sense
+    )  # the genuine junctions' sense count over n_obs (0.5 when n_obs == 0)
     n_same = p_sense * n_obs
     n_opp = n_obs - n_same
     a = n_same + 1.0  # rna_sense_frac posterior Beta(a, b) — Laplace prior Beta(1, 1)

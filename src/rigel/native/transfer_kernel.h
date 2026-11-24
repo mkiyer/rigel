@@ -10,8 +10,8 @@
 // Every table is a view of raw pointers with its sizes, so the same kernels run on the block pipeline's arena
 // (`solve_kernel.cpp`: one native call per sweep, a thread pool over the blocks) and on numpy arrays passed through
 // the gates' bindings (`testing/solve.cpp`); `transfer_store.h` owns the tables' storage. The row constructors are in
-// `transfer_rows.h`, shared with ψ's kernel. This is the only
-// implementation of the policy's arithmetic; there is no Python twin.
+// `transfer_rows.h`, shared with ψ's kernel. This is the only implementation of the policy's arithmetic; there is no
+// Python twin.
 // Gate: tests/calibration/test_transfer_*.py, against independent recomputes.
 #pragma once
 

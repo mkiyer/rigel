@@ -2,12 +2,13 @@
 
 Every C++ symbol the package uses is imported through this module:
 
-_bam_impl     : BAM scanning, annotation writing, junction-tag detection (htslib)
+_bam_impl     : BAM scanning, the calibration accumulator, annotation writing (htslib)
 _resolve_impl : fragment overlap resolution against the reference index
 _scoring_impl : per-fragment likelihood scoring (strand, coverage, splice)
 _em_impl      : the locus-level EM, the partition scatter that builds its loci's arrays, connected components
 _solve_impl   : the calibration solve: the sweep's block pipeline in one call (``solve_blocks``), ψ (``psi_solve``),
-                and ``rows``: ``read_column`` and ``ARM_EPS``, the kernel's values its Python readers share
+                the cut shares of the effective lengths (``side_shares``), and ``rows``: ``read_column`` and
+                ``ARM_EPS``, the kernel's values its Python readers share
 
 Every extension carries a ``testing`` submodule, its seams bound for the tests; production never imports it.
 """

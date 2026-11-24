@@ -73,7 +73,7 @@ SECTIONS = """
     </section>
 
     <section class="panel" id="s-align">
-      <div class="ph"><span class="eyebrow">01</span><h2>Alignment statistics</h2><span class="desc">Every read from the BAM, by fate</span></div>
+      <div class="ph"><span class="eyebrow">01</span><h2>Alignment statistics</h2><span class="desc">Every read pair from the BAM, by fate</span></div>
       <div class="pb">
         <div class="kpis" id="align-kpis"></div>
         <div class="grid2 wide-left">
@@ -166,7 +166,7 @@ SECTIONS = """
         <p class="cap" id="genome-cap">gDNA density across the genome</p>
         <div class="tw"><div class="vega-chart" id="vega-genome"></div></div>
         <div class="note">Log density, independent y per reference (so a high-density reference such as
-          chrM can't flatten the others). Full per-base signal is in
+          chrM can't flatten the others). Every region's density is in
           <span class="num">calibration_track.bedgraph</span> (IGV / UCSC).</div>
 
         <p class="cap" style="margin-top:22px">All references · by gDNA count</p>

@@ -9,9 +9,10 @@
  *       regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
  *       boundaries            boundary 1    boundary 2               c - 2 = 2
  *
- * A sj boundary is an annotated donor->acceptor link. A fragment is a path: its aligned blocks joined across the
- * mate gap, broken by introns. Regions count the fragments contained in them, boundaries the fragments crossing
- * them. Each object stores a count, the reciprocal-opportunity sum and, on boundaries and sj, the conserved mass.
+ * An sj is an annotated link from an intron's low end to its high end. A fragment is a path: its aligned blocks
+ * joined across the mate gap, broken by introns. Regions count the fragments contained in them, boundaries the
+ * fragments crossing them. Each object stores a count, the reciprocal-opportunity sum and, on boundaries and sj, the
+ * conserved mass.
  * Counts are integers and fractions are double: integer banks merge bit-identically across workers; double banks
  * are re-associated by the merge and agree to rounding.
  *
@@ -79,13 +80,13 @@ struct Boundary {
 };
 static_assert(sizeof(Boundary) == 40, "Boundary must be 40 bytes with no padding");
 
-/// A sj boundary: one exact donor->acceptor jump. Spliced by construction, so it holds no unspliced fragment, and
-/// not a genomic position, so it has no structural flags.
+/// An sj: one exact jump from an intron's low end to its high end. Spliced by construction, so it holds no unspliced
+/// fragment, and not a genomic position, so it has no structural flags.
 struct SpliceJunction {
     std::uint32_t count[kNStrandColumns];
     /// Read by the second pass to score a held fragment's sj evidence.
     double inv_length_sum;
-    /// The conserved mass's third axis: a block's end is a sj boundary wherever its intron resolved to an annotated
+    /// The conserved mass's third axis: a block's end is an sj wherever its intron resolved to an annotated
     /// sj, and each slice of a block shares its `slice_len / L` equally among the objects bounding it
     /// (`Accumulator::deposit`). Gate: tests/native/test_conserved_mass.py. Per strand, in `count`'s column, so
     /// `mass[c] / count[c]` is a per-strand mean: an artifactual junction accumulates on both strands as gDNA does,
@@ -182,7 +183,7 @@ struct ScoredHypothesis {
 struct DepositScratch {
     std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
     std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns cut out
-    std::vector<std::int32_t>                         sj_ids;     // annotated sj boundaries used
+    std::vector<std::int32_t>                         sj_ids;     // annotated splice junctions used
     /// The same resolution per intron position, -1 where unannotated, so the conserved mass can tell which of a
     /// block's ends is a sj: block `i` is bounded by `sj_id_at_gap[i-1]` and `sj_id_at_gap[i]`.
     std::vector<std::int32_t>                         sj_id_at_gap;
@@ -220,14 +221,14 @@ public:
     explicit Accumulator(std::vector<std::int64_t> region_bounds, std::vector<std::uint8_t> region_types,
                          int max_length, std::int32_t ref_id);
 
-    /// Install this reference's sj boundaries as a CSR keyed by the donor region_bound index, which the deposit
+    /// Install this reference's splice junctions as a CSR keyed by the low end's region_bound index, which the deposit
     /// already computes while locating the boundaries its path crosses.
     ///
-    /// The sj-boundary id is the slot: `sj_boundary_right[k]` and bank entry `k` are the same k (not a row of
-    /// `edges.feather`). Slot order is part of the contract: the caller sorts on (donor region_bound, acceptor
+    /// The sj id is the slot: `sj_boundary_right[k]` and bank entry `k` are the same k (not a row of
+    /// `edges.feather`). Slot order is part of the contract: the caller sorts on (low-end region_bound, high-end
     /// region_bound, sj_strand), matching `Partition.from_region_bounds` in the specification.
     void set_sj(std::vector<std::int32_t> offsets,         // size n_region_bounds + 1
-                std::vector<std::int32_t> boundary_right,  // acceptor region_bound index, not a coordinate
+                std::vector<std::int32_t> boundary_right,  // the high end's region_bound index, not a coordinate
                 std::vector<std::int8_t>  sj_strand);      // the sj's annotated strand
 
     std::size_t n_regions()    const noexcept { return regions_.size(); }
@@ -353,7 +354,7 @@ private:
     /// inferred lengths would bar fragments whose mates sit far apart, filtering the pool by length.
     std::int64_t fragment_pool(bool spliced, std::int64_t contained_region, std::int64_t sole_boundary) const noexcept;
 
-    /// The annotated sj-boundary id for one intron, or -1 if it is not an annotated sj.
+    /// The annotated sj id for one intron, or -1 if it is not an annotated sj.
     std::int64_t sj_edge_id(std::int64_t intron_start, std::int64_t intron_end, std::int32_t sj_strand) const noexcept;
 
     /// The flat region_bound index of `position`, or -1 if it is not a region_bound on this reference.
@@ -371,7 +372,7 @@ private:
     // to a wall only at the template's downstream end.
     std::vector<std::uint32_t>  region_start_count_;
 
-    std::vector<std::int32_t>   sj_offsets_;          // n_region_bounds + 1, CSR over the donor region_bound index
+    std::vector<std::int32_t>   sj_offsets_;          // n_region_bounds + 1, CSR over the low end's region_bound index
     std::vector<std::int32_t>   sj_boundary_right_;   // n_sj
     std::vector<std::int8_t>    sj_strand_;           // n_sj, the annotated strand
 

@@ -44,7 +44,8 @@ from ..config import CONSTANTS
 from ..native import psi_solve
 from .region_chain import RegionDeconv
 
-# Public surface consumed by sweep / messages / region_geometry.
+# The solve's public surface, read by sweep, region_geometry and diagnostics; landscape and capture_efficiency also read
+# the tile helper ``block_rows``.
 __all__ = [
     "CubeRows",
     "logodds_grid",

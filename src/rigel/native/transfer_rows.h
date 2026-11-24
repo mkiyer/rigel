@@ -202,8 +202,8 @@ inline void lower_side(const double* p, int K, double* out) {
     norm_inplace(out, K);
 }
 
-// intersect: the pointwise minimum of the parts already accumulated in out (the first part copied
-// in, the rest folded in with fold_min), then max-normalised — bounds intersect, they do not multiply.
+// fold_min: the pointwise minimum of the parts already accumulated in out (the first part copied in, the rest
+// folded in here), then max-normalised by the caller — bounds intersect, they do not multiply.
 inline void fold_min(const double* p, int K, double* out) {
     for (int j = 0; j < K; ++j) out[j] = std::min(out[j], p[j]);
 }
@@ -226,7 +226,8 @@ struct Scratch {
     explicit Scratch(int K) : a(K), b(K), c(K), d(K), e(K), f(K), g(K), h(K), level_count(K) {}
 };
 
-// transport_row(row, lam, lam_e_of_u, n_u, n_s)
+// transport_row: the row read through the inverse of `map` (the face map's image of each node) and blurred by both
+// counts' log variance.
 inline void transport_row(const double* row, const double* lam, int K, const double* map, double n_u,
                           double n_s, Scratch& S, double* out) {
     const double m = vmax(row, K);
@@ -250,7 +251,7 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
     const double sd = std::sqrt(trigamma(n_s + 0.5) + trigamma(n_u + 0.5));
     // The forward face map read in reverse, with each component's own opportunity and the route-summed
     // certified rate; only that rate varies across the marginal nodes. The map at each node is
-    // face_map_lambda(lam, n_u, a_g_b, a_r_b, a_g_e, a_r_e, s) with its node-independent half (the gDNA arm's
+    // face_map_lambda(lam, n_u, a_g_b, a_r_b, e_g_e, e_r_e, s) with its node-independent half (the gDNA arm's
     // log, the RNA arm's unspliced density) computed once per face, in the same operation order, so the bits
     // match.
     double* g_log = S.g.data();
@@ -273,7 +274,8 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
     if (ptp(out, K) <= EPS) std::fill(out, out + K, 0.0);
 }
 
-// level_row(row_b, lam, lam_i_of_b, v)
+// level_row: the row read through the inverse of `map` and blurred by `v`; a flat row, or a flat result, carries
+// nothing.
 inline void level_row(const double* row_b, const double* lam, int K, const double* map, double v, Scratch& S,
                       double* out) {
     if (ptp(row_b, K) <= EPS) {
