@@ -22,7 +22,6 @@ Gate: ``tests/calibration/test_capture_eff_length.py``.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING
@@ -31,7 +30,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import CONSTANTS
-from ..types import IntervalType, Strand
+from ..types import Strand
 from .effective_length import conserved_cut_shares, contained_eff_length
 from .region_arrays import overlapping_region_runs, region_right_boundary
 from .signature import RegionType, coarse_type_array
@@ -158,7 +157,8 @@ def _observable_parts(
     mask = np.asarray(mask, dtype=np.int64)
     if mask.shape[0] == 0 or t.size == 0:
         return t, piece, k, length, u
-    # the first masked run ending past each piece's start, on one ascending key: reference, then position
+    # the first masked run ending past each piece's start, on one ascending key: reference, then position (every
+    # position is below 2^40)
     span = np.int64(1) << np.int64(40)
     first = np.searchsorted(mask[:, 0] * span + mask[:, 2], ref * span + a, side="right")
     at = np.minimum(first, mask.shape[0] - 1)
@@ -212,21 +212,14 @@ def transcript_pieces(index: "TranscriptIndex", region_arrays: "RegionArrays") -
 
 
 def _template_spans(index: "TranscriptIndex"):
-    """``(t, ref_id, start, end)``: every transcript's exons, and an unspliced entity's whole span where it has no
-    exon row, in transcript then genomic order; ``ref_id`` is ``-1`` on a reference the index does not carry."""
-    iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
-    ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
-    tdf = index.t_df
-    syn = tdf[tdf["is_synthetic"].to_numpy(dtype=bool)]
-    syn = syn[~np.isin(syn["t_index"].to_numpy(np.int64), ex["t_index"].to_numpy(np.int64))]
-    t = np.concatenate([ex["t_index"].to_numpy(np.int64), syn["t_index"].to_numpy(np.int64)])
-    ref = np.concatenate([ex["ref"].astype(str).to_numpy(), syn["ref"].astype(str).to_numpy()])
-    a = np.concatenate([ex["start"].to_numpy(np.int64), syn["start"].to_numpy(np.int64)])
-    b = np.concatenate([ex["end"].to_numpy(np.int64), syn["end"].to_numpy(np.int64)])
-    order = np.lexsort((a, t))
-    t, ref, a, b = t[order], ref[order], a[order], b[order]
-    rid = pd.Series(ref).astype(str).map(index.ref_name_to_id).fillna(-1).to_numpy(np.int64)
-    return t, rid, a, b
+    """``(t, ref_id, start, end)``: every transcript's exons, a nascent span's one exon its whole span, in transcript
+    then genomic order: the index's exon CSR (:meth:`TranscriptIndex.build_exon_csr`). ``ref_id`` is ``-1`` on a
+    reference the index does not carry."""
+    offsets, starts, ends, _ = index.build_exon_csr()
+    t = np.repeat(np.arange(offsets.size - 1, dtype=np.int64), np.diff(offsets))
+    ref = index.t_df["ref"].astype(str).to_numpy()[t]
+    rid = pd.Series(ref).map(index.ref_name_to_id).fillna(-1).to_numpy(np.int64)
+    return t, rid, starts.astype(np.int64), ends.astype(np.int64)
 
 
 def _region_overlaps(t, rid, a, b, region_arrays: "RegionArrays"):
