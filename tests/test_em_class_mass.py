@@ -146,10 +146,11 @@ def test_no_masses_are_made_unless_asked():
     assert len(out) == 6
 
 
-
 def _stats_and_counts(parts):
     est = AbundanceEstimator(
-        4, em_config=EMConfig(assignment_mode="fractional", n_threads=1, seed=7), is_synthetic=IS_SYNTHETIC
+        4,
+        em_config=EMConfig(assignment_mode="fractional", n_threads=1, seed=7),
+        is_synthetic=IS_SYNTHETIC,
     )
     _, loci, _ = _fixture()
     est.run_batch_locus_em_partitioned(
