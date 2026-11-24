@@ -3,6 +3,8 @@ into the engine's ``SimulationParams`` / ``GDNASimConfig``."""
 
 from dataclasses import dataclass
 
+from ..config import CONSTANTS
+
 __all__ = ["ReadSimConfig", "GDNAConfig"]
 
 
@@ -32,7 +34,7 @@ class ReadSimConfig:
     error_rate: float = 0.0
     strand_specificity: float = 1.0
     r1_sense: bool = False
-    seed: int = 42
+    seed: int = CONSTANTS.simulator.seed
 
 
 @dataclass

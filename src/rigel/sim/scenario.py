@@ -123,7 +123,7 @@ class Scenario:
         name: str,
         *,
         genome_length: int = CONSTANTS.simulator.scenario_genome_length,
-        seed: int = CONSTANTS.simulator.scenario_seed,
+        seed: int = CONSTANTS.simulator.seed,
         work_dir: Path | None = None,
         ref_name: str | None = None,
     ):

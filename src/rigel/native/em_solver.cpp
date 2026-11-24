@@ -485,6 +485,7 @@ NB_MODULE(_em_impl, m) {
     // The assignment codes, the one definition rigel.estimator reads; batch_locus_em_partitioned refuses any other.
     m.attr("ASSIGN_FRACTIONAL") = ASSIGN_FRACTIONAL;
     m.attr("ASSIGN_SAMPLE") = ASSIGN_SAMPLE;
+    m.attr("EM_WINNER_GDNA") = EM_WINNER_GDNA;
     m.attr("EM_WINNER_INTERGENIC") = EM_WINNER_INTERGENIC;
     nb::list class_names;
     for (int c = 0; c < N_EM_CLASSES; ++c) class_names.append(nb::none());

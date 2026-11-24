@@ -268,9 +268,14 @@ public:
     /// Deposit one fragment. Allocates nothing: `scratch` is reused across calls.
     DepositOutcome deposit(const OfferedFragment& fragment, DepositScratch& scratch);
 
+    /// `admit`'s refusals: the fragment has no genome strand, or it clips to nothing.
+    static constexpr int ADMIT_NO_STRAND = -1;
+    static constexpr int ADMIT_EMPTY = -2;
+
     /// The strand check and the clip, counting nothing: the strand column with the clipped extent written to
-    /// `start`/`end`, or -1 when the fragment has no genome strand, -2 when it clips to nothing. The first two
-    /// steps of `deposit`, exposed so the set's offer admits each placement without counting per placement.
+    /// `start`/`end`, or ADMIT_NO_STRAND when the fragment has no genome strand, ADMIT_EMPTY when it clips to nothing.
+    /// The first two steps of `deposit`, exposed so the set's offer admits each placement without counting per
+    /// placement.
     int admit(const OfferedFragment& fragment, std::int64_t* start, std::int64_t* end) const noexcept;
 
     /// Every hypothesis's L, and the survivors of the one filter `L <= max_length` into `scratch.survivors` (the

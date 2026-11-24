@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .calibration.effective_length import observable_contained_eff_length
-from .calibration.signature import coarse_type_array
+from .calibration.signature import RegionType, coarse_type_array
 from .native import PLACE_BOUNDARY, PLACE_REGION, PLACE_SJ
 from .native import Accumulator as NativeAccumulator
 from .native import HeldBank as NativeHeldBank
@@ -429,7 +429,7 @@ def pass_one_bulk(
 ) -> float:
     """gDNA's bulk density on pass one: unique contained fragments per observable start over the intergenic regions,
     the unit :func:`placement_abundance` reads a contained placement in. 0 when there is no intergenic support."""
-    intergenic = region_types == 0
+    intergenic = region_types == RegionType.INTERGENIC
     support = float(region_support[intergenic].sum())
     if support <= 0.0:
         return 0.0

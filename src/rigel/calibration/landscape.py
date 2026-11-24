@@ -90,7 +90,8 @@ def log_rate_grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
     lo = float(np.min(-np.log10(np.maximum(eff, _EPS))))
     hi = float(np.max(np.log10(np.maximum(mass, _EPS)) - np.log10(np.maximum(eff, _EPS))))
     if not np.isfinite(lo) or not np.isfinite(hi) or hi - lo < _EPS:
-        lo, hi = lo - 0.5, lo + 0.5
+        half = 0.5 * CONSTANTS.landscape.degenerate_span_decades
+        lo, hi = lo - half, lo + half
     return np.linspace(lo, hi, CONSTANTS.landscape.grid_points)
 
 
@@ -123,7 +124,7 @@ def knn_widths(centres: np.ndarray, grid_step: float) -> np.ndarray:
     region, smearing one observation across decades.
     """
     n = centres.size
-    k = max(int(round(np.sqrt(n))), 2)
+    k = max(int(round(np.sqrt(n))), CONSTANTS.landscape.min_neighbours)
     srt = np.sort(centres)
     if n <= k:
         return np.full(n, max(float(srt[-1] - srt[0]), grid_step))

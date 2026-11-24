@@ -217,8 +217,8 @@ std::optional<DepositOutcome> AccumulatorSet::admit_placements(const Placement* 
         }
         std::int64_t s = 0, e = 0;
         const int column = accs_[static_cast<std::size_t>(pl.ref_id)].admit(pl.offered, &s, &e);
-        if (column == -1) { ++strand_rejected; continue; }
-        if (column == -2) { ++empty_rejected; continue; }
+        if (column == Accumulator::ADMIT_NO_STRAND) { ++strand_rejected; continue; }
+        if (column == Accumulator::ADMIT_EMPTY) { ++empty_rejected; continue; }
         sc.admitted.append(with_unspliced_default(pl.offered), pl.ref_id, s, e);  // one record per placement, clipped
     }
     if (sc.admitted.n_records() > 0) return std::nullopt;

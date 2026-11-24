@@ -41,7 +41,7 @@ import numpy as np
 from scipy.special import expit
 
 from ..config import CONSTANTS
-from ..native import psi_solve
+from ..native import psi_solve, transfer_rows
 from .region_chain import RegionDeconv
 
 # The solve's public surface, read by sweep, region_geometry and diagnostics; landscape and capture_efficiency also read
@@ -145,8 +145,8 @@ class CubeRows:
 
 
 # The θ window's truncation, in nats: the strand term's mass outside the window is below double precision, since
-# ``erfc(√T) ≈ e^{−T}/√(πT) < ε₆₄`` at ``T = −log ε₆₄``. The kernel carries the same constant (``psi_kernel.h``).
-_T_NATS = -np.log(np.finfo(np.float64).eps)
+# ``erfc(√T) ≈ e^{−T}/√(πT) < ε₆₄`` at ``T = −log ε₆₄``: the kernel's own constant (``psi_kernel.h``).
+_T_NATS = float(transfer_rows.T_NATS)
 
 # The node count that resolves the peak inside its window: the interior window is ``2√(2T)·σ_θ`` wide and the
 # trapezoid rule's error on a Gaussian at spacing ``h`` is ``2·e^{−2π²(σ_θ/h)²}``, below ``e^{−T}`` once

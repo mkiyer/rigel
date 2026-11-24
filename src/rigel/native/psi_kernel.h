@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "constants.h"
 #include "transfer_rows.h"
 
 namespace psi_kernel {
@@ -36,11 +37,11 @@ using transfer_rows::strand_variance;
 constexpr double JEFFREYS_REF = 0.5;
 constexpr double PI = 3.14159265358979323846;
 const double LOG_PI = std::log(PI), LOG_2 = std::log(2.0);
-const double NEG_INF = -std::numeric_limits<double>::infinity();
+using rigel::NEG_INF;
 
 // The θ quadrature's truncation: the strand term's mass outside the window is below double precision,
 // erfc(√T) < ε₆₄ at T = −log ε₆₄ with ε₆₄ = 2⁻⁵² (numpy's finfo(float64).eps). The dispatcher derives the node
-// count that resolves the peak inside that window from it (simplex_logodds.TILT_NODES).
+// count that resolves the peak inside that window from it (simplex_logodds.TILT_NODES), read as `rows.T_NATS`.
 const double T_NATS = -std::log(std::numeric_limits<double>::epsilon());
 
 // a delivered RNA level row (one row of simplex_logodds.CubeRows): the held profile per strand over

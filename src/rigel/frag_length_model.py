@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import BamScanConfig
+from .config import CONSTANTS, BamScanConfig
 
 
 @dataclass
@@ -200,7 +200,7 @@ class FragmentLengthModel:
         self,
         lengths: np.ndarray,
         *,
-        min_value: float = 1.0,
+        min_value: float = CONSTANTS.fragment_length.min_effective_length,
     ) -> np.ndarray:
         """The effective length of each transcript exonic length, from the cumulative sums of the pmf::
 
@@ -210,8 +210,8 @@ class FragmentLengthModel:
         ----------
         lengths : np.ndarray
             1-D array of transcript exonic (spliced) lengths.
-        min_value : float, default 1.0
-            Floor on the result. ``1.0`` keeps a short transcript's log finite (salmon's convention); pass ``0.0``
+        min_value : float, default ``CONSTANTS.fragment_length.min_effective_length``
+            Floor on the result. The default keeps a short transcript's log finite (salmon's convention); pass ``0.0``
             where the value is a Poisson-rate denominator, so a zero-span region contributes zero.
 
         Returns

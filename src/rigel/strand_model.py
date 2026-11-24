@@ -257,7 +257,7 @@ class StrandModel:
             return (0.0, 1.0)
         p = self.p_r1_sense
         se = math.sqrt(p * (1.0 - p) / n)
-        z = float(ndtri(0.975))  # the two-sided 95 % normal quantile
+        z = float(ndtri(CONSTANTS.qc.strand_interval_quantile))
         lo = max(0.0, p - z * se)
         hi = min(1.0, p + z * se)
         return (lo, hi)

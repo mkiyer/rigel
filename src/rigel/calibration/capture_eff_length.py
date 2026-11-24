@@ -347,7 +347,7 @@ def observable_fl_eff_lengths(frame: TranscriptFrame, rna_fl) -> np.ndarray:
             pieces.run_length[on].astype(np.int64), min_value=0.0
         ),
     )
-    eff[touched] = np.maximum(over_runs[touched], 1.0)
+    eff[touched] = np.maximum(over_runs[touched], CONSTANTS.fragment_length.min_effective_length)
     return eff
 
 

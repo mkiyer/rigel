@@ -16,8 +16,15 @@
 
 namespace transfer_rows {
 
-constexpr double EPS = 1.0e-9;
-constexpr double TINY = 1.0e-300;
+// A row whose spread across the λ lattice (`ptp`) is at most this is flat: it says nothing about the composition, so
+// it is neither claimed, transported nor summed. Chosen, not derived.
+constexpr double FLAT_ROW_SPREAD = 1.0e-9;
+// A fraction is held this far inside (0, 1) before its log or a division by its complement. Chosen, not derived.
+constexpr double FRACTION_EDGE = 1.0e-9;
+// The strand variance's floor, so a slot holding no count still has a finite precision. Chosen, not derived.
+constexpr double STRAND_VARIANCE_FLOOR = 1.0e-9;
+// A mass is floored here before its log: above the smallest normal double, so the log is finite (about −690.8).
+constexpr double LOG_FLOOR = 1.0e-300;
 // NONE, or one of the five composition rules a directed face can carry; bound by name as `testing.RULE_CODES`
 constexpr int NONE = 0, FORWARD = 1, TRANSPORT = 2, SPLICE_OUT = 3, EDGE = 4, LEVEL = 5;
 
@@ -64,7 +71,7 @@ inline double log_expit(double x) { return x < 0.0 ? x - std::log1p(std::exp(x))
 // precision, never the composition.
 inline double strand_variance(double n, double f_ref, double ref_pos, double ref_neg, double kappa) {
     const double p_ref = 0.5 * f_ref + kappa * ref_pos + (1.0 - kappa) * ref_neg;
-    return std::max(n * p_ref * (1.0 - p_ref), EPS);
+    return std::max(n * p_ref * (1.0 - p_ref), STRAND_VARIANCE_FLOOR);
 }
 // The strand term at one cell: the Gaussian log-likelihood of the + column count u_pos at the mean n·p,
 // p = ½ f_g + κ f_+ + (1 − κ) f_−, at the frozen variance.
@@ -215,7 +222,7 @@ inline void face_map_lambda(const double* lam, int K, double n_u, double a_g_b, 
         const double sig = sigmoid(lam[j]);
         const double g_arm = n_u * sig / a_g_b * e_g_e;
         const double r_arm = (n_u * (1.0 - sig) / a_r_b + s) * e_r_e;
-        out[j] = std::log(std::max(g_arm, TINY)) - std::log(std::max(r_arm, TINY));
+        out[j] = std::log(std::max(g_arm, LOG_FLOOR)) - std::log(std::max(r_arm, LOG_FLOOR));
     }
 }
 
@@ -242,7 +249,7 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
                            double a_g_b, double a_g_e, double a_r_b, double a_r_e, double splice_rate,
                            const double* nodes, int n_nodes, Scratch& S,
                            double* out) {
-    if (!(n_u > 0.0 && a_g_b > 0.0 && a_g_e > 0.0 && a_r_b > 0.0 && a_r_e > 0.0) || ptp(row_e, K) <= EPS) {
+    if (!(n_u > 0.0 && a_g_b > 0.0 && a_g_e > 0.0 && a_r_b > 0.0 && a_r_e > 0.0) || ptp(row_e, K) <= FLAT_ROW_SPREAD) {
         std::fill(out, out + K, 0.0);
         return;
     }
@@ -258,27 +265,27 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
     double* r_unspl = S.h.data();
     for (int j = 0; j < K; ++j) {
         const double sig = sigmoid(lam[j]);
-        g_log[j] = std::log(std::max(n_u * sig / a_g_b * a_g_e, TINY));
+        g_log[j] = std::log(std::max(n_u * sig / a_g_b * a_g_e, LOG_FLOOR));
         r_unspl[j] = n_u * (1.0 - sig) / a_r_b;
     }
     std::fill(S.d.begin(), S.d.end(), 0.0);
     for (int t = 0; t < n_nodes; ++t) {
         const double s = splice_rate * std::exp(nodes[t] * sd);
-        for (int j = 0; j < K; ++j) S.b[j] = g_log[j] - std::log(std::max((r_unspl[j] + s) * a_r_e, TINY));
+        for (int j = 0; j < K; ++j) S.b[j] = g_log[j] - std::log(std::max((r_unspl[j] + s) * a_r_e, LOG_FLOOR));
         interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
         rigel::fast_exp_inplace(S.c.data(), K);
         for (int j = 0; j < K; ++j) S.d[j] += S.c[j];
     }
-    for (int j = 0; j < K; ++j) out[j] = std::log(std::max(S.d[j] / n_nodes, TINY));
+    for (int j = 0; j < K; ++j) out[j] = std::log(std::max(S.d[j] / n_nodes, LOG_FLOOR));
     norm_inplace(out, K);
-    if (ptp(out, K) <= EPS) std::fill(out, out + K, 0.0);
+    if (ptp(out, K) <= FLAT_ROW_SPREAD) std::fill(out, out + K, 0.0);
 }
 
 // level_row: the row read through the inverse of `map` and blurred by `v`; a flat row, or a flat result, carries
 // nothing.
 inline void level_row(const double* row_b, const double* lam, int K, const double* map, double v, Scratch& S,
                       double* out) {
-    if (ptp(row_b, K) <= EPS) {
+    if (ptp(row_b, K) <= FLAT_ROW_SPREAD) {
         std::fill(out, out + K, 0.0);
         return;
     }
@@ -287,7 +294,7 @@ inline void level_row(const double* row_b, const double* lam, int K, const doubl
     interp(lam, K, map, lam, K, lam[0], lam[K - 1], S.b.data());  // the preimage
     interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
     blur_row(S.c.data(), K, lam, v, out, S.blur);
-    if (ptp(out, K) <= EPS) std::fill(out, out + K, 0.0);
+    if (ptp(out, K) <= FLAT_ROW_SPREAD) std::fill(out, out + K, 0.0);
 }
 
 // ---- the builders' rows: the maps and levels a node's own numbers make -----------------------------
@@ -296,7 +303,8 @@ inline void level_row(const double* row_b, const double* lam, int K, const doubl
 inline void level_map_lambda(const double* lam, int K, double density_b, double opportunity_i, double total_i,
                              double* out) {
     for (int j = 0; j < K; ++j) {
-        const double f = std::clamp(sigmoid(lam[j]) * density_b * opportunity_i / total_i, EPS, 1.0 - EPS);
+        const double f =
+            std::clamp(sigmoid(lam[j]) * density_b * opportunity_i / total_i, FRACTION_EDGE, 1.0 - FRACTION_EDGE);
         out[j] = std::log(f / (1.0 - f));
     }
 }
@@ -308,7 +316,7 @@ inline void level_bound_row(const double* lam, int K, double density_b, double o
     assert(v > 0.0);
     const double log_d = std::log(density_b);
     for (int j = 0; j < K; ++j) {
-        const double x = std::log(std::max(sigmoid(lam[j]) * total_i / opportunity_i, TINY)) - log_d;
+        const double x = std::log(std::max(sigmoid(lam[j]) * total_i / opportunity_i, LOG_FLOOR)) - log_d;
         const double xp = std::max(x, 0.0);
         out[j] = -0.5 * (xp * xp) / v;
     }
@@ -324,7 +332,7 @@ inline void edge_level_row(const double* lam, int K, double n_b, double n_e, dou
     }
     for (int j = 0; j < K; ++j) {
         const double c = sigmoid(lam[j]) * n_e * a_g_b / a_g_e;
-        out[j] = c >= n_b ? 0.0 : n_b * std::log(std::max(c, TINY) / n_b) - (c - n_b);
+        out[j] = c >= n_b ? 0.0 : n_b * std::log(std::max(c, LOG_FLOOR) / n_b) - (c - n_b);
     }
 }
 
@@ -332,14 +340,14 @@ inline void edge_level_row(const double* lam, int K, double n_b, double n_e, dou
 inline void poisson_level(const double* u, int K, double n, double a, double rho_ref, double* out) {
     for (int j = 0; j < K; ++j) {
         const double c = rho_ref * std::exp(u[j]) * a;
-        out[j] = n > 0.0 ? n * std::log(std::max(c, TINY)) - c : -c;
+        out[j] = n > 0.0 ? n * std::log(std::max(c, LOG_FLOOR)) - c : -c;
     }
     norm_inplace(out, K);
 }
 
 // the Poisson tail every level's own total adds above itself: n log(c/n) - (c - n) where c >= n
 inline double total_tail(double c, double n) {
-    return c >= n ? n * std::log(std::max(c, TINY) / n) - (c - n) : 0.0;
+    return c >= n ? n * std::log(std::max(c, LOG_FLOOR) / n) - (c - n) : 0.0;
 }
 
 // level_of_profile(row, lam, u, n, a, rho_ref): a composition profile read as a gDNA level.
@@ -350,7 +358,7 @@ inline void level_of_profile(const double* row, const double* lam, const double*
     for (int j = 0; j < K; ++j) {
         const double c = rho_ref * std::exp(u[j]) * a;
         S.level_count[j] = c;
-        const double f = std::clamp(c / n, EPS, 1.0 - EPS);
+        const double f = std::clamp(c / n, FRACTION_EDGE, 1.0 - FRACTION_EDGE);
         S.b[j] = std::log(f / (1.0 - f));
     }
     interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], out);
@@ -366,7 +374,7 @@ inline void rna_level_of_profile(const double* row, const double* lam, const dou
     for (int j = 0; j < K; ++j) {
         const double c = rho_ref * std::exp(u[j]) * a_r;
         S.level_count[j] = c;
-        const double f_r = std::clamp(c / n, EPS, 1.0 - EPS);
+        const double f_r = std::clamp(c / n, FRACTION_EDGE, 1.0 - FRACTION_EDGE);
         S.b[j] = std::log((1.0 - f_r) / f_r);
     }
     interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], out);

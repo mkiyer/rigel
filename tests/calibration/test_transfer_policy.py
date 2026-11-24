@@ -112,7 +112,7 @@ def _reference_rows(prepared, ctx):
             far = left[s] if right[s] == i else right[s]
             m = into(far, s) if far >= 0 else None
             r = _rule(prepared, s, i, held=m)
-            if r is not None and np.ptp(r) > R.EPS:
+            if r is not None and np.ptp(r) > R.FLAT_ROW_SPREAD:
                 out = norm(r)
         memo[key] = out
         return out
@@ -197,7 +197,7 @@ def test_perturbation_no_node_ever_hears_its_own_claim_back(sweep_inputs):
     probes = [
         i
         for i in range(ctx.n_slots)
-        if prepared.own[i] is not None and np.ptp(prepared.own[i]) > R.EPS
+        if prepared.own[i] is not None and np.ptp(prepared.own[i]) > R.FLAT_ROW_SPREAD
     ]
     assert probes, "no node carries a claim — this gate would prove nothing"
     checked = 0

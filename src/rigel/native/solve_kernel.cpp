@@ -12,7 +12,7 @@
 //   psi_solve        ψ over a slot list, one slot at a time on the same pool: the pre-sweep solve
 //                    (`simplex_logodds.solve_regions_logodds`) and the gates (`tests/calibration/_psi_reference.py`).
 //   side_shares      the cut shares the effective lengths are built from (`cut_shares.cpp`).
-//   rows             `read_column` and `ARM_EPS`, the kernel's values its Python readers share.
+//   rows             `read_column`, `ARM_EPS` and `T_NATS`, the kernel's values its Python readers share.
 
 #include <algorithm>
 #include <atomic>
@@ -160,9 +160,14 @@ void intron_row(const Background& bg, double count, double eff, const double* la
     for (int k = 0; k < K; ++k) out[k] -= m;
 }
 
+// A row whose spread is at most this carries no composition evidence, nor does one whose variance under the normalised
+// row is at most this. Chosen at ARM_EPS's value, not derived; the transfer reads a row as flat at its own
+// FLAT_ROW_SPREAD, a thousand times wider.
+constexpr double ROW_PRECISION_FLAT = 1.0e-12;
+
 // the composition evidence a row carries, 1/Var_λ under the row normalised; a flat row carries none
 double row_precision(const double* row, const double* lam, int K) {
-    if (!(ptp(row, K) > P::ARM_EPS)) return 0.0;
+    if (!(ptp(row, K) > ROW_PRECISION_FLAT)) return 0.0;
     const double m = vmax(row, K);
     double z = 0.0, s1 = 0.0, s2 = 0.0;
     for (int k = 0; k < K; ++k) {
@@ -172,7 +177,7 @@ double row_precision(const double* row, const double* lam, int K) {
         s2 += w * lam[k] * lam[k];
     }
     const double mean = s1 / z, var = s2 / z - mean * mean;
-    return var > P::ARM_EPS ? 1.0 / var : 0.0;
+    return var > ROW_PRECISION_FLAT ? 1.0 / var : 0.0;
 }
 
 // ---- the block pipeline ----
@@ -661,11 +666,13 @@ NB_MODULE(_solve_impl, m) {
           "`n_threads` threads (0: every core) — bit-identical at every thread count. `gdna` is the fitted arm as "
           "(log_rho, logP, mass, eff) or None; `row_logprior` the delivered composition rows or None.");
 
-    nb::module_ rows = m.def_submodule("rows", "read_column and ARM_EPS, the kernel's values its Python readers share.");
+    nb::module_ rows =
+        m.def_submodule("rows", "read_column, ARM_EPS and T_NATS, the kernel's values its Python readers share.");
     rows.def("read_column", [](int64_t col, double kappa) { return read_column(static_cast<int>(col), kappa); },
              nb::arg("col"), nb::arg("kappa"),
              "The genome-strand column strand `col`'s RNA reads on: its own when the library reads sense, else the other.");
     rows.attr("ARM_EPS") = P::ARM_EPS;
+    rows.attr("T_NATS") = P::T_NATS;
 
     rigel::bind_testing(m.def_submodule("testing", "ψ's pieces, the transfer's kernels and its row constructors, bound for "
                                             "the gates."));

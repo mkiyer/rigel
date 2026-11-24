@@ -188,11 +188,11 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // because every fragment counts once and the second pass resolves which path, not which strand.
     std::int64_t start = 0, end = 0;
     const int column = admit(fragment, &start, &end);
-    if (column == -1) {
+    if (column == ADMIT_NO_STRAND) {
         ++counters_.dropped_strand_undefined;
         return DepositOutcome::kStrandUndefined;
     }
-    if (column == -2) {
+    if (column == ADMIT_EMPTY) {
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
     }
@@ -215,10 +215,10 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
 
 int Accumulator::admit(const OfferedFragment& fragment, std::int64_t* start, std::int64_t* end) const noexcept {
     const int column = strand_column(fragment.align_strand);
-    if (column < 0) return -1;
+    if (column < 0) return ADMIT_NO_STRAND;
     // Clip to the reference. L is the clipped length, and the clip precedes arbitration because a hypothesis is
     // filtered on its L.
-    return clip(fragment, *start, *end) ? column : -2;
+    return clip(fragment, *start, *end) ? column : ADMIT_EMPTY;
 }
 
 void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t start, std::int64_t end,

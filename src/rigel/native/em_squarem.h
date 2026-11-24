@@ -18,10 +18,10 @@
 
 namespace rigel {
 
-// digamma by its asymptotic series, after shifting x up to 6 where the series is accurate.
+// digamma by its asymptotic series, after shifting x up to DIGAMMA_SERIES_FROM where the series is accurate.
 inline double digamma(double x) {
     double result = 0.0;
-    while (x < 6.0) {
+    while (x < DIGAMMA_SERIES_FROM) {
         result -= 1.0 / x;
         x += 1.0;
     }
@@ -92,7 +92,7 @@ inline double backtracked_squarem_step(
         }
         if (feasible) return step;
         ++backtracks;
-        const double shorter = 1.0 + 0.5 * (step - 1.0);
+        const double shorter = 1.0 + SQUAREM_BACKTRACK_SHRINK * (step - 1.0);
         step = (shorter < step) ? shorter : 1.0;  // exactly 1 once the excess no longer halves
     }
     return 1.0;

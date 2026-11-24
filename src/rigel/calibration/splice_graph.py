@@ -579,9 +579,9 @@ def _check_boundaries(regions_df, edges_df, ref, slices: dict) -> None:
     if src.size > 1:
         # (src, kind, dst, strand) packed into one int64 key that must strictly increase. Strand is in it because it is
         # in the order; without it two strand-coincident sj would read as a duplicate.
-        key = ((src * 2 + kind.astype(np.int64)) * max(n_regions, 1) + dst) * 4 + estrand.astype(
-            np.int64
-        )
+        key = ((src * 2 + kind.astype(np.int64)) * max(n_regions, 1) + dst) * len(
+            Strand
+        ) + estrand.astype(np.int64)
         if not np.all(np.diff(key) > 0):
             raise ValueError(
                 "I12: boundaries are not sorted by (src, kind, dst, strand), or a duplicate exists."
@@ -668,7 +668,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
     cflags = edges_df["flags"].to_numpy(np.uint16)[cm]
     n_regions = ref.size
     jm = kind == EDGE_KIND_SJ
-    jkey = np.sort((src[jm] * n_regions + dst[jm]) * 4 + estrand[jm].astype(np.int64))
+    jkey = np.sort((src[jm] * n_regions + dst[jm]) * len(Strand) + estrand[jm].astype(np.int64))
 
     slices = _ref_slices(ref)
     for name, L in reflen.items():
@@ -775,7 +775,7 @@ def _check_introns_are_sj(r: _Reference, intr, jkey, n_regions: int) -> None:
     a, b, st = intr[1][r.i_rows], intr[2][r.i_rows], intr[3][r.i_rows].astype(np.int64)
     js = r.base + np.searchsorted(r.region_bounds, a) - 1
     jd = r.base + np.searchsorted(r.region_bounds, b)
-    want = (js * n_regions + jd) * 4 + st
+    want = (js * n_regions + jd) * len(Strand) + st
     if jkey.size == 0:
         miss = np.ones(want.shape, bool)
     else:

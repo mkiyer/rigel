@@ -597,6 +597,14 @@ class LandscapeConstants:
     #: than 1 is below the wall: it has no location and does not train the prior. The identity's value, not tuned.
     located_var: float = 1.0
 
+    #: A landscape whose regions give no rate span to lay a grid on (one region, every region at one density, or no
+    #: finite bound) gets a grid this many decades wide, centred on the lowest rate it reads.
+    degenerate_span_decades: float = 1.0
+
+    #: A kernel's width is its k-th nearest neighbour's distance, k = √n rounded and at least this; with no more
+    #: regions than k, every kernel spans the whole sample.
+    min_neighbours: int = 2
+
     def __post_init__(self) -> None:
         _check_ranges(
             self,
@@ -605,6 +613,8 @@ class LandscapeConstants:
             knn_scale=self.knn_scale > 0.0,
             reliability_sd_decades=self.reliability_sd_decades > 0.0,
             located_var=self.located_var > 0.0,
+            degenerate_span_decades=self.degenerate_span_decades > 0.0,
+            min_neighbours=self.min_neighbours >= 1,
         )
 
 
@@ -710,6 +720,11 @@ class FragmentLengthConstants:
     #: ... and stops when a step changes the penalised objective by less than this share of it.
     law_newton_tolerance: float = 1e-12
 
+    #: An effective length is floored here wherever it divides (a transcript's, a gene's, TPM's rate): a transcript
+    #: shorter than its fragments has under one start position, and it reads one rather than a rate near 1/0. The
+    #: convention of salmon and kallisto; a Poisson rate's denominator, where a span of 0 must add 0, takes no floor.
+    min_effective_length: float = 1.0
+
     def __post_init__(self) -> None:
         _check_ranges(
             self,
@@ -719,6 +734,7 @@ class FragmentLengthConstants:
             law_step_tolerance=self.law_step_tolerance > 0.0,
             law_newton_steps=self.law_newton_steps >= 1,
             law_newton_tolerance=0.0 < self.law_newton_tolerance < 1.0,
+            min_effective_length=self.min_effective_length > 0.0,
         )
 
 
@@ -753,6 +769,10 @@ class QcConstants:
 
     #: Confidence of the upper credible limit on the wrong-strand rate the strand trainer's log line reports.
     strand_ci_confidence: float = 0.99
+
+    #: The normal quantile of the strand rate's two-sided 95 % interval (``StrandModel.posterior_95ci``), which the
+    #: QC summary reports.
+    strand_interval_quantile: float = 0.975
 
     #: An error or warning that lists offending items (duplicate transcript groups, …) shows at most this many.
     report_examples: int = 5
@@ -799,6 +819,9 @@ class QcConstants:
     #: The fragment-length overlay bins lengths this many bp wide before it normalises each pool's density.
     fl_overlay_bin_bp: int = 5
 
+    #: The fragment-length small multiples draw each pool's lengths in at most this many bars.
+    fl_small_multiples_bins: int = 32
+
     #: The genome track facets at most this many references, those holding the most gDNA first, and its caption
     #: states the cap; the reference table lists every reference.
     genome_track_refs: int = 24
@@ -814,6 +837,7 @@ class QcConstants:
             self,
             strand_min_observations=self.strand_min_observations >= 0,
             strand_ci_confidence=0.0 < self.strand_ci_confidence < 1.0,
+            strand_interval_quantile=0.5 < self.strand_interval_quantile < 1.0,
             report_examples=self.report_examples >= 1,
             mapping_rate_good=0.0 < self.mapping_rate_good <= 1.0,
             mapping_rate_warning=0.0 <= self.mapping_rate_warning <= self.mapping_rate_good,
@@ -827,6 +851,7 @@ class QcConstants:
             fraction_decimals=self.fraction_decimals >= 0,
             overflow_percent_decimals=self.overflow_percent_decimals >= 0,
             fl_overlay_bin_bp=self.fl_overlay_bin_bp >= 1,
+            fl_small_multiples_bins=self.fl_small_multiples_bins >= 1,
             genome_track_refs=self.genome_track_refs >= 1,
             genome_track_bins=self.genome_track_bins >= 1,
             position_mb_decimals=self.position_mb_decimals >= 0,
@@ -849,11 +874,14 @@ class SimulatorConstants:
     oversample_extra: int = 10
 
     #: A ``rigel sim`` scenario's defaults where neither its YAML nor the command line sets them (``sim.Scenario``):
-    #: a genome length (bp) and a fragment count small enough that a scenario builds in seconds, and a seed, whose value
-    #: is arbitrary: any fixed one makes the scenario reproducible.
+    #: a genome length (bp) and a fragment count small enough that a scenario builds in seconds.
     scenario_genome_length: int = 5000
-    scenario_seed: int = 42
     scenario_fragments: int = 1000
+
+    #: The simulator's seed and its reference's name wherever the caller gives none (a scenario, its genome, a read
+    #: simulation, a whole-genome run). The seed's value is arbitrary: any fixed one makes a run reproducible.
+    seed: int = 42
+    ref_name: str = "chr1"
 
     def __post_init__(self) -> None:
         _check_ranges(
@@ -861,8 +889,9 @@ class SimulatorConstants:
             oversample_ratio=self.oversample_ratio >= 1.0,
             oversample_extra=self.oversample_extra >= 1,
             scenario_genome_length=self.scenario_genome_length >= 1,
-            scenario_seed=self.scenario_seed >= 0,
             scenario_fragments=self.scenario_fragments >= 1,
+            seed=self.seed >= 0,
+            ref_name=bool(self.ref_name),
         )
 
 

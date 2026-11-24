@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pysam
 
+from ..config import CONSTANTS
+
 __all__ = ["MutableGenome", "reverse_complement", "random_dna_array", "write_fasta_file"]
 
 _DNA_COMPLEMENT = str.maketrans("ACGTNacgtn", "TGCANtgcan")
@@ -65,7 +67,13 @@ class MutableGenome:
     >>> path = g.write_fasta(Path("/tmp/test"))
     """
 
-    def __init__(self, length: int, *, seed: int = 42, name: str = "chr1"):
+    def __init__(
+        self,
+        length: int,
+        *,
+        seed: int = CONSTANTS.simulator.seed,
+        name: str = CONSTANTS.simulator.ref_name,
+    ):
         self.name = name
         self._rng = np.random.default_rng(seed)
         self._seq: list[str] = list(random_dna_array(length, self._rng))

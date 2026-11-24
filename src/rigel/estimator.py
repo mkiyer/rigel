@@ -14,7 +14,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from .config import EMConfig, TranscriptGeometry
+from .config import CONSTANTS, EMConfig, TranscriptGeometry
 from .native import (
     ASSIGN_FRACTIONAL,
     ASSIGN_SAMPLE,
@@ -91,8 +91,9 @@ def _tpm(
     All inputs must share the same length; the denominator uses
     ``eff_len`` in both the numerator and denominator rpk.
     """
-    rpk = counts / np.maximum(eff_len, 1.0)
-    denom_rpk = rpk if denom_counts is None else denom_counts / np.maximum(eff_len, 1.0)
+    floor = CONSTANTS.fragment_length.min_effective_length
+    rpk = counts / np.maximum(eff_len, floor)
+    denom_rpk = rpk if denom_counts is None else denom_counts / np.maximum(eff_len, floor)
     denom = denom_rpk.sum()
     return (rpk / denom * 1e6) if denom > 0 else np.zeros_like(rpk)
 
@@ -161,15 +162,16 @@ def _gene_effective_lengths(
     t_to_g: np.ndarray, n_genes: int, t_counts: np.ndarray, t_eff: np.ndarray
 ) -> np.ndarray:
     """Each gene's effective length: its transcripts' effective lengths weighted by their counts, the unweighted mean
-    for a gene with no count, floored at 1."""
+    for a gene with no count, floored at ``CONSTANTS.fragment_length.min_effective_length``."""
+    floor = CONSTANTS.fragment_length.min_effective_length
     g_eff_num = _aggregate_to_gene(t_to_g, n_genes, t_counts * t_eff)
     g_eff_den = _aggregate_to_gene(t_to_g, n_genes, t_counts)
     g_eff_sum = _aggregate_to_gene(t_to_g, n_genes, t_eff)
     g_eff_cnt = _aggregate_to_gene(t_to_g, n_genes, np.ones_like(t_eff))
     with np.errstate(divide="ignore", invalid="ignore"):
-        g_eff_mean = np.where(g_eff_cnt > 0, g_eff_sum / g_eff_cnt, 1.0)
+        g_eff_mean = np.where(g_eff_cnt > 0, g_eff_sum / g_eff_cnt, floor)
         g_eff_len = np.where(g_eff_den > 0, g_eff_num / g_eff_den, g_eff_mean)
-    return np.maximum(g_eff_len, 1.0)
+    return np.maximum(g_eff_len, floor)
 
 
 #: The nascent table's columns, in order (:meth:`AbundanceEstimator.get_nascent_quant_df`).
@@ -740,8 +742,9 @@ class AbundanceEstimator:
 
         # Total RNA TPM, normalized over the annotated + synthetic rpk pool so it is comparable to the transcript
         # table's tpm_total_rna; inline, because the denominator is the full pool, not this array
-        rpk = counts / np.maximum(eff, 1.0)
-        total_rpk = float((t_total / np.maximum(self._t_eff_len_output, 1.0)).sum())
+        floor = CONSTANTS.fragment_length.min_effective_length
+        rpk = counts / np.maximum(eff, floor)
+        total_rpk = float((t_total / np.maximum(self._t_eff_len_output, floor)).sum())
         tpm_total_rna = (rpk / total_rpk * 1e6) if total_rpk > 0 else np.zeros_like(rpk)
 
         df = pd.DataFrame(

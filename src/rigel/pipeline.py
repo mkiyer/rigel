@@ -36,7 +36,7 @@ from .config import (
 from .estimator import AbundanceEstimator
 from .frag_length_model import FragmentLengthModel
 from .index import TranscriptIndex
-from .native import EM_WINNER_INTERGENIC
+from .native import EM_WINNER_GDNA, EM_WINNER_INTERGENIC
 from .native import BamScanner as _NativeBamScanner
 from .native import UnpairedRecordError
 from .routing import FragmentRouter
@@ -779,15 +779,15 @@ def populate_em_annotations(
 
     # ZF assignment flags bitfield
     tx_flags = np.full(n, AF_UNRESOLVED, dtype=np.uint8)
-    tx_flags[best_tid == -2] = AF_GDNA_EM
+    tx_flags[best_tid == EM_WINNER_GDNA] = AF_GDNA_EM
     tx_flags[best_tid == EM_WINNER_INTERGENIC] = AF_GDNA_INTERGENIC
     if valid_t.any():
         winner_tids = best_tid[valid_t]
         tx_flags[valid_t] = winner_flags(is_synth_arr[winner_tids])
 
-    # Clean sentinels: -2 (the locus's gDNA) and the intergenic term -> -1
+    # Clean sentinels: the locus's gDNA and the intergenic term -> -1
     best_tid_clean = best_tid.copy()
-    best_tid_clean[(best_tid == -2) | (best_tid == EM_WINNER_INTERGENIC)] = -1
+    best_tid_clean[(best_tid == EM_WINNER_GDNA) | (best_tid == EM_WINNER_INTERGENIC)] = -1
 
     annotations.add_batch(
         frag_ids=frag_ids,

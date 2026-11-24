@@ -240,7 +240,7 @@ inline void claims(const Chain& c, RowsOut& own, Scratch& S) {
     for (int x = 0; x < c.n; ++x) {
         const bool single = c.fp[x] != c.fn[x];
         const double* r = (c.intron_row != nullptr && c.intron(x)) ? c.intron_row[x] : nullptr;
-        const bool abundance = r != nullptr && ptp(r, c.K) > EPS;
+        const bool abundance = r != nullptr && ptp(r, c.K) > FLAT_ROW_SPREAD;
         const bool strand = single && c.has_own[x];
         if (!(strand || abundance)) continue;
         if (strand) {
@@ -325,7 +325,7 @@ inline void terminus_rules(const Chain& c, FacesOut& F, Scratch& S) {
         if (c.has_own[b] && c.has_own[i]) {
             double f_b, v_b, f_i, v_i;
             if (c.strand_mode(b, f_b, v_b) && c.strand_mode(i, f_i, v_i)) {
-                const double f_pred = std::min(f_b / r_mode, 1.0 - EPS);
+                const double f_pred = std::min(f_b / r_mode, 1.0 - FRACTION_EDGE);
                 const double d = std::log(f_i / (1.0 - f_i)) - std::log(f_pred / (1.0 - f_pred));
                 v_pair += std::max(0.0, d * d - (v_b + v_i + 1.0 / c.n_u[i] + 1.0 / total_b));
             }
@@ -390,7 +390,7 @@ inline void gdna_lane(const Chain& c, const RowsOut& own, const FacesOut& F, dou
         if (gene_edge) {
             poisson_level(u, c.K, c.n_u[x], c.a_g[x], rho_ref, S.a.data());
             L.own_level.set(x, S.a.data());
-        } else if (const double* o = own.get(x); o != nullptr && ptp(o, c.K) > EPS) {
+        } else if (const double* o = own.get(x); o != nullptr && ptp(o, c.K) > FLAT_ROW_SPREAD) {
             level_of_profile(o, c.lam, u, c.K, c.n_u[x], c.a_g[x], rho_ref, S, S.c.data());
             L.own_level.set(x, S.c.data());
         }
@@ -443,7 +443,7 @@ inline void rna_sources(const Chain& c, const RowsOut& own, int strand, double r
         const bool empty = !(c.n_u[x] > 0.0) || !(c.a_r[x] > 0.0);
         const bool single = !(c.fp[x] && c.fn[x]);
         Intersection inter{S.d.data(), c.K};
-        if (const double* o = own.get(x); !empty && single && o != nullptr && ptp(o, c.K) > EPS) {
+        if (const double* o = own.get(x); !empty && single && o != nullptr && ptp(o, c.K) > FLAT_ROW_SPREAD) {
             rna_level_of_profile(o, c.lam, c.lam, c.K, c.n_u[x], c.a_r[x], rho_ref, S, S.c.data());
             inter.add(S.c.data());
         }
@@ -648,7 +648,7 @@ inline const double* faces_apply(const FacesView& F, int i, int side, const doub
         const int r = F.row[at];
         if (r < 0) return nullptr;
         const double* row = F.map(r);
-        if (ptp(row, K) <= EPS) return nullptr;
+        if (ptp(row, K) <= FLAT_ROW_SPREAD) return nullptr;
         std::copy(row, row + K, out);
         return out;
     }
@@ -700,7 +700,7 @@ inline void pass_block(const double* lam, int K, const int64_t* seq, int n, cons
             const double* own_s = own_mask[s] ? own + static_cast<size_t>(s) * K : nullptr;
             const double* held = R.has_composition[s] ? R.comp(s) : nullptr;
             const double* r = faces_apply(F, i, side, own_s, held, lam, K, S, out.data());
-            if (r != nullptr && ptp(r, K) > EPS) {
+            if (r != nullptr && ptp(r, K) > FLAT_ROW_SPREAD) {
                 double* dest = R.comp(i);
                 std::copy(r, r + K, dest);
                 norm_inplace(dest, K);
@@ -789,8 +789,8 @@ struct BlockSolve {
         if (!inter.any()) return false;
         inter.finish();
         rna_row_of_level(bound, lam, lam, K, L.total[i], L.a[i], L.rho_ref, S, row);
-        if (ptp(row, K) <= EPS) return false;
-        if (ptp(r, K) > EPS) { for (int j = 0; j < K; ++j) r[j] += row[j]; norm_inplace(r, K); }
+        if (ptp(row, K) <= FLAT_ROW_SPREAD) return false;
+        if (ptp(r, K) > FLAT_ROW_SPREAD) { for (int j = 0; j < K; ++j) r[j] += row[j]; norm_inplace(r, K); }
         else std::copy(row, row + K, r);
         return true;
     }

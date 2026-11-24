@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..config import CONSTANTS
+
 
 @dataclass
 class SimulationParams:
@@ -14,7 +16,7 @@ class SimulationParams:
     #: Fixed total fragment budget: `gdna.rates` then decides only the RNA/gDNA split, which reaches high gDNA
     #: fractions at a bounded depth. `None` fixes the RNA depth and adds gDNA to it.
     n_total_fragments: int | None = None
-    sim_seed: int = 42
+    sim_seed: int = CONSTANTS.simulator.seed
     frag_mean: float = 250.0
     frag_std: float = 50.0
     frag_min: int = 50

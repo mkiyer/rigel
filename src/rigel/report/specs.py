@@ -143,7 +143,7 @@ def fl_small_multiples_spec(fl_df: pd.DataFrame) -> dict | None:
                 "x": {
                     "field": "length",
                     "type": "quantitative",
-                    "bin": {"maxbins": 32},
+                    "bin": {"maxbins": CONSTANTS.qc.fl_small_multiples_bins},
                     "title": "bp",
                 },
                 "y": {"field": "count", "aggregate": "sum", "type": "quantitative", "title": None},

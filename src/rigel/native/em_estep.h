@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "constants.h"
 #include "fast_exp.h"
 #include "thread_pool.h"
 
@@ -197,12 +198,11 @@ inline void em_step_kernel(
     const double* ll = ec.ll_flat.data();
     const int32_t* cidx = ec.comp_idx.data();
 
-    // Row buffer: on the stack for k <= MAX_K_STACK, on the heap above it.
-    constexpr int MAX_K_STACK = 512;
-    double stack_row[MAX_K_STACK];
+    // Row buffer: on the stack for k <= ESTEP_STACK_ROW, on the heap above it.
+    double stack_row[ESTEP_STACK_ROW];
     std::vector<double> heap_row;
     double* row = stack_row;
-    if (k > MAX_K_STACK) {
+    if (k > ESTEP_STACK_ROW) {
         heap_row.resize(k);
         row = heap_row.data();
     }

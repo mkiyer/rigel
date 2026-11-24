@@ -7,8 +7,8 @@ _resolve_impl : fragment overlap resolution against the reference index
 _scoring_impl : per-fragment likelihood scoring (strand, coverage, splice)
 _em_impl      : the locus-level EM, the partition scatter that builds its loci's arrays, connected components
 _solve_impl   : the calibration solve: the sweep's block pipeline in one call (``solve_blocks``), ψ (``psi_solve``),
-                the cut shares of the effective lengths (``side_shares``), and ``rows``: ``read_column`` and
-                ``ARM_EPS``, the kernel's values its Python readers share
+                the cut shares of the effective lengths (``side_shares``), and ``rows``: ``read_column``,
+                ``ARM_EPS`` and ``T_NATS``, the kernel's values its Python readers share
 
 Every extension carries a ``testing`` submodule, its seams bound for the tests; production never imports it.
 """
@@ -58,7 +58,7 @@ from ._em_impl import ASSIGN_FRACTIONAL
 from ._em_impl import ASSIGN_SAMPLE
 
 # the winner code a unit the intergenic term wins carries, beside -2 for the locus's own gDNA
-from ._em_impl import EM_WINNER_INTERGENIC
+from ._em_impl import EM_WINNER_GDNA, EM_WINNER_INTERGENIC
 
 # the columns of the EM's per-unit class masses, by name, in order
 from ._em_impl import EM_CLASSES
@@ -109,6 +109,7 @@ __all__ = [
     "scatter_units_u8",
     "ASSIGN_FRACTIONAL",
     "ASSIGN_SAMPLE",
+    "EM_WINNER_GDNA",
     "EM_WINNER_INTERGENIC",
     "EM_CLASSES",
     # The solve

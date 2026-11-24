@@ -220,6 +220,9 @@ SUMMARY_LENGTH_DECIMALS = 2
 #: million fragments, where fixed decimals print 0, and at most 0.25, so 8 significant digits are at least 8 decimals.
 SUMMARY_VARIANCE_DIGITS = 8
 
+#: The compression of every table a run writes (Feather, and Parquet on export).
+_TABLE_COMPRESSION = "zstd"
+
 #: The tables every run writes, each as ``<name>.feather`` with a TSV mirror under ``--tsv``, in the order written.
 _QUANT_TABLES = ("quant", "gene_quant", "nascent_quant", "loci")
 
@@ -287,7 +290,7 @@ def _remove_stale_outputs(output_dir: Path, tsv: bool, locus_stats: bool) -> Non
 
 def _write_table(df, path: Path, tsv: bool) -> None:
     """One output table: Feather v2 with zstd, and its TSV mirror under ``--tsv``."""
-    df.to_feather(str(path), compression="zstd")
+    df.to_feather(str(path), compression=_TABLE_COMPRESSION)
     if tsv:
         df.to_csv(str(path.with_suffix(".tsv")), sep="\t", index=False)
 
@@ -311,7 +314,7 @@ def _write_tables(estimator, index, output_dir: Path, tsv: bool) -> dict:
     if estimator.locus_stats:
         locus_stats_path = output_dir / "locus_stats.feather"
         locus_stats_df = pd.DataFrame(estimator.locus_stats)
-        locus_stats_df.to_feather(str(locus_stats_path), compression="zstd")
+        locus_stats_df.to_feather(str(locus_stats_path), compression=_TABLE_COMPRESSION)
         logging.info(f"[DONE] Wrote {locus_stats_path} ({len(locus_stats_df)} loci)")
     return tables
 
@@ -323,7 +326,7 @@ def _write_calibration_track(track, output_dir: Path) -> None:
 
     track_path = output_dir / "calibration_track.feather"
     bedgraph_path = output_dir / "calibration_track.bedgraph"
-    track.to_feather(str(track_path), compression="zstd")
+    track.to_feather(str(track_path), compression=_TABLE_COMPRESSION)
     write_bedgraph(track, bedgraph_path)
     logging.info(f"[DONE] Wrote {track_path} + {bedgraph_path.name} ({len(track)} regions)")
 
@@ -904,6 +907,7 @@ def _read_sim_scenario(path) -> dict:
 
 def sim_command(args: argparse.Namespace) -> int:
     """Run the ``rigel sim`` subcommand; a scenario's YAML value wins over the command-line flag of its name."""
+    from .config import CONSTANTS
     from .sim import ReadSimConfig, Scenario
 
     try:
@@ -920,7 +924,7 @@ def sim_command(args: argparse.Namespace) -> int:
         genome_length=cfg.get("genome_length", args.genome_length),
         seed=seed,
         work_dir=output_dir,
-        ref_name=cfg.get("ref_name", "chr1"),
+        ref_name=cfg.get("ref_name", CONSTANTS.simulator.ref_name),
     )
     for gene in cfg["genes"]:
         # a gene's optional keys are passed only when given, so the simulator's own defaults stand
@@ -958,7 +962,7 @@ def export_command(args: argparse.Namespace) -> int:
             df.to_csv(str(out), sep="\t", index=False)
         else:
             out = fpath.with_suffix(".parquet")
-            df.to_parquet(str(out), compression="zstd", index=False)
+            df.to_parquet(str(out), compression=_TABLE_COMPRESSION, index=False)
         logging.info(f"  {fpath.name} -> {out.name}")
 
     logging.info(f"[DONE] Exported {len(feather_files)} file(s) to {fmt}")
@@ -1549,8 +1553,8 @@ def _add_sim_parser(subparsers) -> None:
     sim.add_argument(
         "--seed",
         type=int,
-        default=defaults.scenario_seed,
-        help=f"Random seed (default: {defaults.scenario_seed}, overridden by YAML)",
+        default=defaults.seed,
+        help=f"Random seed (default: {defaults.seed}, overridden by YAML)",
     )
     sim.add_argument(
         "--num-reads",

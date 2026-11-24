@@ -9,8 +9,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace rigel {
+
+// −∞, the log of no probability: every native module reads this one.
+static constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
 
 // ================================================================
 // Enum-mirror constants
@@ -95,7 +99,8 @@ static constexpr int32_t PAIR_PLACED_MULTIMAPPING = N_WITHHELD + 2;
 // Scoring constants (scoring.cpp's; `_scoring_impl.testing` binds them for a parity test against their definitions)
 // ================================================================
 static constexpr double LOG_HALF       = -0.6931471805599453;       // log(0.5): a strand with no preference
-static constexpr double TAIL_DECAY_LP  = -0.01005033585350145;      // log(0.99): per-bp penalty past the length table
+// log(0.99): the log-probability a length loses per bp past the length table's end. Chosen, not derived.
+static constexpr double TAIL_DECAY_LP  = -0.01005033585350145;
 // Candidates scored in a stack buffer before falling back to the heap, so the common fragment needs no malloc.
 static constexpr int SCORED_STACK_CAPACITY = 64;
 
@@ -108,6 +113,13 @@ static constexpr double EM_LOG_EPSILON = 1e-300;
 // One SQUAREM iteration runs three EM steps (two plain, one stabilising), so the budget of `EMConfig.iterations` EM
 // steps buys `max(iterations / 3, 1)` SQUAREM iterations: a budget below three still runs one.
 static constexpr int SQUAREM_BUDGET_DIVISOR = 3;
+// A SQUAREM step that would leave a component below the floor shrinks its excess over 1 by this factor and is tried
+// again: it halves.
+static constexpr double SQUAREM_BACKTRACK_SHRINK = 0.5;
+// VBEM's digamma shifts x up by ψ(x) = ψ(x + 1) − 1/x until x reaches this, where its asymptotic series is accurate.
+static constexpr double DIGAMMA_SERIES_FROM = 6.0;
+// The E-step holds a row of up to this many candidates on the stack, a longer one on the heap.
+static constexpr int ESTEP_STACK_ROW = 512;
 // VBEM's floor: the smallest alpha a component keeps. digamma(1e-300) ≈ −1e300, so after max-subtraction the E-step
 // gives a component at the floor exactly zero responsibility and the evidence-proportional prior gives it nothing: it
 // stays dead unless it holds deterministic fragments. Only the EM's own step may put a component there, never
@@ -141,7 +153,7 @@ static constexpr int N_EM_CLASSES        = 4;
 static constexpr int POLICY_SILENT   = 0;
 static constexpr int POLICY_TRANSFER = 1;
 // A slot holds its own composition evidence when the precision of its own strands and its own intron row exceeds this
-// guard; the strand evidence clips its fractions to it.
+// guard; the strand evidence clips its fractions to it. Chosen, not derived.
 static constexpr double OWN_EVIDENCE_EPS = 1.0e-9;
 
 // ================================================================

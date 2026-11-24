@@ -34,7 +34,7 @@ using rigel::FRAG_MULTIMAPPER;
 using rigel::SCORED_STACK_CAPACITY;
 using rigel::Array1;
 
-static constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
+using rigel::NEG_INF;
 
 // An online log-sum-exp: keeps (max, sum) so that logsumexp(x_1..x_n) = max + log(sum); -inf over no terms.
 struct LogSumExp {

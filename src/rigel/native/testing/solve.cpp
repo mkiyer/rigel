@@ -7,8 +7,8 @@
 //                    the transfer policy's three kernels (`transfer_kernel.h`) on tables the call allocates and returns,
 //                    or the harness builds by hand (`tests/calibration/_transfer_harness.py`).
 //   the row constructors of `transfer_rows.h` and the blur's radius, the builders' flag predicates and the strand
-//   evidence, each returning a fresh array; and the constants the gates read (EPS, MARGINAL_NODES, OWN_EVIDENCE_EPS,
-//   JEFFREYS_REF, and RULE_CODES, the composition rules' codes by name).
+//   evidence, each returning a fresh array; and the constants the gates read (FLAT_ROW_SPREAD, MARGINAL_NODES,
+//   OWN_EVIDENCE_EPS, JEFFREYS_REF, and RULE_CODES, the composition rules' codes by name).
 
 #include <cstdint>
 #include <stdexcept>
@@ -399,7 +399,7 @@ nb::object flank(int64_t x) { return x < 0 ? nb::none() : nb::cast(x); }
 
 // The builders' flag predicates on the boundary flags, the strand evidence, and the constants the gates read.
 void bind_predicates(nb::module_& t) {
-    t.attr("EPS") = EPS;
+    t.attr("FLAT_ROW_SPREAD") = FLAT_ROW_SPREAD;
     nb::dict rule_codes;
     rule_codes["none"] = transfer_rows::NONE;
     rule_codes["forward"] = transfer_rows::FORWARD;
