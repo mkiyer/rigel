@@ -39,11 +39,19 @@ def get_version() -> str:
 
 
 def index_command(args: argparse.Namespace) -> int:
-    """Run the ``rigel index`` subcommand."""
+    """Run the ``rigel index`` subcommand: the arguments resolved (CLI flags over the ``--config`` YAML over
+    :class:`~rigel.config.IndexConfig`'s defaults), checked, then :meth:`TranscriptIndex.build`."""
     from .index import TranscriptIndex
 
-    fasta = Path(args.fasta_file)
-    gtf = Path(args.gtf_file)
+    try:
+        resolve_index_args(args)
+    except (ValueError, OSError) as exc:
+        sys.exit(f"Error: {exc}")
+    for key in ("fasta", "gtf", "output_dir"):
+        if getattr(args, key) is None:
+            sys.exit(f"Error: --{key.replace('_', '-')} is required (via CLI or --config YAML)")
+    fasta = Path(args.fasta)
+    gtf = Path(args.gtf)
 
     if not fasta.exists():
         sys.exit(f"Error: FASTA file not found: {fasta}")
@@ -67,7 +75,7 @@ def index_command(args: argparse.Namespace) -> int:
             write_tsv=not args.no_tsv,
             gtf_parse_mode=args.gtf_parse_mode,
             collapse_duplicate_transcripts=args.collapse_duplicate_transcripts,
-            nascent_tolerance=args.nascent_tolerance,
+            end_tolerance=args.end_tolerance,
             alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
         )
     # a malformed annotation, an unreadable store, references that disagree
@@ -1107,9 +1115,42 @@ def resolve_quant_args(args: argparse.Namespace, defaults: dict) -> None:
         setattr(args, key, default_val if yaml_val is None else yaml_val)
 
 
-def _read_config_file(config_path, defaults: dict) -> dict:
-    """A ``--config`` YAML's keys and values: hyphens read as underscores, a ``quant:`` block's keys under the
-    top-level ones, and a key that is neither an option nor one of ``_CONFIG_FILE_KEYS`` refused."""
+def build_index_defaults() -> dict:
+    """Every ``rigel index`` option's default: the paths none, the switches off, the settings
+    :class:`~rigel.config.IndexConfig`'s, so the config dataclass is the one source of every default."""
+    from .config import IndexConfig
+
+    cfg = IndexConfig()
+    return {
+        "fasta": None,
+        "gtf": None,
+        "output_dir": None,
+        "alignable_zarr": None,
+        "no_mappability": False,
+        "no_tsv": not cfg.write_tsv,
+        "feather_compression": cfg.feather_compression,
+        "gtf_parse_mode": cfg.gtf_parse_mode,
+        "collapse_duplicate_transcripts": cfg.collapse_duplicate_transcripts,
+        "end_tolerance": cfg.end_tolerance,
+    }
+
+
+def resolve_index_args(args: argparse.Namespace) -> None:
+    """Fill every ``rigel index`` option in place: an explicit CLI flag wins, then the ``--config`` YAML (its
+    ``index:`` block or its top level), then :func:`build_index_defaults`."""
+    defaults = build_index_defaults()
+    yaml_config = _read_config_file(args.config, defaults, block="index") if args.config else {}
+    for key, default_val in defaults.items():
+        if getattr(args, key) is not None:
+            continue  # CLI wins
+        yaml_val = yaml_config.get(key)
+        setattr(args, key, default_val if yaml_val is None else yaml_val)
+
+
+def _read_config_file(config_path, defaults: dict, block: str = "quant") -> dict:
+    """A ``--config`` YAML's keys and values for one command: hyphens read as underscores, its *block*'s keys
+    (``quant:`` or ``index:``) under the top-level ones, the other command's block left alone, and a key that is
+    neither an option nor, for ``quant``, one of ``_CONFIG_FILE_KEYS`` refused."""
     import yaml
 
     with open(config_path) as fh:
@@ -1120,14 +1161,15 @@ def _read_config_file(config_path, defaults: dict) -> dict:
             f"{config_path} must hold a mapping of keys to values, not a {type(raw).__name__}"
         )
     raw_normalized = {k.replace("-", "_"): v for k, v in raw.items()}
-    quant_block = raw_normalized.pop("quant", None)
+    own = raw_normalized.pop(block, None)
+    raw_normalized.pop("index" if block == "quant" else "quant", None)
     yaml_config: dict = {}
-    if quant_block is not None:
-        if not isinstance(quant_block, dict):
-            raise ValueError("quant config block must be a mapping.")
-        yaml_config.update({str(k).replace("-", "_"): v for k, v in quant_block.items()})
+    if own is not None:
+        if not isinstance(own, dict):
+            raise ValueError(f"{block} config block must be a mapping.")
+        yaml_config.update({str(k).replace("-", "_"): v for k, v in own.items()})
     yaml_config.update(raw_normalized)
-    valid_keys = set(defaults) | set(_CONFIG_FILE_KEYS)
+    valid_keys = set(defaults) | (set(_CONFIG_FILE_KEYS) if block == "quant" else set())
     unknown = set(yaml_config) - valid_keys
     if unknown:
         raise ValueError(_unknown_config_keys(config_path, text, unknown, valid_keys))
@@ -1179,47 +1221,46 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_index_parser(subparsers) -> None:
+    """``rigel index``'s options. Every overridable default is ``None``, so ``resolve_index_args`` can tell a flag the
+    user gave from one the YAML or :class:`~rigel.config.IndexConfig` supplies; every default a help string names is
+    read from the config, never restated here."""
     from .config import IndexConfig
 
     idx = subparsers.add_parser("index", help="Build reference index from FASTA + GTF")
+    idx.add_argument("--fasta", help="Genome FASTA file (must be indexed with samtools faidx)")
+    idx.add_argument("--gtf", help="Gene annotation GTF file (GENCODE recommended)")
+    idx.add_argument("-o", "--output-dir", help="Output directory for index files")
     idx.add_argument(
-        "--fasta",
-        dest="fasta_file",
-        required=True,
-        help="Genome FASTA file (must be indexed with samtools faidx)",
+        "--config",
+        help=(
+            "YAML configuration file: the same keys as these options, with underscores, at the top level or in an "
+            "'index:' block (a 'quant:' block is left to 'rigel quant', so one file can hold both). CLI flags "
+            "override it."
+        ),
     )
-    idx.add_argument(
-        "--gtf",
-        dest="gtf_file",
-        required=True,
-        help="Gene annotation GTF file (GENCODE recommended)",
-    )
-    idx.add_argument("-o", "--output-dir", required=True, help="Output directory for index files")
     idx.add_argument(
         "--feather-compression",
-        default=IndexConfig.feather_compression,
         choices=["lz4", "zstd", "uncompressed"],
-        help="Compression for Feather files (default: %(default)s)",
+        help=f"Compression for Feather files (default: {IndexConfig.feather_compression})",
     )
     idx.add_argument(
         "--no-tsv",
         action="store_true",
-        default=not IndexConfig.write_tsv,
+        default=None,
         help="Skip writing human-readable TSV mirror files",
     )
     idx.add_argument(
         "--gtf-parse-mode",
-        default=IndexConfig.gtf_parse_mode,
         choices=["strict", "warn-skip"],
         help=(
             "GTF parse mode: 'strict' fails on a malformed record; "
-            "'warn-skip' logs a warning and skips it (default: %(default)s)"
+            f"'warn-skip' logs a warning and skips it (default: {IndexConfig.gtf_parse_mode})"
         ),
     )
     idx.add_argument(
         "--collapse-duplicate-transcripts",
         action="store_true",
-        default=IndexConfig.collapse_duplicate_transcripts,
+        default=None,
         help=(
             "Collapse transcripts sharing identical exon coordinates (same ref, "
             "strand, and every exon start/end) instead of failing. Keeps the "
@@ -1231,12 +1272,12 @@ def _add_index_parser(subparsers) -> None:
         ),
     )
     idx.add_argument(
-        "--nascent-tolerance",
+        "--end-tolerance",
         type=int,
-        default=IndexConfig.nascent_tolerance,
         help=(
-            "Max distance (bp) for clustering multi-exon transcripts' start and end sites "
-            "into the synthetic spans that model their nascent RNA (default: %(default)s)"
+            "Multi-exon transcripts whose start and end sites each lie within this many bp of another's share one "
+            "synthetic span, the nascent RNA they model, transitively; a single-exon transcript within it of a span "
+            f"is that span, being its own nascent RNA (default: {IndexConfig.end_tolerance})"
         ),
     )
     idx.add_argument(
@@ -1251,6 +1292,7 @@ def _add_index_parser(subparsers) -> None:
     idx.add_argument(
         "--no-mappability",
         action="store_true",
+        default=None,
         help=(
             "Explicitly opt out of the alignable store: the unobservable genome is the "
             "FASTA's N runs alone. Use this for synthetic "

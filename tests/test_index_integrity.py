@@ -587,7 +587,7 @@ def test_load_does_not_need_the_alias_table(tmp_path: Path):
 @pytest.mark.parametrize(
     "setting, refusal",
     [
-        ({"nascent_tolerance": -5}, "nascent_tolerance must be >= 0; got -5"),
+        ({"end_tolerance": -5}, "end_tolerance must be >= 0; got -5"),
         ({"feather_compression": "gzip"}, "Unknown Feather compression: 'gzip'"),
         ({"gtf_parse_mode": "lenient"}, "Unknown GTF parse mode: 'lenient'"),
     ],
@@ -896,6 +896,105 @@ def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_
     assert synthetics == [] and len(covered_equiv) == 2
     assert all(entity is covering for entity in covered_equiv.values())
     assert covering.span_n_contributors == 3
+
+
+def _span_entities(transcripts, tolerance=20):
+    """The nascent entities' extents: the synthetics' and the carrying single-exon transcripts', and the carriers."""
+    from rigel.index import create_nrna_transcripts
+
+    synthetics, _t_to_span_key, covered_equiv = create_nrna_transcripts(
+        transcripts, tolerance=tolerance
+    )
+    extents = {(s.start, s.end) for s in synthetics} | {
+        (t.start, t.end) for t in covered_equiv.values()
+    }
+    return sorted(extents), covered_equiv
+
+
+def _multi_exon(t_index, start, end):
+    """A two-exon transcript over [start, end) on chr1, +."""
+    return Transcript(
+        ref="chr1",
+        strand=Strand.POS,
+        exons=[Interval(start, start + 50), Interval(end - 50, end)],
+        t_id=f"T{t_index}",
+        g_id="G1",
+        t_index=t_index,
+        g_index=0,
+    )
+
+
+def _within(a, b, tolerance=20):
+    return abs(a[0] - b[0]) <= tolerance and abs(a[1] - b[1]) <= tolerance
+
+
+def test_no_two_spans_lie_within_the_tolerance_at_both_ends():
+    """Ends 1,000, 1,020 and 1,021: a cluster anchored at its first coordinate holds 1,000 and 1,020 and starts
+    another at 1,021, leaving two spans 1 bp apart. Within the tolerance at both ends is one entity."""
+    spans, _ = _span_entities([_multi_exon(i, 0, end) for i, end in enumerate((1000, 1020, 1021))])
+    assert spans == [(0, 1021)]
+
+
+def test_a_chain_within_the_tolerance_is_one_span():
+    """Ends 1,000, 1,015 and 1,030, each within 20 bp of the next: one entity over their envelope."""
+    spans, _ = _span_entities([_multi_exon(i, 0, end) for i, end in enumerate((1000, 1015, 1030))])
+    assert spans == [(0, 1030)]
+
+
+def test_envelopes_within_the_tolerance_are_one_span():
+    """A (100, 1,000), X (110, 1,015) and B (115, 1,030) chain into one entity over (100, 1,030); D (85, 1,045) is
+    near none of them but within 20 bp of their envelope at both ends, so it joins: no two spans left near."""
+    points = [(100, 1000), (110, 1015), (115, 1030), (85, 1045)]
+    spans, _ = _span_entities([_multi_exon(i, s, e) for i, (s, e) in enumerate(points)])
+    assert spans == [(85, 1045)]
+
+
+def test_a_span_keeps_its_start_when_its_neighbour_ends_far_away():
+    """Starts 0 and 15, ends 1,000 and 5,000: two entities, each its own extent. Clustering starts and ends
+    separately would give the second the first's start."""
+    spans, _ = _span_entities([_multi_exon(0, 0, 1000), _multi_exon(1, 15, 5000)])
+    assert spans == [(0, 1000), (15, 5000)]
+
+
+def test_no_span_is_made_equal_to_a_single_exon_transcript():
+    """A single-exon transcript is its own nascent RNA: one 2 bp and 7 bp inside a span's ends (TMEM121B's case)
+    is that span's entity, and no synthetic span is made beside it."""
+    single = Transcript(
+        ref="chr1",
+        strand=Strand.POS,
+        exons=[Interval(2, 993)],
+        t_id="SE",
+        g_id="G1",
+        t_index=0,
+        g_index=0,
+    )
+    spans, covered = _span_entities([single, _multi_exon(1, 0, 1000)])
+    assert spans == [(2, 993)] and list(covered.values()) == [single]
+
+
+def test_a_single_exon_transcript_near_a_chains_member_but_not_its_span_stands_for_nothing():
+    """TDRG1's case: contributors chain from start 100 to start 160, so the span starts at 100; a single-exon
+    transcript within 20 bp of the last contributor but 60 bp short of the span is not the span's equal, so the span is
+    a synthetic of its own (it does not contain it either)."""
+    single = Transcript(
+        ref="chr1",
+        strand=Strand.POS,
+        exons=[Interval(165, 1000)],
+        t_id="SE",
+        g_id="G1",
+        t_index=0,
+        g_index=0,
+    )
+    chain = [_multi_exon(i + 1, s, 1000) for i, s in enumerate((100, 115, 130, 145, 160))]
+    spans, covered = _span_entities([single, *chain])
+    assert covered == {} and spans == [(100, 1000)]
+
+
+def test_the_tolerance_is_the_setting():
+    """Ends 1,000 and 1,030 are one entity at a tolerance of 30 and two at 20."""
+    transcripts = [_multi_exon(0, 0, 1000), _multi_exon(1, 0, 1030)]
+    assert _span_entities(transcripts, tolerance=30)[0] == [(0, 1030)]
+    assert _span_entities(transcripts, tolerance=20)[0] == [(0, 1000), (0, 1030)]
 
 
 def test_collapse_is_noop_without_duplicates(tmp_path: Path):

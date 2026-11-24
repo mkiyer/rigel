@@ -409,19 +409,20 @@ class IndexConfig:
     #: report of each group; ``True`` keeps the lexicographically smallest transcript ID per group, loss-free.
     collapse_duplicate_transcripts: bool = False
 
-    #: Multi-exon transcripts' start and end sites within this many bp cluster into one synthetic span,
-    #: which models their nascent RNA (``index.create_nrna_transcripts``).
-    nascent_tolerance: int = 20
+    #: Nascent entities on one reference and strand (each multi-exon transcript's extent, and each single-exon
+    #: transcript, its own nascent RNA) whose start and end sites each lie within this many bp are one entity,
+    #: transitively: one synthetic span, or the single-exon transcript. A fragment can tell such ends apart only by the
+    #: few that start or end in those bases, where fragmentation and priming bias the ends and the model does not follow
+    #: them (``index.create_nrna_transcripts``).
+    end_tolerance: int = 20
 
     def __post_init__(self) -> None:
         if self.feather_compression not in ("lz4", "zstd", "uncompressed"):
             raise ValueError(f"Unknown Feather compression: {self.feather_compression!r}")
         if self.gtf_parse_mode not in ("strict", "warn-skip"):
             raise ValueError(f"Unknown GTF parse mode: {self.gtf_parse_mode!r}")
-        if self.nascent_tolerance < 0:
-            raise ValueError(
-                f"IndexConfig.nascent_tolerance must be >= 0; got {self.nascent_tolerance}."
-            )
+        if self.end_tolerance < 0:
+            raise ValueError(f"IndexConfig.end_tolerance must be >= 0; got {self.end_tolerance}.")
 
 
 # ======================================================================

@@ -31,8 +31,8 @@ signal in the same library:
 
 A single-pass native BAM scan feeds a calibration stage that separates RNA from gDNA
 genome-wide, and a locus-level EM then assigns the RNA to transcripts. Nascent RNA is
-represented as one synthetic span per merged span — transcript start and end sites clustered within
-`--nascent-tolerance` on each strand — shared by every transcript in it, so isoforms that start and
+represented as one synthetic span per merged span — transcripts whose start and end sites each lie within
+`--end-tolerance` on one strand — shared by every transcript in it, so isoforms that start and
 end at about the same coordinates do not multiply nascent states.
 
 ### Key features

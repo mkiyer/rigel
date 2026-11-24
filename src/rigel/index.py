@@ -416,66 +416,94 @@ def transcripts_to_dataframe(transcripts: list[Transcript]) -> pd.DataFrame:
     return pd.DataFrame(t.to_dict() for t in transcripts)
 
 
-# -- Synthetic nRNA spans: start and end sites clustered within a tolerance ---
+# -- Synthetic nRNA spans: one entity per extent within a tolerance at both ends ---
 
 
-def _cluster_coordinates(coords: np.ndarray, tolerance: int) -> np.ndarray:
-    """Assign sorted coordinates to clusters within *tolerance* bp.
+def _linked_components(points: list[tuple[int, int]], tolerance: int) -> list[int]:
+    """Each ``(start, end)`` point's component: two points whose starts and ends each lie within *tolerance* bp are
+    linked, and a component is a connected set of links (union-find over a start-sorted sweep)."""
+    parent = list(range(len(points)))
 
-    Returns an int array of the same length, where each element is the
-    cluster id (0-based).  Coordinates must be sorted ascending.
-    """
-    n = len(coords)
-    if n == 0:
-        return np.empty(0, dtype=np.intp)
-    ids = np.empty(n, dtype=np.intp)
-    cid = 0
-    anchor = 0  # index of the first element in the current cluster
-    for i in range(n):
-        if coords[i] - coords[anchor] > tolerance:
-            cid += 1
-            anchor = i
-        ids[i] = cid
-    return ids
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
 
-
-def _clustered_envelope(coords: np.ndarray, tolerance: int, outer: np.ufunc) -> np.ndarray:
-    """Each coordinate's cluster envelope, in input order: the coordinates, sorted, cluster within *tolerance* bp
-    (:func:`_cluster_coordinates`), and each takes its cluster's outermost value (``np.minimum`` for start sites,
-    ``np.maximum`` for end sites)."""
-    order = np.argsort(coords, kind="mergesort")
-    ids = _cluster_coordinates(coords[order], tolerance)
-    fill = np.iinfo(np.int64).max if outer is np.minimum else np.iinfo(np.int64).min
-    envelope = np.full(ids[-1] + 1 if len(ids) else 0, fill, dtype=np.int64)
-    outer.at(envelope, ids, coords[order])
-    out = np.empty(len(coords), dtype=np.int64)
-    out[order] = envelope[ids]
-    return out
+    order = sorted(range(len(points)), key=lambda i: points[i])
+    for a, i in enumerate(order):
+        for j in order[a + 1 :]:
+            if points[j][0] - points[i][0] > tolerance:
+                break
+            if abs(points[j][1] - points[i][1]) <= tolerance:
+                parent[find(i)] = find(j)
+    return [find(i) for i in range(len(points))]
 
 
-def _merged_span_keys(multi_exon: list[Transcript], tolerance: int) -> dict[int, tuple]:
-    """Each multi-exon transcript's merged span ``(ref, strand, start, end)``, by ``t_index``: its start and end sites
-    clustered within *tolerance* bp among the transcripts on its reference and strand, independently, the span being
-    the clusters' outer envelope, so a synthetic is never smaller than a contributing transcript."""
-    groups: dict[tuple[str, int], list[Transcript]] = collections.defaultdict(list)
-    for t in multi_exon:
-        groups[(t.ref, int(t.strand))].append(t)
-    keys: dict[int, tuple] = {}
-    for (ref, strand), grp in groups.items():
-        starts = np.array([t.start for t in grp], dtype=np.int64)
-        ends = np.array([t.end for t in grp], dtype=np.int64)
-        spans = zip(
-            _clustered_envelope(starts, tolerance, np.minimum).tolist(),
-            _clustered_envelope(ends, tolerance, np.maximum).tolist(),
-        )
-        for t, (start, end) in zip(grp, spans):
-            keys[t.t_index] = (ref, strand, start, end)
-    return keys
+def _entity_labels(points: list[tuple[int, int]], tolerance: int) -> list[int]:
+    """Each point's entity: its component (:func:`_linked_components`), then the components' envelopes linked again
+    until no two envelopes lie within *tolerance* at both ends. An envelope takes its start from one member and its
+    end from another, so two components no member of which is near the other's can still have near envelopes."""
+    labels = _linked_components(points, tolerance)
+    while True:
+        ids = sorted(set(labels))
+        position = {label: k for k, label in enumerate(ids)}
+        envelope = [[np.iinfo(np.int64).max, np.iinfo(np.int64).min] for _ in ids]
+        for (start, end), label in zip(points, labels):
+            env = envelope[position[label]]
+            env[0], env[1] = min(env[0], start), max(env[1], end)
+        merged = _linked_components([(a, b) for a, b in envelope], tolerance)
+        if len(set(merged)) == len(ids):
+            return labels
+        labels = [merged[position[label]] for label in labels]
 
 
-def _covering_transcripts(transcripts: list[Transcript], spans) -> dict[tuple, Transcript]:
-    """The annotated single-exon transcript that covers each span one covers (an exact match or full containment): the
-    first, by start then end, on the span's reference and strand."""
+def _merged_spans(
+    transcripts: list[Transcript], tolerance: int
+) -> tuple[dict[int, tuple], dict[tuple, int], dict[tuple, Transcript]]:
+    """The nascent entities. On each reference and strand, every multi-exon transcript's extent and every
+    single-exon transcript are points; points within *tolerance* at both ends are one entity, transitively
+    (:func:`_entity_labels`). An entity holding a multi-exon transcript is a span, its multi-exon members'
+    envelope. A single-exon transcript of the entity whose ends lie within *tolerance* of the span's own is that
+    span: a single-exon transcript is its own nascent RNA, so no span equal to one is made; where several are, the one
+    nearest the span, then the smallest ``t_id``. One that is near a member but not the span (a chain's far end) is not
+    the span's equal and stands for nothing. Returns each multi-exon transcript's span key ``(ref, strand, start, end)`` by ``t_index``, each
+    span's contributor count, and each span's single-exon transcript where it has one."""
+    places: dict[tuple[str, int], list[Transcript]] = collections.defaultdict(list)
+    for t in transcripts:
+        places[(t.ref, int(t.strand))].append(t)
+    t_to_span_key: dict[int, tuple] = {}
+    contributors: dict[tuple, int] = {}
+    single_exon: dict[tuple, Transcript] = {}
+    for (ref, strand), members in places.items():
+        labels = _entity_labels([(t.start, t.end) for t in members], tolerance)
+        entities: dict[int, list[Transcript]] = collections.defaultdict(list)
+        for t, label in zip(members, labels):
+            entities[label].append(t)
+        for entity in entities.values():
+            multi = [t for t in entity if len(t.exons) >= 2]
+            if not multi:
+                continue
+            key = (ref, strand, min(t.start for t in multi), max(t.end for t in multi))
+            for t in multi:
+                t_to_span_key[t.t_index] = key
+            contributors[key] = len(multi)
+            singles = [
+                t
+                for t in entity
+                if len(t.exons) == 1
+                and max(abs(t.start - key[2]), abs(t.end - key[3])) <= tolerance
+            ]
+            if singles:
+                single_exon[key] = min(
+                    singles, key=lambda t: (max(abs(t.start - key[2]), abs(t.end - key[3])), t.t_id)
+                )
+    return t_to_span_key, contributors, single_exon
+
+
+def _containing_transcripts(transcripts: list[Transcript], spans) -> dict[tuple, Transcript]:
+    """The single-exon transcript that contains each span whole, beyond the tolerance (the first, by start then
+    end, on the span's reference and strand): it carries the span too."""
     by_place: dict[tuple[str, int], list[tuple[int, int, Transcript]]] = collections.defaultdict(
         list
     )
@@ -484,16 +512,16 @@ def _covering_transcripts(transcripts: list[Transcript], spans) -> dict[tuple, T
             by_place[(t.ref, int(t.strand))].append((t.start, t.end, t))
     for candidates in by_place.values():
         candidates.sort(key=lambda x: (x[0], x[1]))
-    covering: dict[tuple, Transcript] = {}
+    containing: dict[tuple, Transcript] = {}
     for span_key in spans:
         ref, strand, m_start, m_end = span_key
         for s_start, s_end, s_tx in by_place.get((ref, strand), []):
             if s_start > m_start:
                 break  # sorted by start, no more can contain
             if m_end <= s_end:
-                covering[span_key] = s_tx
+                containing[span_key] = s_tx
                 break
-    return covering
+    return containing
 
 
 def _synthetic_span(span_key: tuple, n_contributors: int) -> Transcript:
@@ -518,15 +546,17 @@ def _synthetic_span(span_key: tuple, n_contributors: int) -> Transcript:
 
 def create_nrna_transcripts(
     transcripts: list[Transcript],
-    tolerance: int = IndexConfig.nascent_tolerance,
+    tolerance: int = IndexConfig.end_tolerance,
 ) -> tuple[list[Transcript], dict[int, tuple], dict[tuple, Transcript]]:
     """Create synthetic nRNA transcripts and detect their annotated equivalents.
 
-    1. Each multi-exon transcript's start and end sites are clustered within *tolerance* bp, independently, into a
-       merged span (:func:`_merged_span_keys`).
-    2. A single-exon transcript that already covers a merged span (exact match or full containment) is the span's
-       entity, and its ``span_n_contributors`` counts the span's transcripts (:func:`_covering_transcripts`).
-    3. Each uncovered span becomes a synthetic single-exon ``Transcript`` (``is_synthetic``, ``is_single_exon``).
+    1. Each multi-exon transcript's extent and each single-exon transcript, on one reference and strand, are one
+       entity with every other within *tolerance* bp at both ends, transitively (:func:`_merged_spans`); a span is
+       its multi-exon members' envelope.
+    2. A single-exon transcript in a span's entity is the span: a single-exon transcript is its own nascent RNA.
+       A span no single-exon transcript is near is carried by one that contains it whole, if any
+       (:func:`_containing_transcripts`). Either way its ``span_n_contributors`` counts the span's transcripts.
+    3. Each span not carried becomes a synthetic single-exon ``Transcript`` (``is_synthetic``, ``is_single_exon``).
        Synthetics are gene-neutral (:func:`_synthetic_span`): a merged span may draw on transcripts of several genes,
        so inheriting one contributor's gene would be arbitrary; gene summaries are derived downstream from annotated
        contributors only.
@@ -534,20 +564,14 @@ def create_nrna_transcripts(
     *transcripts* is the sorted transcript list, ``t_index`` already assigned. Returns ``(synthetics, t_to_span_key,
     covered_equiv)``: the synthetics to append, in their spans' first-seen order (the caller assigns their ``t_index``
     and ``g_index``); each annotated multi-exon transcript's span key ``(ref, strand, start, end)``, by ``t_index``,
-    from which the caller sets ``span_t_index``; and the annotated single-exon transcript covering each covered span.
+    from which the caller sets ``span_t_index``; and the annotated single-exon transcript carrying each carried span.
     """
-    multi_exon = [t for t in transcripts if len(t.exons) >= 2]
-    if not multi_exon:
+    if not any(len(t.exons) >= 2 for t in transcripts):
         return [], {}, {}
-
-    t_to_span_key = _merged_span_keys(multi_exon, tolerance)
-    # each span's contributing transcripts, in the spans' first-seen order
-    contributors: dict[tuple, int] = {}
-    for t in multi_exon:
-        key = t_to_span_key[t.t_index]
-        contributors[key] = contributors.get(key, 0) + 1
-
-    covered_equiv = _covering_transcripts(transcripts, contributors)
+    t_to_span_key, contributors, covered_equiv = _merged_spans(transcripts, tolerance)
+    covered_equiv.update(
+        _containing_transcripts(transcripts, [k for k in contributors if k not in covered_equiv])
+    )
     for span_key, s_tx in covered_equiv.items():
         s_tx.span_n_contributors += contributors[span_key]
     synthetics = [
@@ -1294,7 +1318,7 @@ class TranscriptIndex:
         write_tsv: bool = IndexConfig.write_tsv,
         gtf_parse_mode: Literal["strict", "warn-skip"] = IndexConfig.gtf_parse_mode,
         collapse_duplicate_transcripts: bool = IndexConfig.collapse_duplicate_transcripts,
-        nascent_tolerance: int = IndexConfig.nascent_tolerance,
+        end_tolerance: int = IndexConfig.end_tolerance,
         alignable_zarr_path: str | Path | None = None,
     ) -> None:
         """Build the rigel reference index and write to disk.
@@ -1325,9 +1349,10 @@ class TranscriptIndex:
         gtf_parse_mode : {"strict", "warn-skip"}
             GTF parsing behavior. ``"strict"`` (default) fails fast on
             malformed lines; ``"warn-skip"`` logs warnings and skips.
-        nascent_tolerance : int
-            Max distance (bp) for clustering multi-exon transcripts' start
-            and end sites into the synthetic spans that model their nascent RNA.
+        end_tolerance : int
+            Nascent entities whose start and end sites each lie within this many bp are one
+            (``IndexConfig.end_tolerance``): the synthetic spans that model the transcripts' nascent RNA are merged
+            so, and none is made equal to a single-exon transcript.
         alignable_zarr_path : path, optional
             Path to an alignable Zarr store built for the same genome and aligner, whose zero set is the
             unobservable mask (`rigel.observable`).  When ``None``, the mask is the FASTA's unknown runs.
@@ -1337,7 +1362,7 @@ class TranscriptIndex:
             write_tsv=write_tsv,
             gtf_parse_mode=gtf_parse_mode,
             collapse_duplicate_transcripts=collapse_duplicate_transcripts,
-            nascent_tolerance=nascent_tolerance,
+            end_tolerance=end_tolerance,
         )
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1364,7 +1389,7 @@ class TranscriptIndex:
             REF_LENGTHS_FEATHER,
             REF_LENGTHS_TSV,
         )
-        _add_nascent_spans(transcripts, nascent_tolerance)
+        _add_nascent_spans(transcripts, end_tolerance)
         _write_annotation_tables(write, transcripts, genome.ref_lengths)
         _write_genome_tables(write, genome)
         _write_manifest(
@@ -1375,7 +1400,7 @@ class TranscriptIndex:
                 "collapse_duplicate_transcripts": collapse_duplicate_transcripts,
                 "feather_compression": feather_compression,
                 "gtf_parse_mode": gtf_parse_mode,
-                "nascent_tolerance": nascent_tolerance,
+                "end_tolerance": end_tolerance,
                 "write_tsv": write_tsv,
             },
             genome,

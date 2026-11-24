@@ -177,7 +177,8 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `-o`, `--output-dir` | required | Output directory for index files |
 | `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the unobservable genome: the bases at which no read pair the store tiled was placed back, at its longest read length, N runs included (see Mappability below). Required unless `--no-mappability` is set. Read before anything is written, so a store that cannot be read, that is unfinished, that holds a reference at another length than the FASTA's, or that holds none of the FASTA's references, refuses the build and leaves an existing index in place. |
 | `--no-mappability` | off | Explicitly opt out of the alignable store (synthetic genomes, stranded-only benchmarks); the unobservable genome is then the FASTA's N runs. Mutually exclusive with `--alignable-zarr`. |
-| `--nascent-tolerance N` | `20` | Max distance (bp) for clustering multi-exon transcripts' start and end sites into the shared synthetic spans that model their nascent RNA |
+| `--end-tolerance N` | `20` | Multi-exon transcripts whose start and end sites each lie within N bp of another's share one synthetic span, the nascent RNA they model, transitively; no span is made equal to a single-exon transcript within N bp of it (a single-exon transcript is its own nascent RNA) |
+| `--config FILE` | — | YAML config: the same keys as these flags, with underscores, at the top level or in an `index:` block. CLI flags override it. See [YAML configuration](#yaml-configuration). |
 | `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID; `transcript_aliases` maps each collapsed ID to the one kept). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
 | `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them. Malformed: a line that cannot be parsed, a feature that ends before it starts, an exon without a `transcript_id` or a `gene_id`, an exon off its transcript's reference, strand or gene, an exon overlapping another of its transcript, a transcript on neither `+` nor `-`, and a transcript on a reference the FASTA lacks or past its end. Exons with no base between them are one exon. A gene with transcripts on more than one reference is refused by `strict`; `warn-skip` keeps its copy on the longest reference ([Reference](#reference)). |
 | `--feather-compression {lz4,zstd,uncompressed}` | `lz4` | Feather compression for index files |
@@ -380,6 +381,18 @@ flag names with underscores (hyphens are also accepted), plus `bam_file`,
 YAML. A resolved `config.yaml` is written to the output directory after each
 run for reproducibility.
 
+`rigel index --config` reads the same way, its keys the `rigel index` flag names with underscores (`fasta`, `gtf`,
+`output_dir`, `end_tolerance`, ...). One file can configure both commands: each reads its own block (`index:` or
+`quant:`) and leaves the other's alone.
+
+```yaml
+# rigel.yaml
+index:
+  end_tolerance: 20         # bp; nascent spans whose ends lie this close are one
+quant:
+  threads: 16
+```
+
 ```yaml
 # rigel_params.yaml
 
@@ -498,11 +511,11 @@ so they are reported per span in `nascent_quant` and never attributed to a gene 
 
 ### nascent_quant.feather / nascent_quant.tsv
 
-Nascent RNA, one row per synthetic span. Rigel clusters the start and end sites of the multi-exon
-transcripts within `--nascent-tolerance` and adds one span over each merged extent, which holds the unspliced
-RNA, introns included, of the transcripts it models. Where an annotated single-exon transcript already
-covers the extent, Rigel adds no span: that transcript models it, and its RNA is annotated, a row of
-`quant.feather`.
+Nascent RNA, one row per synthetic span. Rigel merges the multi-exon transcripts whose start and end sites each
+lie within `--end-tolerance` and adds one span over each merged extent, which holds the unspliced RNA, introns
+included, of the transcripts it models. A single-exon transcript is its own nascent RNA: where an annotated
+single-exon transcript lies within the tolerance of the extent, or contains it, Rigel adds no span: that transcript
+models it, and its RNA is annotated, a row of `quant.feather`.
 
 | Column | Description |
 |--------|-------------|
@@ -1024,8 +1037,8 @@ annotated counts (`quant`, `gene_quant`) for standard differential expression, a
 family of overlapping spans (see Overlapping spans under `nascent_quant`).
 
 **Why is `count_nascent` shared?**
-One synthetic span models every multi-exon transcript whose start and end sites cluster within
-`--nascent-tolerance`. `nascent_quant` holds its count once; `quant.feather`'s `count_nascent` repeats it on
+One synthetic span models every multi-exon transcript whose start and end sites each lie within
+`--end-tolerance` of another's. `nascent_quant` holds its count once; `quant.feather`'s `count_nascent` repeats it on
 every transcript the span models, so never sum it over isoforms. Counts are fractional only under
 `--assignment-mode fractional`.
 

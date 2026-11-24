@@ -206,13 +206,13 @@ class TestBuildFlags:
             tmp_path / "idx",
             collapse_duplicate_transcripts=True,
             gtf_parse_mode="warn-skip",
-            nascent_tolerance=37,
+            end_tolerance=37,
             feather_compression="zstd",
         )
         flags = manifest["build_flags"]
         assert flags["collapse_duplicate_transcripts"] is True
         assert flags["gtf_parse_mode"] == "warn-skip"
-        assert flags["nascent_tolerance"] == 37
+        assert flags["end_tolerance"] == 37
         assert flags["feather_compression"] == "zstd"
         assert flags["write_tsv"] is False
 

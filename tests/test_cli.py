@@ -1,6 +1,6 @@
 """The command line: every flag reaches the config field it names.
 
-Covers `rigel index`'s GTF parse mode and setting refusals, `rigel quant`'s defaults, boolean flags and the
+Covers `rigel index`'s GTF parse mode, setting refusals and YAML (CLI over YAML over defaults), `rigel quant`'s defaults, boolean flags and the
 resolution of its arguments into a `PipelineConfig` (CLI over YAML over defaults), the config's write/read round
 trip, and the refusal of an unknown YAML key by `rigel quant` and `rigel sim`. A flag parsed into a field nothing
 reads is invisible at runtime, so each is checked against the resolved config, not the parser's namespace.
@@ -12,7 +12,7 @@ import textwrap
 
 import pytest
 
-from rigel.cli import build_parser, resolve_quant_args, build_quant_defaults
+from rigel.cli import build_parser, resolve_index_args, resolve_quant_args, build_quant_defaults
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 
 
@@ -47,7 +47,46 @@ def test_index_gtf_parse_mode_default_strict():
             "out",
         ]
     )
+    resolve_index_args(args)
     assert args.gtf_parse_mode == "strict"
+
+
+def test_index_reads_its_settings_from_a_yaml_and_a_flag_overrides_it(tmp_path):
+    """`rigel index --config`: the tolerance set in an `index:` block reaches the build's argument, a top-level
+    path is read too, a `quant:` block is left to `rigel quant`, and the command line wins over the file."""
+    cfg = tmp_path / "rigel.yaml"
+    cfg.write_text(
+        "fasta: g.fa\ngtf: a.gtf\nindex:\n  end_tolerance: 7\n  output_dir: idx\nquant:\n  threads: 3\n"
+    )
+    args = build_parser().parse_args(["index", "--config", str(cfg)])
+    resolve_index_args(args)
+    assert (args.fasta, args.gtf, args.output_dir, args.end_tolerance) == (
+        "g.fa",
+        "a.gtf",
+        "idx",
+        7,
+    )
+    args = build_parser().parse_args(["index", "--config", str(cfg), "--end-tolerance", "11"])
+    resolve_index_args(args)
+    assert args.end_tolerance == 11
+
+
+def test_index_refuses_an_unknown_yaml_key(tmp_path):
+    """`nascent_tolerance` (the old name) must not build with the default tolerance in silence."""
+    cfg = tmp_path / "rigel.yaml"
+    cfg.write_text("index:\n  nascent_tolerance: 7\n")
+    args = build_parser().parse_args(["index", "--config", str(cfg)])
+    with pytest.raises(ValueError, match="unknown config key"):
+        resolve_index_args(args)
+
+
+def test_quant_leaves_an_index_block_alone(tmp_path):
+    """One file can configure both commands: `rigel quant` reads its own keys and ignores the `index:` block."""
+    cfg = tmp_path / "rigel.yaml"
+    cfg.write_text("index:\n  end_tolerance: 7\nquant:\n  threads: 3\n")
+    args = _parse_quant("--config", str(cfg))
+    resolve_quant_args(args, build_quant_defaults())
+    assert args.threads == 3
 
 
 def test_index_gtf_parse_mode_warn_skip():
@@ -68,9 +107,9 @@ def test_index_gtf_parse_mode_warn_skip():
     assert args.gtf_parse_mode == "warn-skip"
 
 
-def test_index_refuses_a_negative_nascent_tolerance_as_an_error_before_writing(tmp_path):
-    """A negative nascent tolerance would cluster as 0 does while the manifest records it as given. `build` validates
-    its settings as an `IndexConfig`, so the refusal is an error before the output directory is made."""
+def test_index_refuses_a_negative_end_tolerance_as_an_error_before_writing(tmp_path):
+    """A negative end tolerance would merge as 0 does while the manifest records it as given. `build` validates its
+    settings as an `IndexConfig`, so the refusal is an error before the output directory is made."""
     from _index_builder import MINI_GTF, write_fasta
 
     fasta = write_fasta(tmp_path / "genome.fa", {"chr1": 2000})
@@ -79,12 +118,12 @@ def test_index_refuses_a_negative_nascent_tolerance_as_an_error_before_writing(t
     out = tmp_path / "idx"
     args = build_parser().parse_args(
         ["index", "--fasta", str(fasta), "--gtf", str(gtf), "-o", str(out), "--no-mappability"]
-        + ["--nascent-tolerance", "-5"]
+        + ["--end-tolerance", "-5"]
     )
     with pytest.raises(SystemExit) as exited:
         args.func(args)
     message = str(exited.value.code)
-    assert message.startswith("Error: ") and "nascent_tolerance must be >= 0; got -5" in message
+    assert message.startswith("Error: ") and "end_tolerance must be >= 0; got -5" in message
     assert not out.exists()
 
 

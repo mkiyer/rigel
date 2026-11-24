@@ -167,11 +167,16 @@ is and under-calls gDNA. `summary.json`'s `observable_genome` block records the 
 
 ### 2.2 Nascent spans
 
-Multi-exon transcripts whose start and end sites lie within `IndexConfig.nascent_tolerance` bp share one span, their
-outer envelope (`index.create_nrna_transcripts`). A span an annotated single-exon transcript covers takes it as its
-entity; every other is one synthetic transcript, a gene-neutral row of `index.t_df` flagged `is_synthetic`, named by
-its contributors' `span_t_index`. `is_single_exon` is the structural fact (true of every synthetic span), never
-"manufactured"; the annotated filter is `~is_synthetic` alone (`TRAPS: nrna-does-not-mean-synthetic`).
+On one reference and strand, nascent entities (each multi-exon transcript's extent, and each single-exon transcript)
+whose start and end sites each lie within `IndexConfig.end_tolerance` bp are one entity, transitively, and so are
+entities whose envelopes are (the owner, 2026-11-23: the anchored clusters this replaces left 1,776 span entities
+within the tolerance of another on GRCh38). A span is its multi-exon contributors' envelope
+(`index.create_nrna_transcripts`). A single-exon transcript is its own nascent RNA, so no span is made equal to one:
+a span within the tolerance of a single-exon transcript, or contained by one, takes it as its entity; every other is
+one synthetic transcript, a gene-neutral row of `index.t_df` flagged `is_synthetic`, named by its contributors'
+`span_t_index`. `is_single_exon` is the structural fact (true of every synthetic span), never "manufactured"; the
+annotated filter is `~is_synthetic` alone (`TRAPS: nrna-does-not-mean-synthetic`). The tolerance is a user setting
+(`rigel index --end-tolerance`, or its `--config` YAML).
 
 ---
 
