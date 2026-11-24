@@ -108,6 +108,14 @@ Pinned and fractional, per object, against the tree before it:
 - On the VCaP mix the DNA-origin share is 0.257370, and 6.3 % of the transcript mass moves between isoforms (genes
   0.30 %), which no truth there can score.
 
+The index's one rule landed on 2026-11-23 (`DESIGN.md` §2.2): nascent entities whose start and end sites each lie
+within `--end-tolerance` are one entity, transitively, and a single-exon transcript is its own nascent RNA. The suite
+index's spans fall from 6,919 to 6,788. On the ladder's 16 conditions, on the same reads, pinned and fractional, the
+in-scope transcript error moves −4,117 fragments and genes −50, every row within the EM's near-tie noise. The E-step's
+row merge, a speed-up held to the tolerance (issue #84), landed beside it. The design phase on fused loci and the
+EM's cap then closed for 0.8.0 (the owner, 2026-11-24): VBEM ships (`DESIGN.md` §9.6), MAP with removal by evidence is
+issue #86, and annotated aliases are issue #87.
+
 The validation of ec996bba is closed. On the 16-condition ladder, on the simulator's
 alignments and on STAR's, HEAD beats the tagged 0.7.1 in the three in-scope strata: Brier 0.23–0.88 of 0.7.1's on
 identical reads, and transcript error 0.10–0.47 of 0.7.1's. It also states eight failures, each an open entry
@@ -165,7 +173,9 @@ tool's current state, simply and robustly across many kinds of data, and what is
 
 1. **Performance** (issue #84): compute and memory, every change a proven numeric no-op.
 2. **Code review** (issue #85): clean, concise, readable and maintainable, with no hard-coded constants.
-3. **The release:** one ladder re-score; a MANUAL limitation for issue #1, issue #2, issue #3, issue #4 with issue #5,
+3. **The release:** one ladder re-score, after rebuilding the suite and VCaP indexes with the one rule (their caches
+   with them; the panels' reads were drawn on the old spans, so a truth-fed arm needs the span crosswalk or regenerated
+   panels); a MANUAL limitation for issue #1, issue #2, issue #3, issue #4 with issue #5,
    issue #7, issue #9, issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and
    for the cuts' prices' costs; the CHANGELOG; then issue #11.
 

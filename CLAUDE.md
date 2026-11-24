@@ -51,7 +51,13 @@ for robustness, so a number measured at the panel's nascent share is a stress re
   priced at the junction's crossing level, read from gDNA beside it, not by the half-intron gDNA object at the cut.
   Under stranded capture at 5 % gDNA and above the annotated over-call per locus falls 13–41 % on five of six rows;
   isoforms pay on rows whose capture reading is false or thin (STAR unstranded capture OFF 5 %, transcripts +9.8 %).
-  This tree is the baseline.
+- **The index's one rule** landed 2026-11-23: nascent entities whose ends lie within `--end-tolerance` are one, and a
+  single-exon transcript is its own nascent RNA (`docs/DESIGN.md` §2.2). The ladder's in-scope transcript error moves
+  −4,117 fragments on the same reads. With it the E-step holds each distinct likelihood row once (issue #84). This
+  tree is the baseline.
+- The **design phase on fused loci and the EM's cap** (issues #79, #34, #78) closed for 0.8.0 on 2026-11-24: VBEM
+  ships. MAP with removal by evidence is issue #86, annotated aliases issue #87; the receipts and their map are in
+  `$RIGEL_RUNS/perf/2026-11-23_em_cap/`.
 - **Every error is read per object** (the owner, 2026-11-21): Σ|estimate − truth| over objects, never a library net
   (`docs/SUCCESS.md`). Bar 5 holds on every row it covers, transcripts at most 0.72 of 0.7.1's and genes 0.55.
   Bar 1 holds on every row but one: stranded capture ON at 5 % gDNA, 9.5 % of the library's gDNA above chance.

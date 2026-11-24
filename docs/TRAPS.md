@@ -152,6 +152,14 @@ its degenerate value, which is what a structurally blind suite scores.
 **a-broad-population-carries-no-prior.** Before fitting a population prior, measure the pooled width against the
 per-object uncertainty; if it is wider, there is no prior to be had.
 
+**one-draw-cannot-rank-estimators.** Rank estimators on replicate libraries (new abundance draws), choosing on some and
+reading on the others. On one draw two estimators trade places: at unstranded capture OFF 5 % gDNA, VBEM minus MAP ran
+from +7,616 to −6,318 fragments over four draws (issue #86).
+
+**a-count-across-one-fragment-is-not-the-mass.** Read false and missed transcript counts beside the error by truth
+bin. They count transcripts crossing one fragment, so an estimator that moves thousands of fragments between
+near-identical isoforms leaves them nearly unchanged: 4.3 % less error, false calls 1,985 → 1,870 (issue #86).
+
 ## Pools, selections and divisors
 
 **a-cancellation-is-conditional-on-its-support.** Write a reciprocal-opportunity expectation with its support factor,

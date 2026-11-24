@@ -825,6 +825,10 @@ contiguous alternative clips what it cannot place, and a free clip would read it
 - **VBEM's start-dependence is an accepted limit**: the digamma penalises a small component, so components sharing
   ambiguous fragments race and the start picks the winner; the start is fixed, so one input gives one answer. The
   iteration budget can stop the EM short of convergence (issue #34).
+- **VBEM is 0.8.0's estimator** (the owner, 2026-11-24). MAP solved to a certificate, with the transcripts the data
+  can do without removed, beat it by 3.5–6.3 % of annotated transcript error per in-scope stratum on four replicate
+  libraries of the simulator, but that gain rests on the simulator's sparse truth and is unmeasured on aligned input (issue #86).
+  Annotated aliases stay separate components (issue #87).
 
 > **Whole counts are the default (`assignment_mode = "sample"`), fractional an option; there is no argmax mode and no
 > cutoff on one fragment's posterior.** `sample` rounds each component's fractional count within its locus by largest
