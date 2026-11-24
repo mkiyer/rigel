@@ -87,15 +87,6 @@ class PipelineResult:
     calibration_track: pd.DataFrame
 
 
-def _sj_tag_to_spec(sj_strand_tag) -> str:
-    """Convert BamScanConfig.sj_strand_tag to the string spec for BamScanner."""
-    if isinstance(sj_strand_tag, str):
-        return sj_strand_tag if sj_strand_tag else "none"
-    if isinstance(sj_strand_tag, (list, tuple)):
-        return ",".join(sj_strand_tag) if sj_strand_tag else "none"
-    return "none"
-
-
 def _log_sj_tags(stats: PipelineStats, scan: BamScanConfig) -> None:
     """Say what the junction-strand tag gave on the library's spliced records, and warn when it gave none a strand.
 
@@ -110,7 +101,7 @@ def _log_sj_tags(stats: PipelineStats, scan: BamScanConfig) -> None:
     logger.info(
         "[SCAN] splice-junction strand tag %s: %d spliced records, %d with a strand (%.2f %%), %d without one "
         "(%.2f %%), %d whose XS and ts disagree, read as ambiguous (%.2f %%); %d unreadable tag values",
-        _sj_tag_to_spec(scan.sj_strand_tag),
+        scan.sj_tag_spec,
         spliced,
         stats.n_sj_tag_tagged,
         share(stats.n_sj_tag_tagged),
@@ -466,7 +457,7 @@ def _native_scanner(index: TranscriptIndex, scan: "BamScanConfig") -> _NativeBam
     resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
     scanner = _NativeBamScanner(
         resolve_ctx,
-        _sj_tag_to_spec(scan.sj_strand_tag),
+        scan.sj_tag_spec,
         skip_duplicates=scan.skip_duplicates,
         include_multimap=scan.include_multimap,
     )
@@ -1159,7 +1150,7 @@ def run_pipeline(
             stats=stats,
             skip_duplicates=scan.skip_duplicates,
             include_multimap=scan.include_multimap,
-            sj_spec=_sj_tag_to_spec(scan.sj_strand_tag),
+            sj_spec=scan.sj_tag_spec,
             locus_id_per_transcript=estimator.locus_id_per_transcript,
         )
     return result

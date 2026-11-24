@@ -25,13 +25,13 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Iterator
 
 import numpy as np
 import pandas as pd
 import pysam
 
-from .config import CONSTANTS, IndexConfig
+from .config import CONSTANTS, GtfParseMode, IndexConfig
 from .types import AnnotatedInterval, Interval, IntervalType, Strand
 from .transcript import Transcript
 
@@ -358,7 +358,7 @@ def _one_reference_per_gene(
 def read_transcripts(
     gtf_file: str | Path,
     *,
-    gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
+    gtf_parse_mode: GtfParseMode = "strict",
     collapse_duplicate_transcripts: bool = False,
     ref_lengths: dict[str, int] | None = None,
 ) -> list[Transcript]:
@@ -1280,7 +1280,7 @@ class TranscriptIndex:
         *,
         feather_compression: str = IndexConfig.feather_compression,
         write_tsv: bool = IndexConfig.write_tsv,
-        gtf_parse_mode: Literal["strict", "warn-skip"] = IndexConfig.gtf_parse_mode,
+        gtf_parse_mode: GtfParseMode = IndexConfig.gtf_parse_mode,
         collapse_duplicate_transcripts: bool = IndexConfig.collapse_duplicate_transcripts,
         end_tolerance: int = IndexConfig.end_tolerance,
         alignable_zarr_path: str | Path | None = None,

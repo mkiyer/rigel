@@ -21,7 +21,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 if TYPE_CHECKING:
     from .config import PipelineConfig
@@ -1224,7 +1224,7 @@ def _add_index_parser(subparsers) -> None:
     """``rigel index``'s options. Every overridable default is ``None``, so ``resolve_index_args`` can tell a flag the
     user gave from one the YAML or :class:`~rigel.config.IndexConfig` supplies; every default a help string names is
     read from the config, never restated here."""
-    from .config import IndexConfig
+    from .config import FeatherCompression, GtfParseMode, IndexConfig
 
     idx = subparsers.add_parser("index", help="Build reference index from FASTA + GTF")
     idx.add_argument("--fasta", help="Genome FASTA file (must be indexed with samtools faidx)")
@@ -1240,7 +1240,7 @@ def _add_index_parser(subparsers) -> None:
     )
     idx.add_argument(
         "--feather-compression",
-        choices=["lz4", "zstd", "uncompressed"],
+        choices=list(get_args(FeatherCompression)),
         help=f"Compression for Feather files (default: {IndexConfig.feather_compression})",
     )
     idx.add_argument(
@@ -1251,7 +1251,7 @@ def _add_index_parser(subparsers) -> None:
     )
     idx.add_argument(
         "--gtf-parse-mode",
-        choices=["strict", "warn-skip"],
+        choices=list(get_args(GtfParseMode)),
         help=(
             "GTF parse mode: 'strict' fails on a malformed record; "
             f"'warn-skip' logs a warning and skips it (default: {IndexConfig.gtf_parse_mode})"
@@ -1382,6 +1382,8 @@ def _add_quant_alignment_options(grp, qd: dict) -> None:
 
 
 def _add_quant_model_options(grp, qd: dict) -> None:
+    from .config import AssignmentMode, EMMode
+
     grp.add_argument(
         "--seed",
         type=int,
@@ -1397,7 +1399,7 @@ def _add_quant_model_options(grp, qd: dict) -> None:
     )
     grp.add_argument(
         "--em-mode",
-        choices=["vbem", "map"],
+        choices=list(get_args(EMMode)),
         help=f"EM algorithm variant (default: {qd['em_mode']}). "
         "'vbem' uses Variational Bayes EM with digamma-based soft "
         "updates. 'map' uses MAP-EM: each step adds the calibration's gDNA and RNA "
@@ -1405,7 +1407,7 @@ def _add_quant_model_options(grp, qd: dict) -> None:
     )
     grp.add_argument(
         "--assignment-mode",
-        choices=["sample", "fractional"],
+        choices=list(get_args(AssignmentMode)),
         help=f"Post-EM fragment assignment (default: {qd['assignment_mode']}). 'sample' gives every fragment to one "
         "transcript: each transcript's fractional count is rounded within its locus, then each fragment "
         "is drawn from its own posterior toward the transcripts still short of their count. "

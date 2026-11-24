@@ -19,7 +19,7 @@ import operator
 import os
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, get_args
 
 if TYPE_CHECKING:
     import numpy as np
@@ -39,6 +39,14 @@ def _check_integer(where: str, value, least: int) -> None:
 # ======================================================================
 # EM algorithm configuration
 # ======================================================================
+
+
+#: Each named choice set once: a config validates against it and the CLI offers it (``typing.get_args``).
+EMMode = Literal["vbem", "map"]
+AssignmentMode = Literal["sample", "fractional"]
+FeatherCompression = Literal["lz4", "zstd", "uncompressed"]
+GtfParseMode = Literal["strict", "warn-skip"]
+MessagePolicy = Literal["transfer", "silent"]
 
 
 @dataclass(frozen=True)
@@ -74,16 +82,16 @@ class EMConfig:
     """
 
     seed: int = 0
-    mode: Literal["vbem", "map"] = "vbem"
+    mode: EMMode = "vbem"
     iterations: int = 1000
     convergence_delta: float = 1e-6
-    assignment_mode: str = "sample"
+    assignment_mode: AssignmentMode = "sample"
     n_threads: int = 0
 
     def __post_init__(self):
-        if self.mode not in ("map", "vbem"):
+        if self.mode not in get_args(EMMode):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
-        if self.assignment_mode not in ("fractional", "sample"):
+        if self.assignment_mode not in get_args(AssignmentMode):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
         # `None` would seed the draw from OS entropy, and one input would stop giving one answer; the draw's generator
         # refuses a negative seed
@@ -262,12 +270,25 @@ class BamScanConfig:
         _check_integer("BamScanConfig.log_every", self.log_every, 1)
         # the scanner's tag modes; anything else is refused here rather than reinterpreted by the scanner
         tags = self.sj_strand_tag
-        spec = ",".join(tags) if isinstance(tags, (list, tuple)) else tags
-        if spec not in ("auto", "none", "", "XS", "ts", "XS,ts", "ts,XS"):
+        if not isinstance(tags, (str, list, tuple)) or self.sj_tag_spec not in (
+            "auto",
+            "none",
+            "XS",
+            "ts",
+            "XS,ts",
+            "ts,XS",
+        ):
             raise ValueError(
                 "BamScanConfig.sj_strand_tag must be auto, none, XS, ts, or XS and ts in either order; "
                 f"got {tags!r}."
             )
+
+    @property
+    def sj_tag_spec(self) -> str:
+        """The tag spec the scanner reads: the tag names comma-joined, ``"none"`` for no tag."""
+        tags = self.sj_strand_tag
+        spec = ",".join(tags) if isinstance(tags, (list, tuple)) else tags
+        return spec or "none"
 
     def resolved_total_threads(self) -> int:
         """Return the concrete total scan thread budget."""
@@ -332,7 +353,7 @@ class CalibrationConfig:
     #: judged against. Messages serve the slots whose own solve has no composition channel: unstranded data and the
     #: both-stranded (AMBIG) slots. An unknown name raises. A change of default must be checked with the instruments,
     #: not only the suite, because the tests install their policy themselves.
-    message_policy: str = "transfer"
+    message_policy: MessagePolicy = "transfer"
 
     #: Calibration refit iterations, the prior bootstrap: each re-fits the population gDNA landscape
     #: (:class:`~rigel.calibration.landscape.DensityLandscape`) on the current solve, resets the belief and re-solves,
@@ -359,6 +380,10 @@ class CalibrationConfig:
     intron_departure_prior: float = 0.01
 
     def __post_init__(self) -> None:
+        if self.message_policy not in get_args(MessagePolicy):
+            raise ValueError(
+                f"unknown message_policy {self.message_policy!r} — expected one of {get_args(MessagePolicy)}"
+            )
         if self.n_threads < 0:
             raise ValueError(f"CalibrationConfig.n_threads must be >= 0; got {self.n_threads}.")
         if not (0.0 < float(self.intron_departure_prior) < 1.0):
@@ -400,13 +425,13 @@ class IndexConfig:
     """
 
     #: Compression of the index's Feather tables: ``"lz4"``, ``"zstd"`` or ``"uncompressed"``.
-    feather_compression: Literal["lz4", "zstd", "uncompressed"] = "lz4"
+    feather_compression: FeatherCompression = "lz4"
 
     #: Write a human-readable TSV beside every Feather table.
     write_tsv: bool = True
 
     #: ``"strict"`` fails on a malformed GTF record; ``"warn-skip"`` logs it and skips it.
-    gtf_parse_mode: Literal["strict", "warn-skip"] = "strict"
+    gtf_parse_mode: GtfParseMode = "strict"
 
     #: Transcripts with identical exon coordinates are unidentifiable in quantification. ``False`` fails with a
     #: report of each group; ``True`` keeps the lexicographically smallest transcript ID per group, loss-free.
@@ -420,9 +445,9 @@ class IndexConfig:
     end_tolerance: int = 20
 
     def __post_init__(self) -> None:
-        if self.feather_compression not in ("lz4", "zstd", "uncompressed"):
+        if self.feather_compression not in get_args(FeatherCompression):
             raise ValueError(f"Unknown Feather compression: {self.feather_compression!r}")
-        if self.gtf_parse_mode not in ("strict", "warn-skip"):
+        if self.gtf_parse_mode not in get_args(GtfParseMode):
             raise ValueError(f"Unknown GTF parse mode: {self.gtf_parse_mode!r}")
         if self.end_tolerance < 0:
             raise ValueError(f"IndexConfig.end_tolerance must be >= 0; got {self.end_tolerance}.")

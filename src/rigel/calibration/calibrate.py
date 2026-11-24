@@ -366,15 +366,12 @@ def _departure(
 
 
 def _policy(config, strand: StrandBalance):
-    """The message-composition policy the config names. An unknown name raises, because an arm that silently ran a
-    different policy than it names could not be trusted. The transfer policy reads the library's κ."""
+    """The message-composition policy the config names (``CalibrationConfig`` refuses any other name, since an arm
+    that silently ran a different policy than it names could not be trusted). The transfer policy reads the library's
+    κ."""
     if config.message_policy == "silent":
         return SilentPolicy()
-    if config.message_policy == "transfer":
-        return TransferPolicy(kappa=strand.rna_sense_frac)
-    raise ValueError(
-        f"unknown message_policy {config.message_policy!r} — expected 'silent' or 'transfer'"
-    )
+    return TransferPolicy(kappa=strand.rna_sense_frac)
 
 
 def _init_belief(s: _SweepInputs):

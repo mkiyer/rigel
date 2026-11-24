@@ -83,11 +83,17 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
         "the exon -> boundary message must be ON in production"
     )
     with pytest.raises(ValueError, match="unknown message_policy"):
-        calibrate_mod.calibrate(
-            payload=sweep_inputs["payload"],
-            config=_dc.replace(CalibrationConfig(), message_policy="no-such-policy"),
-            **sweep_inputs["calibrate_kw"],
-        )
+        _dc.replace(CalibrationConfig(), message_policy="no-such-policy")
+
+
+def test_the_kernel_switches_on_every_policy_the_config_names():
+    """The sweep's kernel codes and the config's policy names are one set: a name the config admitted and the kernel
+    had no code for would fail mid-run, and a code no name reaches is dead."""
+    from typing import get_args
+
+    from rigel.config import MessagePolicy
+
+    assert set(SW.POLICY_KERNEL) == set(get_args(MessagePolicy))
 
 
 def _reference_rows(prepared, ctx):

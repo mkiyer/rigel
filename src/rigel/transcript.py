@@ -5,9 +5,7 @@ A transcript belongs to one gene (``g_id`` / ``g_index``) and holds its exons in
 
 import logging
 from dataclasses import dataclass, field
-from typing import Literal
-
-from .config import CONSTANTS
+from .config import CONSTANTS, GtfParseMode
 from .types import Interval, Strand
 from .gtf import GTFRecord
 
@@ -154,7 +152,7 @@ class Transcript:
     def read_gtf(
         gtf_file: str,
         *,
-        parse_mode: Literal["strict", "warn-skip"] = "strict",
+        parse_mode: GtfParseMode = "strict",
     ) -> list["Transcript"]:
         """Read a GTF's exon records into transcripts, sorted by ``(ref, start, end, strand)``."""
         transcripts: dict[str, Transcript] = {}
