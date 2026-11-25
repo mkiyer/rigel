@@ -407,7 +407,13 @@ def cut_efficiencies(
     right_of = region_right_boundary(np.asarray(region_arrays.ref_id))
     A = objects.piece[objects.cut_row]
     B = objects.piece[objects.cut_row + 1]
-    out = c_boundary[np.maximum(right_of[A], 0)]
+    # a cut's lower piece has its upper piece above it on its reference, so a boundary to its right
+    below = right_of[A]
+    if below.size and int(below.min()) < 0:
+        raise ValueError(
+            "a cut's lower piece is the last region of its reference: the transcript frame is corrupt"
+        )
+    out = c_boundary[below]
     crossing = np.zeros(out.shape[0])
     j = np.flatnonzero(objects.is_junction)
     if j.size:
@@ -704,7 +710,8 @@ def place_efficiencies(
     src = np.asarray(geo.src_region, dtype=np.int64)
     dst = np.asarray(geo.dst_region, dtype=np.int64)
     right_of = region_right_boundary(np.asarray(region_arrays.ref_id))
-    low, high = right_of[src], right_of[np.maximum(dst - 1, 0)]
+    # every boundary's src lies below its dst (the graph's I8, checked on load), so dst - 1 is a region
+    low, high = right_of[src], right_of[dst - 1]
     if calibration.gdna_bulk_density is None or src.size == 0:
         one = np.ones(src.size, dtype=np.float64)
         return c_region, c_boundary, one, one, low, high
