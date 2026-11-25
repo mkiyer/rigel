@@ -118,7 +118,7 @@ Each bar names its quantity, its strata and its truth. The thresholds are the ow
    probe designs) reported beside them.
 5. **At 5 % gDNA and above, the annotated pool is no worse than 0.7.1's.** On every in-scope row at 5 % gDNA and
    above, on the ladder on both inputs and on both fl-gap panels, Σ|Δ| over transcripts and over genes is at most
-   that of 0.7.1 re-scored on the same reads (`$RIGEL_RUNS/prototypes/2026-11-21_regen/v071/`), with bar 4 still
+   that of 0.7.1 re-scored on the same reads (`$RIGEL_RUNS/prototypes/2026-11-25_v071_rescore/`), with bar 4 still
    holding.
 
 The accumulator's own correctness (fidelity to the specification, worker-order independence, conservation) is a

@@ -37,8 +37,8 @@ port of STAR, which reads STAR's index and options and matches STAR on 99.9 % of
 python .claude/skills/ladder-report/build_report.py \
     --html <scratchpad>/ladder_report.html \
     --cvo <dir> --vcap <dir>/vcap_rc/summary.json --vcap-truth 0.2518 --vcap-v071 0.263117 \
-    --v071 $RIGEL_RUNS/prototypes/2026-11-16_v071_rescore/v071_sim.jsonl \
-    --baseline "v0.7.1, re-scored 2026-11-16 on the current panel, pinned like HEAD" \
+    --v071 $RIGEL_RUNS/prototypes/2026-11-25_v071_rescore/v071_sim.jsonl \
+    --baseline "v0.7.1, re-scored 2026-11-25 on the rebuilt panels, pinned like HEAD" \
     --markdown $RIGEL_RUNS/reports/ladder_accuracy_<DATE>.md
 ```
 
@@ -76,7 +76,7 @@ watched to fail under its own perturbation — if you change the rendering, keep
 | a percent error at a truth of zero | The `g00` rung has no gDNA at all. Print `n/a`; the raw count is the whole answer (`TRAPS: a-ratio-cannot-carry-zero`) |
 | the two RNA pools folded together | The split is `is_synthetic`, **never** `is_single_exon`. A single-exon transcript is **annotated** RNA (`TRAPS: nrna-does-not-mean-synthetic`) |
 | a false-negative column of zeros | `fn_mass` is the truth on the expressed transcripts the estimate gives *exactly* zero, and it fires only because a component the EM left at its floor is assigned nothing. Rows scored before that fix read 0 on all 16 conditions, a perfect score for something unmeasured (`TRAPS: could-the-arm-have-fired`), and their `detected` counts nearly every transcript for the same reason. Re-score them; `count_under` is reported beside it |
-| the truth table's row count as a transcript count | The table carries a row per synthetic entity too (6,919 of 15,669 on the current index), zero on **both** sides. Only 2,466 of 9,385 gene rows are real genes. `expressed` and `detected` are the scored sets |
+| the truth table's row count as a transcript count | The table carries a row per synthetic entity too (6,788 of 15,538 on the current index), zero on **both** sides. Only 2,466 of 9,254 gene rows are real genes. `expressed` and `detected` are the scored sets |
 | the deferred stratum unmarked | Unstranded × capture-ON carries most of the error; unmarked, a reader takes a pooled total for the tool's accuracy (`TRAPS: never-pool-the-strata`) |
 | the STAR rung's gDNA gap read as Rigel's | The aligner leaves a little of the simulated library unplaced: since the re-simulation of 2026-10-21, 1.4 % of the gDNA off capture and 0.07 % on (it was a fifth off capture, drawn over the suite genome's N runs). The rung is scored against the same truth as the simulator's alignments, so the two compare directly; `unaligned` counts what the aligner left out by origin, and the gDNA fraction's truth is read over what it placed (`gdna_frac_true_aligned`) |
 | a rung that mixes aligners | Every condition comes from one `panel.py align` run: its `<name>.align.json` records the aligner, its version and the parameter file, and `quant_accuracy.py --bam` stamps the input on every row |
@@ -94,7 +94,7 @@ transcripts contribute ~300 fragments to nascent truth while their tool-side cou
   library looks like to Rigel, and the difference between the two is the alignment's.
 - **By size.** An A/B pair runs with the scan pinned (`--set scan.total_threads=1`) and is exactly
   reproducible; judge an effect by its size, genes and pools beside the transcript table.
-- **The capture-OFF magnitudes are a stress reading.** The panel runs 20.2 % nascent fragments against
+- **The capture-OFF magnitudes are a stress reading.** The panel runs 18.5 % nascent fragments against
   a realistic ~4.2 % (`DESIGN.md` §0b's nascent scope ruling), so quote the share with the number.
 
 ## Files

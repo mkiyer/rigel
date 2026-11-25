@@ -59,8 +59,9 @@ for robustness, so a number measured at the panel's nascent share is a stress re
   ships. MAP with removal by evidence is issue #86, annotated aliases issue #87; the receipts and their map are in
   `$RIGEL_RUNS/perf/2026-11-23_em_cap/`.
 - **Every error is read per object** (the owner, 2026-11-21): Σ|estimate − truth| over objects, never a library net
-  (`docs/SUCCESS.md`). Bar 5 holds on every row it covers, transcripts at most 0.72 of 0.7.1's and genes 0.55.
-  Bar 1 holds on every row but one: stranded capture ON at 5 % gDNA, 9.5 % of the library's gDNA above chance.
+  (`docs/SUCCESS.md`). On the panels rebuilt 2026-11-25 from 2ad72b98, bar 5 holds on every row it covers,
+  transcripts at most 0.71 of 0.7.1's and genes 0.64. Bar 1 holds on every row but one: stranded capture ON at 5 %
+  gDNA, 9.2 % of the library's gDNA above chance.
 - The validation of ec996bba beat 0.7.1 in every in-scope stratum and stated eight failures, mostly about capture
   (`docs/ROADMAP.md`).
 - **No preview ships.** 0.8.0 waits for every `release-blocker` issue in the milestone; the milestone's other issues
