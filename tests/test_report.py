@@ -449,14 +449,14 @@ def test_the_capture_answer_is_calibrations_bulk_and_saturation(tmp_path):
     enriched = view("on", gdna_bulk_density=1.2e-4, gdna_capture_saturation=852.0)
     assert enriched["calibration"]["capture"] == {"bulk_density": 1.2e-4, "saturation": 852.0}
     tile = next(v for v in enriched["verdicts"] if v["k"] == "Capture")
-    assert (tile["v"], tile["fmt"], tile["s"]) == ("852×", "text", "info")
-    assert "0.00012" in tile["n"]
+    assert (tile["v"], tile["fmt"], tile["s"]) == (852.0, "times", "info")
+    assert {"v": 1.2e-4, "fmt": "g4"} in tile["n"]
     assert [k["v"] for k in enriched["calibration"]["enrichment_kpis"]] == [1.2e-4, 852.0]
 
     one = view("off", gdna_bulk_density=6e-3, gdna_capture_saturation=1.0)
     tile = next(v for v in one["verdicts"] if v["k"] == "Capture")
-    assert (tile["v"], tile["fmt"]) == ("1×", "text")
-    assert "one gDNA level" in tile["n"]
+    assert (tile["v"], tile["fmt"]) == (1.0, "times")
+    assert "one gDNA level" in tile["n"][0]
 
     none = view("none", gdna_bulk_density=None, gdna_capture_saturation=1.0)
     assert none["calibration"]["capture"] == {"bulk_density": None, "saturation": 1.0}

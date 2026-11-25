@@ -1,9 +1,9 @@
 """Transform a :class:`ReportSubstrate` into the render-ready view model: a JSON-serializable dict the front end
 only lays out, so no logic runs in the browser.
 
-Most values are raw numbers the front end formats, so tooltips, tables and charts share them. The headline captions
-and a few text KPIs are finished strings, and some table cells are rounded here. Every tile cut, table cap and
-rounding is ``CONSTANTS.qc``'s. The summary is read only through :class:`~rigel.report.substrate.SummaryReader`.
+Every value is a raw number the front end formats by its tag (``fmtValue``), so tooltips, tables, charts and the
+headline tiles' notes, which are lists of text and values, share one formatting; only labels are text here, and some
+table cells are rounded here to bound the page. Every tile cut, table cap and rounding is ``CONSTANTS.qc``'s. The summary is read only through :class:`~rigel.report.substrate.SummaryReader`.
 """
 
 from __future__ import annotations
@@ -54,8 +54,9 @@ def _verdicts(summary: SummaryReader) -> list[dict]:
     ]
 
 
-def _tile(k: str, icon: str, v, fmt: str, s: str, n: str) -> dict:
-    """One headline tile: its label, icon, value and the value's format, status and note."""
+def _tile(k: str, icon: str, v, fmt: str, s: str, n: list) -> dict:
+    """One headline tile: its label, icon, value and the value's format, status and note. The note is a list of parts,
+    each text or a ``{"v", "fmt"}`` value, which the front end formats as it formats every value."""
     return {"k": k, "icon": icon, "v": v, "fmt": fmt, "s": s, "n": n}
 
 
@@ -77,9 +78,8 @@ def _mapping_tile(summary: SummaryReader) -> dict:
     total, mapped = aln["total_reads"], aln["mapped_reads"]
     rate = _pct(mapped, total)
     status = _grade(rate, qc.mapping_rate_good, qc.mapping_rate_warning, higher_is_better=True)
-    return _tile(
-        "Mapping rate", "check", rate, "pct", status, f"{mapped:,} of {total:,} reads mapped"
-    )
+    note = [{"v": mapped, "fmt": "int"}, " of ", {"v": total, "fmt": "int"}, " reads mapped"]
+    return _tile("Mapping rate", "check", rate, "pct", status, note)
 
 
 def _strandedness_tile(summary: SummaryReader) -> dict:
@@ -89,7 +89,10 @@ def _strandedness_tile(summary: SummaryReader) -> dict:
         status, label = "good", "Reverse (R1−)" if not strand["read1_sense"] else "Forward (R1+)"
     else:
         status, label = "warning", "Unstranded"
-    note = f"{strand['strand_specificity'] * 100:.1f}% strand-specific · {_protocol(strand['read1_sense'])}"
+    note = [
+        {"v": strand["strand_specificity"], "fmt": "pct"},
+        f" strand-specific · {_protocol(strand['read1_sense'])}",
+    ]
     return _tile("Strandedness", "arrow", label, "text", status, note)
 
 
@@ -105,7 +108,7 @@ def _gdna_tile(summary: SummaryReader) -> dict:
         fraction,
         "pct",
         status,
-        "EM-corrected; incl. unspliced intergenic",
+        ["EM-corrected; incl. unspliced intergenic"],
     )
 
 
@@ -121,29 +124,26 @@ def _usable_tile(summary: SummaryReader) -> dict:
         genic,
         "count",
         status,
-        f"{rate * 100:.1f}% genic of {_si(total)}",
+        [{"v": rate, "fmt": "pct"}, " genic of ", {"v": total, "fmt": "count"}],
     )
 
 
 def _capture_tile(capture: dict) -> dict:
     """Capture is descriptive: an enriched level is neither good nor bad, so the tile is neutral ("info")."""
     if capture["bulk_density"] is None:
-        value, note = "None", "no gDNA landscape: lengths not corrected for capture"
+        value, fmt = "None", "text"
+        note = ["no gDNA landscape: lengths not corrected for capture"]
     elif capture["saturation"] > 1.0:
-        value = f"{capture['saturation']:,.0f}×"
-        note = f"saturated gDNA level over the bulk ({capture['bulk_density']:.3g} fragments/bp)"
+        value, fmt = capture["saturation"], "times"
+        note = [
+            "saturated gDNA level over the bulk (",
+            {"v": capture["bulk_density"], "fmt": "g4"},
+            " fragments/bp)",
+        ]
     else:
-        value, note = "1×", "one gDNA level: nothing enriched above the bulk"
-    return _tile("Capture", "target", value, "text", "info", note)
-
-
-def _si(n: float) -> str:
-    n = float(n)
-    if n >= 1e6:
-        return f"{n / 1e6:.1f}M"
-    if n >= 1e3:
-        return f"{n / 1e3:.1f}k"
-    return f"{n:.0f}"
+        value, fmt = 1.0, "times"
+        note = ["one gDNA level: nothing enriched above the bulk"]
+    return _tile("Capture", "target", value, fmt, "info", note)
 
 
 def _alignment(summary: SummaryReader) -> dict:
@@ -241,7 +241,7 @@ def _strand(summary: SummaryReader) -> dict:
         "kpis": [
             {"l": "P(R1 sense)", "v": s["p_r1_sense"], "fmt": "float3"},
             {"l": "Specificity", "v": s["strand_specificity"], "fmt": "float3"},
-            {"l": "95% CI", "v": f"±{eps:.4f}", "fmt": "text"},
+            {"l": "95% CI", "v": eps, "fmt": "pm4"},
             {"l": "Exonic (all)", "v": exonic if exonic is not None else "—", "fmt": "float3"},
         ],
     }

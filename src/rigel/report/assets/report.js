@@ -22,6 +22,8 @@
       case "int": return grp(v);
       case "float3": return v.toFixed(3);
       case "g4": return g4(v);         // 4 significant figures
+      case "times": return grp(v) + "×";  // a multiple: "852×"
+      case "pm4": return "±" + v.toFixed(4);  // a half-width: "±0.0050"
       default: return String(v);
     }
   }
@@ -30,6 +32,8 @@
   // A string a user or an annotation chose (a sample, a path, a gene, a reference) is text: escaped before
   // it joins markup that innerHTML parses.
   const esc = (s) => s == null ? "" : String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  // A note is text and values: each text part escaped, each value formatted by its tag.
+  const noteHtml = (parts) => parts.map((p) => typeof p === "string" ? esc(p) : fmtValue(p.v, p.fmt)).join("");
   function H(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
   function el(tag, attrs, kids) { const e = document.createElementNS(SVGNS, tag); for (const k in (attrs || {})) e.setAttribute(k, attrs[k]); (kids || []).forEach((c) => e.appendChild(c)); return e; }
   function txt(t) { const e = document.createElementNS(SVGNS, "tspan"); e.textContent = t; return e; }
@@ -310,7 +314,7 @@
       v.innerHTML = "";
       (M.verdicts || []).forEach((d) => {
         const t = H("div", `vt s-${d.s}`);
-        t.innerHTML = `<div class="k">${icon(d.icon)}${d.k}</div><div class="v">${fmtValue(d.v, d.fmt)}</div><div class="n">${d.n}</div>`;
+        t.innerHTML = `<div class="k">${icon(d.icon)}${d.k}</div><div class="v">${fmtValue(d.v, d.fmt)}</div><div class="n">${noteHtml(d.n)}</div>`;
         v.appendChild(t);
       });
     }
