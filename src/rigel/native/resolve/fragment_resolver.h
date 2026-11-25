@@ -114,8 +114,8 @@ public:
     /// non-empty; ``introns`` are its observed junctions as `sort_unique_junctions` leaves them, every one held by one
     /// annotated transcript (the scan's annotated-path rule). Sets every field of ``out`` but the hit's own
     /// (num_hits, nm, clip).
-    void resolve(const std::vector<ExonBlock>& exons, const std::vector<IntronBlock>& introns,
-                 int32_t genomic_footprint, ResolvedFragment& out, ResolverScratch& scratch) const;
+    void resolve(const std::vector<ExonBlock>& exons, const std::vector<IntronBlock>& introns, ResolvedFragment& out,
+                 ResolverScratch& scratch) const;
 
 private:
     /// Transcript t's introns: `n` (start, end) pairs, the gaps between its consecutive exons. None for a transcript
@@ -159,8 +159,9 @@ private:
     void choose_candidates(bool spliced, ResolvedFragment& out, ResolverScratch& scratch) const;
     void candidate_exon_bp(ResolvedFragment& out, ResolverScratch& scratch) const;
     bool candidates_on_both_strands(const std::vector<int32_t>& candidates) const;
-    void enumerate_gap_hypotheses(const std::vector<ExonBlock>& exons, const std::vector<IntronBlock>& observed_introns,
-                                  bool certified_rna, ResolvedFragment& out, ResolverScratch& scratch) const;
+    void enumerate_gap_hypotheses(const std::vector<ExonBlock>& exons, std::pair<int32_t, int32_t> extent,
+                                  const std::vector<IntronBlock>& observed_introns, bool certified_rna,
+                                  ResolvedFragment& out, ResolverScratch& scratch) const;
     void unsequenced_gaps(const std::vector<ExonBlock>& exons, const std::vector<IntronBlock>& observed_introns,
                           ResolverScratch& scratch) const;
 

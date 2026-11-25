@@ -82,23 +82,21 @@ void bind_accumulator_set(nb::module_& m) {
                  static accumulator::OfferScratch offer_scratch;
                  // One pass over `placements`, as over each placement's hypotheses, so a one-shot iterable offers the
                  // same fragment as a list. The `Placement`s are taken after the loop, once `marshalled` has stopped
-                 // growing.
-                 std::vector<MarshalledFragment> marshalled;
+                 // growing; a move keeps each storage's fragment valid.
+                 std::vector<accumulator::OfferedStorage> marshalled;
                  std::vector<int32_t> refs;
                  for (nb::handle p : placements) {
-                     marshalled.emplace_back(nb::cast<int64_t>(nb::getattr(p, "start")),
-                                             nb::cast<int64_t>(nb::getattr(p, "end")),
-                                             nb::cast<nb::iterable>(nb::getattr(p, "observed_introns")),
-                                             nb::cast<int32_t>(nb::getattr(p, "align_strand")),
-                                             nb::cast<int32_t>(nb::getattr(p, "sj_strand")),
-                                             nb::getattr(p, "hypotheses"),
-                                             nb::cast<int32_t>(nb::getattr(p, "nm")),
-                                             nb::cast<int32_t>(nb::getattr(p, "clip")));
+                     marshal_fragment(marshalled.emplace_back(), nb::cast<int64_t>(nb::getattr(p, "start")),
+                                      nb::cast<int64_t>(nb::getattr(p, "end")),
+                                      nb::cast<nb::iterable>(nb::getattr(p, "observed_introns")),
+                                      nb::cast<int32_t>(nb::getattr(p, "align_strand")),
+                                      nb::cast<int32_t>(nb::getattr(p, "sj_strand")), nb::getattr(p, "hypotheses"),
+                                      nb::cast<int32_t>(nb::getattr(p, "nm")), nb::cast<int32_t>(nb::getattr(p, "clip")));
                      refs.push_back(nb::cast<int32_t>(nb::getattr(p, "ref")));
                  }
                  std::vector<accumulator::Placement> pls;
                  pls.reserve(marshalled.size());
-                 for (size_t i = 0; i < marshalled.size(); ++i) pls.push_back({refs[i], marshalled[i].offered});
+                 for (size_t i = 0; i < marshalled.size(); ++i) pls.push_back({refs[i], marshalled[i].offered()});
                  return std::string(accumulator::outcome_key(s.offer(pls.data(), pls.size(), offer_scratch)));
              },
              nb::arg("placements"))

@@ -49,6 +49,7 @@ constexpr int64_t stride_of() {
 struct HeldBank {
     Array1<int64_t> start, end, align_strand, sj_strand, observed_intron_offsets, observed_introns,
         hypothesis_offsets, hypothesis_sj_strand, hypothesis_intron_offsets, hypothesis_introns;
+    accumulator::OfferedStorage storage;
 
     HeldBank(Array1<int64_t> start, Array1<int64_t> end, Array1<int64_t> align_strand, Array1<int64_t> sj_strand,
              Array1<int64_t> observed_intron_offsets, Array1<int64_t> observed_introns,
@@ -63,15 +64,11 @@ struct HeldBank {
             observed_intron_offsets.shape(0) != n + 1 || hypothesis_offsets.shape(0) != n + 1 ||
             hypothesis_intron_offsets.shape(0) != hypothesis_sj_strand.shape(0) + 1)
             throw std::invalid_argument("HeldBank: the arrays do not describe one bank");
-    }
-    std::vector<IntronBlock> observed, implied;
-    std::vector<accumulator::GapHypothesis> spans;
-    std::vector<size_t> first_implied;
-
-    /// A coordinate as the per-record bindings cast it, refused where it would not fit.
-    static int32_t coordinate(int64_t x) {
-        if (x < INT32_MIN || x > INT32_MAX) throw std::overflow_error("held bank: an intron coordinate exceeds int32");
-        return static_cast<int32_t>(x);
+        // every coordinate as the per-record bindings cast it, refused where it would not fit
+        for (const Array1<int64_t>* introns : {&observed_introns, &hypothesis_introns})
+            for (size_t i = 0; i < introns->shape(0); ++i)
+                if (introns->data()[i] < INT32_MIN || introns->data()[i] > INT32_MAX)
+                    throw std::overflow_error("held bank: an intron coordinate exceeds int32");
     }
 
     int64_t n_placements() const { return static_cast<int64_t>(start.shape(0)); }
@@ -83,35 +80,20 @@ struct HeldBank {
     }
 
     /// Placement `p` offered with hypotheses `[h0, h1)`; the pointers stay valid until the next call.
-    accumulator::OfferedFragment offer(int64_t p, int64_t h0, int64_t h1) {
-        observed.clear();
-        implied.clear();
-        spans.clear();
-        first_implied.clear();
-        const int64_t* oo = observed_intron_offsets.data();
-        const int64_t* oi = observed_introns.data();
-        for (int64_t i = oo[p]; i < oo[p + 1]; ++i)
-            observed.push_back(IntronBlock{0, coordinate(oi[2 * i]), coordinate(oi[2 * i + 1]), 0});
-        const int64_t* ho = hypothesis_intron_offsets.data();
-        const int64_t* hi = hypothesis_introns.data();
-        for (int64_t h = h0; h < h1; ++h) {
-            first_implied.push_back(implied.size());
-            for (int64_t i = ho[h]; i < ho[h + 1]; ++i)
-                implied.push_back(IntronBlock{0, coordinate(hi[2 * i]), coordinate(hi[2 * i + 1]), 0});
-            spans.push_back({nullptr, implied.size() - first_implied.back(),
-                             static_cast<int32_t>(hypothesis_sj_strand.data()[h])});
-        }
-        for (size_t s = 0; s < spans.size(); ++s) spans[s].introns = implied.data() + first_implied[s];
-        accumulator::OfferedFragment f{};
-        f.start = start.data()[p];
-        f.end = end.data()[p];
-        f.observed_introns = observed.data();
-        f.n_observed_introns = observed.size();
-        f.align_strand = static_cast<int32_t>(align_strand.data()[p]);
-        f.sj_strand = static_cast<int32_t>(sj_strand.data()[p]);
-        f.hypotheses = spans.data();
-        f.n_hypotheses = spans.size();
-        return f;
+    const accumulator::OfferedFragment& offer(int64_t p, int64_t h0, int64_t h1) {
+        const accumulator::HeldArrays bank{start.data(),
+                                           end.data(),
+                                           align_strand.data(),
+                                           sj_strand.data(),
+                                           observed_intron_offsets.data(),
+                                           observed_introns.data(),
+                                           hypothesis_sj_strand.data(),
+                                           hypothesis_intron_offsets.data(),
+                                           hypothesis_introns.data(),
+                                           nullptr,
+                                           nullptr};
+        return accumulator::rebuild_offered(bank, static_cast<size_t>(p), static_cast<size_t>(h0),
+                                            static_cast<size_t>(h1), storage);
     }
 };
 
@@ -218,8 +200,10 @@ void bind_accumulator(nb::module_& m) {
     c.def("deposit",
           [](Accumulator& a, int64_t start, int64_t end, nb::iterable introns, int32_t align_strand, int32_t sj_strand,
              nb::object hypotheses, int32_t nm, int32_t clip) {
-              MarshalledFragment frag(start, end, introns, align_strand, sj_strand, hypotheses, nm, clip);
-              return std::string(accumulator::outcome_key(a.deposit(frag.offered, binding_scratch())));
+              accumulator::OfferedStorage storage;
+              const accumulator::OfferedFragment& frag =
+                  marshal_fragment(storage, start, end, introns, align_strand, sj_strand, hypotheses, nm, clip);
+              return std::string(accumulator::outcome_key(a.deposit(frag, binding_scratch())));
           },
           nb::arg("start"), nb::arg("end"), nb::arg("observed_introns") = nb::tuple(),
           nb::arg("align_strand") = STRAND_POS, nb::arg("sj_strand") = STRAND_NONE, nb::arg("hypotheses"),
@@ -229,8 +213,10 @@ void bind_accumulator(nb::module_& m) {
         .def("length_under",
              [](const Accumulator& a, int64_t start, int64_t end, nb::iterable introns, int32_t align_strand,
                 int32_t sj_strand, nb::object hypotheses, size_t hypothesis_index) {
-                 MarshalledFragment frag(start, end, introns, align_strand, sj_strand, hypotheses);
-                 return a.length_under(frag.offered, hypothesis_index, binding_scratch());
+                 accumulator::OfferedStorage storage;
+                 const accumulator::OfferedFragment& frag =
+                     marshal_fragment(storage, start, end, introns, align_strand, sj_strand, hypotheses);
+                 return a.length_under(frag, hypothesis_index, binding_scratch());
              },
              nb::arg("start"), nb::arg("end"), nb::arg("observed_introns") = nb::tuple(),
              nb::arg("align_strand") = STRAND_POS, nb::arg("sj_strand") = STRAND_NONE,
@@ -256,9 +242,11 @@ void bind_accumulator(nb::module_& m) {
         .def("placement_masses",
              [](const Accumulator& a, int64_t start, int64_t end, nb::iterable introns, int32_t align_strand,
                 int32_t sj_strand) {
-                 MarshalledFragment frag(start, end, introns, align_strand, sj_strand, nb::tuple());
+                 accumulator::OfferedStorage storage;
+                 const accumulator::OfferedFragment& frag =
+                     marshal_fragment(storage, start, end, introns, align_strand, sj_strand, nb::tuple());
                  std::vector<accumulator::PlaceMass> out;
-                 a.placement_masses(frag.offered, binding_scratch(), out);
+                 a.placement_masses(frag, binding_scratch(), out);
                  std::vector<int8_t> kinds;
                  std::vector<int64_t> ids;
                  std::vector<double> masses;

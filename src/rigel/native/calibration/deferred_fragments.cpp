@@ -60,41 +60,20 @@ void DeferredFragments::copy_placement(const DeferredFragments& from, std::size_
 }
 
 const OfferedFragment& DeferredFragments::offered_of(std::size_t p, std::size_t h0, std::size_t h1,
-                                                     OfferedStorage& st) const {
-    st.observed.clear();
-    st.implied.clear();
-    st.spans.clear();
-    for (std::size_t q = static_cast<std::size_t>(observed_intron_offsets[p]);
-         q < static_cast<std::size_t>(observed_intron_offsets[p + 1]); ++q) {
-        st.observed.push_back({0, static_cast<std::int32_t>(observed_introns[2 * q]),
-                               static_cast<std::int32_t>(observed_introns[2 * q + 1]), 0});
-    }
-    const std::size_t g0 = static_cast<std::size_t>(hypothesis_offsets[p]) + h0;
-    const std::size_t g1 = static_cast<std::size_t>(hypothesis_offsets[p]) + h1;
-    // Reserved up front: the spans below point into these vectors, so they must not reallocate while filling.
-    st.implied.reserve(static_cast<std::size_t>(hypothesis_intron_offsets[g1] - hypothesis_intron_offsets[g0]));
-    st.spans.reserve(g1 - g0);
-    for (std::size_t g = g0; g < g1; ++g) {
-        const std::size_t i0 = st.implied.size();
-        for (std::size_t q = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
-             q < static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]); ++q) {
-            st.implied.push_back({0, static_cast<std::int32_t>(hypothesis_introns[2 * q]),
-                                  static_cast<std::int32_t>(hypothesis_introns[2 * q + 1]), 0});
-        }
-        st.spans.push_back({st.implied.data() + i0, st.implied.size() - i0,
-                            static_cast<std::int32_t>(hypothesis_sj_strand[g])});
-    }
-    st.offered.start = start[p];
-    st.offered.end = end[p];
-    st.offered.observed_introns = st.observed.data();
-    st.offered.n_observed_introns = st.observed.size();
-    st.offered.align_strand = static_cast<std::int32_t>(align_strand[p]);
-    st.offered.sj_strand = static_cast<std::int32_t>(sj_strand[p]);
-    st.offered.hypotheses = st.spans.data();
-    st.offered.n_hypotheses = st.spans.size();
-    st.offered.nm = static_cast<std::int32_t>(nm[p]);
-    st.offered.clip = static_cast<std::int32_t>(clip[p]);
-    return st.offered;
+                                                     OfferedStorage& storage) const {
+    const HeldArrays bank{start.data(),
+                          end.data(),
+                          align_strand.data(),
+                          sj_strand.data(),
+                          observed_intron_offsets.data(),
+                          observed_introns.data(),
+                          hypothesis_sj_strand.data(),
+                          hypothesis_intron_offsets.data(),
+                          hypothesis_introns.data(),
+                          nm.data(),
+                          clip.data()};
+    const std::size_t g = static_cast<std::size_t>(hypothesis_offsets[p]);
+    return rebuild_offered(bank, p, g + h0, g + h1, storage);
 }
 
 namespace {

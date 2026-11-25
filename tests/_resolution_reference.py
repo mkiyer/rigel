@@ -39,9 +39,8 @@ class GenomicInterval(NamedTuple):
 def make_fragment(exons=(), introns=()):
     """Create a minimal fragment-like object for :func:`resolve_fragment`.
 
-    Builds a lightweight ``SimpleNamespace`` with ``.exons``, ``.introns``,
-    and ``.genomic_footprint`` — the three attributes the C++ resolve
-    kernel reads via ``frag.attr()``.
+    Builds a lightweight ``SimpleNamespace`` with ``.exons`` and ``.introns``,
+    the two attributes the C++ resolve kernel reads via ``frag.attr()``.
 
     Parameters
     ----------
@@ -55,14 +54,7 @@ def make_fragment(exons=(), introns=()):
     SimpleNamespace
         Object accepted by ``resolve_fragment`` and the C++ kernel.
     """
-    exons = tuple(exons)
-    introns = tuple(introns)
-    footprint = exons[-1].end - exons[0].start if exons else -1
-    return SimpleNamespace(
-        exons=exons,
-        introns=introns,
-        genomic_footprint=footprint,
-    )
+    return SimpleNamespace(exons=tuple(exons), introns=tuple(introns))
 
 
 # ---------------------------------------------------------------------------

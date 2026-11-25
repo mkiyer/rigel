@@ -28,8 +28,8 @@ std::vector<Block> read_blocks(const FragmentResolver& resolver, nb::object bloc
     return out;
 }
 
-/// A fragment-like object (``exons``, ``introns``, ``genomic_footprint``) resolved as the scan resolves a hit, its
-/// junctions sorted as the scan hands them over; None when it has no exon block.
+/// A fragment-like object (``exons``, ``introns``) resolved as the scan resolves a hit, its junctions sorted as the
+/// scan hands them over; None when it has no exon block.
 nb::object resolve_fragment(const FragmentResolver& resolver, nb::object frag) {
     std::vector<ExonBlock> exons = read_blocks<ExonBlock>(resolver, frag.attr("exons"));
     if (exons.empty()) return nb::none();
@@ -37,7 +37,7 @@ nb::object resolve_fragment(const FragmentResolver& resolver, nb::object frag) {
     sort_unique_junctions(introns);
     ResolverScratch scratch(resolver.n_transcripts());
     ResolvedFragment out;
-    resolver.resolve(exons, introns, nb::cast<int32_t>(frag.attr("genomic_footprint")), out, scratch);
+    resolver.resolve(exons, introns, out, scratch);
     return nb::cast(std::move(out));
 }
 

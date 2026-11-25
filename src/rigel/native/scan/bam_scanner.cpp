@@ -412,12 +412,11 @@ void BamScanner::Worker::collect_placement(const AssembledFragment& f, const Res
         pending_hypotheses_.push_back({imp0, arena_implied_.size(), r.gap_sj_strand[h]});
     }
 
-    // The molecule's extent: leftmost block start to rightmost block end, the mate gap included, because the gap is
-    // part of the molecule and counts toward L. The observed motif strand: `deposit` falls back to a hypothesis's
-    // implied strand only when nothing was sequenced, since an observed motif is evidence and an implied one an
-    // inference. A usable hit lies on a reference the index, and so the accumulator, holds.
-    const std::pair<int32_t, int32_t> extent = fragment_extent(f.exons);
-    pending_.push_back({f.exons.front().ref_id, extent.first, extent.second, r.align_strand, r.sj_strand, obs0,
+    // The molecule's extent, the mate gap included, because the gap is part of the molecule and counts toward L. The
+    // observed motif strand: `deposit` falls back to a hypothesis's implied strand only when nothing was sequenced,
+    // since an observed motif is evidence and an implied one an inference. A usable hit lies on a reference the
+    // index, and so the accumulator, holds.
+    pending_.push_back({f.exons.front().ref_id, r.genomic_start, r.genomic_end(), r.align_strand, r.sj_strand, obs0,
                         arena_observed_.size(), hyp0, pending_hypotheses_.size(), f.nm, f.clip});
 }
 
@@ -455,9 +454,8 @@ void BamScanner::Worker::offer_placements() {
 void BamScanner::Worker::add_place_masses(const AssembledFragment& f, const ResolvedFragment& r) {
     mass_observed_.clear();
     append_observed_introns(f.introns, mass_observed_);
-    const std::pair<int32_t, int32_t> extent = fragment_extent(f.exons);
-    const accumulator::OfferedFragment off{extent.first,          extent.second, mass_observed_.data(),
-                                           mass_observed_.size(), r.align_strand, r.sj_strand, nullptr, 0};
+    const accumulator::OfferedFragment off{r.genomic_start,       r.genomic_end(), mass_observed_.data(),
+                                           mass_observed_.size(), r.align_strand,  r.sj_strand, nullptr, 0};
     acc_set_->placement_masses(f.exons.front().ref_id, off, mass_scratch_, masses_);
     for (const auto& m : masses_) chunk_.add_place_mass(m.kind, m.index, m.mass);
 }

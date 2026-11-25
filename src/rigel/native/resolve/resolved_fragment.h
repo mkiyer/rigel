@@ -32,8 +32,10 @@ struct ResolvedFragment {
     int32_t sj_strand = STRAND_NONE;     // the observed junctions' motif strands, OR-ed
     int32_t ambig_strand = 0;            // 1 when the candidates lie on both strands
     int32_t read_length = 0;             // the blocks' aligned bases
-    int32_t genomic_footprint = -1;
-    int32_t genomic_start = -1;
+    int32_t genomic_footprint = -1;      // the molecule's extent, the mate gap included: its bases
+    int32_t genomic_start = -1;          // and its leftmost base
+
+    int32_t genomic_end() const noexcept { return genomic_start + genomic_footprint; }
 
     // The per-junction strand table's key: the leftmost observed junction (-1 when none), completed by `sj_strand`. A
     // strand-qualified fragment carries one strand bit (mates whose XS/ts tags disagree OR to STRAND_AMBIGUOUS and are

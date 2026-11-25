@@ -339,20 +339,28 @@ private:
     /// it is spliced.
     bool resolve_annotated_sj(std::int32_t sj_strand, DepositScratch& scratch) const;
 
-    /// The region_bounds strictly inside the segment [seg_start, seg_end), as the index range [first, last): the
-    /// boundaries it crosses are first - 1 .. last - 2.
-    std::pair<std::int64_t, std::int64_t> crossed_bounds(std::int64_t seg_start, std::int64_t seg_end) const noexcept;
+    /// One segment of a path that holds a base, `[start, end)`, the `index`-th on the path (the gap after it is
+    /// intron `index`), with the region_bounds strictly inside it as the index range `[first, last)`: the boundaries
+    /// it crosses are first - 1 .. last - 2.
+    struct PathSegment {
+        std::size_t  index;
+        std::int64_t start, end, first, last;
+    };
 
-    /// Every share of one segment's conserved mass, as `visit(kind, id, share)`: the crossed region_bounds
-    /// [first, last) split the segment into slices, and each slice's `slice_len / length` is shared equally among the
-    /// objects bounding it, so the shares over a fragment sum to 1. The segment's own ends are bounds wherever its
-    /// intron resolved to an annotated sj, its interior ends boundaries. Coverage-weighted rather than 1/K: both
-    /// conserve, but only this one says where the fragment sat. An unbounded segment yields nothing: the contained
-    /// case, or an unannotated intron's.
+    /// Each segment of the path in `scratch.segments` that holds a base, as `visit(segment)`. A boundary is crossed
+    /// iff it lies strictly inside a segment, so per segment the crossed boundaries are a contiguous index range.
     template <class Visit>
-    void for_each_mass_share(std::size_t segment, std::int64_t seg_start, std::int64_t seg_end, std::int64_t first,
-                             std::int64_t last, std::int64_t length, const std::vector<std::int32_t>& sj_id_at_gap,
-                             Visit&& visit) const;
+    void for_each_segment(const DepositScratch& scratch, Visit&& visit) const;
+
+    /// Every share of one segment's conserved mass, as `visit(kind, id, share)`: the crossed region_bounds split the
+    /// segment into slices, and each slice's `slice_len / length` is shared equally among the objects bounding it, so
+    /// the shares over a fragment sum to 1. The segment's own ends are bounds wherever its intron resolved to an
+    /// annotated sj, its interior ends boundaries. Coverage-weighted rather than 1/K: both conserve, but only this one
+    /// says where the fragment sat. An unbounded segment yields nothing: the contained case, or an unannotated
+    /// intron's.
+    template <class Visit>
+    void for_each_mass_share(const PathSegment& segment, std::int64_t length,
+                             const std::vector<std::int32_t>& sj_id_at_gap, Visit&& visit) const;
 
     /// The one length pool this fragment belongs to, or -1 for none. A fragment arrives here only when exactly one
     /// hypothesis survived, so its L is determined, and an implied splice counts as a sequenced one: barring

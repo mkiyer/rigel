@@ -341,10 +341,13 @@ int32_t FragmentResolver::validate_pair(int32_t ref_id, const PairMate& f, const
 // ================================================================
 
 void FragmentResolver::resolve(const std::vector<ExonBlock>& exons, const std::vector<IntronBlock>& introns,
-                               int32_t genomic_footprint, ResolvedFragment& out, ResolverScratch& scratch) const {
+                               ResolvedFragment& out, ResolverScratch& scratch) const {
     if (exons.empty()) throw std::invalid_argument("resolve: a fragment needs at least one aligned block");
     scratch.reset_per_fragment();
-    out.genomic_footprint = genomic_footprint;
+    // the molecule's extent, the mate gap included: where it starts, and the genome it spans
+    const std::pair<int32_t, int32_t> extent = fragment_extent(exons);
+    out.genomic_start = extent.first;
+    out.genomic_footprint = extent.second - extent.first;
 
     query_blocks(exons, out, scratch);
     add_nascent_spans(exons, scratch);
@@ -355,13 +358,11 @@ void FragmentResolver::resolve(const std::vector<ExonBlock>& exons, const std::v
 
     // Every fragment, whatever its splice type: a spliced fragment can also carry an intron in its mate gap. This only
     // enumerates; whether the fragment deposits or waits for the second pass is decided where the outcome is reported.
-    enumerate_gap_hypotheses(exons, introns, out.splice_type == SPLICE_SPLICED_ANNOT, out, scratch);
+    enumerate_gap_hypotheses(exons, extent, introns, out.splice_type == SPLICE_SPLICED_ANNOT, out, scratch);
     // SPLICE_SPLICED_IMPLICIT promotes unspliced fragments only. `splice_type` is the scanner's census of what it saw
     // and feeds scoring, the buffer, strand training and `rigel report`, so relabelling an observed SPLICED_ANNOT
     // fragment would move mass between reported categories. Deferral is a separate axis.
     if (out.splice_type == SPLICE_UNSPLICED && out.n_gap_hypotheses() > 1) out.splice_type = SPLICE_SPLICED_IMPLICIT;
-
-    out.genomic_start = fragment_extent(exons).first;
 }
 
 /// Each block's exon-interval and transcript-interval transcripts, sorted and unique, and every transcript's aligned
@@ -595,6 +596,7 @@ void FragmentResolver::unsequenced_gaps(const std::vector<ExonBlock>& exons,
 /// keeps a length: its molecule with the covered intron retained, which the EM scores beside the covered bases'
 /// overhang penalty.
 void FragmentResolver::enumerate_gap_hypotheses(const std::vector<ExonBlock>& exons,
+                                                const std::pair<int32_t, int32_t> extent,
                                                 const std::vector<IntronBlock>& observed_introns,
                                                 bool certified_rna, ResolvedFragment& out,
                                                 ResolverScratch& scratch) const {
@@ -602,10 +604,9 @@ void FragmentResolver::enumerate_gap_hypotheses(const std::vector<ExonBlock>& ex
     out.gap_sj_strand.clear();
     out.gap_intron_offsets.assign(1, 0);
 
-    const std::pair<int32_t, int32_t> span = fragment_extent(exons);
     const auto length_of = [&](const std::vector<IntronBlock>& path) -> int32_t {
         const int64_t L = path_length(observed_introns.data(), observed_introns.size(), path.data(), path.size(),
-                                      span.first, span.second, scratch.path_introns, scratch.path_segments);
+                                      extent.first, extent.second, scratch.path_introns, scratch.path_segments);
         return L > 0 ? static_cast<int32_t>(L) : -1;
     };
 

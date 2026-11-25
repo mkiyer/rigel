@@ -155,13 +155,18 @@ void Accumulator::sj_edge_ids(const std::int64_t* starts, const std::int64_t* en
     for (std::size_t i = 0; i < n; ++i) out[i] = sj_edge_id(starts[i], ends[i], sj_strand[i]);
 }
 
-std::pair<std::int64_t, std::int64_t> Accumulator::crossed_bounds(std::int64_t seg_start,
-                                                                  std::int64_t seg_end) const noexcept {
-    const std::int64_t first =
-        std::upper_bound(region_bounds_.begin(), region_bounds_.end(), seg_start) - region_bounds_.begin();
-    const std::int64_t last =
-        std::lower_bound(region_bounds_.begin(), region_bounds_.end(), seg_end) - region_bounds_.begin();
-    return {first, last};
+template <class Visit>
+void Accumulator::for_each_segment(const DepositScratch& scratch, Visit&& visit) const {
+    for (std::size_t segment = 0; segment < scratch.segments.size(); ++segment) {
+        const std::int64_t start = scratch.segments[segment].first;
+        const std::int64_t end = scratch.segments[segment].second;
+        if (end <= start) continue;  // an empty first or last segment: no base to book, no boundary inside it
+        const std::int64_t first =
+            std::upper_bound(region_bounds_.begin(), region_bounds_.end(), start) - region_bounds_.begin();
+        const std::int64_t last =
+            std::lower_bound(region_bounds_.begin(), region_bounds_.end(), end) - region_bounds_.begin();
+        visit(PathSegment{segment, start, end, first, last});
+    }
 }
 
 bool Accumulator::clip(const OfferedFragment& fragment, std::int64_t& start, std::int64_t& end) const noexcept {
@@ -302,16 +307,10 @@ DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, co
 
 std::int64_t Accumulator::deposit_crossings(bool spliced, std::size_t col, std::int64_t length, double inv_boundary,
                                             const DepositScratch& scratch) {
-    // A boundary is crossed iff it lies strictly inside a segment, so per segment the crossed boundaries are a
-    // contiguous index range.
     std::int64_t n_crossed = 0;
     std::int64_t sole_boundary = -1;
-    for (std::size_t segment = 0; segment < scratch.segments.size(); ++segment) {
-        const std::int64_t seg_start = scratch.segments[segment].first;
-        const std::int64_t seg_end = scratch.segments[segment].second;
-        if (seg_end <= seg_start) continue;  // an empty first or last segment: no base to book, no boundary inside it
-        const std::pair<std::int64_t, std::int64_t> crossed = crossed_bounds(seg_start, seg_end);
-        const std::int64_t first = crossed.first, last = crossed.second;
+    for_each_segment(scratch, [&](const PathSegment& segment) {
+        const std::int64_t first = segment.first, last = segment.last;
         for (std::int64_t bound = first; bound < last; ++bound) {
             // A spliced crossing books no length moment: it is certified RNA, which nothing deconvolves.
             Boundary& boundary = boundaries_[static_cast<std::size_t>(bound - 1)];
@@ -322,22 +321,21 @@ std::int64_t Accumulator::deposit_crossings(bool spliced, std::size_t col, std::
                 boundary.unspliced_inv_length_sum += inv_boundary;
             }
         }
-        for_each_mass_share(segment, seg_start, seg_end, first, last, length, scratch.sj_id_at_gap,
-                            [&](std::int8_t kind, std::int64_t id, double share) {
-                                if (kind == kPlaceBoundary) {
-                                    Boundary& boundary = boundaries_[static_cast<std::size_t>(id)];
-                                    if (spliced) boundary.spliced_mass += share;
-                                    else         boundary.unspliced_mass += share;
-                                } else {
-                                    // `count`'s column, so `mass[c] / count[c]` is a per-strand mean.
-                                    sj_[static_cast<std::size_t>(id)].mass[col] += share;
-                                }
-                            });
+        for_each_mass_share(segment, length, scratch.sj_id_at_gap, [&](std::int8_t kind, std::int64_t id, double share) {
+            if (kind == kPlaceBoundary) {
+                Boundary& boundary = boundaries_[static_cast<std::size_t>(id)];
+                if (spliced) boundary.spliced_mass += share;
+                else         boundary.unspliced_mass += share;
+            } else {
+                // `count`'s column, so `mass[c] / count[c]` is a per-strand mean.
+                sj_[static_cast<std::size_t>(id)].mass[col] += share;
+            }
+        });
         if (last > first) {
             sole_boundary = (n_crossed == 0 && last - first == 1) ? first : -1;
             n_crossed += last - first;
         }
-    }
+    });
     return sole_boundary;
 }
 
@@ -360,15 +358,16 @@ bool Accumulator::resolve_annotated_sj(std::int32_t sj_strand, DepositScratch& s
 }
 
 template <class Visit>
-void Accumulator::for_each_mass_share(std::size_t segment, std::int64_t seg_start, std::int64_t seg_end,
-                                      std::int64_t first, std::int64_t last, std::int64_t length,
+void Accumulator::for_each_mass_share(const PathSegment& segment, std::int64_t length,
                                       const std::vector<std::int32_t>& sj_id_at_gap, Visit&& visit) const {
-    const std::int32_t left_sj = segment > 0 ? sj_id_at_gap[segment - 1] : -1;
-    const std::int32_t right_sj = segment < sj_id_at_gap.size() ? sj_id_at_gap[segment] : -1;
-    const std::int64_t n_slices = last - first + 1;
+    const std::int64_t first = segment.first;
+    const std::int32_t left_sj = segment.index > 0 ? sj_id_at_gap[segment.index - 1] : -1;
+    const std::int32_t right_sj = segment.index < sj_id_at_gap.size() ? sj_id_at_gap[segment.index] : -1;
+    const std::int64_t n_slices = segment.last - first + 1;
     for (std::int64_t i = 0; i < n_slices; ++i) {
-        const std::int64_t lo = (i == 0) ? seg_start : region_bounds_[static_cast<std::size_t>(first + i - 1)];
-        const std::int64_t hi = (i == n_slices - 1) ? seg_end : region_bounds_[static_cast<std::size_t>(first + i)];
+        const std::int64_t lo = (i == 0) ? segment.start : region_bounds_[static_cast<std::size_t>(first + i - 1)];
+        const std::int64_t hi =
+            (i == n_slices - 1) ? segment.end : region_bounds_[static_cast<std::size_t>(first + i)];
         const std::int64_t left_bound  = (i > 0) ? first + i - 1 : -1;
         const std::int64_t right_bound = (i < n_slices - 1) ? first + i : -1;
         // The segment's own ends are sj bounds and its interior ends boundaries, so each side of a slice has at
@@ -456,16 +455,12 @@ void Accumulator::placement_masses(const OfferedFragment& fragment, DepositScrat
     if (length <= 0) return;
     const bool spliced = resolve_annotated_sj(fragment.sj_strand, scratch);
 
-    for (std::size_t segment = 0; segment < scratch.segments.size(); ++segment) {
-        const std::int64_t seg_start = scratch.segments[segment].first;
-        const std::int64_t seg_end = scratch.segments[segment].second;
-        if (seg_end <= seg_start) continue;  // an empty first or last segment: no base to book, no boundary inside it
-        const std::pair<std::int64_t, std::int64_t> crossed = crossed_bounds(seg_start, seg_end);
-        for_each_mass_share(segment, seg_start, seg_end, crossed.first, crossed.second, length, scratch.sj_id_at_gap,
+    for_each_segment(scratch, [&](const PathSegment& segment) {
+        for_each_mass_share(segment, length, scratch.sj_id_at_gap,
                             [&out](std::int8_t kind, std::int64_t id, double share) {
                                 out.push_back({kind, id, share});
                             });
-    }
+    });
     const std::pair<std::int64_t, std::int64_t> covered = covered_bases(scratch.segments);
     const std::int64_t first_region = region_of_pos(covered.first);
     const std::int64_t last_region  = region_of_pos(covered.second);
