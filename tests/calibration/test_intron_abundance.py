@@ -195,6 +195,15 @@ def test_no_departure_room_lets_the_background_tail_win():
     assert float(out.f_g[INTRON_SLOT]) < 0.5, out.f_g[INTRON_SLOT]
 
 
+def test_the_solve_refuses_a_background_with_no_finite_size():
+    """An informative law's size is finite (``background_law`` joins the rate's own posterior width to its
+    over-dispersion), so the solve reads no Poisson limit: an infinite size is refused, never read as one."""
+    parts, _ = _gene(rho_g=0.05, intron_gdna=0.05 * 1801.0, intron_rna=0.0, kappa=0.5)
+    law = dataclasses.replace(_law(parts), size=np.inf)
+    with pytest.raises(ValueError, match="size is finite"):
+        _solve(parts, kappa=0.5, background=law)
+
+
 def test_the_intron_claims_its_row_under_the_transfer_policy():
     """Under the transfer policy the intron's row is its own claim, so its exon|intron boundaries, which share its
     densities and carry nothing of their own on an unstranded library, read the intron's composition."""

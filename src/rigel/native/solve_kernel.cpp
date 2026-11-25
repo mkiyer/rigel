@@ -118,18 +118,14 @@ void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec al
 
 struct Background {
     double log_rate;   // the background rate's log, fragments per unit of gDNA opportunity
-    double size;       // the negative binomial size an intron's gDNA is drawn with (∞: Poisson)
+    double size;       // the negative binomial size an intron's gDNA is drawn with, finite and positive
     double departure;  // ε, the prior probability that the intron's gDNA is not at the background
 };
 
-// log NegBinom(g; mean μ, size r) at a continuous g ≥ 0; r = ∞ is the Poisson limit
+// log NegBinom(g; mean μ, size r) at a continuous g ≥ 0
 double log_negbinom(double g, double mu, double size) {
     mu = std::max(mu, P::ARM_EPS);
     const double lg_g1 = std::lgamma(g + 1.0);
-    if (!std::isfinite(size)) {
-        const double t = g * std::log(mu);
-        return t - mu - lg_g1;
-    }
     const double r = std::max(size, P::ARM_EPS);
     const double rpm = r + mu;
     const double t_r = r * (std::log(r) - std::log(rpm));
@@ -143,7 +139,7 @@ void intron_row(const Background& bg, double count, double eff, const double* la
     const double mu = std::exp(bg.log_rate) * std::max(eff, P::ARM_EPS);
     // the continuous count's mode, where digamma(g + size) − digamma(g + 1) = log((μ + size)/μ), to O(1/g²); 0 below
     // size 1
-    const double mode = std::max(0.0, (std::isfinite(bg.size) ? mu * (1.0 - 1.0 / bg.size) : mu) - 0.5);
+    const double mode = std::max(0.0, mu * (1.0 - 1.0 / bg.size) - 0.5);
     const double half = K > 1 ? 0.5 * (lam[K - 1] - lam[0]) / (K - 1) : 0.0;
     for (int k = 0; k < K; ++k) {
         const double lo = P::sigmoid(lam[k] - half) * count, hi = P::sigmoid(lam[k] + half) * count;
@@ -604,6 +600,8 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
         bg = Background{nb::cast<double>(t[0]), nb::cast<double>(t[1]), nb::cast<double>(t[2])};
         if (!(bg.departure > 0.0 && bg.departure < 1.0))
             throw std::invalid_argument("solve_blocks: the background's departure prior is in (0, 1)");
+        if (!(std::isfinite(bg.size) && bg.size > 0.0))
+            throw std::invalid_argument("solve_blocks: the background's size is finite and positive");
         bg_ptr = &bg;
     }
     Outputs out{out_fpos.data(), out_fneg.data(), out_fg.data(), out_var.data(), out_has_composition.data()};
