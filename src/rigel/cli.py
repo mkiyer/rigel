@@ -205,7 +205,7 @@ def build_pipeline_config(args: argparse.Namespace) -> PipelineConfig:
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
 #: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name;
 #: ``length_tables`` is the EM's two length tables and the decision behind them.
-SUMMARY_SCHEMA_VERSION = 10
+SUMMARY_SCHEMA_VERSION = 11
 
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
@@ -348,10 +348,6 @@ def _summary(result, index, output_dir: Path, args, tables: dict, fl_summary: di
             "config_file": str(Path(args.config).resolve()) if args.config else None,
         },
         "configuration": result.pipeline_config.to_dict(),
-        "input": {
-            "bam_file": str(Path(args.bam_file).resolve()),
-            "index_dir": str(Path(args.index_dir).resolve()),
-        },
         # the observable genome every opportunity of the run was read over: the index's mask and where it came from
         "observable_genome": observable_genome_summary(index),
         "alignment_stats": _alignment_summary(stats),
@@ -533,7 +529,6 @@ def _strand_model_summary(sm) -> dict:
     spliced = sm.exonic_spliced
     ci_lo, ci_hi = spliced.wald_interval_95()
     return {
-        "protocol": "R1-sense" if sm.read1_sense else "R1-antisense",
         "strand_specificity": round(sm.strand_specificity, SUMMARY_DECIMALS),
         "p_r1_sense": round(sm.p_r1_sense, SUMMARY_DECIMALS),
         "read1_sense": bool(sm.read1_sense),
@@ -641,17 +636,17 @@ def _series_summary(df, column: str) -> dict[str, float]:
 
 def _length_tables_summary(tables) -> dict:
     """The EM's two length tables and the decision behind them (`calibration.shared_length_law`): ``weight`` 0 is one
-    shared law for both origins, 1 gDNA's own law brought into RNA's captured frame, continuous between. ``kappa`` is
-    RNA's captured fraction, ``captured`` the capture mixture's fraction, ``contrast`` and ``bound`` the Hellinger
-    distances the weight compares, ``noise`` the squared distance sampling noise alone adds; the three means are the
-    two tables' and gDNA's uncaptured law's, in bp."""
+    shared law for both origins, 1 gDNA's own law brought into RNA's captured frame, continuous between.
+    ``rna_captured_fraction`` is RNA's captured fraction, ``captured`` the capture mixture's fraction, ``contrast``
+    and ``bound`` the Hellinger distances the weight compares, ``noise`` the squared distance sampling noise alone
+    adds; the three means are the two tables' and gDNA's uncaptured law's, in bp."""
     import numpy as np
 
     d = tables.decision
     L = np.arange(tables.rna.size, dtype=np.float64)
     return {
         "weight": round(float(d.weight), SUMMARY_DECIMALS),
-        "kappa": round(float(d.rna_captured_fraction), SUMMARY_DECIMALS),
+        "rna_captured_fraction": round(float(d.rna_captured_fraction), SUMMARY_DECIMALS),
         "captured": round(float(d.captured), SUMMARY_DECIMALS),
         "contrast": round(float(d.contrast), SUMMARY_DECIMALS),
         "bound": round(float(d.bound), SUMMARY_DECIMALS),

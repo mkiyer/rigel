@@ -7,10 +7,10 @@ cut, cap and rounding from ``CONSTANTS.qc``, and its front end reads only what t
 every string a user or an annotation chose (read off ``report.js``'s source: the suite runs no JavaScript).
 Vega-specific assertions are conditional on ``vl-convert-python``.
 
-The report reads ``summary.json`` through the keys ``SUMMARY_KEYS`` lists, tolerantly, so a key misspelled on the
-report's side would read its default without a sound, and a substrate written by the same hand would agree with it.
-One gate therefore reads a real output directory written by ``rigel quant``'s writer: every listed key, gene-table
-column and fragment-length category must be one that writer writes.
+The report reads ``summary.json`` through the keys ``SUMMARY_KEYS`` lists and refuses a summary that lacks one, but
+a substrate written by the same hand as the list would agree with a key misspelled in both. One gate therefore reads
+a real output directory written by ``rigel quant``'s writer: every listed key, gene-table column and fragment-length
+category must be one that writer writes.
 """
 
 import json
@@ -44,7 +44,7 @@ from rigel.report.substrate import SUMMARY_KEYS, SubstrateError, SummaryReader, 
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 #: The ``summary.json`` schema the synthesized substrate mirrors, and the one the real writer must write.
-_SCHEMA = 10
+_SCHEMA = 11
 
 #: The output convention's four pools, as the report names them.
 _POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic gDNA")
@@ -60,11 +60,21 @@ def _write_substrate(d: Path) -> Path:
         "schema_version": _SCHEMA,
         "rigel_version": "0.7.0",
         "timestamp": "2026-07-11 09:42",
-        "input": {"bam_file": "/data/SampleX.bam", "index_dir": "/refs/gencode"},
+        "command": {
+            "subcommand": "quant",
+            "arguments": {
+                "bam_file": "/data/SampleX.bam",
+                "index_dir": "/refs/gencode",
+                "output_dir": str(d),
+            },
+            "config_file": None,
+        },
         "configuration": {"em": {"mode": "vbem", "n_threads": 8}, "seed": 42},
         "alignment_stats": {
             "total_reads": 1000,
             "mapped_reads": 950,
+            "secondary_reads": 40,
+            "supplementary_reads": 10,
             "proper_pairs": 900,
             "duplicate_reads": 60,
             "qc_fail_reads": 5,
@@ -88,7 +98,6 @@ def _write_substrate(d: Path) -> Path:
             },
         },
         "strand_model": {
-            "protocol": "R1-antisense",
             "strand_specificity": 0.98,
             "p_r1_sense": 0.02,
             "read1_sense": False,
@@ -102,6 +111,14 @@ def _write_substrate(d: Path) -> Path:
                 "exonic_all_n_fragments": 600,
                 "contamination_gap": 0.05,
             },
+        },
+        # calibration's library scalars, with no gDNA landscape fitted (``_with_calibration`` sets others)
+        "calibration": {
+            "gdna_density_global": 0.03,
+            "gdna_bulk_density": None,
+            "gdna_capture_saturation": 1.0,
+            "fraction_rna_sense": 0.02,
+            "n_regions": 1760,
         },
         "quantification": {
             "n_transcripts": 120,
@@ -153,12 +170,27 @@ def _write_substrate(d: Path) -> Path:
         {
             "gene_id": [f"ENSG{i:05d}" for i in range(5)],
             "gene_name": ["GAPDH", "ACTB", "TP53", "MYC", "MALAT1"],
+            "gene_type": ["protein_coding"] * 4 + ["lncRNA"],
+            "ref": ["chr12", "chr7", "chr17", "chr8", "chr11"],
+            "strand": ["+", "-", "-", "+", "+"],
             "count": [4200.37, 3800.0, 120.0, 300.0, 900.0],
             "count_spliced": [4100.0, 3700.0, 110.0, 280.0, 40.0],
             "tpm": [42000.456, 38000.0, 1200.0, 2900.0, 9000.0],
             "n_transcripts": [3, 4, 6, 2, 1],
         }
     ).to_feather(d / "gene_quant.feather")
+
+    pd.DataFrame(
+        {
+            "ref": pd.Categorical(["chr1"] * 3),
+            "start": [0, 100, 200],
+            "end": [100, 200, 300],
+            "count_gdna": [1.0, 2.0, 3.0],
+            "count_rna": [5.0, 5.0, 5.0],
+            "gdna_density": [0.01, 0.02, 0.03],
+            "fraction_gdna": [0.1, 0.2, 0.3],
+        }
+    ).to_feather(d / "calibration_track.feather")
     return d
 
 
@@ -223,7 +255,7 @@ def test_view_model_shape(tmp_path):
     assert sub.sample_name == "SampleX"
     vm = build_view_model(sub)
 
-    assert len(vm["verdicts"]) == 4
+    assert len(vm["verdicts"]) == 5
     # formatting boundary: KPIs / verdicts carry raw values + a fmt tag (JS formats)
     for kpi in vm["alignment"]["kpis"]:
         assert "fmt" in kpi and "u" not in kpi
@@ -296,24 +328,42 @@ def test_genome_track_spec_bins_per_ref(monkeypatch):
     assert rt[0][1] == 2  # chr2 n_regions
     # build_charts merges genome in when a track is present
     stub = SimpleNamespace(
-        fragment_lengths=None,
+        fragment_lengths=pd.DataFrame(),
         calibration_track=track,
         summary={},
     )
     assert set(build_charts(stub)) == {"genome"}
     empty = SimpleNamespace(
-        fragment_lengths=None,
-        calibration_track=None,
+        fragment_lengths=pd.DataFrame(),
+        calibration_track=pd.DataFrame(),
         summary={},
     )
     assert build_charts(empty) == {}
 
 
 def _with_calibration(d: Path, **keys) -> Path:
-    """Give the substrate's ``summary.json`` a calibration block carrying ``keys``."""
+    """Give the substrate's ``summary.json`` calibration block these ``keys``."""
     path = d / "summary.json"
     summary = json.loads(path.read_text())
-    summary["calibration"] = {"gdna_density_global": 0.03, "n_regions": 1760, **keys}
+    summary["calibration"].update(keys)
+    path.write_text(json.dumps(summary))
+    return d
+
+
+def _set(d: Path, key: str, value) -> Path:
+    """Set one top-level key of the substrate's ``summary.json``."""
+    path = d / "summary.json"
+    summary = json.loads(path.read_text())
+    summary[key] = value
+    path.write_text(json.dumps(summary))
+    return d
+
+
+def _drop(d: Path, section: str, key: str) -> Path:
+    """Remove one key of a section (``""``: the top level) of the substrate's ``summary.json``."""
+    path = d / "summary.json"
+    summary = json.loads(path.read_text())
+    (summary[section] if section else summary).pop(key)
     path.write_text(json.dumps(summary))
     return d
 
@@ -389,7 +439,7 @@ def test_the_configuration_panel_escapes_every_group_key_and_value():
 def test_the_capture_answer_is_calibrations_bulk_and_saturation(tmp_path):
     """The capture tile, KPIs and note read calibration's bulk density and saturated level and nothing else: an
     enriched landscape shows its saturation over the bulk, a one-level landscape says nothing is enriched, no
-    landscape says so, and a summary without calibration shows no tile."""
+    landscape says so."""
 
     def view(name, **keys):
         return build_view_model(
@@ -414,11 +464,6 @@ def test_the_capture_answer_is_calibrations_bulk_and_saturation(tmp_path):
     assert (tile["v"], tile["fmt"]) == ("None", "text")
     assert [k["v"] for k in none["calibration"]["enrichment_kpis"]] == ["None"]
 
-    absent = build_view_model(load_substrate(_write_substrate(tmp_path / "absent")))
-    assert absent["calibration"]["capture"] is None
-    assert not any(v["k"] == "Capture" for v in absent["verdicts"])
-    assert absent["calibration"]["enrichment_kpis"] == []
-
 
 def test_the_capture_note_never_says_a_mode_was_located(tmp_path):
     """The reader locates no mode, so the note may not say it did — in any of its three cases — and it names
@@ -428,18 +473,22 @@ def test_the_capture_note_never_says_a_mode_was_located(tmp_path):
     assert "bulk" in note
 
 
-def test_the_capture_note_tells_an_older_summary_from_one_with_no_calibration(tmp_path):
-    """A 0.7.1 or schema-2 summary has a calibration block but not calibration's capture answer: the note says
-    the summary predates that answer, not that the run carries no calibration."""
-    older = build_view_model(
-        load_substrate(_with_calibration(_write_substrate(tmp_path / "older")))
-    )
-    assert older["calibration"]["capture"] is None
-    assert older["calibration"]["calibrated"] is True
-    bare = build_view_model(load_substrate(_write_substrate(tmp_path / "bare")))
-    assert bare["calibration"]["calibrated"] is False
-    note = _js_function("captureNote")
-    assert "M.calibration.calibrated" in note and "predates" in note
+@pytest.mark.parametrize(
+    "spoil, said",
+    [
+        (lambda d: _set(d, "schema_version", 10), "schema 10"),
+        (lambda d: _drop(d, "calibration", "gdna_bulk_density"), "lacks ['gdna_bulk_density']"),
+        (lambda d: _drop(d, "", "calibration"), "no `calibration` section"),
+        (lambda d: (d / "calibration_track.feather").unlink(), "calibration_track.feather"),
+    ],
+)
+def test_a_report_on_another_version_or_a_partial_output_is_refused(tmp_path, spoil, said):
+    """No older version is read: a summary of another schema, one missing a key or a section the report reads, and an
+    output directory missing a table ``rigel quant`` always writes are each refused, never read with a default."""
+    d = _write_substrate(tmp_path / "run")
+    spoil(d)
+    with pytest.raises(SubstrateError, match=re.escape(said)):
+        load_substrate(d)
 
 
 def test_the_capture_note_reads_only_keys_the_view_model_writes(tmp_path):
@@ -760,26 +809,17 @@ def test_the_genome_caption_states_the_cap_the_view_model_passes(tmp_path, monke
 
 
 def test_the_summary_reader_hands_out_only_the_keys_it_lists():
-    """A listed key reads the summary's own value or its listed default, a missing or ``null`` section reads as
-    all defaults, and a section or key the list does not name raises: the report cannot read past the list the
-    gate below holds to the writer."""
-    reader = SummaryReader(
-        {"quantification": {"count_annotated": 5.0, "unlisted": 1}, "calibration": None}
-    )
+    """A listed key reads the summary's own value, a key or section the summary lacks refuses, and a section or key
+    the list does not name raises: the report cannot read past the list the gate below holds to the writer."""
+    section = {key: i for i, key in enumerate(SUMMARY_KEYS["quantification"])}
+    reader = SummaryReader({"quantification": {**section, "unlisted": 1}, "calibration": {}})
     q = reader["quantification"]
-    assert q["count_annotated"] == 5.0
-    assert q["count_nascent"] == SUMMARY_KEYS["quantification"]["count_nascent"]
-    assert set(q) == set(SUMMARY_KEYS["quantification"])
-    assert reader["calibration"] == SUMMARY_KEYS["calibration"]
-    assert reader["strand_model.diagnostics"] == SUMMARY_KEYS["strand_model.diagnostics"]
-    assert reader["fragment_length.*"] == {}
-    assert reader.holds("quantification.count_annotated")
-    assert not reader.holds("calibration.gdna_bulk_density")
-    for unlisted in (
-        lambda: reader["not_a_section"],
-        lambda: q["unlisted"],
-        lambda: reader.holds("calibration.unlisted"),
-    ):
+    assert q == section
+    with pytest.raises(SubstrateError, match="lacks"):
+        reader["calibration"]
+    with pytest.raises(SubstrateError, match="no `strand_model.diagnostics` section"):
+        reader["strand_model.diagnostics"]
+    for unlisted in (lambda: reader["not_a_section"], lambda: q["unlisted"]):
         with pytest.raises(KeyError):
             unlisted()
 
@@ -885,7 +925,7 @@ def test_build_report_self_contained(tmp_path):
     assert html.lstrip().startswith("<!doctype html>")
     payload = _payload(html)
     assert payload["model"]["meta"]["sample"] == "SampleX"
-    assert set(payload["charts"]) == {"overlay", "small_multiples"}  # no track in this substrate
+    assert set(payload["charts"]) == {"overlay", "small_multiples", "genome"}
 
 
 def test_build_report_inlines_vega_runtime(tmp_path):

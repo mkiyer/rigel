@@ -230,25 +230,23 @@ def _manual_block(name: str, indent: str = r"\s+") -> set[str]:
 
 
 def test_the_schema_version_is_one_constant_the_writer_and_the_report_share(quant_run, tmp_path):
-    """The report targets the version the writer writes, so a bump of the writer's moves the report's with it: the
-    bumped summary reads clean and the older one warns. A copy restated in the report would stay behind and warn on
-    the bumped one."""
-    from rigel.report.substrate import load_substrate
+    """The report reads the version the writer writes and no other, so a bump of the writer's moves the report's with
+    it: the bumped summary reads, and the one written before the bump is refused. A copy restated in the report would
+    stay behind and refuse the bumped one."""
+    from rigel.report.substrate import SubstrateError, load_substrate
 
     pr, result, args, out, summary = quant_run
-
-    def schema_warnings(run_dir):
-        return [w for w in load_substrate(run_dir).warnings if "schema_version" in w]
-
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 10
-    assert schema_warnings(out) == []
+    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 11
+    load_substrate(out)
     bumped = tmp_path / "bumped"
     bumped.mkdir()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
         cli.write_quant_outputs(pr, result.index, bumped, args)
-        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 11
-        assert schema_warnings(bumped) == [] and schema_warnings(out) != []
+        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 12
+        load_substrate(bumped)
+        with pytest.raises(SubstrateError, match="schema 11"):
+            load_substrate(out)
 
 
 def test_the_mismatch_rate_is_the_scans_counts_and_their_ratio(quant_run):
@@ -385,7 +383,7 @@ def test_the_length_tables_block_is_the_pipelines_decision_the_manual_lists(quan
     assert (
         tables["weight"] == round(d.weight, cli.SUMMARY_DECIMALS) and 0.0 <= tables["weight"] <= 1.0
     )
-    assert tables["kappa"] == round(d.rna_captured_fraction, cli.SUMMARY_DECIMALS)
+    assert tables["rna_captured_fraction"] == round(d.rna_captured_fraction, cli.SUMMARY_DECIMALS)
     assert tables["gdna_table_mean"] == round(
         float(pr.length_tables.gdna @ np.arange(pr.length_tables.gdna.size)), 2
     )

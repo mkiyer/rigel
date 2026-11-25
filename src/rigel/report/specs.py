@@ -158,9 +158,9 @@ def fl_small_multiples_spec(fl_df: pd.DataFrame) -> dict | None:
     }
 
 
-def build_fl_specs(fl_df: pd.DataFrame | None) -> dict:
+def build_fl_specs(fl_df: pd.DataFrame) -> dict:
     """Return the fragment-length Vega-Lite specs (``{}`` when no histogram data)."""
-    if fl_df is None or fl_df.empty:
+    if fl_df.empty:
         return {}
     specs: dict = {}
     overlay = fl_overlay_spec(fl_df)
@@ -210,14 +210,14 @@ def _bin_track(track: pd.DataFrame) -> list[dict]:
     return rows
 
 
-def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
+def genome_track_spec(track: pd.DataFrame) -> dict | None:
     """Per-reference gDNA-density track for the top ``CONSTANTS.qc.genome_track_refs`` references by gDNA count.
 
     Ranking by count, not by name, keeps small alt and haplotype contigs out of the panel on any organism; the
     reference table lists them all. The y-axis is log and independent per facet, so a high-density reference such
     as chrM cannot flatten the others.
     """
-    if track is None or track.empty:
+    if track.empty:
         return None
     gdna = track.groupby("ref", observed=True)["count_gdna"].sum().sort_values(ascending=False)
     top = [str(r) for r in gdna.index[: CONSTANTS.qc.genome_track_refs]]

@@ -314,11 +314,6 @@
         v.appendChild(t);
       });
     }
-    const wb = $("warn-banner");
-    if (wb && m.warnings && m.warnings.length) {
-      wb.innerHTML = `<b>Note.</b> ${m.warnings.map(esc).join(" ")}`;
-      wb.style.display = "";
-    }
   }
 
   /* ---------- Vega-Lite theming ---------- */
@@ -392,13 +387,7 @@
   /* ---------- capture note: calibration's own answer ---------- */
   function captureNote() {
     const n = $("capture-note"); if (!n) return;
-    const c = M.calibration && M.calibration.capture;
-    if (!c) {
-      n.innerHTML = M.calibration.calibrated
-        ? "This summary predates calibration's capture answer: rerun <span class=\"num\">rigel quant</span> to read it."
-        : "This summary carries no calibration, so there is no capture answer.";
-      return;
-    }
+    const c = M.calibration.capture;
     if (c.bulk_density == null) {
       n.innerHTML = `<b>No gDNA landscape was fitted</b>, so every capture efficiency is 1 and every ` +
         `<span class="num">em_effective_length</span> equals <span class="num">effective_length</span>.`;

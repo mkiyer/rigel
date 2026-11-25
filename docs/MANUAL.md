@@ -321,7 +321,9 @@ rigel export results/sample/ --format parquet
 Builds a single self-contained HTML QC report from a `rigel quant` output
 directory. It reads only the files `quant` already wrote (`summary.json` plus the
 companion tables — see [Output files](#output-files)), so reports can be built or
-rebuilt later, in bulk, without re-quantifying.
+rebuilt later, in bulk, without re-quantifying. It reads only an output directory
+this version of `rigel quant` wrote: a `summary.json` of another schema, or one
+missing a key or a table the report reads, is refused as an error.
 
 ```bash
 rigel report results/sample/                         # → results/sample/report.html
@@ -433,7 +435,7 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 | `gene_quant.feather` | Per-gene abundance, summed over each gene's annotated transcripts |
 | `nascent_quant.feather` | Nascent RNA: one row per synthetic span Rigel adds to model a multi-exon transcript's unspliced RNA |
 | `loci.feather` | Per-locus EM summary |
-| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 9) |
+| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 11) |
 | `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
 | `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, count_gdna, count_rna, gdna_density, fraction_gdna)` |
 | `calibration_track.bedgraph` | Per-region gDNA density as a genome-browser track (IGV / UCSC) |
@@ -584,20 +586,19 @@ histograms they are built from.
 Run-level QC manifest. It is a small, human-readable index — the bulky raw
 fragment-length histograms live in the `fragment_lengths.feather` companion
 (see above), not in the JSON. `schema_version` (integer) identifies the layout;
-the current version is **8**. Top-level keys:
+the current version is **11**. Top-level keys:
 
 | Key | Contents |
 |-----|----------|
-| `schema_version` | Manifest schema version (currently `9`) |
+| `schema_version` | Manifest schema version (currently `11`) |
 | `rigel_version`, `timestamp` | Version and run time |
-| `command` | Subcommand, resolved arguments, config-file path |
+| `command` | Subcommand, resolved arguments (the BAM, index and output paths absolute), config-file path |
 | `configuration` | All resolved pipeline parameters |
-| `input` | Absolute BAM and index paths |
 | `observable_genome` | The observable genome the run read: what the index's unobservable mask is and where it came from, and the bases a fragment can and cannot be observed on, over the genome and per reference (see below) |
 | `alignment_stats` | The alignment records: `total_reads`; `mapped_reads`, `unmapped_reads`, `secondary_reads`, `supplementary_reads`, `duplicate_reads`, `qc_fail_reads`, each the records carrying its flag; and `proper_pairs`, the primary records flagged as a proper pair. A `records` sub-block gives each record one status, summing to `total_reads`: `filtered` (unmapped, QC-failed, or a duplicate when duplicates are skipped), `used` (an alignment of a read pair's placement), `unused` (in a placed read pair but in none of its usable alignments: one the pair rule rejected, one that pairs with nothing, a supplementary record) and `unplaced` (in a read pair withheld or excluded by `--no-include-multimap`). An `sj_strand_tag` sub-block counts the spliced records the scan read (secondary and supplementary included) by what their junction-strand tags gave: `tagged` (a strand), `untagged` (none) and `conflicting` (XS and ts disagree, read as ambiguous), with `invalid` the tag values that were neither `+` nor `-`, each read as absent. `nm_tag` and `nh_tag` count the records without the tag (`missing`) and with it held as anything but an integer (`invalid`), each read as absent (`NM` 0, `NH` 1); `nm_tag.conflicting` counts the alignments whose records disagree on `NM`, each read with the largest |
 | `read_pairs` | One outcome per read pair (a read name's records), summing to `total`, decided in this order: `excluded` (every record filtered, as a pair whose mates are both unmapped is); `withheld`, with no usable alignment, by reason: `off_index` when one of its alignments lies on a reference the index does not hold, else `chimeric` when one of its alignments has a mate aligned in pieces, else `unannotated_splice` when one of its alignments is a molecule whose junctions no one annotated transcript holds, else `unpaired`, which `unpaired_by_reason` splits by the furthest check of the pair rule any of its alignments reached (`missing_mate`, `reference`, `strand`, `outward`, `length`); `excluded_by_option` (`--no-include-multimap`: more than one usable alignment); and `placed`, `unique` (one usable alignment) or `multimapping` (more). The report's read-fate bar shows every read pair by outcome |
 | `fragment_stats` | The fragments (the placed read pairs): total, genic and intergenic counts; the annotated SJ count; a `splice` sub-block with the splice-type breakdown, one count per fragment, a multimapper as its first alignment with an annotated transcript, else its first (`unspliced`, `spliced_annotated`, `spliced_implicit`; a spliced fragment's junctions are always annotated, and `spliced_annotated` equals the annotated SJ count); `hits_rejected`, the pairings of an R1 alignment with an R2 alignment tried and dropped, by reason (`missing_mate`, `reference`, `strand`, `outward`, `length`: the two mates are not one molecule; `contradictory`, `novel_junction`, `unsupported`: no one annotated transcript overlapping both mates holds the junctions it observes; `off_index`: both mates on one reference the index does not hold; `chimeric`: a mate aligned in pieces); `nh_above_reported`, the read pairs whose `NH` exceeds the records reported for a mate (a truncated output, whose multiplicity is read from the alignments present); and `mismatch_rate`, the library's mismatch rate read on its unique unspliced alignments (`rate`, `null` with none; `mismatches`, their summed `NM`; `bases`, the read bases they align), at which a multimapper's alignments are priced against each other |
-| `strand_model` | Protocol (`R1-sense` / `R1-antisense`, and `read1_sense`), strand specificity, `p_r1_sense`, training count, the per-junction strand table's QC (`sj`: `n_sj`, `n_observations` and the junctions' depth, `depth_median`, `depth_p90`, `depth_p99`, `depth_max`), posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments; `null` where the strand channel is dead, since the classes are not identified at κ = ½ and `genuine` then equals `pooled`, the κ calibration reads), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
+| `strand_model` | `read1_sense` (read 1 on the RNA's own strand: an R1-sense protocol, else R1-antisense), strand specificity, `p_r1_sense`, training count, the per-junction strand table's QC (`sj`: `n_sj`, `n_observations` and the junctions' depth, `depth_median`, `depth_p90`, `depth_p99`, `depth_max`), posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments; `null` where the strand channel is dead, since the classes are not identified at κ = ½ and `genuine` then equals `pooled`, the κ calibration reads), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_em_effective_length` | Summary of the loci table's column of that name: its `min`, `median`, `p95`, `max` |
 | `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna` and the five pools. The raw per-bin histograms are in `fragment_lengths.feather` |
@@ -605,7 +606,7 @@ the current version is **8**. Top-level keys:
 | `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` — which no pool holds), and three pools, each a `count_*` beside its `fraction_*` of the three together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans) and `count_gdna` (gDNA: the EM's genic gDNA plus the intergenic gDNA, which reaches no locus and is unspliced, since a spliced alignment is used only when a transcript holds its junctions: the fragments that reach no transcript, and the EM's share of the multimappers at their intergenic alignments), so `fraction_annotated + fraction_nascent + fraction_gdna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, and `count_intergenic` and `fraction_intergenic` the intergenic gDNA, so `count_gdna = count_gdna_em + count_intergenic`; `fragment_stats.intergenic` counts the fragments that reach no transcript, so the multimappers' share is `count_intergenic − fragment_stats.intergenic`. The report's four pools are `count_annotated`, `count_nascent`, `count_gdna_em` and `count_intergenic` |
 
 The **`calibration`** block holds exactly the library-wide calibration
-scalars (it is `null` if calibration did not run):
+scalars:
 
 ```jsonc
 {
@@ -717,10 +718,10 @@ make, when gDNA keeps its own law brought into RNA's captured frame. The
 {
   "length_tables": {
     "weight":               <float>,  // 0 = one shared law, 1 = gDNA's own law; continuous between
-    "kappa":                <float>,  // RNA's captured fraction, from calibration's capture efficiencies; 0 off capture
-    "captured":             <float>,  // the fraction of gDNA's law the capture mixture size-biases, in [0, kappa]
+    "rna_captured_fraction": <float>, // RNA's captured fraction, from calibration's capture efficiencies; 0 off capture
+    "captured":             <float>,  // the fraction of gDNA's law the capture mixture size-biases, in [0, rna_captured_fraction]
     "contrast":             <float>,  // the two laws' Hellinger distance less their sampling noise
-    "bound":                <float>,  // the most hybrid capture at kappa can make; weight = clip(contrast/bound - 1, 0, 1)
+    "bound":                <float>,  // the most hybrid capture at that fraction can make; weight = clip(contrast/bound - 1, 0, 1)
     "noise":                <float>,  // the squared distance sampling noise alone adds
     "rna_table_mean":       <float>,  // the RNA table's mean, bp
     "gdna_table_mean":      <float>,  // the gDNA table's mean, bp
@@ -731,8 +732,7 @@ make, when gDNA keeps its own law brought into RNA's captured frame. The
 
 Off capture `bound` is 0, and any difference the noise does not explain keeps each
 origin's own law. The `calibration` block above is the complete set of
-calibration keys; a manifest from an older release may carry keys this manual
-does not list, which the current version no longer writes.
+calibration keys.
 
 ### Annotated BAM
 

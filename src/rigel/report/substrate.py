@@ -1,103 +1,82 @@
-"""Load the report substrate from a ``rigel quant`` output directory.
+"""Load the report substrate from a ``rigel quant`` output directory written by this version of rigel.
 
-The substrate is ``summary.json``, read eagerly, and the feather tables the report draws (``fragment_lengths``,
-``gene_quant``, ``calibration_track``), read lazily on first access. Only ``summary.json`` is required; a missing
-table empties what is drawn from it. The report reads the summary only through :class:`SummaryReader`, and only the
-keys :data:`SUMMARY_KEYS` lists.
+The substrate is ``summary.json``, read and checked eagerly, and the feather tables the report draws
+(:data:`REPORT_TABLES`), read lazily on first access; each is required. The report reads the summary only through
+:class:`SummaryReader`, and only the keys :data:`SUMMARY_KEYS` lists, every one of which must be there: a summary of
+another schema or one missing a key is refused, never read with a default.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
 import pandas as pd
 
-# The schema this builder targets is the writer's ``cli.SUMMARY_SCHEMA_VERSION``. A report still builds on another
-# version, behind a warning banner.
 from .. import cli
 
-#: Every ``summary.json`` key the report reads, by section, with the default a summary without it reads. ``""`` is
-#: the top level and ``fragment_length.*`` each fragment-length category. The reads are tolerant, so a key misspelt
-#: here reads its default silently.
-SUMMARY_KEYS: dict[str, dict] = {
-    "": {
-        "schema_version": None,
-        "rigel_version": None,
-        "timestamp": None,
-        "configuration": None,
-        "calibration": None,
-    },
-    "input": {"bam_file": None, "index_dir": None},
-    "alignment_stats": {
-        "total_reads": 0,
-        "mapped_reads": 0,
-        "secondary_reads": 0,
-        "supplementary_reads": 0,
-        "proper_pairs": 0,
-        "duplicate_reads": 0,
-        "qc_fail_reads": 0,
-    },
-    "read_pairs": {"total": 0, "excluded": 0, "excluded_by_option": 0},
-    "read_pairs.withheld": {"unpaired": 0, "unannotated_splice": 0, "off_index": 0, "chimeric": 0},
-    "read_pairs.placed": {"unique": 0, "multimapping": 0},
-    "fragment_stats": {
-        "total": 0,
-        "genic": 0,
-        "intergenic": 0,
-    },
-    "fragment_stats.splice": {
-        "unspliced": 0,
-        "spliced_annotated": 0,
-        "spliced_implicit": 0,
-    },
-    "strand_model": {
-        "protocol": "?",
-        "strand_specificity": 0.5,
-        "p_r1_sense": 0.5,
-        "read1_sense": True,
-        "ci_95": (0.0, 1.0),
-        "strand_live": False,
-    },
-    "strand_model.diagnostics": {"exonic_all_specificity": None, "contamination_gap": None},
-    "calibration": {
-        "gdna_density_global": 0,
-        "gdna_bulk_density": None,
-        "gdna_capture_saturation": None,
-        "fraction_rna_sense": 0,
-        "n_regions": 0,
-    },
-    "fragment_length.*": {
-        "n_observations": 0,
-        "mean": 0,
-        "std": 0,
-        "median": 0,
-        "mode": 0,
-        "overflow_fraction": 0.0,
-    },
-    "quantification": {
-        "n_transcripts": 0,
-        "n_genes": 0,
-        "n_loci": 0,
-        "count_annotated": 0.0,
-        "count_nascent": 0.0,
-        "count_gdna_em": 0.0,
-        "fraction_annotated": 0.0,
-        "fraction_nascent": 0.0,
-        "fraction_gdna": 0.0,
-        "fraction_gdna_em": 0.0,
-        "count_intergenic": 0.0,
-        "fraction_intergenic": 0.0,
-    },
+#: Every ``summary.json`` key the report reads, by section: ``""`` is the top level and ``fragment_length.*`` each
+#: fragment-length category. Each must be in the summary; a missing one refuses the report.
+SUMMARY_KEYS: dict[str, tuple[str, ...]] = {
+    "": ("schema_version", "rigel_version", "timestamp", "configuration"),
+    "command.arguments": ("bam_file", "index_dir"),
+    "alignment_stats": (
+        "total_reads",
+        "mapped_reads",
+        "secondary_reads",
+        "supplementary_reads",
+        "proper_pairs",
+        "duplicate_reads",
+        "qc_fail_reads",
+    ),
+    "read_pairs": ("total", "excluded", "excluded_by_option"),
+    "read_pairs.withheld": ("unpaired", "unannotated_splice", "off_index", "chimeric"),
+    "read_pairs.placed": ("unique", "multimapping"),
+    "fragment_stats": ("total", "genic", "intergenic"),
+    "fragment_stats.splice": ("unspliced", "spliced_annotated", "spliced_implicit"),
+    "strand_model": ("strand_specificity", "p_r1_sense", "read1_sense", "ci_95", "strand_live"),
+    "strand_model.diagnostics": ("exonic_all_specificity", "contamination_gap"),
+    "calibration": (
+        "gdna_density_global",
+        "gdna_bulk_density",
+        "gdna_capture_saturation",
+        "fraction_rna_sense",
+        "n_regions",
+    ),
+    "fragment_length.*": (
+        "n_observations",
+        "mean",
+        "std",
+        "median",
+        "mode",
+        "overflow_fraction",
+    ),
+    "quantification": (
+        "n_transcripts",
+        "n_genes",
+        "n_loci",
+        "count_annotated",
+        "count_nascent",
+        "count_gdna_em",
+        "fraction_annotated",
+        "fraction_nascent",
+        "fraction_gdna",
+        "fraction_gdna_em",
+        "count_intergenic",
+        "fraction_intergenic",
+    ),
 }
+
+#: The tables ``rigel quant`` writes that the report draws.
+REPORT_TABLES = ("fragment_lengths.feather", "gene_quant.feather", "calibration_track.feather")
 
 
 class SummaryReader:
-    """``summary.json`` as the report reads it. A section reads as exactly the keys :data:`SUMMARY_KEYS` lists, each
-    the summary's value or the listed default; a missing or ``null`` section reads as all defaults. A section or key
-    the list does not name raises ``KeyError``."""
+    """``summary.json`` as the report reads it: a section reads as exactly the keys :data:`SUMMARY_KEYS` lists, each
+    the summary's value. A section or key the summary lacks raises :class:`SubstrateError`; one the list does not
+    name raises ``KeyError``."""
 
     def __init__(self, summary: dict):
         self._summary = summary
@@ -105,27 +84,27 @@ class SummaryReader:
     def __getitem__(self, name: str) -> dict:
         keys = SUMMARY_KEYS[name]
         if name.endswith(".*"):
-            return {cat: _listed(held, keys) for cat, held in self._section(name[:-2]).items()}
-        return _listed(self._section(name), keys)
-
-    def holds(self, path: str) -> bool:
-        """Whether the summary holds the listed key ``path`` names (``section.key``), whatever its value."""
-        name, _, key = path.rpartition(".")
-        if key not in SUMMARY_KEYS[name]:
-            raise KeyError(path)
-        return key in self._section(name)
+            return {
+                cat: _listed(held, keys, f"{name[:-2]}.{cat}")
+                for cat, held in self._section(name[:-2]).items()
+            }
+        return _listed(self._section(name), keys, name)
 
     def _section(self, name: str) -> dict:
         node = self._summary
         for step in name.split(".") if name else ():
-            node = node.get(step) if isinstance(node, dict) else None
-        return node if isinstance(node, dict) else {}
+            if not (isinstance(node, dict) and isinstance(node.get(step), dict)):
+                raise SubstrateError(f"summary.json has no `{name}` section")
+            node = node[step]
+        return node
 
 
-def _listed(held, keys: dict) -> dict:
-    """The listed keys of one section, each the summary's value or its default."""
-    held = held if isinstance(held, dict) else {}
-    return {key: held.get(key, default) for key, default in keys.items()}
+def _listed(held: dict, keys: tuple[str, ...], where: str) -> dict:
+    """The listed keys of one section, each the summary's value."""
+    missing = [key for key in keys if key not in held]
+    if missing:
+        raise SubstrateError(f"summary.json's `{where or 'top level'}` lacks {missing}")
+    return {key: held[key] for key in keys}
 
 
 class SubstrateError(Exception):
@@ -134,54 +113,48 @@ class SubstrateError(Exception):
 
 @dataclass
 class ReportSubstrate:
-    """Everything the report builder needs from a quant output directory.
-
-    ``summary`` is loaded up front; each feather table is a ``cached_property`` read on first use, ``None`` when the
-    file is absent.
-    """
+    """Everything the report builder needs from a quant output directory: ``summary`` loaded up front, and each table
+    :data:`REPORT_TABLES` names read on first use."""
 
     output_dir: Path
     summary: dict
-    #: Non-fatal issues to surface in the report (schema drift, missing tables).
-    warnings: list[str] = field(default_factory=list)
 
-    def _feather(self, name: str) -> pd.DataFrame | None:
+    def _feather(self, name: str) -> pd.DataFrame:
         path = self.output_dir / name
-        if not path.exists():
-            return None
         try:
             return pd.read_feather(path)
-        except Exception as exc:  # pragma: no cover - corrupt file is unusual
+        except Exception as exc:  # pragma: no cover - a corrupt file is unusual
             raise SubstrateError(f"Could not read {path.name}: {exc}") from exc
 
     # -- tables the report draws --
     @cached_property
-    def fragment_lengths(self) -> pd.DataFrame | None:
+    def fragment_lengths(self) -> pd.DataFrame:
         return self._feather("fragment_lengths.feather")
 
     @cached_property
-    def gene_quant(self) -> pd.DataFrame | None:
+    def gene_quant(self) -> pd.DataFrame:
         return self._feather("gene_quant.feather")
 
     @cached_property
-    def calibration_track(self) -> pd.DataFrame | None:
+    def calibration_track(self) -> pd.DataFrame:
         return self._feather("calibration_track.feather")
 
     @property
     def sample_name(self) -> str:
-        """A human label for the sample, derived from the input BAM stem."""
-        bam = SummaryReader(self.summary)["input"]["bam_file"]
-        return Path(bam).stem if bam else self.output_dir.name
+        """A human label for the sample: the input BAM's stem."""
+        return Path(SummaryReader(self.summary)["command.arguments"]["bam_file"]).stem
 
 
 def load_substrate(output_dir: str | Path) -> ReportSubstrate:
-    """Load the report substrate from a ``rigel quant`` output directory: read ``summary.json`` and warn about a
-    schema mismatch or a missing fragment-length table. The tables load lazily.
+    """Load the report substrate from a ``rigel quant`` output directory written by this version of rigel: its
+    ``summary.json``, at this version's schema with every key the report reads, and every table it draws. The tables
+    load lazily.
 
     Raises
     ------
     SubstrateError
-        If the directory or ``summary.json`` is missing / unreadable.
+        If the directory, ``summary.json`` or a table is missing or unreadable, the summary is of another schema, or it
+        lacks a key the report reads.
     """
     output_dir = Path(output_dir)
     if not output_dir.is_dir():
@@ -190,25 +163,26 @@ def load_substrate(output_dir: str | Path) -> ReportSubstrate:
     summary_path = output_dir / "summary.json"
     if not summary_path.exists():
         raise SubstrateError(
-            f"No summary.json in {output_dir}. Point `rigel report` at a "
-            f"`rigel quant` output directory."
+            f"No summary.json in {output_dir}. Point `rigel report` at a `rigel quant` output directory."
         )
     try:
         summary = json.loads(summary_path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise SubstrateError(f"Could not parse {summary_path}: {exc}") from exc
+    if not isinstance(summary, dict):
+        raise SubstrateError(f"{summary_path} is not a summary: it holds no mapping")
 
-    warnings: list[str] = []
-    sv = SummaryReader(summary)[""]["schema_version"]
-    if sv != cli.SUMMARY_SCHEMA_VERSION:
-        warnings.append(
-            f"summary.json schema_version is {sv}; this builder targets "
-            f"v{cli.SUMMARY_SCHEMA_VERSION}. Some panels may be incomplete."
+    version = summary.get("schema_version")
+    if version != cli.SUMMARY_SCHEMA_VERSION:
+        raise SubstrateError(
+            f"{summary_path} is summary schema {version}, and this rigel reads schema "
+            f"{cli.SUMMARY_SCHEMA_VERSION}: run this version's `rigel quant` to report on it."
         )
-    if not (output_dir / "fragment_lengths.feather").exists():
-        warnings.append(
-            "fragment_lengths.feather not found; the fragment-length "
-            "distribution charts will be omitted."
-        )
-
-    return ReportSubstrate(output_dir=output_dir, summary=summary, warnings=warnings)
+    # every listed key read once here, so a missing one refuses the report before it is built
+    reader = SummaryReader(summary)
+    for name in SUMMARY_KEYS:
+        reader[name]
+    missing = [name for name in REPORT_TABLES if not (output_dir / name).exists()]
+    if missing:
+        raise SubstrateError(f"{output_dir} lacks {missing}, which every `rigel quant` run writes")
+    return ReportSubstrate(output_dir=output_dir, summary=summary)

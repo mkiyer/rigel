@@ -1,8 +1,8 @@
 """The report pipeline in one function, :func:`build_report`: load the substrate (:mod:`.substrate`), build the
 view model (:mod:`.model`) and the chart specs (:mod:`.specs`), and write one HTML file (:mod:`.html`).
 
-Only ``summary.json`` is required. Substrate warnings are logged, not raised, and a missing optional table empties
-its section. Without ``vl-convert-python`` every chart is omitted, with a warning naming the extra to install.
+The output directory must be one this version of ``rigel quant`` wrote (:func:`~.substrate.load_substrate` refuses
+any other). Without ``vl-convert-python`` every chart is omitted, with a warning naming the extra to install.
 """
 
 from __future__ import annotations
@@ -40,8 +40,6 @@ def build_report(
         The written HTML file.
     """
     sub = load_substrate(output_dir)
-    for w in sub.warnings:
-        logger.warning("[report] %s", w)
 
     model = build_view_model(sub)
     charts = build_charts(sub)

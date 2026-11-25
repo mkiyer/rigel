@@ -64,7 +64,6 @@ SECTIONS = """
   </nav>
   <main class="main">
 
-    <div class="banner" id="warn-banner" style="display:none"></div>
 
     <section class="hero" id="hero">
       <h1 id="hero-title">Rigel QC report</h1>

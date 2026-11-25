@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from ..config import CONSTANTS
 from .specs import fl_label
-from .substrate import ReportSubstrate, SummaryReader
+from .substrate import ReportSubstrate, SubstrateError, SummaryReader
 
 # Categorical colour slots of the palette; the front end resolves them to colours per theme.
 _C = {i: f"f{i}" for i in range(1, 9)}
 
-#: The ``gene_quant`` columns the gene table shows, in order. A column the table lacks reads as empty cells.
+#: The ``gene_quant`` columns the gene table shows, in order.
 GENE_COLUMNS = (
     "gene_name",
     "gene_id",
@@ -32,12 +32,10 @@ def _pct(numer: float, denom: float) -> float:
     return (numer / denom) if denom else 0.0
 
 
-def _capture(summary: SummaryReader) -> dict | None:
+def _capture(summary: SummaryReader) -> dict:
     """Calibration's capture answer: the gDNA landscape's bulk density (fragments per bp, the level every capture
     efficiency is read against) and its saturated level as a multiple of the bulk (1: nothing above it).
-    ``bulk_density`` is ``None`` when no landscape was fitted; the answer is ``None`` when the summary has none."""
-    if not summary.holds("calibration.gdna_bulk_density"):
-        return None
+    ``bulk_density`` is ``None`` when no landscape was fitted."""
     cal = summary["calibration"]
     return {
         "bulk_density": cal["gdna_bulk_density"],
@@ -46,18 +44,14 @@ def _capture(summary: SummaryReader) -> dict | None:
 
 
 def _verdicts(summary: SummaryReader) -> list[dict]:
-    """Headline QC tiles: mapping, strandedness, gDNA, usable fragments, + calibration's capture
-    answer when the summary carries one."""
-    tiles = [
+    """Headline QC tiles: mapping, strandedness, gDNA, usable fragments and calibration's capture answer."""
+    return [
         _mapping_tile(summary),
         _strandedness_tile(summary),
         _gdna_tile(summary),
         _usable_tile(summary),
+        _capture_tile(_capture(summary)),
     ]
-    capture = _capture(summary)
-    if capture is not None:
-        tiles.append(_capture_tile(capture))
-    return tiles
 
 
 def _tile(k: str, icon: str, v, fmt: str, s: str, n: str) -> dict:
@@ -95,7 +89,7 @@ def _strandedness_tile(summary: SummaryReader) -> dict:
         status, label = "good", "Reverse (R1−)" if not strand["read1_sense"] else "Forward (R1+)"
     else:
         status, label = "warning", "Unstranded"
-    note = f"{strand['strand_specificity'] * 100:.1f}% strand-specific · {strand['protocol']}"
+    note = f"{strand['strand_specificity'] * 100:.1f}% strand-specific · {_protocol(strand['read1_sense'])}"
     return _tile("Strandedness", "arrow", label, "text", status, note)
 
 
@@ -227,6 +221,11 @@ def _fragments(summary: SummaryReader) -> dict:
     return {"kpis": kpis, "ctx": ctx, "splice": splice_bar}
 
 
+def _protocol(read1_sense: bool) -> str:
+    """The library protocol's name, from which read the RNA strand follows."""
+    return "R1-sense" if read1_sense else "R1-antisense"
+
+
 def _strand(summary: SummaryReader) -> dict:
     s = summary["strand_model"]
     d = summary["strand_model.diagnostics"]
@@ -236,7 +235,7 @@ def _strand(summary: SummaryReader) -> dict:
     return {
         "spec": s["strand_specificity"],
         "read1_sense": bool(s["read1_sense"]),
-        "protocol": s["protocol"],
+        "protocol": _protocol(s["read1_sense"]),
         "exonic_all_spec": exonic,
         "contamination_gap": d["contamination_gap"],
         "kpis": [
@@ -324,31 +323,23 @@ def _genes(sub: ReportSubstrate) -> dict:
     """The gene table's rows: a gene's RNA is its annotated ``count``, since a nascent span belongs to no gene."""
     qc = CONSTANTS.qc
     gq = sub.gene_quant
-    if gq is None or gq.empty:
-        return {"rows": [], "total": 0, "shown": 0, "truncated": False}
-    df = gq[[c for c in GENE_COLUMNS if c in gq.columns]]
+    missing = [c for c in GENE_COLUMNS if c not in gq.columns]
+    if missing:
+        raise SubstrateError(f"gene_quant.feather lacks {missing}")
     # Embed only expressed genes, capped to bound the HTML size; the rest stay in gene_quant.feather.
-    if "count" in df.columns:
-        df = df[df["count"] > 0]
-    if "tpm" in df.columns:
-        df = df.sort_values("tpm", ascending=False)
+    df = gq.loc[gq["count"] > 0, list(GENE_COLUMNS)].sort_values("tpm", ascending=False)
     total = len(df)
     truncated = total > qc.gene_table_rows
     df = df.head(qc.gene_table_rows)
 
     # Rows are built column-wise, not with iterrows.
-    def col(name, cast, default):
-        if name not in df.columns:
-            return [default] * len(df)
-        return [cast(v) for v in df[name].to_numpy()]
-
-    # each cell as the front end shows it, and what a missing column shows: text, or a number to its decimals
-    cell = {
-        "tpm": (lambda v: round(float(v), qc.tpm_decimals), 0.0),
-        "count": (lambda v: round(float(v), qc.count_decimals), 0.0),
-        "n_transcripts": (int, 0),
+    # each cell as the front end shows it: text, or a number to its decimals
+    cast = {
+        "tpm": lambda v: round(float(v), qc.tpm_decimals),
+        "count": lambda v: round(float(v), qc.count_decimals),
+        "n_transcripts": int,
     }
-    cols = [col(name, *cell.get(name, (str, ""))) for name in GENE_COLUMNS]
+    cols = [[cast.get(name, str)(v) for v in df[name].to_numpy()] for name in GENE_COLUMNS]
     rows = [list(r) for r in zip(*cols)]
     return {"rows": rows, "total": total, "shown": len(rows), "truncated": truncated}
 
@@ -357,17 +348,16 @@ def _calibration(summary: SummaryReader, track) -> dict:
     """Two panels' worth of data: 'enrichment' (calibration's capture answer + its KPIs) and
     'density' (the genome track + per-reference table + its KPIs)."""
     cal = summary["calibration"]
-    has_track = track is not None and len(track) > 0
+    has_track = len(track) > 0
 
     # Enrichment panel KPIs (capture).
     capture = _capture(summary)
-    enrichment_kpis = []
-    if capture is not None and capture["bulk_density"] is not None:
+    if capture["bulk_density"] is not None:
         enrichment_kpis = [
             {"l": "ρg bulk", "v": capture["bulk_density"], "fmt": "g4"},
             {"l": "Saturation × bulk", "v": capture["saturation"], "fmt": "g4"},
         ]
-    elif capture is not None:
+    else:
         enrichment_kpis = [{"l": "ρg bulk", "v": "None", "fmt": "text"}]
 
     # gDNA-density panel KPIs: calibration's library scalars, then the track's.
@@ -389,8 +379,6 @@ def _calibration(summary: SummaryReader, track) -> dict:
         "enrichment_kpis": enrichment_kpis,
         "density_kpis": density_kpis,
         "capture": capture,
-        # an older-schema summary can hold a calibration block without a capture answer
-        "calibrated": bool(summary[""]["calibration"]),
         "ref_table": ref_table,
         # the genome track's reference cap, which its caption states
         "genome_track_refs": CONSTANTS.qc.genome_track_refs,
@@ -431,7 +419,7 @@ def reference_table(track) -> list:
 
 
 def _config(summary: SummaryReader) -> dict:
-    cfg = summary[""]["configuration"] or {}
+    cfg = summary[""]["configuration"]
     groups: dict[str, dict] = {}
     # top-level scalars first
     top = {k: v for k, v in cfg.items() if not isinstance(v, dict)}
@@ -460,11 +448,10 @@ def build_view_model(sub: ReportSubstrate) -> dict:
     return {
         "meta": {
             "sample": sub.sample_name,
-            "index": s["input"]["index_dir"],
+            "index": s["command.arguments"]["index_dir"],
             "created": top["timestamp"],
             "version": top["rigel_version"],
             "schema_version": top["schema_version"],
-            "warnings": sub.warnings,
         },
         "verdicts": _verdicts(s),
         "alignment": _alignment(s),
