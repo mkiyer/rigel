@@ -258,7 +258,7 @@ struct TablesArrays {
     }
 };
 
-// One directional pass on the tables, writing the received table in place: the gates' whole passes and single hops.
+// One directional pass on the tables, writing the received table in place: the gates' whole passes and single steps.
 void transfer_pass(nb::dict tables, nb::dict received, IdxVec seq, IdxVec nbr, BoolVec terminal) {
     TablesArrays T(tables);
     ReceivedArrays R(received);
@@ -315,7 +315,7 @@ nb::object row_of(int K, Fill&& fill) {
 void bind_rows(nb::module_& t) {
     t.def("trigamma", &trigamma, nb::arg("x"), "zeta(2, x), the counting variance's one home.");
     t.def("count_logvar", &count_logvar, nb::arg("n"));
-    t.def("hop_price", &hop_price, nb::arg("n_s"), nb::arg("a_s"), nb::arg("n_x"), nb::arg("a_x"));
+    t.def("step_price", &step_price, nb::arg("n_s"), nb::arg("a_s"), nb::arg("n_x"), nb::arg("a_x"));
     t.def("blur_radius", &blur_radius, nb::arg("v"), nb::arg("step"),
           "The blur kernel's half-width in grid steps at variance v: the footprint blur_row convolves over.");
     t.def("blur_row", [](Vec row, Vec lam, double v) {

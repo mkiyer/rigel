@@ -85,12 +85,12 @@ def test_z7_a_hop_priced_on_a_zero_count_is_finite_and_counting_alone():
     """The transfer policy's hop price with a zero witness count on either side: no density ratio exists, so the price
     is the two counts' counting and nothing more, finite and larger than the same hop priced on a positive count (a zero
     count is the quietest measurement, not silence)."""
-    v0 = R.hop_price(30.0, 100.0, 0.0, 100.0)
+    v0 = R.step_price(30.0, 100.0, 0.0, 100.0)
     assert np.isfinite(v0) and v0 == pytest.approx(
         polygamma(1, 30.5) + polygamma(1, 0.5), rel=1e-12
     )
-    assert v0 > R.hop_price(30.0, 100.0, 30.0, 100.0)
-    assert np.isfinite(R.hop_price(0.0, 100.0, 0.0, 100.0))
+    assert v0 > R.step_price(30.0, 100.0, 30.0, 100.0)
+    assert np.isfinite(R.step_price(0.0, 100.0, 0.0, 100.0))
 
 
 def test_z7_a_gene_edge_with_zero_counts_emits_a_level():

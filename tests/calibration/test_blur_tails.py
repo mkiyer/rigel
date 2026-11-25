@@ -55,7 +55,7 @@ def test_a_small_kernel_weight_can_be_relevant_to_a_deep_tail(variance):
 def test_certified_source_keeps_its_low_density_tail(count):
     grid = np.arange(-125, 126) * 0.2
     rate, origin = 1.0, 1.0
-    variance = rows.hop_price(count, count / rate, 0.0, 0.0)
+    variance = rows.step_price(count, count / rate, 0.0, 0.0)
     step = grid[1] - grid[0]
     half = rows.blur_radius(variance, step)
     extended = grid[0] + np.arange(-half, len(grid) + half) * step

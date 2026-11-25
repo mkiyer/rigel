@@ -53,8 +53,8 @@ inline double trigamma(double x) {
 
 inline double count_logvar(double n) { return trigamma(n + 0.5); }
 
-// hop_price(n_s, a_s, n_x, a_x): both counts' counting plus the discrepancy beyond it.
-inline double hop_price(double n_s, double a_s, double n_x, double a_x) {
+// step_price(n_s, a_s, n_x, a_x): both counts' counting plus the discrepancy beyond it.
+inline double step_price(double n_s, double a_s, double n_x, double a_x) {
     double v = count_logvar(n_s) + count_logvar(n_x);
     if (n_s > 0.0 && n_x > 0.0) {
         const double l = std::log((n_x / a_x) / (n_s / a_s));

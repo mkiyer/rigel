@@ -651,7 +651,7 @@ def _length_tables_summary(tables) -> dict:
     L = np.arange(tables.rna.size, dtype=np.float64)
     return {
         "weight": round(float(d.weight), SUMMARY_DECIMALS),
-        "kappa": round(float(d.kappa), SUMMARY_DECIMALS),
+        "kappa": round(float(d.rna_captured_fraction), SUMMARY_DECIMALS),
         "captured": round(float(d.captured), SUMMARY_DECIMALS),
         "contrast": round(float(d.contrast), SUMMARY_DECIMALS),
         "bound": round(float(d.bound), SUMMARY_DECIMALS),

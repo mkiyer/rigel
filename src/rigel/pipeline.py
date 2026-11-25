@@ -1222,9 +1222,9 @@ def _log_length_tables(tables: "LengthTables") -> None:
     decision = tables.decision
     bins = np.arange(tables.rna.size, dtype=np.float64)
     logger.info(
-        "[FL] length tables: kappa=%.4f captured=%.4f contrast=%.4f bound=%.4f noise=%.3g weight=%.3f "
+        "[FL] length tables: rna_captured=%.4f captured=%.4f contrast=%.4f bound=%.4f noise=%.3g weight=%.3f "
         "rna_mean=%.1f gdna_table_mean=%.1f",
-        decision.kappa,
+        decision.rna_captured_fraction,
         decision.captured,
         decision.contrast,
         decision.bound,

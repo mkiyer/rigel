@@ -455,8 +455,8 @@ inline void rna_sources(const Chain& c, const RowsOut& own, int strand, double r
                 const double c_j = (hi ? c.sj_hi : c.sj_lo)[2 * b + col];
                 const double r_j = (hi ? c.route_hi : c.route_lo)[2 * b + col];
                 if (!(c_j > 0.0 && r_j > 0.0)) continue;
-                const double v = hop_price(c_j, c_j / r_j, c.cnt[2 * x + col_read], kappa_read * c.a_r[x]);
-                // an exon with reads but no RNA opportunity prices the hop infinitely wide: no claim, the
+                const double v = step_price(c_j, c_j / r_j, c.cnt[2 * x + col_read], kappa_read * c.a_r[x]);
+                // an exon with reads but no RNA opportunity prices the step infinitely wide: no claim, the
                 // limit of a vanishing opportunity
                 if (!std::isfinite(v)) continue;
                 double* fl = S.e.data();
@@ -604,7 +604,7 @@ inline void lane_receive(const LaneView& ln, LevelsView& L, int K, const double*
     const double cnt = ln.count[x], a_x = ln.a[x];
     double v;
     if (ln.other == nullptr || !L.has_witness[x]) {
-        v = hop_price(n_sent, a_sent, cnt, a_x);
+        v = step_price(n_sent, a_sent, cnt, a_x);
     } else {
         v = count_logvar(n_sent) + count_logvar(cnt);
         const double n_s = L.rna_count[x], v_s = L.rna_count_var[x];

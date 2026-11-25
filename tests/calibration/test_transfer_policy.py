@@ -149,7 +149,7 @@ def _reference_rows(prepared, ctx):
                     tight = parts[0] if len(parts) == 1 else np.minimum(parts[0], parts[1])
                     out = (norm(tight), float(lane.count[s]), float(lane.a[s]))
             if out is not None and not lane.empty[i]:
-                v = R.hop_price(out[1], out[2], lane.count[i], lane.a[i])
+                v = R.step_price(out[1], out[2], lane.count[i], lane.a[i])
                 priced = R.lower_side(out[0])
                 priced = R.blur_row(priced, lane.u, v) if v > 0.0 else priced
                 out = (priced, float(lane.count[i]), float(lane.a[i]))
@@ -540,15 +540,15 @@ def test_the_hop_price_is_both_countings_and_the_discrepancy_beyond_them():
     from scipy.special import polygamma
 
     counting = float(polygamma(1, 50.5) + polygamma(1, 200.5))
-    assert abs(R.hop_price(50, 100.0, 200, 400.0) - counting) < 1e-12, (
+    assert abs(R.step_price(50, 100.0, 200, 400.0) - counting) < 1e-12, (
         "equal densities: counting only"
     )
     d = np.log(8.0) ** 2 - (1 / 50 + 1 / 200)
-    assert abs(R.hop_price(50, 100.0, 200, 50.0) - (counting + d)) < 1e-12, (
+    assert abs(R.step_price(50, 100.0, 200, 50.0) - (counting + d)) < 1e-12, (
         "the excess over counting"
     )
     # both terms are symmetric in the two ends, so the price does not depend on which way the hop is read
-    assert R.hop_price(50, 100.0, 200, 50.0) == R.hop_price(200, 50.0, 50, 100.0)
+    assert R.step_price(50, 100.0, 200, 50.0) == R.step_price(200, 50.0, 50, 100.0)
 
 
 def test_a_composition_arrives_only_through_a_face_with_a_composition_rule(sweep_inputs):
@@ -592,7 +592,7 @@ def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
             x = int(right[e] if not backward else left[e])
             if x < 0 or not held.present[x] or lane.empty[x]:
                 continue
-            v = R.hop_price(held.count[e], held.opportunity[e], lane.count[x], lane.a[x])
+            v = R.step_price(held.count[e], held.opportunity[e], lane.count[x], lane.a[x])
             want = R.lower_side(held.profile[e])
             want = R.blur_row(want, lane.u, v) if v > 0.0 else want
             np.testing.assert_allclose(held.profile[x], want, atol=1e-9)

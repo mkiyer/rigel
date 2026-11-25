@@ -148,14 +148,14 @@ def test_the_rna_coordinate_round_trips_where_it_resolves():
 
 
 def test_the_rna_hop_is_priced_by_the_strands_own_counts():
-    """`hop_price` on an RNA lane's own witness: two nodes with equal totals but strand counts 30 and 3
+    """`step_price` on an RNA lane's own witness: two nodes with equal totals but strand counts 30 and 3
     pay the strand counts' price, not the totals'; a zero count on either side pays counting alone and
     stays finite."""
 
-    v_strand = R.hop_price(30.0, 100.0, 3.0, 100.0)
-    v_total = R.hop_price(3000.0, 100.0, 3000.0, 100.0)
+    v_strand = R.step_price(30.0, 100.0, 3.0, 100.0)
+    v_total = R.step_price(3000.0, 100.0, 3000.0, 100.0)
     assert v_strand > 10.0 * v_total
-    v0 = R.hop_price(30.0, 100.0, 0.0, 100.0)
+    v0 = R.step_price(30.0, 100.0, 0.0, 100.0)
     assert np.isfinite(v0) and abs(v0 - float(polygamma(1, 30.5) + polygamma(1, 0.5))) < 1e-12
 
 
@@ -182,8 +182,8 @@ def test_the_flux_level_is_a_lower_bound_priced_by_the_node_pair():
     assert R.flux_level(u, 0.0, 0.0, rho) is None
     # a probed junction beside an unprobed exon: the exon's strand count per opportunity sits far below
     # the junction's rate, the pair disagrees, the floor widens and stays a floor
-    v_match = R.hop_price(300.0, 200.0, 1500.0, 1000.0)  # 1.5/bp against 1.5/bp
-    v_cliff = R.hop_price(300.0, 200.0, 150.0, 1000.0)  # 1.5/bp against 0.15/bp
+    v_match = R.step_price(300.0, 200.0, 1500.0, 1000.0)  # 1.5/bp against 1.5/bp
+    v_cliff = R.step_price(300.0, 200.0, 150.0, 1000.0)  # 1.5/bp against 0.15/bp
     assert v_cliff > 10.0 * v_match
     wide = R.flux_level(u, 300.0, 1.5, rho, v_cliff)
     tight = R.flux_level(u, 300.0, 1.5, rho, v_match)
@@ -195,8 +195,8 @@ def test_the_flux_level_is_a_lower_bound_priced_by_the_node_pair():
     assert read_column(0, 0.01) == 1 and read_column(1, 0.01) == 0
     # at kappa = 0.01 a 90 % − transcript's reads sit on the + column; pricing its junction against the − column (10 %)
     # would disagree 9x and price the floor away
-    v_right = R.hop_price(180.0, 215.0, 1345.0, 1785.0)
-    v_wrong = R.hop_price(180.0, 215.0, 173.0, 1785.0)
+    v_right = R.step_price(180.0, 215.0, 1345.0, 1785.0)
+    v_wrong = R.step_price(180.0, 215.0, 173.0, 1785.0)
     assert v_wrong > 4.0 and v_right < 0.5
 
 
@@ -272,7 +272,7 @@ def test_perturbation_an_rna_level_never_returns_to_its_source(sweep_inputs):
 
 def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     """The RNA lane's hop into a full recipient: across a two-sided face the profile keeps its upper side; across any
-    other face it is lower-sided. Both pay the pair's price (`hop_price`: both counts' counting plus the disagreement of
+    other face it is lower-sided. Both pay the pair's price (`step_price`: both counts' counting plus the disagreement of
     the strand's two count densities beyond it); no face is exempt. Where the pair agrees the price is counting alone;
     where it disagrees by a cliff the upper side is blurred away, so a lit intron's sharp upper side cannot cross a
     probe cliff unpriced and read a mostly-RNA junction as mostly gDNA. The sender is empty and holds the profile with
@@ -298,7 +298,7 @@ def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     lane = LevelLane("pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face)
     two = received(lane, 30.0, 300.0)
     v_agree = float(polygamma(1, 30.5) + polygamma(1, 300.5))
-    assert abs(R.hop_price(30.0, 300.0, 300.0, 3000.0) - v_agree) < 1e-12
+    assert abs(R.step_price(30.0, 300.0, 300.0, 3000.0) - v_agree) < 1e-12
     np.testing.assert_allclose(two, R.blur_row(prof, u, v_agree), atol=1e-9)
     assert two.max() - two[-1] > 1.0  # the upper side survives
     # the pair disagrees by a cliff (the strand's density 800x higher at the recipient): the whole profile still
@@ -307,7 +307,7 @@ def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     a = np.array([2200.0, 200.0])
     cliff = LevelLane("pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face)
     two_cliff = received(cliff, 3.0, 2200.0)
-    v_pair = R.hop_price(3.0, 2200.0, 229.0, 200.0)
+    v_pair = R.step_price(3.0, 2200.0, 229.0, 200.0)
     v_counting = float(polygamma(1, 3.5) + polygamma(1, 229.5))
     assert v_pair > v_counting + 10.0  # log(800)^2 ~ 45 nats^2 beyond counting
     np.testing.assert_allclose(two_cliff, R.blur_row(prof, u, v_pair), atol=1e-9)
@@ -375,7 +375,7 @@ def test_two_dark_nodes_cross_a_column_cliff_at_counting_alone():
     v_counting = float(polygamma(1, 5.5) + polygamma(1, 367.5))
     np.testing.assert_allclose(got, R.blur_row(_HOP_PROF, _HOP_U, v_counting), atol=1e-9)
     assert got.max() - got[-1] > 1.0, "the dark claim's upper side must survive"
-    v_column = R.hop_price(5.0, 277.0, 367.0, 223.0)
+    v_column = R.step_price(5.0, 277.0, 367.0, 223.0)
     assert v_column > v_counting + 5.0
     assert not np.allclose(got, R.blur_row(_HOP_PROF, _HOP_U, v_column), atol=1e-3), (
         "the column count is the witness again: two dark nodes were charged a cliff"
@@ -433,9 +433,9 @@ def test_the_witness_rides_across_an_empty_node_to_the_next_full_one():
 
 
 def test_with_no_other_column_the_column_count_is_the_witness():
-    """`hop_price` on the two column counts."""
+    """`step_price` on the two column counts."""
     held = _priced(_two_node_lane([69.0, 198.0], [14054.0, 227.0]), 69.0, 14054.0)
-    want = R.blur_row(_HOP_PROF, _HOP_U, R.hop_price(69.0, 14054.0, 198.0, 227.0))
+    want = R.blur_row(_HOP_PROF, _HOP_U, R.step_price(69.0, 14054.0, 198.0, 227.0))
     np.testing.assert_allclose(held.profile[1], want, atol=1e-9)
     assert not held.has_witness[1]
 
@@ -619,7 +619,7 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
 
 def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     """The junction's flux measures the exon's RNA whether or not the exon piece holds a fragment of its own. At an
-    empty piece the flux level is built (lower-sided), priced by `hop_price` on the piece's zero count (counting alone,
+    empty piece the flux level is built (lower-sided), priced by `step_price` on the piece's zero count (counting alone,
     the rule every hop pays), and emitted from the piece with the flux's own witness (the spliced count on the route
     rate's opportunity), so the next full node prices the hop as `flux_level` is priced at a full exon: the junction's
     rate against its own strand column. A silent junction builds nothing and the piece forwards as usual.
@@ -636,8 +636,8 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     assert own is not None, "no flux level at the empty piece: the source was skipped"
     assert np.all(np.diff(own) >= -1e-12), "the flux level is lower-sided"
     assert lane.flux_at(2, 0) is not None  # its junction, slot 1, is on its left
-    # the price is `hop_price` on the piece's own (zero) count: counting alone, both counts
-    v = R.hop_price(40.0, 40.0 / 0.02, 0.0, 0.0)
+    # the price is `step_price` on the piece's own (zero) count: counting alone, both counts
+    v = R.step_price(40.0, 40.0 / 0.02, 0.0, 0.0)
     np.testing.assert_allclose(own, R.flux_level(lane.u, 40.0, 0.02, lane.rho_ref, v), atol=1e-12)
     # the piece emits its level with the flux's witness (the empty boundary beyond it does not price)
     sent = _hop(prepared, 2, 3).level_rna_pos
@@ -652,7 +652,7 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     _hop(prepared, 3, 4, table)
     assert table.level_rna_pos.present[4]
     got = table.level_rna_pos.profile[4]
-    v4 = R.hop_price(40.0, 40.0 / 0.02, float(lane.count[4]), float(lane.a[4]))
+    v4 = R.step_price(40.0, 40.0 / 0.02, float(lane.count[4]), float(lane.a[4]))
     np.testing.assert_allclose(got, R.blur_row(R.lower_side(own), lane.u, v4), atol=1e-9)
     # a silent junction builds no source, and the empty piece forwards nothing
     quiet = _prepared(TransferPolicy(kappa=0.99), _empty_piece_ctx(flux=0.0, rate=0.0))

@@ -3,7 +3,7 @@
 The accumulator behind it, the chunks the buffer takes and hands back, `frag_id` assignment, the
 fragment classes, spilling to disk and reading back, the finalizer, and the resolved-fragment surface.
 Every chunk is built the way the scanner builds it — C++ `ResolvedFragment`s from
-the resolver's `resolve_fragment` test seam, appended to the native `FragmentAccumulator`, finalized and handed
+the resolver's `resolve_fragment` test seam, appended to the native `FragmentChunk`, finalized and handed
 to `FragmentBuffer.inject_chunk` — so these exercise the real native path rather than a Python stand-in
 that could diverge from it.
 """
@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 import rigel.buffer as buffer_mod
-from rigel._resolve_impl.testing import FragmentAccumulator
+from rigel._resolve_impl.testing import FragmentChunk
 from rigel.types import Strand
 from rigel.splice import SpliceType
 from _resolution_reference import GenomicInterval, make_fragment, resolve_fragment
@@ -54,7 +54,7 @@ def _inject(buf, fragments, chunk_size=100, frag_ids=None):
         frag_ids = range(len(fragments))
     frag_ids = list(frag_ids)
     for lo in range(0, len(fragments), chunk_size):
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         for resolved, frag_id in zip(
             fragments[lo : lo + chunk_size], frag_ids[lo : lo + chunk_size]
         ):
@@ -108,15 +108,15 @@ def _assert_chunk_payloads_equal(left, right):
 
 
 # =====================================================================
-# FragmentAccumulator -- direct C++ tests
+# FragmentChunk -- direct C++ tests
 # =====================================================================
 
 
 class TestFragmentAccumulator:
-    """Test FragmentAccumulator directly (no FragmentBuffer)."""
+    """Test FragmentChunk directly (no FragmentBuffer)."""
 
     def test_append_and_size(self, mini_index):
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         assert acc.size == 0
 
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
@@ -125,7 +125,7 @@ class TestFragmentAccumulator:
         assert acc.size == 1
 
     def test_finalize_returns_dict(self, mini_index):
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         acc.append(result, 0)
 
@@ -137,7 +137,7 @@ class TestFragmentAccumulator:
         assert "t_indices" in raw
 
     def test_finalize_carries_the_stored_ambig_strand(self, mini_index):
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         assert result.ambig_strand == 0
         assert len(result.t_inds) >= 2
@@ -148,7 +148,7 @@ class TestFragmentAccumulator:
         assert raw["ambig_strand"].tolist() == [0]
 
     def test_finalize_multiple(self, mini_index):
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
 
         # Exon in g1 region -> hits t1, t2
         r1 = _resolve(mini_index, [_exon("chr1", 120, 180)])
@@ -162,7 +162,7 @@ class TestFragmentAccumulator:
         assert raw["size"] == 2
 
     def test_finalize_buffer_payload_dtypes(self, mini_index):
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         acc.append(result, 0)
 
@@ -179,7 +179,7 @@ class TestFragmentAccumulator:
         assert result is not None
         assert result.read_length == 65_536
 
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         with pytest.raises(RuntimeError, match="read_length"):
             acc.append(result, 0)
 
@@ -187,7 +187,7 @@ class TestFragmentAccumulator:
         """An NM past 16 bits is refused, naming its column, as read_length is: it would wrap silently."""
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         result.nm = 65_536
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         with pytest.raises(RuntimeError, match="'nm'"):
             acc.append(result, 0)
 
@@ -196,7 +196,7 @@ class TestFragmentAccumulator:
         65,535. In 16 bits 65,536 hits would read as 0 and 65,537 as 1, a unique mapper."""
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         result.num_hits = 65_537
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         acc.append(result, 0)
         assert acc.finalize()["num_hits"].tolist() == [65_537]
 
@@ -205,7 +205,7 @@ class TestFragmentAccumulator:
         assert result is not None
         assert result.read_length == 65_535
 
-        acc = FragmentAccumulator()
+        acc = FragmentChunk()
         acc.append(result, 0)
         raw = acc.finalize()
         assert raw["read_length"].tolist() == [65_535]

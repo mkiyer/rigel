@@ -30,7 +30,7 @@ def poisson_blur(log_density, count, opportunity, variance, step):
 )
 def test_source_blur_matches_direct_poisson_evaluation(count, rate, origin, window):
     grid = np.arange(-round(window / 0.2), round(window / 0.2) + 1) * 0.2
-    variance = rows.hop_price(count, count / rate, 0.0, 0.0)
+    variance = rows.step_price(count, count / rate, 0.0, 0.0)
     reference = poisson_blur(
         grid + np.log(origin), count, count / rate, variance, float(grid[1] - grid[0])
     )
@@ -43,7 +43,7 @@ def test_source_blur_matches_direct_poisson_evaluation(count, rate, origin, wind
 @pytest.mark.parametrize("shift", [-14.0, 14.0])
 def test_source_blur_preserves_physical_coordinates(shift):
     grid = np.linspace(-10, 10, 101)
-    variance = rows.hop_price(1.0, 1000.0, 0.0, 0.0)
+    variance = rows.step_price(1.0, 1000.0, 0.0, 0.0)
     a = rows.flux_level(grid, 1.0, 0.001, 1.0, variance)
     b = rows.flux_level(grid - shift, 1.0, 0.001, np.exp(shift), variance)
     np.testing.assert_allclose(a, b, rtol=1e-10, atol=1e-10)

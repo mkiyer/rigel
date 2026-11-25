@@ -152,7 +152,7 @@ struct QnameGroup {
 
 /// Pre-size a worker's chunk: chunk_size fragment rows and 3/2 candidate-transcript rows per fragment. A capacity hint
 /// only; the columns grow past it.
-void reserve_chunk(FragmentAccumulator& chunk, int64_t chunk_size) { chunk.reserve(chunk_size, chunk_size * 3 / 2); }
+void reserve_chunk(FragmentChunk& chunk, int64_t chunk_size) { chunk.reserve(chunk_size, chunk_size * 3 / 2); }
 
 /// The introns a hit's reads stated, appended to ``out`` each once: a pair where only one mate carries the strand tag
 /// yields the same intron twice under the junctions' (ref, start, end, strand) key, and the accumulator's held records
@@ -187,14 +187,14 @@ public:
 
     /// Take batches until the input closes, pushing each full chunk to ``output``; the last, partial chunk too unless
     /// the output was aborted.
-    void run(BoundedQueue<QnameBatch>& input, BoundedQueue<FragmentAccumulator>& output) {
+    void run(BoundedQueue<QnameBatch>& input, BoundedQueue<FragmentChunk>& output) {
         QnameBatch batch;
         while (input.pop(batch)) {
             for (QnameGroup& group : batch.groups) {
                 scan_template(group);
                 if (chunk_.size() < chunk_size_) continue;
                 if (!output.push(std::move(chunk_))) return;
-                chunk_ = FragmentAccumulator();
+                chunk_ = FragmentChunk();
                 reserve_chunk(chunk_, chunk_size_);
             }
             batch.groups.clear();
@@ -234,7 +234,7 @@ private:
     const int64_t chunk_size_;
     ResolverScratch scratch_;
     JudgeScratch judge_;
-    FragmentAccumulator chunk_;
+    FragmentChunk chunk_;
     std::unique_ptr<AccumulatorSet> acc_set_;
 
     // The deposit path allocates no per-fragment memory (capacity is never released). Each resolved hit is collected
@@ -602,10 +602,10 @@ namespace {
 /// The main thread's part: hand each finished chunk to Python, holding the GIL only while calling back. An exception
 /// aborts both queues, so the reader and the workers stop, and is returned.
 template <class InputQueue>
-std::exception_ptr hand_chunks_to_python(BoundedQueue<FragmentAccumulator>& output, InputQueue& input,
+std::exception_ptr hand_chunks_to_python(BoundedQueue<FragmentChunk>& output, InputQueue& input,
                                          nb::callable& chunk_callback) {
     try {
-        FragmentAccumulator chunk;
+        FragmentChunk chunk;
         nb::gil_scoped_release release;
         while (output.pop(chunk)) {
             nb::gil_scoped_acquire acquire;
@@ -631,7 +631,7 @@ nb::dict BamScanner::scan(const std::string& bam_path, nb::callable chunk_callba
     require_partition();
 
     BoundedQueue<QnameBatch> input(static_cast<size_t>(n_workers * INPUT_BATCHES_PER_WORKER));
-    BoundedQueue<FragmentAccumulator> output(static_cast<size_t>(n_workers * OUTPUT_CHUNKS_PER_WORKER));
+    BoundedQueue<FragmentChunk> output(static_cast<size_t>(n_workers * OUTPUT_CHUNKS_PER_WORKER));
     std::vector<std::unique_ptr<Worker>> workers;
     for (int i = 0; i < n_workers; i++)
         workers.push_back(std::make_unique<Worker>(*resolver_, partition_, include_multimap_, chunk_size));

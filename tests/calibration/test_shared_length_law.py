@@ -289,7 +289,9 @@ def test_an_rna_law_no_spliced_fragment_measured_shows_no_difference():
         t = shared_length_law(anchor, g, ZERO, ZERO, kappa, rna_measured=False)
         d = t.decision
         assert d.weight == 0.0 and d.contrast == 0.0 and d.captured == 0.0 and d.noise == 0.0
-        assert d.kappa == kappa and d.bound == pytest.approx(np.sqrt(capture_bound(g, kappa)))
+        assert d.rna_captured_fraction == kappa and d.bound == pytest.approx(
+            np.sqrt(capture_bound(g, kappa))
+        )
         np.testing.assert_array_equal(t.gdna, anchor)
         np.testing.assert_array_equal(t.rna, anchor)
         np.testing.assert_array_equal(t.anchor, g)
@@ -372,7 +374,7 @@ def test_the_decision_reports_what_it_read():
     g, r = _law(130.0, 60.0), _law(260.0, 80.0)
     t = _tables(r, g, 0.7)
     d = t.decision
-    assert d.kappa == 0.7 and 0.0 <= d.captured <= 0.7
+    assert d.rna_captured_fraction == 0.7 and 0.0 <= d.captured <= 0.7
     assert d.contrast == pytest.approx(np.sqrt(hellinger_sq(g, r)))
     assert d.bound == pytest.approx(np.sqrt(capture_bound(g, 0.7)))
     assert d.noise == 0.0 and d.weight == 1.0

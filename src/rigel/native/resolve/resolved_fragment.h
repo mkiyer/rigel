@@ -1,5 +1,5 @@
 // resolved_fragment.h — what the resolver concludes about one fragment (ResolvedFragment), and the columnar chunk the
-// scan gathers the rows into for rigel.buffer (FragmentAccumulator).
+// scan gathers the rows into for rigel.buffer (FragmentChunk).
 #pragma once
 
 #include <cstdint>
@@ -72,9 +72,9 @@ struct ResolvedFragment {
 };
 
 /// The rows of one chunk, column by column, as rigel.buffer reads them.
-class FragmentAccumulator {
+class FragmentChunk {
 public:
-    FragmentAccumulator() {
+    FragmentChunk() {
         t_offsets_.push_back(0);
         place_offsets_.push_back(0);
     }
@@ -149,7 +149,7 @@ public:
         result["place_index"]       = vec_to_ndarray(std::move(place_index_));
         result["place_mass"]        = vec_to_ndarray(std::move(place_mass_));
         result["size"]              = nb::cast(size_);
-        *this = FragmentAccumulator();  // the CSR offsets' leading 0s back, so the next row starts a valid chunk
+        *this = FragmentChunk();  // the CSR offsets' leading 0s back, so the next row starts a valid chunk
         return result;
     }
 

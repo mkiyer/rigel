@@ -385,7 +385,7 @@ def test_the_length_tables_block_is_the_pipelines_decision_the_manual_lists(quan
     assert (
         tables["weight"] == round(d.weight, cli.SUMMARY_DECIMALS) and 0.0 <= tables["weight"] <= 1.0
     )
-    assert tables["kappa"] == round(d.kappa, cli.SUMMARY_DECIMALS)
+    assert tables["kappa"] == round(d.rna_captured_fraction, cli.SUMMARY_DECIMALS)
     assert tables["gdna_table_mean"] == round(
         float(pr.length_tables.gdna @ np.arange(pr.length_tables.gdna.size)), 2
     )

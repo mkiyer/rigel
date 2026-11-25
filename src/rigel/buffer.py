@@ -109,7 +109,7 @@ class FinalizedChunk:
 
     @classmethod
     def from_raw(cls, raw: dict) -> "FinalizedChunk":
-        """Build a chunk from the dict C++ ``FragmentAccumulator.finalize`` returns. The arrays arrive C-contiguous in
+        """Build a chunk from the dict C++ ``FragmentChunk.finalize`` returns. The arrays arrive C-contiguous in
         the declared dtypes, so nothing is copied or cast."""
         return cls(
             **{name: raw[name] for name in _FRAGMENT_ARRAYS},

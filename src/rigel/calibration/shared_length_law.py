@@ -59,12 +59,12 @@ __all__ = [
 class LengthDecision:
     """What the shared law decided, and from what.
 
-    ``kappa`` RNA's captured fraction; ``captured`` the capture mixture's ``c`` in ``[0, kappa]``; ``contrast`` ``D``
-    and ``bound`` ``B``, Hellinger distances; ``noise`` the squared distance sampling noise alone adds; ``weight``
-    ``w``, 0 for one law and 1 for gDNA's own law whole.
+    ``rna_captured_fraction`` RNA's captured fraction, the module's ``kappa``; ``captured`` the capture mixture's ``c``
+    in ``[0, kappa]``; ``contrast`` ``D`` and ``bound`` ``B``, Hellinger distances; ``noise`` the squared distance
+    sampling noise alone adds; ``weight`` ``w``, 0 for one law and 1 for gDNA's own law whole.
     """
 
-    kappa: float
+    rna_captured_fraction: float
     captured: float
     contrast: float
     bound: float
@@ -194,7 +194,7 @@ def shared_length_law(
             gdna=r.copy(),
             anchor=g,
             decision=LengthDecision(
-                kappa=float(kappa),
+                rna_captured_fraction=float(kappa),
                 captured=0.0,
                 contrast=0.0,
                 bound=float(np.sqrt(capture_bound(g, kappa))),
@@ -214,7 +214,7 @@ def shared_length_law(
         gdna=geometric_path(r, tilted, weight),
         anchor=g,
         decision=LengthDecision(
-            kappa=float(kappa),
+            rna_captured_fraction=float(kappa),
             captured=float(captured),
             contrast=float(np.sqrt(contrast_sq)),
             bound=float(np.sqrt(bound_sq)),

@@ -91,12 +91,12 @@ void bind_testing(nb::module_ m) {
             return out;
         });
 
-    nb::class_<FragmentAccumulator>(m, "FragmentAccumulator")
+    nb::class_<FragmentChunk>(m, "FragmentChunk")
         .def(nb::init<>(), "Create an empty native accumulator.")
-        .def("append", &FragmentAccumulator::append, nb::arg("result"), nb::arg("frag_id"),
+        .def("append", &FragmentChunk::append, nb::arg("result"), nb::arg("frag_id"),
              "Append a ResolvedFragment to the accumulator.")
-        .def_prop_ro("size", &FragmentAccumulator::size, "Number of fragments in the accumulator.")
-        .def("finalize", &FragmentAccumulator::finalize,
+        .def_prop_ro("size", &FragmentChunk::size, "Number of fragments in the accumulator.")
+        .def("finalize", &FragmentChunk::finalize,
              "Finalize to a dict of numpy arrays, leaving the accumulator empty.");
 
     m.def("resolve_fragment", &resolve_fragment, nb::arg("resolver"), nb::arg("frag"),
