@@ -34,6 +34,7 @@ from rigel.report.html import SECTIONS, read_asset
 from rigel.report.model import GENE_COLUMNS, reference_table, build_view_model
 from rigel.report.specs import (
     FL_CATEGORY_LABELS,
+    _bin_track,
     build_charts,
     build_fl_specs,
     fl_label,
@@ -248,6 +249,21 @@ def test_fl_specs_present(tmp_path):
     sub = load_substrate(d)
     specs = build_fl_specs(sub.fragment_lengths)
     assert "overlay" in specs and "small_multiples" in specs
+
+
+def test_a_region_longer_than_a_bin_fills_every_bin_it_covers(monkeypatch):
+    """A region's density counts in every bin it covers, by the bases it holds there: binning a region by its start
+    alone left the bins its body covers empty. A bin two regions share reads their base-weighted mean."""
+    _charts_with(monkeypatch, genome_track_bins=4)
+    track = pd.DataFrame(
+        {
+            "ref": pd.Categorical(["chr1", "chr1"]),
+            "start": [0, 150],
+            "end": [150, 400],
+            "gdna_density": [1.0, 5.0],
+        }
+    )
+    assert [row["density"] for row in _bin_track(track)] == pytest.approx([1.0, 3.0, 5.0, 5.0])
 
 
 def test_genome_track_spec_bins_per_ref(monkeypatch):

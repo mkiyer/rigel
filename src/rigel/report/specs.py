@@ -173,23 +173,32 @@ def build_fl_specs(fl_df: pd.DataFrame | None) -> dict:
 
 
 def _bin_track(track: pd.DataFrame) -> list[dict]:
-    """Length-weighted gDNA density per bin, binned within each reference, so a genome with millions of regions
-    still sends at most ``CONSTANTS.qc.genome_track_bins`` points per reference to the chart. One ``groupby`` keeps
-    it O(regions)."""
+    """Base-weighted gDNA density per bin, binned within each reference, so a genome with millions of regions still
+    sends at most ``CONSTANTS.qc.genome_track_bins`` points per reference to the chart. A region counts in every bin
+    it covers, by the bases it holds there, so one longer than a bin fills each of them. The regions are the
+    partition, disjoint and in genomic order, so a bin's bases and density mass are differences of two cumulative
+    sums at its edges: O(regions + bins)."""
     bins_per_ref = CONSTANTS.qc.genome_track_bins
     rows: list[dict] = []
-    length = (track["end"] - track["start"]).clip(lower=1).to_numpy(dtype="float64")
-    dens = track["gdna_density"].to_numpy(dtype="float64")
     starts = track["start"].to_numpy(dtype="float64")
+    ends = track["end"].to_numpy(dtype="float64")
+    dens = track["gdna_density"].to_numpy(dtype="float64")
     for ref, idx in track.groupby("ref", observed=True, sort=False).indices.items():
-        s, ln, d = starts[idx], length[idx], dens[idx]
-        span = float(s.max() + ln[s.argmax()])
+        order = idx[np.argsort(starts[idx], kind="stable")]
+        s, e, d = starts[order], ends[order], dens[order]
+        span = float(e.max())
         if span <= 0:
             continue
         width = span / bins_per_ref
-        bin_idx = np.minimum((s / width).astype(int), bins_per_ref - 1)
-        num = np.bincount(bin_idx, weights=d * ln, minlength=bins_per_ref)
-        den = np.bincount(bin_idx, weights=ln, minlength=bins_per_ref)
+        edges = np.arange(bins_per_ref + 1, dtype=np.float64) * width
+        bases = np.concatenate([[0.0], np.cumsum(e - s)])
+        mass = np.concatenate([[0.0], np.cumsum(d * (e - s))])
+        # below an edge: every region that ends at or before it, and the part of the next one that lies below it
+        whole = np.searchsorted(e, edges, side="right")
+        nxt = np.minimum(whole, s.size - 1)
+        part = np.where(whole < s.size, np.clip(edges - s[nxt], 0.0, e[nxt] - s[nxt]), 0.0)
+        den = np.diff(bases[whole] + part)
+        num = np.diff(mass[whole] + d[nxt] * part)
         for b in np.nonzero(den > 0)[0]:
             rows.append(
                 {
