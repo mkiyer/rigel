@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.splice_graph import build_region_partition_arrays
+from rigel.calibration.region_arrays import RegionArrays
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import scan_and_buffer
 from rigel.scan_payload import AccumulatorPayload
@@ -172,7 +173,7 @@ class TestFragmentLengthAnchor:
         classified = sum(int(getattr(stats, census_field(st))) for st in SpliceType)
         assert classified > payload.qc.deposited, "every classified fragment deposited: no teeth"
 
-        fl = library_fl_models(payload, oracle.index)
+        fl = library_fl_models(payload, oracle.index, RegionArrays.from_index(oracle.index))
         np.testing.assert_array_equal(fl.global_counts, np.asarray(payload.deposited_lengths))
         assert float(fl.global_counts.sum()) == float(payload.qc.deposited)
         np.testing.assert_allclose(

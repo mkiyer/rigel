@@ -43,7 +43,7 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     _s, sm, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
     CalibrationSubstrate.check_alignment(pl, ra)
-    flm = library_fl_models(pl, index)
+    flm = library_fl_models(pl, index, RegionArrays.from_index(index))
     gpmf = flm.gdna_pmf
     region_eff = contained_eff_length(ra.region_size_bp, gpmf)
     # gDNA's template is the chromosome, so a boundary's divisor is the unbounded-reach limit mu_g − 1, the same at

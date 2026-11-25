@@ -655,14 +655,21 @@ def calibration_inputs(
     stays empty when the side buffer held nothing.
     """
     lift = {} if lift_out is None else lift_out
+    derived = index_derived_inputs(index)
+    regions = derived["region_arrays"]
     payload = drain_side_buffer(
-        cache.payload, index, cache.strand_model, seed=PipelineConfig().second_pass_seed, lift=lift
+        cache.payload,
+        index,
+        cache.strand_model,
+        regions=regions,
+        seed=PipelineConfig().second_pass_seed,
+        lift=lift,
     )
-    fl_models = library_fl_models(payload, index)
+    fl_models = library_fl_models(payload, index, regions)
     return {
         "payload": payload,
         "strand_model": cache.strand_model,
         "gdna_fl_pmf": fl_models.gdna_pmf,
         "rna_fl_pmf": fl_models.rna_pmf,
-        **index_derived_inputs(index),
+        **derived,
     }

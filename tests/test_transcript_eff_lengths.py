@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from rigel.calibration.region_arrays import RegionArrays
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.frag_length_model import FragmentLengthModel
 from rigel.pipeline import run_pipeline, scan_and_buffer
@@ -81,9 +82,13 @@ def test_every_transcript_eff_length_comes_from_the_payloads_rna_pmf(scenario):
         str(scenario.bam_path), scenario.index, config.scan
     )
     payload = drain_side_buffer(
-        payload, scenario.index, strand_models, seed=config.second_pass_seed
+        payload,
+        scenario.index,
+        strand_models,
+        regions=RegionArrays.from_index(scenario.index),
+        seed=config.second_pass_seed,
     )
-    fl_models = library_fl_models(payload, scenario.index)
+    fl_models = library_fl_models(payload, scenario.index, RegionArrays.from_index(scenario.index))
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
     expected = rna_fl.compute_all_transcript_eff_lens(exonic)
@@ -101,7 +106,7 @@ def test_the_eff_lengths_move_when_the_rna_pmf_moves(scenario):
     from rigel.pipeline import library_fl_models
 
     _, _, _, payload = scan_and_buffer(str(scenario.bam_path), scenario.index, _config().scan)
-    fl_models = library_fl_models(payload, scenario.index)
+    fl_models = library_fl_models(payload, scenario.index, RegionArrays.from_index(scenario.index))
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
 
     base = FragmentLengthModel.from_pmf(
@@ -135,7 +140,7 @@ def test_the_n_observations_guard_on_that_path_cannot_fire(scenario):
     from rigel.pipeline import library_fl_models
 
     _, _, _, payload = scan_and_buffer(str(scenario.bam_path), scenario.index, _config().scan)
-    fl_models = library_fl_models(payload, scenario.index)
+    fl_models = library_fl_models(payload, scenario.index, RegionArrays.from_index(scenario.index))
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
     assert rna_fl.n_observations == 1
 

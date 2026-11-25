@@ -80,7 +80,7 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nascent_abundance: fl
     cfg = PipelineConfig()
     _st, sm, _buf, pl = scan_and_buffer(bam, idx, cfg.scan)
     ra = RegionArrays.from_frame(idx.regions_df, idx.ref_name_to_id)
-    fl = library_fl_models(pl, idx)
+    fl = library_fl_models(pl, idx, RegionArrays.from_index(idx))
     # The sj axis and the boundary flags are both required against the index the payload was scanned on: an axis
     # addressing a different graph would place every splice on the wrong boundary, so calibrate refuses.
     from rigel.calibration.splice_graph import (

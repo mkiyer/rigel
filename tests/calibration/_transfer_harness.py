@@ -457,7 +457,7 @@ def capture_sweep_inputs(tmp_path_factory):
         str(toy.bam_path), index, PipelineConfig().scan
     )
     ra = RegionArrays.from_index(index)
-    fl = library_fl_models(payload, index)
+    fl = library_fl_models(payload, index, RegionArrays.from_index(index))
     grabbed: list = []
     calibrate_mod = sys.modules["rigel.calibration.calibrate"]
     orig = SW.solve_chain

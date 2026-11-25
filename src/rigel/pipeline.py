@@ -486,7 +486,7 @@ def _strand_models(strand_observations: dict, stats: PipelineStats) -> StrandMod
     return strand_models
 
 
-def library_fl_models(payload, index: TranscriptIndex) -> "FLModels":
+def library_fl_models(payload, index: TranscriptIndex, regions: "RegionArrays") -> "FLModels":
     """The fragment-length models from one payload, exactly as production builds them.
 
     All three histograms come from the payload, so there is one definition of length; a fragment enters a pool
@@ -497,14 +497,13 @@ def library_fl_models(payload, index: TranscriptIndex) -> "FLModels":
     gDNA's is empirical-Bayes shrunk toward the all-fragment anchor.
 
     The one home for this call: the second pass scores on pass one's payload and calibration fits on the drained
-    one, and an instrument must read the same models.
+    one, and an instrument must read the same models. ``regions`` is the index's region frame
+    (``RegionArrays.from_index``), which a run builds once.
     """
     from .calibration.fl import build_fl_models
     from .calibration.gdna_opportunity import observable_gdna_opportunity
-    from .calibration.region_arrays import RegionArrays
     from .calibration.sj_opportunity import crossing_probability_from_index
 
-    regions = RegionArrays.from_index(index)
     max_length = int(payload.max_length)
     return build_fl_models(
         payload,
@@ -535,7 +534,13 @@ def length_tables(
 
 
 def drain_side_buffer(
-    payload, index: TranscriptIndex, strand_models, *, seed: int, lift: dict | None = None
+    payload,
+    index: TranscriptIndex,
+    strand_models,
+    *,
+    regions: "RegionArrays",
+    seed: int,
+    lift: dict | None = None,
 ):
     """The second pass: score the held fragments, draw one hypothesis each, and re-deposit them.
 
@@ -552,8 +557,8 @@ def drain_side_buffer(
     the drain conditions on the whole tally, so the oracle replays the whole's drawn choices inside each partition,
     and needs the choices, the undrained payload and the two index-derived arrays `drain` takes, which exist only
     here. Like ``calibrate(diagnostics=)``, it is inert in production. An empty side buffer leaves ``lift`` untouched.
+    ``regions`` is the index's region frame (``RegionArrays.from_index``), which a run builds once.
     """
-    from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
     from .second_pass import choose_hypotheses, drain, score_held_fragments
 
@@ -571,10 +576,10 @@ def drain_side_buffer(
         payload,
         # Pass one's length models, de-tilted as calibration's are: the scorer weighs a candidate length by
         # `f(L)`, and the raw sj-tilted RNA pool would favour the longer hypothesis
-        fl_models=library_fl_models(payload, index),
+        fl_models=library_fl_models(payload, index, regions),
         # `P(align_strand agrees | RNA)`: near 0 on an R1-antisense (dUTP) library, where disagreement is likely
         rna_sense_frac=strand_models.p_r1_sense,
-        regions=RegionArrays.from_index(index),
+        regions=regions,
         sj=sj,
     )
     choices = choose_hypotheses(scores, payload, seed=seed)
@@ -1060,6 +1065,8 @@ def run_pipeline(
     -------
     PipelineResult
     """
+    from .calibration.region_arrays import RegionArrays
+
     if config is None:
         config = PipelineConfig()
     bam_path = str(bam_path)
@@ -1070,12 +1077,18 @@ def run_pipeline(
         _log_sj_tags(stats, scan)
         _log_record_tags(stats)
         _log_hit_verdicts(stats)
+        # The index's region frame, built once: the drain, the length models and calibration all read it
+        region_arrays = RegionArrays.from_index(index)
         # The second pass drains the side buffer before calibration
         calibration_payload = drain_side_buffer(
-            calibration_payload, index, strand_models, seed=config.second_pass_seed
+            calibration_payload,
+            index,
+            strand_models,
+            regions=region_arrays,
+            seed=config.second_pass_seed,
         )
-        calibration, region_arrays, fl_models = _calibrate(
-            calibration_payload, index, strand_models, config.calibration
+        calibration, fl_models = _calibrate(
+            calibration_payload, index, region_arrays, strand_models, config.calibration
         )
         # The EM's two length tables: one shared law unless the data show a difference capture cannot make
         tables = length_tables(fl_models, calibration, region_arrays)
@@ -1143,12 +1156,15 @@ def run_pipeline(
 
 
 def _calibrate(
-    payload, index: TranscriptIndex, strand_models: StrandModels, calibration_config
-) -> tuple["CalibrationResult", "RegionArrays", "FLModels"]:
-    """Calibration on the drained tally: deconvolve every region and boundary into gDNA / RNA+ / RNA−. Returns the
-    result with the region frame it was solved over and the fragment-length models it read, refit on that tally."""
+    payload,
+    index: TranscriptIndex,
+    region_arrays: "RegionArrays",
+    strand_models: StrandModels,
+    calibration_config,
+) -> tuple["CalibrationResult", "FLModels"]:
+    """Calibration on the drained tally over the run's region frame: deconvolve every region and boundary into gDNA /
+    RNA+ / RNA−. Returns the result and the fragment-length models it read, refit on that tally."""
     from .calibration import calibrate
-    from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
 
     warn_if_calibration_strand_unidentifiable(strand_models)
@@ -1162,7 +1178,6 @@ def _calibrate(
     )
 
     # No alignment check here: calibrate() runs it (CalibrationSubstrate.from_payload)
-    region_arrays = RegionArrays.from_index(index)
     boundary_flags = build_boundary_flags_array(index)
     # The sj axis, in the accumulator's sj slot order: where each sj attaches, its transcript strand and its exonic
     # reach either side. The calibrator places each sj as a factor on its two endpoint regions, never as a message
@@ -1170,7 +1185,7 @@ def _calibrate(
     sj = build_sj_geometry_arrays(index)
 
     # The two component length models the calibrator's effective lengths need, refit on the drained tally
-    fl_models = library_fl_models(payload, index)
+    fl_models = library_fl_models(payload, index, region_arrays)
     bins = np.arange(fl_models.gdna_pmf.size, dtype=np.float64)
     logger.info(
         "[CAL] FL models: n_gdna_pool=%.0f gdna_fl_mean=%.1f rna_fl_mean=%.1f global_fl_mean=%.1f",
@@ -1205,7 +1220,7 @@ def _calibrate(
         calibration.library_rna_fragments,
         float(calibration.count_rna_sj.sum()),
     )
-    return calibration, region_arrays, fl_models
+    return calibration, fl_models
 
 
 def _log_length_tables(tables: "LengthTables") -> None:

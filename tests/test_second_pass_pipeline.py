@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from rigel.calibration.region_arrays import RegionArrays
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import drain_side_buffer, scan_and_buffer
 from rigel.scan_payload import (
@@ -121,7 +122,13 @@ def test_the_gdna_length_pools_do_not_move(scanned):
     partly from RNA, and nothing downstream would look wrong.
     """
     index, strand_models, payload, cfg = scanned
-    drained = drain_side_buffer(payload, index, strand_models, seed=cfg.second_pass_seed)
+    drained = drain_side_buffer(
+        payload,
+        index,
+        strand_models,
+        regions=RegionArrays.from_index(index),
+        seed=cfg.second_pass_seed,
+    )
     before = np.asarray(payload.pool_lengths, dtype=np.int64)
     after = np.asarray(drained.pool_lengths, dtype=np.int64)
 
@@ -155,7 +162,11 @@ def test_calibration_sees_the_drained_tally(scenario):
         str(scenario.bam_path), scenario.index, config.scan
     )
     drained = drain_side_buffer(
-        pass_one, scenario.index, strand_models, seed=config.second_pass_seed
+        pass_one,
+        scenario.index,
+        strand_models,
+        regions=RegionArrays.from_index(scenario.index),
+        seed=config.second_pass_seed,
     )
     assert drained.drain is not None and drained.drain.offered > 0
 
@@ -165,7 +176,7 @@ def test_calibration_sees_the_drained_tally(scenario):
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
     shipped = np.asarray(result.estimator.effective_lengths, dtype=np.float64)
     for label, payload in (("drained", drained), ("pass one", pass_one)):
-        fl = library_fl_models(payload, scenario.index)
+        fl = library_fl_models(payload, scenario.index, RegionArrays.from_index(scenario.index))
         expected = FragmentLengthModel.from_pmf(
             fl.rna_pmf, fl.max_size
         ).compute_all_transcript_eff_lens(exonic)
@@ -191,7 +202,13 @@ def test_the_drain_seed_is_its_own_and_is_not_the_em_seed(scanned):
     index, strand_models, payload, _cfg = scanned
 
     def drained(second_pass_seed: int):
-        return drain_side_buffer(payload, index, strand_models, seed=second_pass_seed)
+        return drain_side_buffer(
+            payload,
+            index,
+            strand_models,
+            regions=RegionArrays.from_index(index),
+            seed=second_pass_seed,
+        )
 
     first, again, other = drained(1), drained(1), drained(2)
     assert np.array_equal(first.deposited_lengths, again.deposited_lengths), (
@@ -221,6 +238,8 @@ def test_an_empty_side_buffer_is_a_documented_no_op(scanned):
         gap_resolution=GapCensus.zeros(),
         qc=dataclasses.replace(payload.qc, deferred_undetermined_gap=0),
     )
-    out = drain_side_buffer(empty, index, strand_models, seed=0)
+    out = drain_side_buffer(
+        empty, index, strand_models, regions=RegionArrays.from_index(index), seed=0
+    )
     assert out is empty, "with nothing held the drain must return the payload it was given"
     assert out.drain is None

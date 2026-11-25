@@ -281,7 +281,7 @@ def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, c
     debug["gdna_fl_pmf"] = kw["gdna_fl_pmf"]
     debug["rna_fl_pmf"] = kw["rna_fl_pmf"]
     # the EM's two length tables as production builds them on this payload: the shipped ruler reads them
-    debug["length_tables"] = length_tables(library_fl_models(kw["payload"], index), cal, region_arrays)
+    debug["length_tables"] = length_tables(library_fl_models(kw["payload"], index, RegionArrays.from_index(index)), cal, region_arrays)
     return cal, debug
 
 

@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 
 from rigel import scan_payload
+from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.splice_graph import EDGE_KIND_CONTIGUOUS, EDGE_KIND_SJ
 from rigel.scan_payload import AccumulatorPayload
 
@@ -261,8 +262,8 @@ class TestTheCachedTallyIsTheScannedTally:
 
         # And the models rebuild from the cached payload alone, identically to the live scan's.
         index = scanned[0]
-        live = library_fl_models(scanned[3], index)
-        cached = library_fl_models(cache.payload, index)
+        live = library_fl_models(scanned[3], index, RegionArrays.from_index(index))
+        cached = library_fl_models(cache.payload, index, RegionArrays.from_index(index))
         assert np.array_equal(cached.global_counts, live.global_counts)
         assert np.array_equal(cached.rna_counts, live.rna_counts)
         assert np.array_equal(cached.gdna_counts, live.gdna_counts)

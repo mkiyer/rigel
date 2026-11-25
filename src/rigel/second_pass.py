@@ -688,8 +688,8 @@ def score_held_fragments(
     payload
         Pass 1's tally and its side buffer.
     fl_models
-        ``pipeline.library_fl_models(payload, index)``. ``rna_pmf`` scores a spliced hypothesis (certified RNA);
-        ``global_pmf``, the unconditional anchor, scores the genomic one, whose component is unknown.
+        ``pipeline.library_fl_models(payload, index, regions)``. ``rna_pmf`` scores a spliced hypothesis
+        (certified RNA); ``global_pmf``, the unconditional anchor, scores the genomic one, whose component is unknown.
     rna_sense_frac
         ``P(align_strand == transcript strand | RNA)``, from ``StrandModels.exonic_spliced``. Near 0 on a dUTP
         library; used as the probability of agreement, never inverted.

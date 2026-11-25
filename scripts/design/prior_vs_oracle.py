@@ -232,7 +232,7 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
     from rigel.calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
     from rigel.pipeline import library_fl_models
 
-    fl = library_fl_models(payload, index)
+    fl = library_fl_models(payload, index, ra)
     cal = calibrate(
         payload=payload,
         region_arrays=ra,
@@ -263,7 +263,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
     # drained at the production seed; the oracle partitions replay the whole's choices, and sum-to-full checks it
     lift: dict = {}
     payload = drain_side_buffer(
-        payload, index, strand_model, seed=pipeline_config.second_pass_seed, lift=lift
+        payload, index, strand_model, regions=ra, seed=pipeline_config.second_pass_seed, lift=lift
     )
     # sum-to-full is re-run on the loaded parts, cached or rebuilt; it raises if the lift breaks a bank
     oracle = load_or_build_oracle(

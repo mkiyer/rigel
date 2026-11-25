@@ -928,7 +928,7 @@ def test_the_length_law_reads_the_index_mask(tmp_path, monkeypatch):
     index = TranscriptIndex.load(tmp_path / "idx")
     seen = {}
     monkeypatch.setattr(fl, "build_fl_models", lambda payload, **kw: seen.update(kw))
-    library_fl_models(SimpleNamespace(max_length=200), index)
+    library_fl_models(SimpleNamespace(max_length=200), index, RegionArrays.from_index(index))
 
     assert seen["regions"].unobservable.tolist() == [[0, 1500, 1800]]
     want = observable_gdna_opportunity(RegionArrays.from_index(index), 200)
