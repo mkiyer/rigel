@@ -148,11 +148,11 @@ def normal_pmf(mean=200.0, sd=50.0, lo=100, hi=300) -> np.ndarray:
 
 
 def contained_support(lengths, pmf) -> np.ndarray:
-    """The contained support ``Σ_w f(w)(ℓ − w + 1)⁺`` per piece of length ``ℓ``, by brute force over the pmf; 0 for a
-    piece shorter than every fragment."""
-    w = np.arange(pmf.shape[0], dtype=np.float64)
+    """The contained support ``Σ_{w ≥ 1} f(w)(ℓ − w + 1)⁺`` per piece of length ``ℓ``, by brute force over the pmf; 0
+    for a piece shorter than every fragment. A zero-length molecule places nowhere."""
+    w = np.arange(1, pmf.shape[0], dtype=np.float64)
     L = np.asarray(lengths, dtype=np.float64)[:, None]
-    return (pmf[None, :] * np.maximum(L - w[None, :] + 1.0, 0.0)).sum(1)
+    return (pmf[None, 1:] * np.maximum(L - w[None, :] + 1.0, 0.0)).sum(1)
 
 
 def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):

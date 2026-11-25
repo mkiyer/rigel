@@ -347,12 +347,10 @@ def observable_fl_eff_lengths(frame: TranscriptFrame, rna_fl) -> np.ndarray:
 def object_shares(
     pieces: TranscriptPieces, pmf: np.ndarray, n_threads: int = 1
 ) -> TranscriptObjects:
-    """The pieces' contained shares and the cuts' conserved shares on one pmf. A zero-length fragment places
-    nowhere — the accumulator deposits none — so the pmf's mass at ``w = 0`` is dropped, and the shares partition
-    the fl-marginal length the pipeline builds, which excludes it too. Every cut's shares are its own, so the cuts are
-    priced a block at a time (``CONSTANTS.resources.share_block_rows``) and the temporaries stay a block's size."""
-    pmf = np.asarray(pmf, dtype=np.float64).copy()
-    pmf[0] = 0.0
+    """The pieces' contained shares and the cuts' conserved shares on one pmf, which partition the fl-marginal length
+    the pipeline builds: neither counts a zero-length fragment, which places nowhere. Every cut's shares are its own,
+    so the cuts are priced a block at a time (``CONSTANTS.resources.share_block_rows``) and the temporaries stay a
+    block's size."""
     cut = pieces.cut_row
     n = cut.shape[0]
     whole, low, high, both = (np.empty(n, dtype=np.float64) for _ in range(4))

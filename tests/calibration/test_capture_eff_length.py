@@ -298,6 +298,25 @@ def test_a_transcripts_shares_sum_to_its_fl_marginal_length(misaligned_index, pa
     )
 
 
+def test_the_shares_drop_a_zero_length_molecule_as_the_effective_length_does(misaligned_index):
+    """A pmf with mass at ``w = 0``: the shares still sum to the transcript's effective length as the EM reads it
+    (``FragmentLengthModel``), which drops that mass rather than sharing it out over the lengths that place."""
+    from rigel.frag_length_model import FragmentLengthModel
+
+    idx = misaligned_index
+    pmf = 0.8 * PMF
+    pmf[0] = 0.2
+    obj = transcript_objects(idx, RegionArrays.from_index(idx), pmf)
+    total = np.zeros(len(idx.t_df))
+    np.add.at(total, obj.t, obj.contained)
+    np.add.at(total, obj.t[obj.cut_row], obj.cut_share)
+    lengths = idx.t_df["length"].to_numpy()
+    model = FragmentLengthModel.from_pmf(pmf)
+    np.testing.assert_allclose(
+        total, model.compute_all_transcript_eff_lens(lengths, min_value=0.0), rtol=1e-9
+    )
+
+
 def test_the_pieces_are_on_the_transcripts_own_reference(two_ref_index):
     """A second reference numbers its regions after the first's: every piece of a transcript must lie on the
     transcript's reference, or a region index would read another chromosome's efficiency."""

@@ -51,12 +51,16 @@ UNBOUNDED_REACH = 1.0e12
 
 
 def _as_pmf(fl_pmf: np.ndarray) -> np.ndarray:
-    """The fragment-length pmf as a normalised 1-D float64 array indexed by length."""
+    """The fragment-length pmf as a normalised 1-D float64 array indexed by length, holding no mass at ``w = 0``. A
+    zero-length molecule places nowhere, so its mass is dropped, not shared out over the lengths that place: what a
+    transcript's effective length reads too (``FragmentLengthModel.compute_all_transcript_eff_lens``)."""
     p = np.asarray(fl_pmf, dtype=np.float64)
     if p.ndim != 1 or p.shape[0] == 0:
         raise ValueError("fl_pmf must be a non-empty 1-D array indexed by fragment length.")
     total = float(p.sum())
-    return p / total if total > 0.0 else p
+    p = p / total if total > 0.0 else p.copy()
+    p[0] = 0.0
+    return p
 
 
 def contained_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndarray:
@@ -119,9 +123,8 @@ def crossing_eff_length(
     f1, s1 = at(a + 1.0)
     f2, s2 = at(b + 1.0)
     f3, s3 = at(a + b + 1.0)
-    # the first sum starts at w = 1: a zero-length molecule places nowhere, so add back the (0 − 1)·f(0) the
-    # cumulative sums credit it
-    out = (s1 - f1 + p[0]) + a * (f2 - f1) + (a + b + 1.0) * (f3 - f2) - (s3 - s2)
+    # the first sum starts at w = 1, where the pmf's mass starts (``_as_pmf``)
+    out = (s1 - f1) + a * (f2 - f1) + (a + b + 1.0) * (f3 - f2) - (s3 - s2)
     return np.maximum(out, 0.0).reshape(lo.shape)
 
 

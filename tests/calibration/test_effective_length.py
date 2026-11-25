@@ -33,6 +33,24 @@ from rigel.calibration.region_arrays import RegionArrays, observable_stretches
 UNBOUNDED = el.UNBOUNDED_REACH
 
 
+def test_a_zero_length_molecule_places_nowhere():
+    """One convention for length 0 in every reader of a pmf: a zero-length molecule places nowhere, so its mass is
+    dropped, neither counted nor shared out over the lengths that place. A region's contained opportunity reads what a
+    transcript's effective length reads, and a boundary's unbounded crossing opportunity is ``E_f[w − 1]`` over
+    ``w ≥ 1``."""
+    from rigel.frag_length_model import FragmentLengthModel
+
+    pmf = np.array([0.2, 0.0, 0.1, 0.3, 0.4])
+    lengths = np.array([0, 3, 10])
+    np.testing.assert_allclose(contained_eff_length(lengths, pmf), [0.0, 0.5, 6.1], atol=1e-12)
+    np.testing.assert_allclose(
+        contained_eff_length(lengths, pmf),
+        FragmentLengthModel.from_pmf(pmf).compute_all_transcript_eff_lens(lengths, min_value=0.0),
+        atol=1e-12,
+    )
+    assert float(crossing_eff_length(pmf, UNBOUNDED, UNBOUNDED)) == pytest.approx(1.9, abs=1e-12)
+
+
 def _spike(at: int, n: int = 1301) -> np.ndarray:
     p = np.zeros(n, dtype=np.float64)
     p[at] = 1.0
