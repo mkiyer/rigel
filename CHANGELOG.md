@@ -182,6 +182,19 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 13).
 
 ### Fixed
 
+- **An output directory holds one run.** `summary.json` is the completion marker: `rigel quant` removes it first, then
+  every product and derivative a previous run left (`--tsv` mirrors, `rigel export` files, a `locus_stats.feather`
+  this run does not collect), writes each file to a temporary sibling and renames it, and writes `summary.json` last.
+  `rigel report` and `rigel export` refuse a directory without it. The annotated BAM is written the same way and may
+  not be a product, the input BAM or an index file: before, it could overwrite the run's own `summary.json`.
+- A setting of the wrong kind is refused with the field named (a quoted `"false"` for a switch, a fractional count),
+  as is a non-finite number; an unreadable index or manifest is a named error with its file.
+  `--scan-buffer-size 0` disables spilling, as now documented; a negative size, or one that rounds to 0 bytes, is
+  refused.
+- A hard clip beside a soft clip is read past, so the soft clip's bases are counted; the scan's pair digest covers
+  every field a pass reads, and each pass resolves fragments under its own `max_frag_length` and overhang tolerance.
+- An index whose synthetic span no transcript names, a strand code that is no strand and a calibration track region
+  of no length are refused, not dropped or clipped.
 - A read pair's alignment is a fragment only if it places both mates (a record that aligns no base, all clips, places
   nothing) and the two can be one molecule with a valid fragment length: on one reference, on opposite strands, their
   5' ends facing each other once each 5' soft clip is walked back (the molecule spans both mates, so a mate may run
