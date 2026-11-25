@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 from _two_genes import three_pairs, two_gene_index
 
-from rigel import cli
+from rigel import cli, quant_writer
 from rigel.report.substrate import SubstrateError, load_substrate
 
 
@@ -73,7 +73,7 @@ def test_an_interrupted_rerun_leaves_no_run_a_reader_accepts(run):
     the directory as incomplete instead of reading this run's counts beside the previous run's track."""
     quant, out, _index, _ = run
     quant(1000)
-    with patch.object(cli, "_write_calibration_track", side_effect=OSError("interrupted")):
+    with patch.object(quant_writer, "_write_calibration_track", side_effect=OSError("interrupted")):
         with pytest.raises(OSError, match="interrupted"):
             quant(0)
     with pytest.raises(SubstrateError, match="no complete run"):

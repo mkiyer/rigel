@@ -208,7 +208,7 @@ def test_accessors_return_empirical_models():
     assert rna_m.n_observations == 300
     assert gdna_m.n_observations == 40
     # the summary QC report reads them as they are
-    from rigel.cli import length_summary
+    from rigel.quant_writer import length_summary
 
     assert length_summary(gdna_m)["mode"] == 325
 

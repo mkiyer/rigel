@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import pandas as pd
 
-from rigel import cli, outputs
+from rigel import cli, outputs, quant_writer
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
@@ -64,7 +64,7 @@ def _fl_models(max_size: int = 1000):
 
 
 def test_fragment_length_report_splits_lean_summary_from_histograms():
-    summary, hist_df = cli.fragment_length_report(_fl_models())
+    summary, hist_df = quant_writer.fragment_length_report(_fl_models())
 
     # summary is lean: stats only, never raw per-bin arrays
     assert "global" in summary
@@ -97,7 +97,7 @@ def test_the_reported_categories_are_the_anchor_the_two_models_and_five_pure_poo
     pools are a structural gDNA/RNA classification in the accumulator's one frame, and the two ``*_exon``
     rows are on-target gDNA, which nothing else surfaces.
     """
-    summary, _ = cli.fragment_length_report(_fl_models())
+    summary, _ = quant_writer.fragment_length_report(_fl_models())
     assert set(summary) == {
         "global",
         "gdna",
@@ -117,7 +117,7 @@ def test_the_modelled_pools_are_sums_of_the_reported_pure_pools():
     ones, because summing four differently-tilted pools reports a gDNA mean far above what the pure
     intergenic pool measures.
     """
-    summary, _ = cli.fragment_length_report(_fl_models())
+    summary, _ = quant_writer.fragment_length_report(_fl_models())
     n = {k: v["n_observations"] for k, v in summary.items()}
     assert n["rna"] == n["pool_rna_spliced"]
     assert n["gdna"] == n["pool_gdna_intergenic"] + n["pool_gdna_intronic"]
@@ -137,7 +137,7 @@ def _raw_model(counts: dict, max_size: int = 100):
 
 def test_a_length_summary_reports_the_censored_overflow_apart():
     """The censored overflow bin is surfaced as a QC diagnostic, and kept out of the mean and the mode."""
-    summary = cli.length_summary(_raw_model({50: 90.0, 100: 10.0}))
+    summary = quant_writer.length_summary(_raw_model({50: 90.0, 100: 10.0}))
     assert summary["mode"] == 50
     assert summary["mean"] == pytest.approx(50.0, abs=0.01)
     assert summary["overflow_count"] == pytest.approx(10.0)
@@ -146,10 +146,10 @@ def test_a_length_summary_reports_the_censored_overflow_apart():
 
 
 def test_a_length_histogram_is_trimmed_to_its_occupied_bins():
-    lengths, counts = cli.length_histogram(_raw_model({50: 1.0, 60: 1.0}))
+    lengths, counts = quant_writer.length_histogram(_raw_model({50: 1.0, 60: 1.0}))
     assert lengths.tolist() == list(range(50, 61))  # 50 through 60 inclusive
     assert counts.sum() == 2.0
-    empty_lengths, empty_counts = cli.length_histogram(_raw_model({}))
+    empty_lengths, empty_counts = quant_writer.length_histogram(_raw_model({}))
     assert empty_lengths.size == empty_counts.size == 0
 
 
@@ -255,7 +255,7 @@ def test_the_mismatch_rate_is_the_scans_counts_and_their_ratio(quant_run):
     rate = summary["fragment_stats"]["mismatch_rate"]
     assert rate["mismatches"] == pr.stats.n_unique_unspliced_mismatches
     assert rate["bases"] == pr.stats.n_unique_unspliced_bases > 0
-    assert rate["rate"] == round(rate["mismatches"] / rate["bases"], cli.SUMMARY_DECIMALS)
+    assert rate["rate"] == round(rate["mismatches"] / rate["bases"], quant_writer.SUMMARY_DECIMALS)
 
 
 def test_every_read_pair_has_one_outcome_and_every_record_one_status(quant_run):
@@ -368,7 +368,7 @@ def test_the_observable_genome_block_is_the_indexs_record_the_manual_lists(quant
     """The index's record of its mask over every reference's bases."""
     _pr, result, _args, _out, summary = quant_run
     observable = summary["observable_genome"]
-    assert observable == cli.observable_genome_summary(result.index)
+    assert observable == quant_writer.observable_genome_summary(result.index)
     assert observable["observable_bases"] + observable["unobservable_bases"] == sum(
         result.index.ref_lengths.values()
     )
@@ -381,9 +381,12 @@ def test_the_length_tables_block_is_the_pipelines_decision_the_manual_lists(quan
     tables = summary["length_tables"]
     d = pr.length_tables.decision
     assert (
-        tables["weight"] == round(d.weight, cli.SUMMARY_DECIMALS) and 0.0 <= tables["weight"] <= 1.0
+        tables["weight"] == round(d.weight, quant_writer.SUMMARY_DECIMALS)
+        and 0.0 <= tables["weight"] <= 1.0
     )
-    assert tables["rna_captured_fraction"] == round(d.rna_captured_fraction, cli.SUMMARY_DECIMALS)
+    assert tables["rna_captured_fraction"] == round(
+        d.rna_captured_fraction, quant_writer.SUMMARY_DECIMALS
+    )
     assert tables["gdna_table_mean"] == round(
         float(pr.length_tables.gdna @ np.arange(pr.length_tables.gdna.size)), 2
     )
@@ -395,7 +398,7 @@ def test_every_intergenic_fragment_is_gdna():
     so the gDNA count takes every one, and the three pools' fractions sum to one."""
     from types import SimpleNamespace
 
-    q = cli.quantification_pools(
+    q = quant_writer.quantification_pools(
         SimpleNamespace(n_intergenic=100),
         count_annotated=600.0,
         count_nascent=100.0,
@@ -415,7 +418,7 @@ def test_every_intergenic_fragment_is_gdna():
         "fraction_intergenic",
     }
     assert (q["count_gdna"], q["count_gdna_em"]) == (300.0, 200.0)
-    assert q["fraction_gdna"] == round(300 / 1000, cli.SUMMARY_DECIMALS)
+    assert q["fraction_gdna"] == round(300 / 1000, quant_writer.SUMMARY_DECIMALS)
     assert q["fraction_annotated"] + q["fraction_nascent"] + q["fraction_gdna"] == pytest.approx(
         1.0
     )
@@ -474,7 +477,9 @@ def test_a_dead_strand_channel_publishes_the_kappa_calibration_reads_and_no_clas
         n_sense=sense.astype(np.int64),
         n_antisense=(depth - sense).astype(np.int64),
     )
-    block = cli.strand_fit_summary(StrandModels(exonic_spliced=StrandModel.from_sj_table(table)))
+    block = quant_writer.strand_fit_summary(
+        StrandModels(exonic_spliced=StrandModel.from_sj_table(table))
+    )
     assert block["strand_live"] is False
     assert block["kappa"]["genuine"] == block["kappa"]["pooled"]
     assert block["junction_classes"] == {"by_junction": None, "by_fragment": None}

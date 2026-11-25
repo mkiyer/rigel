@@ -32,6 +32,8 @@ CALIBRATION_TRACK = "calibration_track"
 LOCUS_STATS = "locus_stats"
 #: Every product written as Feather.
 TABLES = (*QUANT_TABLES, FRAGMENT_LENGTHS, CALIBRATION_TRACK, LOCUS_STATS)
+#: The compression of every table a run writes (Feather, and Parquet on export).
+TABLE_COMPRESSION = "zstd"
 #: The track's genome-browser view.
 BEDGRAPH = f"{CALIBRATION_TRACK}.bedgraph"
 #: A Feather product's derivatives: its ``--tsv`` mirror, and what ``rigel export`` writes.

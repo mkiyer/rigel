@@ -326,12 +326,12 @@ def _per_reference(index) -> dict[str, dict[str, int]]:
 def test_a_run_reports_the_mask_without_a_store(tmp_path):
     """`summary.json`'s observable genome: the index's own record of what the mask is, its bases per reference as an
     enumeration counts them, and no store."""
-    from rigel import cli
+    from rigel import quant_writer
 
     fasta, gtf = _write_genome(tmp_path)
     TranscriptIndex.build(fasta, gtf, tmp_path / "idx", write_tsv=False)
     index = TranscriptIndex.load(tmp_path / "idx")
-    block = cli.observable_genome_summary(index)
+    block = quant_writer.observable_genome_summary(index)
     record = _manifest(tmp_path / "idx")["observable"]
     assert block["rule"] == record["rule"] and block["read_length"] is None
     assert block["store"] is None
@@ -347,10 +347,10 @@ def test_a_run_reports_the_mask_without_a_store(tmp_path):
 def test_a_run_reports_the_mask_and_its_store(tmp_path, store_build):
     """With a store, the block names the store the mask was read from: its aligner, the bins and the bin read, the
     fragment model it tiled, and the references it lacks, masked at their unknown bases."""
-    from rigel import cli
+    from rigel import quant_writer
 
     index = store_build(_store(), tmp_path / "idx")
-    block = cli.observable_genome_summary(index)
+    block = quant_writer.observable_genome_summary(index)
     record = _manifest(tmp_path / "idx")["observable"]
     assert block["rule"] == record["rule"] and block["read_length"] == 100
     assert block["store"] == {

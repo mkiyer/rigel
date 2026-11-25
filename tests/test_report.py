@@ -24,7 +24,7 @@ import pytest
 import numpy as np
 
 from _constants import replaced
-from rigel import cli
+from rigel import cli, quant_writer
 from rigel.config import CONSTANTS, BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
 from rigel.report import model as report_model
@@ -125,7 +125,7 @@ def _write_substrate(d: Path) -> Path:
             "n_nascent": 30,
             "n_genes": 40,
             "n_loci": 35,
-            **cli.quantification_pools(
+            **quant_writer.quantification_pools(
                 SimpleNamespace(n_intergenic=intergenic), annotated, nascent, gdna_em, intergenic_em
             ),
         },

@@ -491,7 +491,7 @@ def test_a_multimapper_whose_only_surviving_place_is_intergenic_is_intergenic_gd
     stamped as a multimapper none of whose hits resolves is and never gated, whatever the hits' order and wherever a
     chunk boundary falls. It reaches the summary's intergenic gDNA."""
     from rigel.annotate import AF_GDNA_INTERGENIC
-    from rigel.cli import quantification_pools
+    from rigel.quant_writer import quantification_pools
 
     hits, penalty = GATED_GENIC_PLACE[case]
     em, stats, stamps = _route_all(
@@ -1159,7 +1159,7 @@ def test_at_rate_zero_the_intergenic_term_is_inert():
 
 
 def test_the_intergenic_terms_mass_joins_the_summarys_intergenic_gdna():
-    from rigel.cli import quantification_pools
+    from rigel.quant_writer import quantification_pools
 
     stats = PipelineStats()
     stats.n_intergenic = 300
