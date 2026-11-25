@@ -161,16 +161,19 @@ def _rna_prior_shares(weight, n_transcripts: int) -> np.ndarray:
 def _gene_effective_lengths(
     t_to_g: np.ndarray, n_genes: int, t_counts: np.ndarray, t_eff: np.ndarray
 ) -> np.ndarray:
-    """Each gene's effective length: its transcripts' effective lengths weighted by their counts, the unweighted mean
-    for a gene with no count, floored at ``CONSTANTS.fragment_length.min_effective_length``."""
+    """Each gene's effective length, abundance-weighted: ``Σc / Σ(c/L)`` over its transcripts, ``c`` each one's count
+    and ``L`` its effective length floored as the TPM floors it, the transcripts' lengths weighted by their abundance
+    ``c/L``. A gene's count over this length is the sum of its transcripts' rates, so its TPM is the sum of their TPMs.
+    A gene with no count reads its transcripts' unweighted mean length. Floored at
+    ``CONSTANTS.fragment_length.min_effective_length``."""
     floor = CONSTANTS.fragment_length.min_effective_length
-    g_eff_num = _aggregate_to_gene(t_to_g, n_genes, t_counts * t_eff)
-    g_eff_den = _aggregate_to_gene(t_to_g, n_genes, t_counts)
+    g_count = _aggregate_to_gene(t_to_g, n_genes, t_counts)
+    g_rate = _aggregate_to_gene(t_to_g, n_genes, t_counts / np.maximum(t_eff, floor))
     g_eff_sum = _aggregate_to_gene(t_to_g, n_genes, t_eff)
     g_eff_cnt = _aggregate_to_gene(t_to_g, n_genes, np.ones_like(t_eff))
     with np.errstate(divide="ignore", invalid="ignore"):
         g_eff_mean = np.where(g_eff_cnt > 0, g_eff_sum / g_eff_cnt, floor)
-        g_eff_len = np.where(g_eff_den > 0, g_eff_num / g_eff_den, g_eff_mean)
+        g_eff_len = np.where(g_rate > 0, g_count / g_rate, g_eff_mean)
     return np.maximum(g_eff_len, floor)
 
 
@@ -628,12 +631,13 @@ class AbundanceEstimator:
         ref, strand, start, end : genomic locus
         n_transcripts : int, number of annotated transcripts
         locus_id : int32, primary EM locus for this gene (-1 if none)
-        effective_length : abundance-weighted mean effective length
+        effective_length : abundance-weighted effective length, Σc / Σ(c/L) over the gene's transcripts
+            (their unweighted mean for a gene with no count)
         count : sum of annotated transcript counts
         count_unambig : uniquely-assigned count
         count_em : EM-assigned count
         count_spliced : spliced fragment count
-        tpm : transcripts per million
+        tpm : transcripts per million, the sum of the gene's transcripts' TPMs
         """
         t_to_g = index.t_to_g_arr
         n_genes = index.num_genes

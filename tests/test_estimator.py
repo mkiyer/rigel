@@ -611,8 +611,26 @@ class TestCountsOutput:
         assert df.loc[0, "count"] == 8.0  # g0 = t0 + t1
         assert df.loc[1, "count"] == 7.0  # g1 = t2
 
+    def test_a_genes_tpm_is_the_sum_of_its_transcripts_tpms(self):
+        """Isoforms of unequal length: the gene table's TPM is the transcript table's summed by gene, and both sum to a
+        million. A count-weighted arithmetic mean length read gene A at 645,161 against its isoforms' 846,154."""
+        index = _make_index()  # t0,t1 -> g0; t2 -> g1
+        rc = AbundanceEstimator(
+            3, em_config=EMConfig(seed=42), geometry=_lengths([100.0, 1000.0, 500.0])
+        )
+        rc.unambig_counts[:, _UNSPLICED_SENSE] = 100.0
+        tx = rc.get_counts_df(index)
+        genes = rc.get_gene_counts_df(index).set_index("gene_id")
+        summed = tx.groupby("gene_id", observed=True)["tpm"].sum()
+        for g in genes.index:
+            assert genes.loc[g, "tpm"] == pytest.approx(summed[g], rel=1e-12)
+        assert genes["tpm"].sum() == pytest.approx(1e6)
+        assert genes.loc[genes.index[0], "tpm"] == pytest.approx(
+            1e6 * (0.01 + 0.001) / (0.01 + 0.001 + 0.002)
+        )
+
     def test_gene_effective_length_abundance_weighted(self):
-        """Gene effective length is abundance-weighted mean of transcript eff lens."""
+        """A gene's effective length weights its transcripts' lengths by abundance (c/L): Σc / Σ(c/L)."""
         index = _make_index()  # t0,t1 → g0; t2 → g1
         rc = AbundanceEstimator(
             3, em_config=EMConfig(seed=42), geometry=_lengths([500.0, 1000.0, 300.0])
@@ -624,8 +642,8 @@ class TestCountsOutput:
         rc.unambig_counts[2, _UNSPLICED_SENSE] = 50.0
 
         df = rc.get_gene_counts_df(index)
-        # g0: (90*500 + 10*1000) / (90+10) = 55000/100 = 550
-        assert df.loc[0, "effective_length"] == pytest.approx(550.0)
+        # g0: (90 + 10) / (90/500 + 10/1000) = 100 / 0.19
+        assert df.loc[0, "effective_length"] == pytest.approx(100.0 / 0.19)
         # g1: single transcript → 300
         assert df.loc[1, "effective_length"] == pytest.approx(300.0)
 

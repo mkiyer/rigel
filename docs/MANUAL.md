@@ -515,12 +515,12 @@ so they are reported per span in `nascent_quant` and never attributed to a gene 
 | `ref`, `strand`, `start`, `end` | Gene genomic coordinates |
 | `n_transcripts` | Number of annotated transcripts |
 | `locus_id` | Primary locus assigned to the gene |
-| `effective_length` | Abundance-weighted mean effective transcript length |
+| `effective_length` | Abundance-weighted effective length, Σc / Σ(c/L) over the gene's transcripts (count c, effective length L); their unweighted mean for a gene with no count |
 | `count` | Fragment count, the sum of the gene's annotated transcripts' counts |
 | `count_unambig` | Deterministic fragment count |
 | `count_em` | EM-assigned fragment count |
 | `count_spliced` | Spliced fragment count |
-| `tpm` | Gene-level TPM |
+| `tpm` | Gene-level TPM: the sum of the gene's transcripts' TPMs in `quant` |
 
 ### nascent_quant.feather / nascent_quant.tsv
 

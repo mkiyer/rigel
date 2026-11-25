@@ -477,6 +477,9 @@ def _law_and_variance(m: np.ndarray, d: np.ndarray, factor: np.ndarray):
     w = m * np.exp(np.clip(d - d.max(), -_LOG_MAX, 0.0))
     f = w / w.sum()
     width = f.size
+    if width == 1:
+        # one length holds probability one, whatever the factor: no variance (the solve below can read it as 0/0)
+        return f, np.zeros(1)
     # H = UᵀU with U the upper banded factor, so (e_l − f)ᵀ H⁻¹ (e_l − f) = |U⁻ᵀ (e_l − f)|², every l in one solve
     lower = np.zeros((2, width), dtype=np.float64)
     lower[0] = factor[1]

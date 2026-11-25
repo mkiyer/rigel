@@ -637,6 +637,34 @@ def test_the_strandedness_tile_is_the_strand_models_own_verdict(
     assert (tile["v"], tile["s"]) == (shown, state)
 
 
+@pytest.mark.parametrize(
+    "live, read1_sense, protocol",
+    [
+        (True, True, "R1-sense"),
+        (True, False, "R1-antisense"),
+        (False, False, "unstranded"),
+        (False, True, "unstranded"),
+    ],
+)
+def test_the_tile_and_the_strand_panel_name_one_protocol(tmp_path, live, read1_sense, protocol):
+    """One verdict, the strand model's: an unstranded library is unstranded in the tile, its note and the strand
+    panel, whatever orientation a dead channel's fit leans to, and the panel draws an orientation only for a live
+    call. The tile read "Unstranded" while its note and the panel named R1-antisense."""
+    d = _with(
+        _write_substrate(tmp_path / "run"),
+        "strand_model",
+        strand_live=live,
+        read1_sense=read1_sense,
+    )
+    model = build_view_model(load_substrate(d))
+    tile = next(v for v in model["verdicts"] if v["k"] == "Strandedness")
+    note = "".join(part for part in tile["n"] if isinstance(part, str))
+    assert model["strand"]["protocol"] == protocol and protocol in note
+    assert model["strand"]["live"] is live
+    if not live:
+        assert "R1-" not in note
+
+
 def test_a_genes_rna_is_its_count(tmp_path):
     """The gene table shows a gene's annotated ``count``, and no mature or nascent column: under the output
     convention a single-exon transcript is annotated, and the nascent spans belong to no gene."""

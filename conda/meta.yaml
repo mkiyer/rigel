@@ -26,7 +26,7 @@ requirements:
   host:
     - python
     - pip
-    - scikit-build-core >=0.4.3
+    - scikit-build-core >=0.12,<2
     - nanobind >=2.0
     - htslib
     - zlib
@@ -43,7 +43,7 @@ requirements:
     - pyarrow >=14.0
     - pysam >=0.22
     - pyyaml >=6.0
-    - scipy >=1.11
+    - scipy >=1.12
     - htslib
 
 test:

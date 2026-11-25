@@ -91,7 +91,7 @@ def _strandedness_tile(summary: SummaryReader) -> dict:
         status, label = "warning", "Unstranded"
     note = [
         {"v": strand["strand_specificity"], "fmt": "pct"},
-        f" strand-specific · {_protocol(strand['read1_sense'])}",
+        f" strand-specific · {_protocol(strand)}",
     ]
     return _tile("Strandedness", "arrow", label, "text", status, note)
 
@@ -221,28 +221,32 @@ def _fragments(summary: SummaryReader) -> dict:
     return {"kpis": kpis, "ctx": ctx, "splice": splice_bar}
 
 
-def _protocol(read1_sense: bool) -> str:
-    """The library protocol's name, from which read the RNA strand follows."""
-    return "R1-sense" if read1_sense else "R1-antisense"
+def _protocol(strand: dict) -> str:
+    """The library protocol's name, the strand model's one verdict: from which read the RNA strand follows when the
+    strand channel is live, and unstranded when it is not, whatever orientation a dead channel's fit leans to."""
+    if not strand["strand_live"]:
+        return "unstranded"
+    return "R1-sense" if strand["read1_sense"] else "R1-antisense"
 
 
 def _strand(summary: SummaryReader) -> dict:
     s = summary["strand_model"]
     d = summary["strand_model.diagnostics"]
-    ci = s["ci_95"]
-    eps = (ci[1] - ci[0]) / 2 if len(ci) == 2 else 0.0
+    low, high = s["ci_95"]
     exonic = d["exonic_all_specificity"]
     return {
         "spec": s["strand_specificity"],
+        # the orientation diagram is drawn for a live directional call only
+        "live": bool(s["strand_live"]),
         "read1_sense": bool(s["read1_sense"]),
-        "protocol": _protocol(s["read1_sense"]),
+        "protocol": _protocol(s),
         "exonic_all_spec": exonic,
         "contamination_gap": d["contamination_gap"],
         "kpis": [
             {"l": "P(R1 sense)", "v": s["p_r1_sense"], "fmt": "float3"},
             {"l": "Specificity", "v": s["strand_specificity"], "fmt": "float3"},
-            {"l": "95% CI", "v": eps, "fmt": "pm4"},
-            {"l": "Exonic (all)", "v": exonic if exonic is not None else "—", "fmt": "float3"},
+            {"l": "95% CI", "v": (high - low) / 2, "fmt": "pm4"},
+            {"l": "Exonic (all)", "v": exonic, "fmt": "float3"},
         ],
     }
 

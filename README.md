@@ -92,7 +92,7 @@ pip install --no-build-isolation -e .
   else pip builds from source, which needs a C++17-capable compiler, CMake ≥ 3.15, pkg-config and htslib
   (`mamba_env.yaml` installs all of them)
 - Runtime dependencies (from `pyproject.toml`): `pysam>=0.22`, `numpy>=1.26`, `pandas>=2.1`,
-  `pyarrow>=14.0`, `pyyaml>=6.0`, `scipy>=1.11`
+  `pyarrow>=14.0`, `pyyaml>=6.0`, `scipy>=1.12`
 
 On macOS, install Xcode Command Line Tools first:
 

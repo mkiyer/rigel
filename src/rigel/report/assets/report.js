@@ -444,11 +444,14 @@
     kpis($("frag-kpis"), M.fragments.kpis);
     stackBar($("ctx-bar"), M.fragments.ctx); legend($("ctx-legend"), M.fragments.ctx, true);
     stackBar($("sj-bar"), M.fragments.splice); legend($("sj-legend"), M.fragments.splice, true);
-    gauge($("gauge"), M.strand.spec); kpis($("strand-kpis"), M.strand.kpis); orient($("orient"), M.strand.read1_sense);
+    gauge($("gauge"), M.strand.spec); kpis($("strand-kpis"), M.strand.kpis);
+    // the orientation is drawn for a live directional call only: an unstranded library has none to draw
+    if (M.strand.live) orient($("orient"), M.strand.read1_sense);
+    else if ($("orient")) $("orient").textContent = "No read orientation: the library reads as unstranded.";
     if ($("strand-note")) {
       const g = M.strand.contamination_gap, ex = M.strand.exonic_all_spec;
       $("strand-note").innerHTML = `<b>Protocol: ${M.strand.protocol}.</b> ` +
-        (ex != null ? `The all-exonic model reads <span class="num">${ex.toFixed(3)}</span> vs the spliced model’s <span class="num">${M.strand.spec.toFixed(3)}</span> — a contamination gap of <span class="num">${g != null ? g.toFixed(4) : "—"}</span> (larger ⇒ more unstranded gDNA drag).` : "");
+        `The all-exonic model reads <span class="num">${ex.toFixed(3)}</span> vs the spliced model’s <span class="num">${M.strand.spec.toFixed(3)}</span> — a contamination gap of <span class="num">${g.toFixed(4)}</span> (larger ⇒ more unstranded gDNA drag).`;
     }
     flTable();
     stackBar($("pool-bar"), M.quant.pools); legend($("pool-legend"), M.quant.pools, true); poolTable();

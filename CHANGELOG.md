@@ -116,6 +116,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 13).
   schema 11: the `input` block and `strand_model.protocol` are gone (`command.arguments` and `read1_sense` hold
   them), and the length tables' captured fraction is `rna_captured_fraction` (was a second `kappa`). `rigel report`
   reads schema 11 only and refuses a summary or a table that lacks what it shows.
+- **Gene TPM is additive (breaking).** `gene_quant`'s `tpm` is the sum of its transcripts' TPMs, and its
+  `effective_length` the abundance-weighted length Σc / Σ(c/L) the manual promised (it was count-weighted, so a gene
+  with isoforms of unequal length read another TPM than its isoforms summed).
 - **The simulator's names.** A read name's nascent prefix is `nascent_` (was `nrna_`); the truth tables, the
   scenario YAML (`nascent_abundance`) and the panel configs (`nascent:`) say annotated and nascent, never mrna and
   nrna.

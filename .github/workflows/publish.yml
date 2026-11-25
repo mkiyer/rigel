@@ -104,11 +104,12 @@ jobs:
             PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             MACOSX_DEPLOYMENT_TARGET="${{ matrix.macos_target }}"
           # Smoke test: install the wheel with its runtime deps and load every native extension (rigel.native
-          # binds all five), then run the CLI, so a wheel that compiles but cannot load never uploads.
+          # binds all five) and calibration (scipy's betaincc, 1.12 and later), then run the CLI, so a wheel that
+          # compiles but cannot load never uploads.
           CIBW_TEST_REQUIRES: >
-            numpy>=1.26 pandas>=2.1 pyarrow>=14.0 pysam>=0.22 pyyaml>=6.0 scipy>=1.11
+            numpy>=1.26 pandas>=2.1 pyarrow>=14.0 pysam>=0.22 pyyaml>=6.0 scipy>=1.12
           CIBW_TEST_COMMAND: >-
-            python -c "import rigel, rigel.native; print('OK', rigel.__version__)" &&
+            python -c "import rigel, rigel.native, rigel.calibration; print('OK', rigel.__version__)" &&
             rigel --version
 
       - uses: actions/upload-artifact@v4
