@@ -167,22 +167,23 @@ Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_previe
 ## Next
 
 The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the release fixes or states; its
-`release-blocker` label is what it waits for. The last sessions have no pass bar (`DESIGN.md` §0b): each improves the
-tool's current state, simply and robustly across many kinds of data, and what is left ships stated. In order, one
-`src/` writer at a time:
+`release-blocker` label is what it waits for. Several items are done:
+- the performance pass (issue #84) and the code review (issue #85), closed 2026-11-25;
+- the rebuild of the indexes and panels with the one rule, and the re-score of 0.7.1 on the same reads;
+- issues #9 and #76, closed 2026-11-25;
+- issue #1, which ships stated (the owner, 2026-11-25).
 
-1. **Performance** (issue #84): compute and memory, every change a proven numeric no-op.
-2. **Code review** (issue #85): clean, concise, readable and maintainable, with no hard-coded constants.
-3. **The release:** one ladder re-score, after rebuilding the suite and VCaP indexes with the one rule (their caches
-   with them; the panels' reads were drawn on the old spans, so a truth-fed arm needs the span crosswalk or regenerated
-   panels); a MANUAL limitation for issue #1, issue #2, issue #3, issue #4 with issue #5, issue #34 (the EM's cap: a
-   capped locus's split among near-identical components is where the solve stopped, `--emit-locus-stats` names the
-   loci, and genes and pools are stable),
-   issue #7, issue #9, issue #10, issue #12, issue #13, issue #23, issue #46, issue #78, issue #82 and issue #83, and
-   for the cuts' prices' costs; the CHANGELOG; then issue #11.
+The MANUAL's Known limitations state the milestone's open issues, and issue #89 is new among them. CI (`ci.yml`,
+dispatch only) passed on 00cfd50b: Ubuntu and macOS, Python 3.12 and 3.13, all 3,929 tests in each. What is left, in
+order:
 
-CI runs alongside from now (issue #11). On its first run since September (fe0e3183) the native build compiled on Linux
-and macOS. Two tests stopped the runs: one asserts a native kernel equals NumPy to the bit, which x86-64 misses by
-1e-15, and one needs `minimap2`, which the CI environment lacks.
+1. **A shallow real library** (issue #23): the VCaP mix's P/O at 1 % and 10 % depth on HEAD. The MANUAL quotes an
+   earlier version's collapse; if HEAD still collapses, the owner decides.
+2. **The cluster:** build and run on the Slurm cluster, and read timing and memory there. Linux has never been timed.
+3. **The release** (issue #11): a last read of the CHANGELOG's unreleased section, then `release.sh 0.8.0`, the
+   publish workflow, `post_release.sh` and the bioconda recipe (`PUBLISHING.md`).
 
-After that, the open issues outside the milestone, in issue order.
+After 0.8.0:
+1. Real data through the production pipeline, whole-transcriptome simulations on the cluster, and in-silico DNA/RNA
+   mixes. Their fixes make 0.8.1, and issue #1's repair upstream of the reader is the first candidate.
+2. The open issues outside the milestone, in issue order.

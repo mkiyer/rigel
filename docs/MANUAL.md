@@ -658,47 +658,9 @@ the library's junctions together support a higher level the cap is raised to it.
 it equals `gdna_capture_saturation` wherever the spliced counts ask for no more, and in every library that
 reads no capture.
 
-**Known limitation: RNA the annotation does not explain can read as capture.** Rigel takes an unspliced
-fragment for genomic DNA wherever the annotation has no RNA to give it to: past a transcript's annotated
-end, in intergenic space, on a gene's other strand, or at the second copy of a duplicated gene when the
-aligner reports the read at both. On a stranded library, calibration reads the two strands of each such
-place and does not count as genomic DNA what one strand holds beyond the other, since genomic DNA lands on
-both evenly; what both strands hold, and all of it on an unstranded library, it still counts. Where such
-fragments are dense they stand above the bulk as a level of genomic DNA, which is what capture looks like,
-and two kinds of library show it with no capture panel. In our tests, on simulated libraries aligned by
-STAR:
-
-- *A library with almost no gDNA.* The bulk sits at the landscape's floor, so any such level stands
-  thousands-fold above it, and busy exons that hold no DNA evidence of their own are read at those levels
-  too. The capture weight fades the reading, since the library's reads sit where no genomic DNA shows, but
-  does not remove it. A stranded, transcriptome-only library reads a landscape level of 25,786× and reports
-  it at a weight of 0.06 as a `gdna_capture_saturation` of 1.8. Its `em_effective_length` is a little above
-  `effective_length` for four transcripts in five, more than 1.2 times it for one transcript in a hundred,
-  and at most 2.2 times it. Its transcript error is 3.6 % of the annotated RNA fragments and its gene error
-  0.4 %, where the same run with capture not read makes 2.5 % and 0.3 %.
-- *An unstranded library.* With no strand to say that the fragments past a transcript's end are RNA, they
-  are booked as genomic DNA, and so is part of the exon beside them. An unstranded library with 5 % gDNA
-  reports a weight of 0.87 and a saturation of 10.1. One transcript in a hundred has an
-  `em_effective_length` more than 1.08 times its `effective_length`, and the largest is 85 times it. Its
-  transcript error is 4.5 % of the annotated RNA fragments and its gene error 0.9 %, against 2.6 % and
-  0.4 % with capture not read.
-
-In both the error takes annotated RNA away, at most about 0.1 % of it, mostly to nascent RNA; it does not turn
-genomic DNA into annotated RNA. With every read placed where it came from, the same two libraries' errors
-are within 1 % of the run with capture not read. A `gdna_capture_saturation` above 1 on a library that was
-not captured is this limitation, not capture.
-
-**Known limitation: a captured library whose off-target DNA is thin.** The capture weight is a share of
-the library's reads, so RNA on regions too thinly covered by genomic DNA to show any lowers it for the
-whole library, even where the panel itself reads cleanly. The panel's reading then fades a little and
-some genomic DNA on the probed genes is called RNA: on one real captured cfRNA library at about 93 % DNA
-the weight was 0.95, and a few hundred DNA fragments moved to RNA on genes whose reads are
-strand-balanced.
-
-**Known limitation: an unstranded capture library.** Without a strand channel, gDNA on the captured exons is told
-from RNA only through the neighbouring regions and the fragment counts, and some of it is read as RNA, most of
-it as nascent RNA, so the gDNA fraction is underestimated. Stranded capture libraries, and unstranded libraries
-without capture, do not share this.
+A `gdna_capture_saturation` above 1 on a library that was not captured, and a capture reading that fades on
+a captured library whose off-target DNA is thin, are known limitations: see
+[Known limitations](#known-limitations).
 
 The **`observable_genome`** block is the index's unobservable mask as the run read it (see
 [Mappability](#mappability)): every count Rigel divides by the places a fragment
@@ -1027,6 +989,172 @@ samtools view -f 64 -F 0x900 results/annotated.bam \
 rigel quant --bam sample.bam --index index/ -o results/ --no-include-multimap
 rigel quant --bam sample.bam --index index/ -o results/ --emit-locus-stats  # -> locus_stats.feather
 ```
+
+---
+
+## Known limitations
+
+Rigel 0.8.0 ships with the limitations below. Unless one says otherwise, each was measured on simulated libraries
+with known truth:
+- a ladder of gDNA levels from none to 98 %;
+- stranded and unstranded;
+- with and without hybrid capture;
+- aligned both by the simulator and by STAR at the recommended settings ([Input requirements](#input-requirements)).
+
+The numbers show the size of an effect on those libraries, not a promise about yours. The simulated libraries draw
+about a fifth of their RNA from nascent RNA, against about 4 % in a typical library, so an error that moves nascent
+RNA is larger there than in most real data. Each limitation links to its GitHub issue, where the measurements are
+recorded and the work continues.
+
+### Every library
+
+**Rigel quantifies only the RNA the annotation holds**
+([issue #12](https://github.com/mkiyer/rigel/issues/12)). Three things happen to RNA the annotation leaves out:
+- an unspliced fragment no annotated transcript can explain is booked as genomic DNA;
+- a read pair spliced at junctions no single annotated transcript holds is withheld (`unannotated_splice` under
+  `read_pairs` in `summary.json`);
+- the transcripts that remain absorb part of the rest.
+
+With a lncRNA left out of the annotation, more than half of its RNA was booked as gDNA, and the error on the genes
+left in rose 1.4–3.0 times. Use the most complete annotation you can.
+
+**A nascent span's own count is not identifiable when spans overlap**
+([issue #13](https://github.com/mkiyer/rigel/issues/13)). Spans whose ends lie within `--end-tolerance` are one span.
+Spans that overlap with ends further apart stay separate, and the EM cannot tell them apart, so it can put a family's
+nascent RNA on any one of them. Read nascent RNA per gene, or per family of overlapping spans (Overlapping spans,
+under `nascent_quant`).
+
+**The split between near-identical transcripts is where the EM stopped**
+([issue #34](https://github.com/mkiyer/rigel/issues/34)). The EM runs at most `--em-iterations` steps (default
+1,000), an early stop measured against truth: run longer, the answer drifted further from the truth at many times the
+cost. A locus that reaches the cap has a nearly flat likelihood there. Its split among transcripts that differ by a
+few bases is where the solve stopped, not a converged answer. Genes and the three pools are stable.
+
+`--emit-locus-stats` writes `locus_stats.feather`, whose `squarem_iterations` column names the loci that reached the
+cap: a third of `--em-iterations`.
+
+**A gDNA read the aligner splices counts as RNA** ([issue #7](https://github.com/mkiyer/rigel/issues/7)). A spliced
+fragment is certified RNA. An aligner can splice a genomic-DNA read without also reporting its contiguous alignment,
+and Rigel then reads it as RNA. At the recommended STAR settings STAR reports both. On the simulated libraries, such
+reads were under 0.11 % of the gDNA called RNA. Real STAR output has not been measured.
+
+**Duplicated sequence on an aligner's input** ([issue #10](https://github.com/mkiyer/rigel/issues/10)). Where the
+reference repeats itself, gDNA the aligner reports at several places is partly called RNA, and RNA is split wrongly
+between the copies of a duplicated gene. In a STAR-aligned captured library at 98 % gDNA, 5.3 % of the multimapping
+gDNA was called RNA, against 1.4 % when every read sat at its true place.
+
+**One locus can hold most of an aligned library** ([issue #78](https://github.com/mkiyer/rigel/issues/78)). On
+STAR's alignments, multimapping reads link loci into one that held 61–78 % of a library's fragments. The EM reads one
+gDNA rate per locus, so inside that locus calibration's local gDNA estimates enter only through their sum. That
+locus is also the one that most often reaches the iteration cap. What this costs has not been measured.
+
+**Shallow libraries** ([issue #23](https://github.com/mkiyer/rigel/issues/23)). Calibration learns the library's
+gDNA density from the regions that hold gDNA fragments, and in a very shallow library few regions do. On real
+libraries, an earlier version's gDNA estimate fell with depth: subsampled to 1 % of its reads, a captured cfRNA
+library's gDNA per fragment fell to about an eighth of its full-depth value. Simulated libraries at a tenth and a
+hundredth of the ladder's depth show no collapse in this release. Real data has not been re-measured with it.
+
+### Libraries without capture
+
+**A STAR-aligned library with little gDNA can read capture it does not have**
+([issue #1](https://github.com/mkiyer/rigel/issues/1)). Rigel takes an unspliced fragment for genomic DNA wherever the
+annotation has no RNA to give it to:
+- past a transcript's annotated end;
+- in intergenic space;
+- on a gene's other strand;
+- at the second copy of a duplicated gene, when the aligner reports the read at both.
+
+On a stranded library, calibration reads the two strands of each such place. Genomic DNA lands on both strands
+evenly, so what one strand holds beyond the other is not counted as genomic DNA. What both strands hold is still
+counted, and so is all of it on an unstranded library.
+
+Where such fragments are dense, they stand above the bulk as a level of genomic DNA, which is what capture looks like.
+STAR's alignments make such places at exon boundaries: a multimapper's overhang past a transcript's end, or a spliced
+read run 1–3 bases into the intron. On simulated libraries aligned by STAR:
+
+- *A stranded library with no gDNA.* The bulk sits at the landscape's floor, so any such level stands far above it.
+  The library reads a landscape level of 44,509× and reports it, at a capture weight of 0.066, as a
+  `gdna_capture_saturation` of 2.0. Its `em_effective_length` is a little above `effective_length` for four
+  transcripts in five, more than 1.2 times it for one transcript in fifty, and at most 2.4 times it. Its transcript
+  error is 3.3 % of the annotated RNA fragments and its gene error 0.44 %. The same run with capture not read makes
+  2.6 % and 0.32 %.
+- *An unstranded library with 5 % gDNA.* With no strand to say that the fragments past a transcript's end are RNA,
+  they are booked as genomic DNA, and so is part of the exon beside them. The library reports a weight of 0.87 and a
+  saturation of 114. Fewer than one transcript in 500 has an `em_effective_length` more than 1.08 times its
+  `effective_length`, and the largest is 94 times it. Its transcript error is 3.3 % of the annotated RNA fragments and
+  its gene error 0.92 %, against 2.5 % and 0.46 % with capture not read.
+
+In both, the error moves under 0.1 % of the annotated RNA, mostly to nascent RNA. It does not turn genomic DNA into
+annotated RNA, and both libraries still read better than 0.7.1.
+
+With every read placed where it came from, the same libraries read within 3 % of the run with capture not read,
+except at 0.1 % gDNA, where reading capture costs 12 % of the transcript error. A `gdna_capture_saturation` above 1 on
+a library that was not captured is this limitation, not capture.
+
+**The sparse introns of an unstranded library** ([issue #82](https://github.com/mkiyer/rigel/issues/82)). Rigel reads
+an intron's gDNA against the library's own intergenic gDNA level. Where that level predicts under one fragment for the
+intron, every fragment the intron holds looks like an excess, so some gDNA there is booked as nascent RNA. On a
+stranded library the introns' own strands correct this. On an unstranded library nothing does.
+
+On a shallow simulated unstranded library (11,700 fragments), 1.2 % of the gDNA moved to nascent RNA, and up to 4 % on
+one row. None moved to annotated RNA.
+
+### Captured libraries
+
+**Capture is read from gDNA alone** ([issue #89](https://github.com/mkiyer/rigel/issues/89)). Rigel reads hybrid-capture
+enrichment from the gDNA the probes pulled down. A captured library with no gDNA, or very little, gives it nothing to
+read, and Rigel then treats the library as uncaptured. It books part of the nascent RNA as annotated RNA: about a
+third of it in simulated stranded captured libraries with no gDNA or 0.1 % gDNA, about 0.8 % of the library. At 1 %
+gDNA most of this error goes. At 0.1 % gDNA the gene error is 1.16 times 0.7.1's, the one place in these tests where
+this release's gene error is above 0.7.1's.
+
+**Where gDNA is sparse under capture, the isoform split is noisy**
+([issue #83](https://github.com/mkiyer/rigel/issues/83)). Rigel reads each region's capture from its own gDNA. At 5 %
+gDNA a typical captured region holds about three gDNA fragments, so its reading is noisy, and the split between
+isoforms that share most of their exons follows that noise. Gene totals barely move. Read the isoform results of a
+captured library at low gDNA with care: `count_unambig` shows how much of a transcript's count rests on its own
+fragments.
+
+**A splice junction's price follows the gDNA beside it.** An RNA fragment that leaves an exon across a splice junction
+is priced at the junction's own capture level, which is read from the gDNA beside it. Where that reading is false or
+thin, the isoform split pays. When this pricing was introduced, it raised transcript error by 9.8 % on a STAR-aligned
+unstranded library without capture at 5 % gDNA, and by 7.7 % on a stranded captured library at 0.1 % gDNA.
+
+**Two stranded captured libraries at 50 % gDNA over-call annotated RNA**
+([issue #76](https://github.com/mkiyer/rigel/issues/76)). Summed over loci, Rigel calls more DNA or nascent RNA
+annotated than 0.7.1 did in two tested libraries, although its total error on both is lower than 0.7.1's:
+- on STAR's alignments, 16,878 fragments against 0.7.1's 9,564;
+- where the RNA's fragments are longer than the gDNA's, 5,520 against 2,567.
+
+On the other stranded captured libraries tested at 5 % gDNA and above, it over-calls less than 0.7.1.
+
+**The probes must bind where the annotation puts them** ([issue #3](https://github.com/mkiyer/rigel/issues/3)).
+Capture is read per region of the annotation. A probe can also bind sequence the annotation does not separate: an
+exact copy of its target in an intron, a paralog or intergenic space. That shifts the reading genome-wide. In a
+simulated panel where every exact copy of a probe's target was captured as well as the target, the gDNA called RNA
+rose 2.7-fold.
+
+**Off-target RNA dilutes the capture weight** ([issue #2](https://github.com/mkiyer/rigel/issues/2)). The capture
+weight is a share of the library's reads. RNA on regions too thinly covered by genomic DNA to show any lowers the
+weight for the whole library, even where the panel itself reads cleanly. The panel's reading then fades a little, and
+some genomic DNA on the probed genes is called RNA. On one real captured cfRNA library at about 93 % DNA, the weight
+was 0.95, and a few hundred DNA fragments moved to RNA on genes whose reads are strand-balanced.
+
+**Capture is assumed to deplete RNA as it depletes DNA** ([issue #46](https://github.com/mkiyer/rigel/issues/46)). The
+capture-aware length reads the panel from gDNA and applies the same enrichment to RNA, so it assumes that off-target
+RNA is depleted as off-target DNA is. Cross-hybridisation could make the depletion milder for RNA. This is untested,
+and it matters most for the split between isoforms. One sample sequenced both with the panel and without it would
+settle it.
+
+**An unstranded captured library** ([issue #4](https://github.com/mkiyer/rigel/issues/4),
+[issue #5](https://github.com/mkiyer/rigel/issues/5)). Without a strand channel, gDNA on the captured exons is told
+from RNA only through the neighbouring regions and the fragment counts. Some of it is read as RNA, most of it as
+nascent RNA, so the gDNA fraction is underestimated. In simulated unstranded captured libraries, 27 % of the gDNA was
+read as RNA at 5 % gDNA, and 16 % at 50 % and 98 %.
+
+The same holds inside a mixed library. In a mix of an exome-captured DNA library with a stranded RNA library, 447,000
+of the DNA library's fragments were called RNA, 1.48 times 0.7.1's count, about half of them as nascent RNA. Stranded
+captured libraries, and unstranded libraries without capture, do not share this.
 
 ---
 

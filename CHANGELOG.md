@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The calibration stage — how a library's unspliced fragments are separated into genomic DNA and RNA
 before the transcript EM sees them — was rebuilt from its foundations. Indexes built by earlier
-versions must be rebuilt (`rigel index`; the on-disk format is now version 13).
+versions must be rebuilt (`rigel index`; the on-disk format is now version 13). What this release
+leaves undone is stated, with its measured size, under Known limitations in `docs/MANUAL.md`.
 
 ### Added
 
