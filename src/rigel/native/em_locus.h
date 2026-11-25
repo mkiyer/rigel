@@ -115,16 +115,10 @@ inline int unit_candidates(const LocusSubProblem& sub, const PartitionView& pv, 
                                          : -std::numeric_limits<double>::infinity();
     const bool has_ig = std::isfinite(ig_ll);
     buf.resize(static_cast<size_t>(p_end - p_start) + (has_gdna ? 1 : 0) + (has_ig ? 1 : 0));
-    const int map_size = static_cast<int>(local_map.size());
     int k = 0;
-    for (int64_t j = p_start; j < p_end; ++j) {
-        const int32_t global_t = pv.t_indices[j];
-        if (global_t < 0 || global_t >= map_size) continue;
-        const int32_t local = local_map[global_t];
-        if (local < 0 || local >= sub.n_components) continue;
-        buf[k++] = {local, static_cast<double>(pv.log_liks[j]), static_cast<double>(pv.coverage_wts[j]),
-                    pv.count_cols[j]};
-    }
+    for (int64_t j = p_start; j < p_end; ++j)  // every candidate is one of the locus's transcripts (read_partitions)
+        buf[k++] = {local_map[pv.t_indices[j]], static_cast<double>(pv.log_liks[j]),
+                    static_cast<double>(pv.coverage_wts[j]), pv.count_cols[j]};
     if (has_gdna) buf[k++] = {sub.gdna_idx, gdna_ll, 1.0, 0};
     if (has_ig) buf[k++] = {sub.ig_idx, ig_ll, 1.0, 0};
     if (k > 1) {

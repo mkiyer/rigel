@@ -320,9 +320,7 @@ inline void add_class_mass(const LocusSubProblem& sub, const IntergenicTerm& ig,
             const int32_t comp = sub.t_indices[k];
             int cls = comp == ig.idx ? EM_CLASS_INTERGENIC : EM_CLASS_GDNA;
             if (comp < sub.n_t) {
-                const int32_t global_t = sub.local_to_global_t[comp];
-                if (global_t < 0 || global_t >= out.n_transcripts) continue;
-                cls = out.t_is_synthetic[global_t] ? EM_CLASS_NASCENT : EM_CLASS_ANNOTATED;
+                cls = out.t_is_synthetic[sub.local_to_global_t[comp]] ? EM_CLASS_NASCENT : EM_CLASS_ANNOTATED;
             }
             row[cls] += post[k];
         }
@@ -394,7 +392,6 @@ inline LocusAssignment assign_posteriors(const LocusSubProblem& sub, const doubl
             if (comp < sub.n_t) {
                 const int32_t global_t = sub.local_to_global_t[comp];
                 const uint8_t col = sub.count_cols[s + j];
-                if (global_t < 0 || global_t >= out.n_transcripts || col >= out.n_cols) continue;
                 out.em_counts[global_t * out.n_cols + col] += p;
                 res.rna += p;
                 out.posterior_sum[global_t] += posteriors[j] * posteriors[j];

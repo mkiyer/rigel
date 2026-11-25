@@ -109,9 +109,12 @@ def _make_locus_em_data(
         span_bp=10000,
         loci=(Locus(ref="chr1", ref_id=0, start=0, end=10000),),
     )
-    loci = [locus]
+    # as production builds them (`locus.build_multi_loci`), a scored set with no unit makes no locus
+    loci = [locus] if n_units else []
 
-    gdna_prior_count_arr = np.array([gdna_prior_count if include_gdna else 0.0], dtype=np.float64)
+    gdna_prior_count_arr = np.array(
+        [gdna_prior_count if include_gdna else 0.0] * len(loci), dtype=np.float64
+    )
 
     return em_data, loci, gdna_prior_count_arr
 

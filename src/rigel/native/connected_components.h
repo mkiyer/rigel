@@ -55,7 +55,6 @@ inline std::vector<int32_t> transcript_components(const int64_t* offsets, const 
         int32_t first_t = -1;
         for (int64_t j = offsets[u]; j < offsets[u + 1]; ++j) {
             const int32_t t = t_idx[j];
-            if (t < 0 || t >= n_transcripts) continue;
             active[t] = true;
             if (first_t < 0) first_t = t;
             else uf.unite(first_t, t);
@@ -73,20 +72,12 @@ inline std::vector<int32_t> transcript_components(const int64_t* offsets, const 
     return labels;
 }
 
-// Each unit's component: that of its first candidate with one; -1 for none.
+// Each unit's component: that of its first candidate, since every candidate is in one; -1 for a unit with none.
 inline std::vector<int32_t> unit_components(const int64_t* offsets, const int32_t* t_idx, int64_t n_units,
                                             const std::vector<int32_t>& t_labels) {
-    const int32_t n_transcripts = static_cast<int32_t>(t_labels.size());
     std::vector<int32_t> labels(n_units, -1);
-    for (int64_t u = 0; u < n_units; ++u) {
-        for (int64_t j = offsets[u]; j < offsets[u + 1]; ++j) {
-            const int32_t t = t_idx[j];
-            if (t >= 0 && t < n_transcripts && t_labels[t] >= 0) {
-                labels[u] = t_labels[t];
-                break;
-            }
-        }
-    }
+    for (int64_t u = 0; u < n_units; ++u)
+        if (offsets[u + 1] > offsets[u]) labels[u] = t_labels[t_idx[offsets[u]]];
     return labels;
 }
 
@@ -107,14 +98,24 @@ inline std::pair<nb::object, nb::object> group_by_label(const std::vector<int32_
 // The loci of the global CSR (offsets int64[n_units + 1], t_indices int32[n_candidates]): (n_components,
 // comp_t_offsets, comp_t_flat, comp_u_offsets, comp_u_flat), each component's transcript and unit indices as a sorted
 // CSR.
+// The CSR is checked here once, so the builders read every candidate unguarded: its offsets start at 0, never fall and
+// end at its candidates' count, and every candidate is one of the `n_transcripts`.
 inline nb::tuple connected_components(Array1<int64_t> offsets_arr, Array1<int32_t> t_indices_arr,
                                       int32_t n_transcripts) {
     const int64_t* offsets = offsets_arr.data();
     const int32_t* t_idx = t_indices_arr.data();
-    const int64_t n_units = std::max<int64_t>(static_cast<int64_t>(offsets_arr.shape(0)) - 1, 0);
+    const int64_t n_units = static_cast<int64_t>(offsets_arr.shape(0)) - 1;
+    if (n_units < 0 || n_transcripts < 0 || offsets[0] != 0 ||
+        offsets[n_units] != static_cast<int64_t>(t_indices_arr.shape(0)))
+        throw std::invalid_argument("connected_components: the offsets must start at 0 and end at the candidates' count");
+    for (int64_t u = 0; u < n_units; ++u)
+        if (offsets[u + 1] < offsets[u]) throw std::invalid_argument("connected_components: the offsets fall");
+    for (size_t j = 0; j < t_indices_arr.shape(0); ++j)
+        if (t_idx[j] < 0 || t_idx[j] >= n_transcripts)
+            throw std::invalid_argument("connected_components: candidate transcript " + std::to_string(t_idx[j]) +
+                                        " is outside the " + std::to_string(n_transcripts));
     int32_t n_comp = 0;
-    const std::vector<int32_t> t_labels =
-        transcript_components(offsets, t_idx, n_units, std::max<int32_t>(n_transcripts, 0), n_comp);
+    const std::vector<int32_t> t_labels = transcript_components(offsets, t_idx, n_units, n_transcripts, n_comp);
     const auto [t_offsets, t_flat] = group_by_label(t_labels, n_comp);
     const auto [u_offsets, u_flat] = group_by_label(unit_components(offsets, t_idx, n_units, t_labels), n_comp);
     return nb::make_tuple(n_comp, t_offsets, t_flat, u_offsets, u_flat);
