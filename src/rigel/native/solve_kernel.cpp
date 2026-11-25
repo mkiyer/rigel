@@ -156,25 +156,6 @@ void intron_row(const Background& bg, double count, double eff, const double* la
     for (int k = 0; k < K; ++k) out[k] -= m;
 }
 
-// A row whose spread is at most this carries no composition evidence, nor does one whose variance under the normalised
-// row is at most this. Chosen at ARM_EPS's value, not derived; the transfer reads a row as flat at its own
-// FLAT_ROW_SPREAD, a thousand times wider.
-constexpr double ROW_PRECISION_FLAT = 1.0e-12;
-
-// the composition evidence a row carries, 1/Var_λ under the row normalised; a flat row carries none
-double row_precision(const double* row, const double* lam, int K) {
-    if (!(ptp(row, K) > ROW_PRECISION_FLAT)) return 0.0;
-    const double m = vmax(row, K);
-    double z = 0.0, s1 = 0.0, s2 = 0.0;
-    for (int k = 0; k < K; ++k) {
-        const double w = std::exp(row[k] - m);
-        z += w;
-        s1 += w * lam[k];
-        s2 += w * lam[k] * lam[k];
-    }
-    const double mean = s1 / z, var = s2 / z - mean * mean;
-    return var > ROW_PRECISION_FLAT ? 1.0 / var : 0.0;
-}
 
 // ---- the block pipeline ----
 

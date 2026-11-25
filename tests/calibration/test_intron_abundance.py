@@ -195,6 +195,16 @@ def test_no_departure_room_lets_the_background_tail_win():
     assert float(out.f_g[INTRON_SLOT]) < 0.5, out.f_g[INTRON_SLOT]
 
 
+def test_a_row_the_transfer_reads_as_flat_is_no_evidence_to_the_solve():
+    """One flatness: a row whose spread is within the transfer's flat threshold sends no claim, so it carries no
+    composition evidence to the solve either (the precision read a thousand-fold narrower threshold before); a row
+    with a shape does."""
+    lam = np.linspace(-5.0, 5.0, 11)
+    flat = float(R.FLAT_ROW_SPREAD)
+    assert R.row_precision(0.4 * flat * lam / 5.0, lam) == 0.0
+    assert R.row_precision(-(lam**2), lam) > 0.0
+
+
 def test_the_solve_refuses_a_background_with_no_finite_size():
     """An informative law's size is finite (``background_law`` joins the rate's own posterior width to its
     over-dispersion), so the solve reads no Poisson limit: an infinite size is refused, never read as one."""

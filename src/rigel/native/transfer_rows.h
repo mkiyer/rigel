@@ -93,6 +93,27 @@ inline double vmin(const double* r, int K) {
     return m;
 }
 inline double ptp(const double* r, int K) { return vmax(r, K) - vmin(r, K); }
+
+// A row whose variance under the normalised row is at most this carries no composition evidence. Chosen at ARM_EPS's
+// value, not derived.
+constexpr double ROW_VARIANCE_FLOOR = 1.0e-12;
+
+// row_precision(row, lam): the composition evidence a row carries, 1/Var_λ under the row normalised. A flat row carries
+// none, flat as the transfer reads one (FLAT_ROW_SPREAD), so a row is evidence to the solve exactly when it is one to
+// the message layer.
+inline double row_precision(const double* row, const double* lam, int K) {
+    if (!(ptp(row, K) > FLAT_ROW_SPREAD)) return 0.0;
+    const double m = vmax(row, K);
+    double z = 0.0, s1 = 0.0, s2 = 0.0;
+    for (int k = 0; k < K; ++k) {
+        const double w = std::exp(row[k] - m);
+        z += w;
+        s1 += w * lam[k];
+        s2 += w * lam[k] * lam[k];
+    }
+    const double mean = s1 / z, var = s2 / z - mean * mean;
+    return var > ROW_VARIANCE_FLOOR ? 1.0 / var : 0.0;
+}
 inline void norm_inplace(double* r, int K) {
     const double m = vmax(r, K);
     for (int j = 0; j < K; ++j) r[j] -= m;
