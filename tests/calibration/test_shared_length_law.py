@@ -241,7 +241,7 @@ def test_with_no_capture_each_origin_keeps_its_own_law():
     t = _tables(r, g, 0.0)
     assert t.decision.captured == 0.0 and t.decision.bound == 0.0 and t.decision.weight == 1.0
     np.testing.assert_array_equal(t.gdna, g)
-    np.testing.assert_array_equal(t.anchor, g)
+    np.testing.assert_array_equal(t.gdna_uncaptured, g)
 
 
 def test_noise_that_covers_the_difference_is_one_table_even_without_capture():
@@ -294,7 +294,7 @@ def test_an_rna_law_no_spliced_fragment_measured_shows_no_difference():
         )
         np.testing.assert_array_equal(t.gdna, anchor)
         np.testing.assert_array_equal(t.rna, anchor)
-        np.testing.assert_array_equal(t.anchor, g)
+        np.testing.assert_array_equal(t.gdna_uncaptured, g)
 
 
 # ── the decision on built laws: pools nested in the anchor as production's are ─────────────────────────────

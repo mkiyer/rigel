@@ -135,7 +135,7 @@ class TranscriptFrame:
 
     @cached_property
     def carry(self) -> tuple[TranscriptObjects, TranscriptObjects] | None:
-        """``(on_anchor, on_table)``, or ``None`` where nothing is carried (:func:`_carry_shares`)."""
+        """``(on_uncaptured, on_table)``, or ``None`` where nothing is carried (:func:`_carry_shares`)."""
         return _carry_shares(self.pieces, self.rna, self.tables, self.n_threads)
 
 
@@ -563,10 +563,10 @@ def fit_junction_cap(calibration: "CalibrationResult", frame: TranscriptFrame) -
     law = obj
     carry = frame.carry
     if carry is not None:
-        on_anchor, on_table = carry
-        c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)
-        cut_slope = obj.cut_share * _carry_factor(on_anchor.cut_share, on_table.cut_share)
-        law = on_anchor
+        on_uncaptured, on_table = carry
+        c_piece = _carried(c_piece, on_uncaptured.contained, on_table.contained)
+        cut_slope = obj.cut_share * _carry_factor(on_uncaptured.cut_share, on_table.cut_share)
+        law = on_uncaptured
     piece_term = obj.contained * c_piece
 
     # each annotated transcript's junction cuts, on the sj axis
@@ -598,12 +598,12 @@ def fit_junction_cap(calibration: "CalibrationResult", frame: TranscriptFrame) -
         region_term, pair % n_regions, np.bincount(part_of, weights=piece_term[annotated])
     )
     rna = np.maximum(np.asarray(calibration.count_rna_region, dtype=np.float64), 0.0)
-    anchor = np.zeros(n_sj)
-    anchor_term = np.zeros(n_sj)
+    own_rna = np.zeros(n_sj)
+    own_term = np.zeros(n_sj)
     for side in (src, dst):
         own = (users > 0) & (cover[side] == users) & (region_term[side] > 0.0)
-        anchor += np.where(own, rna[side], 0.0)
-        anchor_term += np.where(own, region_term[side], 0.0)
+        own_rna += np.where(own, rna[side], 0.0)
+        own_term += np.where(own, region_term[side], 0.0)
     spliced = np.asarray(calibration.sj_conserved_mass, dtype=np.float64)
 
     # every junction cut as the ruler prices it: its own rule's two bounds, and the junctions its placements leave
@@ -636,7 +636,7 @@ def fit_junction_cap(calibration: "CalibrationResult", frame: TranscriptFrame) -
     ]
     moved = np.bincount(sj[counted], weights=np.logical_or.reduce(reads)[counted], minlength=n_sj)
     held = np.bincount(sj[counted], weights=slope[counted], minlength=n_sj)
-    fit = (moved > 0) & (held > 0.0) & (anchor_term > 0.0) & (spliced + anchor > 0.0)
+    fit = (moved > 0) & (held > 0.0) & (own_term > 0.0) & (spliced + own_rna > 0.0)
     in_fit = np.flatnonzero(counted & fit[np.maximum(sj, 0)])
     if in_fit.size == 0:
         return saturation
@@ -654,7 +654,7 @@ def fit_junction_cap(calibration: "CalibrationResult", frame: TranscriptFrame) -
     sum_lo, sum_hi = (_across(summed, to)[in_fit] for to in leave)
     parts = [part[in_fit] for part in (*leaving, law.cut_share[cuts])]
     share, slope, sj = obj.cut_share[cuts][in_fit], slope[in_fit], sj[in_fit]
-    W, m, D, n = spliced[fit], anchor[fit], anchor_term[fit], users[fit]
+    W, m, D, n = spliced[fit], own_rna[fit], own_term[fit], users[fit]
     log_likelihood = np.empty(levels.shape[0])
     for i, level in enumerate(levels):
         # the ruler's term at each cut with the cap at this level, the excess over 1 carried, and its mean over the
@@ -830,7 +830,7 @@ def transcript_capture_eff_lengths(
     The efficiencies ``c_o`` are the result's (a piece's region's, a contiguous cut's boundary's, a junction's from the
     objects beside it, capped at ``junction_cap``, :func:`fit_junction_cap`; a cut's placements that leave its exons
     across a junction at that junction's crossing level where it is higher, :func:`_best_part`): gDNA's yields, read on gDNA's
-    uncaptured law ``g`` (``tables.anchor``). Capture adds to the uncaptured yield, and the uncaptured part is RNA's own share on
+    uncaptured law ``g`` (``tables.gdna_uncaptured``). Capture adds to the uncaptured yield, and the uncaptured part is RNA's own share on
     its own table, so only the excess is carried to the scorer's gDNA table ``T_G`` (``tables.gdna``):
     ``ĉ_o = 1 + (c_o − 1)·share_o(g)/share_o(T_G)`` where ``c_o > 1``, and ``c_o`` as read elsewhere and where ``T_G``
     cannot reach (:func:`_carried`). Every efficiency exactly 1 gives ``fl`` to the bit, whatever the tables; where
@@ -857,9 +857,9 @@ def transcript_capture_eff_lengths(
         obj if carry is None else carry[0],
     )
     if carry is not None:
-        on_anchor, on_table = carry
-        c_piece = _carried(c_piece, on_anchor.contained, on_table.contained)
-        c_cut = _carried(c_cut, on_anchor.cut_share, on_table.cut_share)
+        on_uncaptured, on_table = carry
+        c_piece = _carried(c_piece, on_uncaptured.contained, on_table.contained)
+        c_cut = _carried(c_cut, on_uncaptured.cut_share, on_table.cut_share)
     num = np.zeros(fl.shape[0])
     den = np.zeros(fl.shape[0])
     np.add.at(num, obj.t, obj.contained * c_piece)
@@ -874,32 +874,32 @@ def transcript_capture_eff_lengths(
 def _carry_shares(
     pieces: TranscriptPieces, obj: TranscriptObjects, tables: "LengthTables", n_threads: int = 1
 ) -> tuple[TranscriptObjects, TranscriptObjects] | None:
-    """``(on_anchor, on_table)``: the objects' shares on gDNA's uncaptured law and on the scorer's gDNA table, by
+    """``(on_uncaptured, on_table)``: the objects' shares on gDNA's uncaptured law and on the scorer's gDNA table, by
     which an efficiency is carried to that table (:func:`_carried`); ``None`` where the table is the uncaptured law
     and nothing is carried. ``obj`` is the shares on RNA's table."""
-    if np.array_equal(tables.gdna, tables.anchor):
+    if np.array_equal(tables.gdna, tables.gdna_uncaptured):
         return None
     on_table = (
         obj
         if np.array_equal(tables.gdna, tables.rna)
         else object_shares(pieces, tables.gdna, n_threads)
     )
-    return object_shares(pieces, tables.anchor, n_threads), on_table
+    return object_shares(pieces, tables.gdna_uncaptured, n_threads), on_table
 
 
-def _carry_factor(share_anchor: np.ndarray, share_table: np.ndarray) -> np.ndarray:
+def _carry_factor(share_uncaptured: np.ndarray, share_table: np.ndarray) -> np.ndarray:
     """``share(g) / share(T_G)`` per object, by which capture's excess is carried to the scorer's gDNA table; 1 where
     ``T_G`` has no share there."""
     reach = share_table > 0.0
-    return np.where(reach, share_anchor / np.where(reach, share_table, 1.0), 1.0)
+    return np.where(reach, share_uncaptured / np.where(reach, share_table, 1.0), 1.0)
 
 
-def _carried(c: np.ndarray, share_anchor: np.ndarray, share_table: np.ndarray) -> np.ndarray:
+def _carried(c: np.ndarray, share_uncaptured: np.ndarray, share_table: np.ndarray) -> np.ndarray:
     """``ĉ`` per object. Capture adds to the uncaptured yield, and the uncaptured part is RNA's own share on its own
     table, so only an excess over 1 is carried: ``1 + (c − 1)·share(g)/share(T_G)``. A reading of 1 or below carries
     nothing and enters as read, and so does an object ``T_G`` has no share of."""
     carry = (c > 1.0) & (share_table > 0.0)
-    return np.where(carry, 1.0 + (c - 1.0) * _carry_factor(share_anchor, share_table), c)
+    return np.where(carry, 1.0 + (c - 1.0) * _carry_factor(share_uncaptured, share_table), c)
 
 
 def rna_captured_fraction(calibration: "CalibrationResult", region_arrays: "RegionArrays") -> float:

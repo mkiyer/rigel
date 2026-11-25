@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
-#include <thread>
 #include <vector>
 
 #include <nanobind/nanobind.h>
@@ -76,10 +75,8 @@ nb::object side_shares(Vec cum0, Vec cum1, Vec cumr, Vec a, Vec near, Vec far, i
             for (size_t i = m * t / threads, end = m * (t + 1) / threads; i < end; ++i)
                 out[i] = side_share(c0, c1, cr, n, pa[i], pn[i], pf[i]);
         };
-        std::vector<std::thread> workers;
-        for (size_t t = 1; t < threads; ++t) workers.emplace_back(range, t);
-        range(0);
-        for (std::thread& w : workers) w.join();
+        // on the pool, so a thread's exception reaches the caller rather than ending the process
+        rigel::ThreadPool(static_cast<int>(threads)).run_parallel([&](int t) { range(static_cast<size_t>(t)); });
     }
     return rigel::vec_to_ndarray(std::move(out));
 }

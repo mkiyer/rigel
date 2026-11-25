@@ -51,7 +51,7 @@ MU = float(np.dot(np.arange(PMF.shape[0]), PMF))
 
 def _one_law(pmf) -> LengthTables:
     """The EM's tables when both origins and the uncaptured law are one pmf: the efficiencies read as given."""
-    return LengthTables(rna=pmf, gdna=pmf, anchor=pmf, decision=None)
+    return LengthTables(rna=pmf, gdna=pmf, gdna_uncaptured=pmf, decision=None)
 
 
 def _lengths(cal, ra, idx, fl, tables, junction_cap: float | None = None) -> np.ndarray:
@@ -994,7 +994,7 @@ def test_a_templates_place_weights_carry_its_lengths_excess_on_the_uncaptured_la
     """``Σ_x g(ℓ_x) (w(x) − 1) = eff_em_t − fl_t`` over every observable placement of a template on its own path,
     junctions included, on a field at or above 1. ``w(x) = Σ_o m_o(x) c_o`` is the native deposit's masses at the
     reader's efficiencies (a junction at its price), the weight a multimapper's place carries (``place_log_weights``),
-    and ``g`` is the law the efficiencies are read on (``tables.anchor``), not the scorer's table, here another law
+    and ``g`` is the law the efficiencies are read on (``tables.gdna_uncaptured``), not the scorer's table, here another law
     (``T_R = T_G ≠ g``). So the weight and the length the EM divides a transcript by carry one excess, in the frame
     calibration measures capture in; the uncaptured part of the length is RNA's own on its own table, which a place's
     weight, common to every candidate there, does not carry. A placement touching a masked base is never observed and
@@ -1423,14 +1423,19 @@ def _split_at(idx, ra, c, price, tables=None, rate=None):
     tables = _one_law(PMF) if tables is None else tables
     pieces = transcript_pieces(idx, ra)
     obj = object_shares(pieces, tables.rna)
-    on_anchor, on_table = object_shares(pieces, tables.anchor), object_shares(pieces, tables.gdna)
+    on_uncaptured, on_table = (
+        object_shares(pieces, tables.gdna_uncaptured),
+        object_shares(pieces, tables.gdna),
+    )
 
     def carried(level, k):
         # the ruler's rule: only an excess over 1 is carried; a level of 1 or below enters as read
         return np.where(level > 1.0, 1.0 + (level - 1.0) * k, level)
 
-    piece_term = obj.contained * carried(c[obj.piece], on_anchor.contained / on_table.contained)
-    cut_term = obj.cut_share * carried(np.float64(price), on_anchor.cut_share / on_table.cut_share)
+    piece_term = obj.contained * carried(c[obj.piece], on_uncaptured.contained / on_table.contained)
+    cut_term = obj.cut_share * carried(
+        np.float64(price), on_uncaptured.cut_share / on_table.cut_share
+    )
     geo = build_sj_geometry_arrays(idx)
     rna = np.zeros(ra.n_regions)
     spliced = np.zeros(np.asarray(geo.src_region).shape[0])

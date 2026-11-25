@@ -653,7 +653,7 @@ def _length_tables_summary(tables) -> dict:
         "noise": round(float(d.noise), SUMMARY_DECIMALS),
         "rna_table_mean": round(float(tables.rna @ L), SUMMARY_LENGTH_DECIMALS),
         "gdna_table_mean": round(float(tables.gdna @ L), SUMMARY_LENGTH_DECIMALS),
-        "gdna_uncaptured_mean": round(float(tables.anchor @ L), SUMMARY_LENGTH_DECIMALS),
+        "gdna_uncaptured_mean": round(float(tables.gdna_uncaptured @ L), SUMMARY_LENGTH_DECIMALS),
     }
 
 

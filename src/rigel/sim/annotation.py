@@ -61,13 +61,13 @@ def write_splice_motif(
             f"(length {intron_end - intron_start} < 4)"
         )
     if strand == Strand.POS:
-        donor, acceptor = "GT", "AG"
+        low_motif, high_motif = "GT", "AG"
     elif strand == Strand.NEG:
-        donor, acceptor = "CT", "AC"
+        low_motif, high_motif = "CT", "AC"
     else:
         raise ValueError(f"cannot inject splice motifs for strand {strand!r}")
-    genome.edit(intron_start, donor)
-    genome.edit(intron_end - 2, acceptor)
+    genome.edit(intron_start, low_motif)
+    genome.edit(intron_end - 2, high_motif)
 
 
 class GeneBuilder:

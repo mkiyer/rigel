@@ -76,14 +76,14 @@ class LengthDecision:
 class LengthTables:
     """The EM's two length tables, and the law RNA's normaliser carries capture from.
 
-    ``rna`` is ``FLModels.rna_pmf`` itself; ``gdna`` the scorer's gDNA table; ``anchor`` gDNA's uncaptured law
+    ``rna`` is ``FLModels.rna_pmf`` itself; ``gdna`` the scorer's gDNA table; ``gdna_uncaptured`` gDNA's uncaptured law
     (``FLModels.gdna_pmf``), the law calibration's capture efficiencies are read on. The scorer and RNA's normaliser
     read the same three (:func:`rigel.calibration.capture_eff_length.transcript_capture_eff_lengths`).
     """
 
     rna: np.ndarray
     gdna: np.ndarray
-    anchor: np.ndarray
+    gdna_uncaptured: np.ndarray
     decision: LengthDecision
 
 
@@ -192,7 +192,7 @@ def shared_length_law(
         return LengthTables(
             rna=r,
             gdna=r.copy(),
-            anchor=g,
+            gdna_uncaptured=g,
             decision=LengthDecision(
                 rna_captured_fraction=float(kappa),
                 captured=0.0,
@@ -212,7 +212,7 @@ def shared_length_law(
     return LengthTables(
         rna=r,
         gdna=geometric_path(r, tilted, weight),
-        anchor=g,
+        gdna_uncaptured=g,
         decision=LengthDecision(
             rna_captured_fraction=float(kappa),
             captured=float(captured),
