@@ -233,7 +233,7 @@ def _count_scores(t: np.ndarray, e: np.ndarray) -> dict:
 def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     """Score one arm's transcript table against the condition's realised fragment truth.
 
-    ``count`` against ``observed_mrna_fragments``, both fragment counts with no length or normalisation between
+    ``count`` against ``observed_annotated_fragments``, both fragment counts with no length or normalisation between
     them, so a difference is a fragment the tool put somewhere the simulator did not. ``fp_mass`` is the estimate
     on transcripts the simulator gave zero fragments: contamination the deconvolution failed to remove, with
     nothing to cancel it. ``fn_mass`` is its mirror, real RNA the tool assigned nowhere. They are reported apart
@@ -246,7 +246,7 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     )
     for col in ("count", "count_em", "tpm", "effective_length"):
         m[col] = m[col].fillna(0.0)
-    t = m["observed_mrna_fragments"].to_numpy(np.float64)
+    t = m["observed_annotated_fragments"].to_numpy(np.float64)
     e = m["count"].to_numpy(np.float64)
     expressed = t > 0.0
 
@@ -282,13 +282,13 @@ def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     Summing a gene's isoforms removes the error of not knowing which isoform a fragment came from. What remains is
     error in deciding whether a fragment was RNA from this gene at all, the question Rigel is for. Genes come from
     the truth table's ``gene_id``, so both sides share one grouping. Synthetic nascent entities are absent from
-    ``quant`` (``get_counts_df`` drops them); their mass is on the library row as ``nrna_est``.
+    ``quant`` (``get_counts_df`` drops them); their mass is on the library row as ``nascent_est``.
     """
     m = truth.merge(quant[["transcript_id", "count"]], on="transcript_id", how="left")
     m["count"] = m["count"].fillna(0.0)
-    g = m.groupby("gene_id", observed=True)[["observed_mrna_fragments", "count"]].sum()
+    g = m.groupby("gene_id", observed=True)[["observed_annotated_fragments", "count"]].sum()
     # `n_tx` counts genes here, named as on the transcript row so one table renders both
-    return _count_scores(g["observed_mrna_fragments"].to_numpy(np.float64), g["count"].to_numpy(np.float64))
+    return _count_scores(g["observed_annotated_fragments"].to_numpy(np.float64), g["count"].to_numpy(np.float64))
 
 
 def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
@@ -301,26 +301,26 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     The truth is the simulator's ``origin_counts``, which counts each fragment once.
     """
     est = result.estimator
-    mrna = float(quant["count"].sum())
-    nrna = float(est.synthetic_count)
+    annotated = float(quant["count"].sum())
+    nascent = float(est.synthetic_count)
     gdna = float(est.gdna_em_count)
     intergenic = float(result.stats.n_intergenic) + float(est.gdna_intergenic_em_count)
     oc = truth_summary.get("origin_counts", {})
     t_g = float(oc.get("gdna", float("nan")))
-    t_m = float(oc.get("mrna", 0.0))
-    t_n = float(oc.get("nrna", 0.0))
+    t_m = float(oc.get("annotated", 0.0))
+    t_n = float(oc.get("nascent", 0.0))
     t_r = t_m + t_n
-    total = mrna + nrna + gdna
+    total = annotated + nascent + gdna
     total_all = total + intergenic
     return {
         # The nascent pool is broken out: ``get_counts_df`` drops the synthetic entities, so mass the EM
-        # assigns them is invisible in the transcript table's ``fp_mass``. On an ``nrna_none`` panel its
-        # truth is 0, which makes ``nrna_est`` a third false-positive channel.
-        "mrna_est": mrna,
-        "mrna_true": t_m,
-        "nrna_est": nrna,
-        "nrna_true": t_n,
-        "rna_est": mrna + nrna,
+        # assigns them is invisible in the transcript table's ``fp_mass``. On an ``nascent_none`` panel its
+        # truth is 0, which makes ``nascent_est`` a third false-positive channel.
+        "annotated_est": annotated,
+        "annotated_true": t_m,
+        "nascent_est": nascent,
+        "nascent_true": t_n,
+        "rna_est": annotated + nascent,
         "rna_true": t_r,
         "gdna_est": gdna,
         "gdna_true": t_g,
@@ -370,7 +370,7 @@ def aligner_loss(bam: Path, origin_counts: dict) -> dict:
 
     from rigel.sim.read_name import parse_origin
 
-    lost = {"gdna": 0, "mrna": 0, "nrna": 0}
+    lost = {"gdna": 0, "annotated": 0, "nascent": 0}
     seen = dict(lost)
     name, mapped = None, False
 
@@ -402,7 +402,7 @@ def aligned_library_truth(library: dict, bam: Path, summary: dict) -> dict:
     fraction's truth over the templates that reached Rigel. The truth itself stays the simulator's."""
     loss = aligner_loss(bam, summary.get("origin_counts", {}))
     t_g = library["gdna_true"] - loss["unaligned_gdna"]
-    t_r = library["rna_true"] - loss["unaligned_mrna"] - loss["unaligned_nrna"]
+    t_r = library["rna_true"] - loss["unaligned_annotated"] - loss["unaligned_nascent"]
     return {**loss, "gdna_frac_true_aligned": t_g / (t_g + t_r) if (t_g + t_r) > 0 else float("nan")}
 
 
@@ -411,7 +411,7 @@ def aligned_library_truth(library: dict, bam: Path, summary: dict) -> dict:
 
 #: The truth table's realised RNA fragment columns, mature and nascent. A synthetic span emits no mature RNA, so
 #: its whole realised mass sits in the nascent column of its own row; the mature column alone weights it at zero.
-_WEIGHT_COLUMNS = ("observed_mrna_fragments", "observed_nrna_fragments")
+_WEIGHT_COLUMNS = ("observed_annotated_fragments", "observed_nascent_fragments")
 
 
 def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
@@ -799,8 +799,8 @@ _MD_HOW_TO_READ = (
 #: the pool tables: (estimate field, or None for the intergenic-inclusive gDNA estimate; truth field; title)
 _MD_POOLS = (
     (None, "gdna_true", "gDNA (EM + intergenic)"),
-    ("nrna_est", "nrna_true", "Nascent RNA — SYNTHETIC entities only"),
-    ("mrna_est", "mrna_true", "Annotated RNA — the transcript table"),
+    ("nascent_est", "nascent_true", "Nascent RNA — SYNTHETIC entities only"),
+    ("annotated_est", "annotated_true", "Annotated RNA — the transcript table"),
 )
 
 #: the transcript and gene sections: (axis, heading, blurb)
@@ -926,8 +926,8 @@ def _md_rollup(primary: dict, conds: list[str]) -> list[str]:
         tx = sum(primary[(c, "transcript")]["count_abs_err"] for c in rows)
         gn = sum(primary[(c, "gene")]["count_abs_err"] for c in rows)
         tt = sum(primary[(c, "transcript")]["count_true"] for c in rows)
-        ne = sum(primary[(c, "library")]["nrna_est"] for c in rows)
-        nt = sum(primary[(c, "library")]["nrna_true"] for c in rows)
+        ne = sum(primary[(c, "library")]["nascent_est"] for c in rows)
+        nt = sum(primary[(c, "library")]["nascent_true"] for c in rows)
         ge = sum(gdna_estimate(primary[(c, "library")]) for c in rows)
         gt = sum(primary[(c, "library")]["gdna_true"] for c in rows)
         lines.append(f"| {_stratum_name(st, ' ')} | {tt:,.0f} | {tx:,.0f} | {100 * tx / tt:.2f} % | {gn:,.0f} | "
@@ -962,7 +962,7 @@ def markdown_report(path: Path, out: Path) -> None:
 
 
 #: the library row's pool fields; an arm file without them has no per-condition pool table
-_POOL_FIELDS = ("gdna_est", "gdna_true", "nrna_est", "nrna_true", "mrna_est", "mrna_true", "n_intergenic_gdna")
+_POOL_FIELDS = ("gdna_est", "gdna_true", "nascent_est", "nascent_true", "annotated_est", "annotated_true", "n_intergenic_gdna")
 
 
 def _check_comparable(arms: list[tuple[dict, str]]) -> None:
@@ -1063,13 +1063,13 @@ def _print_rank(arms, conds) -> None:
 def _print_pools(arms, conds) -> None:
     """⑥: where the library's fragments went, per stratum and arm.
 
-    "Nascent" is a simulator input, not a solver population: `nrna_est` is mass the EM assigned to the synthetic
-    entities, so this table scores assignment. On an `nrna_none` panel `nrna_true` is 0 and every fragment in that
+    "Nascent" is a simulator input, not a solver population: `nascent_est` is mass the EM assigned to the synthetic
+    entities, so this table scores assignment. On an `nascent_none` panel `nascent_true` is 0 and every fragment in that
     column is a false positive with nothing to cancel it, so the column is printed even there."""
     print()
     print("  ⑥ ⭐⭐⭐ POOL LEVEL — where the library's fragments went: gDNA vs NASCENT vs ANNOTATED")
     print("     ⛔ 'nascent' is a SIMULATOR input, never a population the solver has (AXIOM 0). This")
-    print("        scores ASSIGNMENT. On a nrna_none panel nascent truth is 0, so that column is pure")
+    print("        scores ASSIGNMENT. On a nascent_none panel nascent truth is 0, so that column is pure")
     print("        false positive and Δ% is undefined rather than large.")
     for a, name in arms:
         print()
@@ -1092,8 +1092,8 @@ def _print_pool_rows(a: dict, conds, label: str, sel) -> None:
         ("gDNA (total)", gdna_em + inter, tot("gdna_true")),
         ("  of which EM", gdna_em, None),
         ("  of which intergenic", inter, None),
-        ("nascent", tot("nrna_est"), tot("nrna_true")),
-        ("annotated", tot("mrna_est"), tot("mrna_true")),
+        ("nascent", tot("nascent_est"), tot("nascent_true")),
+        ("annotated", tot("annotated_est"), tot("annotated_true")),
     ]
     for i, (pretty, est, tru) in enumerate(rows):
         first = label if i == 0 else ""
@@ -1121,8 +1121,8 @@ def _print_pools_per_condition(arms, conds) -> None:
         for c in conds:
             r = a[(c, "library")]
             print(f"    {c:<44} {gdna_estimate(r):>13,.0f} {r['gdna_true']:>13,.0f} "
-                  f"{r['nrna_est']:>11,.0f} {r['nrna_true']:>10,.0f} "
-                  f"{r['mrna_est']:>13,.0f} {r['mrna_true']:>13,.0f}")
+                  f"{r['nascent_est']:>11,.0f} {r['nascent_true']:>10,.0f} "
+                  f"{r['annotated_est']:>13,.0f} {r['annotated_true']:>13,.0f}")
 
 
 def _print_thermometer(arms, conds) -> None:

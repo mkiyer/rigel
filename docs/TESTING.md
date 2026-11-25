@@ -73,7 +73,7 @@ Nothing in the loop *change calibration → re-run calibration → score against
 | cache | holds | invalidated by |
 |---|---|---|
 | scan (`build_scan_cache.py`) | the accumulator payload | an accumulator change (`payload_schema_digest`), the index (`graph_hash`, `reach_digest`), a tally setting of the scan (`sj_strand_tag` among them, never a thread count) |
-| oracle (`<panel>/oracle_cache/`) | five origin partitions per condition (`gdna`, `mrna`, `nrna`, `rna_pos`, `rna_neg`), checked sum-to-full against the scan cache, and the certified `slot_truth.npz` | the same, and nothing else |
+| oracle (`<panel>/oracle_cache/`) | five origin partitions per condition (`gdna`, `annotated`, `nascent`, `rna_pos`, `rna_neg`), checked sum-to-full against the scan cache, and the certified `slot_truth.npz` | the same, and nothing else |
 
 `panel.py status` names what is missing, and an instrument fed a stale cache refuses it. ⛔ The scan cache's key
 hashes the deposit rule, not the resolver (`native/resolve/`): after a change to which fragments are offered, rebuild with `--force`.
@@ -88,7 +88,7 @@ seconds, so a policy change is scored on every condition between edits; the ladd
 | gDNA fraction | `g00` `g05` `g25` `g50` `g98` | `scripts/sim/configs/test_reference.yaml` |
 | strand specificity | `0.50` · `0.70` (the transition) · `0.99` | the config |
 | capture | off · on; about half the genes probed, half with no probe | the config, `test_probes.bed` |
-| nascent RNA | ten transcripts (the twin block's `nasc`, `capnasc`), hand-authored below, near and above the annotated level | the `nrna_abundance` column |
+| nascent RNA | ten transcripts (the twin block's `nasc`, `capnasc`), hand-authored below, near and above the annotated level | the `nascent_abundance` column |
 
 Depth is 1.17 M fragments per condition. Five more configs differ from `test_reference.yaml` in one thing each: two
 adversarial probe panels (`test_reference_probes_{junction,sparse}.yaml`) and the three fl arms (§0); three more are the
@@ -127,7 +127,7 @@ since a toy and the panel have inverted a ranking before (`TRAPS: panel-before-s
 ### The substrate — one hand-edited file, thirteen blocks
 
 `scripts/sim/test_reference/test_chr.yaml` is the `rigel sim` scenario schema
-(`genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}`, exons 0-based half-open) plus
+(`genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nascent_abundance}]}`, exons 0-based half-open) plus
 `probed` per gene and a `shadow_genes` list. Its header is the design record of every block.
 
 | block | what it stresses | gene types |
@@ -170,9 +170,9 @@ the reads, so the truth is `Σ_w f_pre(w) · partition_t(w)`. Ratios are compare
 probed transcripts, per probed class and per kind (annotated multi-exon, single-exon, synthetic span).
 
 ```bash
-python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.99_nrna_file_capture_on
+python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.99_nascent_file_capture_on
 python scripts/design/ruler_vs_truth.py --panel ladder                     # one line per capture-ON row
-python scripts/design/ruler_vs_truth.py --panel ladder --condition gdna_g50_ss_0.99_nrna_mid_capture_on --scale
+python scripts/design/ruler_vs_truth.py --panel ladder --condition gdna_g50_ss_0.99_nascent_mid_capture_on --scale
 python scripts/design/ruler_vs_truth.py --panel test --condition C --module proto.py --out table.tsv
 ```
 
@@ -213,7 +213,7 @@ what `rigel quant` reads: the annotated transcripts plus the synthetic spans `in
 
 | | |
 |---|---|
-| nascent RNA is a transcript | a span's molecules are its `nrna_abundance`, on its own template, reads tagged `nrna_`. Under `sparse` a span is off with probability `1 − on_fraction`, else log-uniform over `abundance_ranges` |
+| nascent RNA is a transcript | a span's molecules are its `nascent_abundance`, on its own template, reads tagged `nascent_`. Under `sparse` a span is off with probability `1 − on_fraction`, else log-uniform over `abundance_ranges` |
 | one multinomial over every RNA row | `prob ∝ abundance × capture-aware effective length`, annotated and span rows together |
 | capture binds by genomic overlap, at the probe's strength | a probe binds at the strength its own sequence's GC content gives, falling at both extremes (`CaptureConfig.gc_optimum`, `gc_half_distance`); a fragment binds through ONE contiguous part of a probe, the one with the largest strength times overlap, never the sum: a transcript holding a probed junction holds the probe whole, while gDNA, a span and an isoform without the junction bind the better part, every part at its probe's one strength; gDNA and nascent RNA enrich alike |
 
@@ -307,6 +307,6 @@ the zero control and the two capture-ON strata:
 
     P=$RIGEL_RUNS/arms/2026-11-17_identity S=$RIGEL_RUNS/suite
     python scripts/design/rename_identity.py --check --suite $S/ladder --index $S/rigel_index \
-      --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference $P/identity_head_g05off.json
+      --condition gdna_g05_ss_0.99_nascent_mid_capture_off --reference $P/identity_head_g05off.json
     python scripts/design/rename_identity.py --check --index $RIGEL_RUNS/refs/rigel_index \
       --bam $RIGEL_RUNS/cfrna/vcap_mix/bam/star.srt.rmdup.collate.bam --reference $P/identity_head_vcap.json

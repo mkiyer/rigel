@@ -49,7 +49,7 @@ os.environ.setdefault("RIGEL_RUNS", str(RUNS))
 from _sim_config import expand_config_path  # noqa: E402
 
 #: the three origin partitions the oracle cache holds and the per-strand RNA pair the certifier requires.
-ORACLE_PARTS = ("gdna", "mrna", "nrna", "rna_pos", "rna_neg")
+ORACLE_PARTS = ("gdna", "annotated", "nascent", "rna_pos", "rna_neg")
 
 #: the STAR options the ladder's STAR rung is aligned with: the recommended settings
 STAR_PARAMS = SIM / "configs" / "star_recommended.params.txt"
@@ -260,7 +260,7 @@ def cmd_simulate(p: Panel, args) -> int:
 
 def cmd_cache(p: Panel, args) -> int:
     """Both caches. The scan cache makes calibration re-runnable without rescanning. The oracle cache is the
-    origin-split truth (`gdna` / `mrna` / `nrna` and the two transcript-strand partitions, checked sum-to-full
+    origin-split truth (`gdna` / `annotated` / `nascent` and the two transcript-strand partitions, checked sum-to-full
     against the scan cache) that every truth-scoring instrument requires; `calibration_oracle.py --build`
     builds it and certifies `slot_truth.npz` in the same run."""
     need(bool(p.conditions), f"simulated conditions in {p.dir}", "panel.py simulate")

@@ -71,7 +71,7 @@ def index_composition(suite: Path, condition: str) -> dict:
     import pandas as pd
 
     t = pd.read_csv(suite / condition / "truth_abundances.tsv", sep="\t")
-    syn = t["transcript_id"].astype(str).str.startswith("RIGEL_NRNA_")
+    syn = t["transcript_id"].astype(str).str.startswith("RIGEL_NASCENT_")
     return {
         "truth_rows": int(len(t)),
         "annotated_tx": int((~syn).sum()),
@@ -94,8 +94,8 @@ def scenario(qa, rows: dict, c: str) -> dict:
             # ⛔ EM + intergenic: the instrument's own definition, never restated here
             "gdna": {"est": qa.gdna_estimate(lib), "true": lib["gdna_true"]},
             #: SYNTHETIC entities only — the split is `is_synthetic`, never `is_single_exon`
-            "nascent": {"est": lib["nrna_est"], "true": lib["nrna_true"]},
-            "annotated": {"est": lib["mrna_est"], "true": lib["mrna_true"]},
+            "nascent": {"est": lib["nascent_est"], "true": lib["nascent_true"]},
+            "annotated": {"est": lib["annotated_est"], "true": lib["annotated_true"]},
         },
         "gdna_frac": {"est": lib["gdna_frac_est"], "true": lib["gdna_frac_true"]},
         "tx": {**{k: tx[k] for k in AXIS_FIELDS}, "median_rel_err": tx["median_rel_err"]},
@@ -103,7 +103,7 @@ def scenario(qa, rows: dict, c: str) -> dict:
     }
     if "unaligned_gdna" in lib:
         # an aligned input: what the aligner left unplaced, and the gDNA fraction's truth over what it placed
-        s["unaligned"] = {k: lib[f"unaligned_{k}"] for k in ("gdna", "mrna", "nrna")}
+        s["unaligned"] = {k: lib[f"unaligned_{k}"] for k in ("gdna", "annotated", "nascent")}
         s["gdna_frac"]["true_aligned"] = lib["gdna_frac_true_aligned"]
     return s
 
@@ -128,7 +128,7 @@ def with_v071(qa, s: dict, v: dict | None) -> dict:
             "gene_abs_err": v["gene"]["count_abs_err"], "gene_true": v["gene"]["count_true"],
             # 0.7.1's rows recorded one `n_intergenic`, booked as gDNA as today's `n_intergenic_gdna` is
             "pools": {"gdna": lib["gdna_est"] + lib.get("n_intergenic_gdna", lib.get("n_intergenic", 0.0)),
-                      "nascent": lib["nrna_est"], "annotated": lib["mrna_est"]},
+                      "nascent": lib["nascent_est"], "annotated": lib["annotated_est"]},
             "gdna_frac": lib["gdna_frac_est"],
         }
     return s

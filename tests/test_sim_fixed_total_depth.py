@@ -76,7 +76,7 @@ def test_the_nascent_split_is_inside_the_rna_budget_not_on_top(tmp_path):
     from rigel.sim.genome import MutableGenome
     from rigel.sim.wgs_config import GDNASimConfig
     from rigel.sim.wgs_engine import WholeGenomeSimulator
-    from rigel.sim.transcriptome import assign_nrna_to_entities
+    from rigel.sim.transcriptome import assign_nascent_to_entities
     from rigel.transcript import Transcript
     from rigel.types import Interval, Strand
 
@@ -109,7 +109,7 @@ def test_the_nascent_split_is_inside_the_rna_budget_not_on_top(tmp_path):
         import numpy as np
 
         rows = [mature, entity]
-        assign_nrna_to_entities(rows, np.array([100.0 * nascent_per_mature, 0.0]))
+        assign_nascent_to_entities(rows, np.array([100.0 * nascent_per_mature, 0.0]))
         sim = WholeGenomeSimulator(
             fasta,
             rows,

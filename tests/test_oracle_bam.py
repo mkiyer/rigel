@@ -95,7 +95,7 @@ def _name_from_origin(origin: Origin) -> str:
         origin.end,
         origin.strand,
         origin.index,
-        nascent=origin.kind == "nrna",
+        nascent=origin.kind == "nascent",
     )
 
 
@@ -198,7 +198,7 @@ class TestWholeGenomeOracleBamOrientation:
             _make_neg_transcript([(1400, 1700), (1900, 2200)], t_id="tx_neg", g_id="g_neg"),
         ]
         # nascent lives on single-exon entities over each span (one per strand here), as the index
-        # makes them; the entities' reads carry the `nrna_` tag and contiguous genomic blocks
+        # makes them; the entities' reads carry the `nascent_` tag and contiguous genomic blocks
         pos_entity = Transcript(
             ref="ref",
             strand=Strand.POS,
@@ -209,7 +209,7 @@ class TestWholeGenomeOracleBamOrientation:
             is_single_exon=True,
             is_synthetic=True,
             abundance=0.0,
-            nrna_abundance=100.0,
+            nascent_abundance=100.0,
         )
         neg_entity = Transcript(
             ref="ref",
@@ -221,7 +221,7 @@ class TestWholeGenomeOracleBamOrientation:
             is_single_exon=True,
             is_synthetic=True,
             abundance=0.0,
-            nrna_abundance=100.0,
+            nascent_abundance=100.0,
         )
         for t in (pos_entity, neg_entity):
             t.length = t.compute_length()
@@ -278,7 +278,7 @@ class TestWholeGenomeOracleBamOrientation:
                     assert origin.strand == strand_letter[origin.transcript_id]
                 assert read.query_sequence == _reference_sequence_for_record(read, fasta)
 
-        assert seen_categories == {"mrna", "nrna", "gdna"}
+        assert seen_categories == {"annotated", "nascent", "gdna"}
 
 
 class TestWholeGenomeOracleBamHeader:

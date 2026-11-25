@@ -35,8 +35,8 @@ from rigel.sim.wgs_config import GDNASimConfig
 from rigel.sim.wgs_engine import WholeGenomeSimulator
 from rigel.transcript import Transcript
 
-from _sim_abundance import apply_nrna_ratio, apply_sparse_nrna, assign_base_abundances
-from _sim_config import CaptureScenario, NRNAConfig, WholeGenomeSimConfig, refuse_a_run_that_keeps_no_reads
+from _sim_abundance import apply_nascent_ratio, apply_sparse_nascent, assign_base_abundances
+from _sim_config import CaptureScenario, NascentConfig, WholeGenomeSimConfig, refuse_a_run_that_keeps_no_reads
 from _sim_truth import write_molar_truth, write_post_capture_truth
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def merge_shadow_transcripts(
         t.t_index = base + k
         t.is_synthetic = False
         t.span_t_index = -1
-        t.nrna_abundance = 0.0
+        t.nascent_abundance = 0.0
     logger.info(
         "Shadow transcripts: %d appended from %s (unknown to the index by construction)",
         len(shadows),
@@ -175,7 +175,7 @@ def _overdispersion_axis(gdna: GDNASimConfig) -> list[tuple[str, float]]:
     return axis
 
 
-def nrna_label_for_ratio(ratio: float | tuple[float, float], labels: list[str] | None, idx: int) -> str:
+def nascent_label_for_ratio(ratio: float | tuple[float, float], labels: list[str] | None, idx: int) -> str:
     if labels and idx < len(labels):
         return labels[idx].strip()
     if isinstance(ratio, tuple):
@@ -186,18 +186,18 @@ def nrna_label_for_ratio(ratio: float | tuple[float, float], labels: list[str] |
     return f"ratio_{ratio:g}"
 
 
-def _nrna_axis(
-    nrna: NRNAConfig, has_file_nrna: bool
+def _nascent_axis(
+    nascent: NascentConfig, has_file_nascent: bool
 ) -> list[tuple[str, str, float | tuple[float, float] | None, int]]:
     """One ``(label, mode, value, index)`` per nascent condition: per ``ratios`` entry for ``additive_ratio``, per
     ``abundance_ranges`` pair for ``sparse`` (which folds ``index`` into its seed), or the single
-    ``("file", "file", None, 0)`` when the abundance file supplied nRNA values.
+    ``("file", "file", None, 0)`` when the abundance file supplied nascent RNA values.
     """
-    if has_file_nrna:
+    if has_file_nascent:
         return [("file", "file", None, 0)]
-    values = nrna.ratios if nrna.mode == "additive_ratio" else nrna.abundance_ranges
+    values = nascent.ratios if nascent.mode == "additive_ratio" else nascent.abundance_ranges
     return [
-        (nrna_label_for_ratio(value, nrna.ratio_labels, i), nrna.mode, value, i)
+        (nascent_label_for_ratio(value, nascent.ratio_labels, i), nascent.mode, value, i)
         for i, value in enumerate(values)
     ]
 
@@ -266,18 +266,19 @@ def stable_seed(base_seed: int, *parts: object) -> int:
 
 
 def capture_paired_condition_seed(base_seed: int, gdna_label: str, strand_specificity: float) -> int:
-    """Seed shared by the capture and nascent variants of one ``(gdna, ss)`` base condition.
+    """Seed shared by the capture and nascent variants of one ``(gdna, ss)`` base condition, keyed on those two
+    values, never on a condition's name, so renaming a label or the name's format moves no draw.
 
     A nascent-on cell and its nascent-off twin share the seed but not an identical mature stream, since nascent
     rows are drawn in the same multinomial and re-allocate the RNA budget.
     """
-    return stable_seed(base_seed, condition_dir_name(gdna_label, strand_specificity, "_paired"))
+    return stable_seed(base_seed, gdna_label, f"{strand_specificity:.2f}")
 
 
 def condition_dir_name(
     gdna_label: str,
     strand_specificity: float,
-    nrna_label: str,
+    nascent_label: str,
     capture_label: str | None = None,
     gdna_strand_overdispersion: float = 0.0,
 ) -> str:
@@ -286,7 +287,7 @@ def condition_dir_name(
     name = f"gdna_{gdna_label}"
     if gdna_strand_overdispersion > 0.0:
         name = f"{name}_od_{gdna_strand_overdispersion:g}".replace(".", "p")
-    name = f"{name}_ss_{strand_specificity:.2f}_nrna_{nrna_label}"
+    name = f"{name}_ss_{strand_specificity:.2f}_nascent_{nascent_label}"
     if capture_label is not None:
         name = f"{name}_capture_{capture_label}"
     return name
@@ -296,12 +297,12 @@ def condition_dir_name(
 
 
 def _nascent_transcripts(
-    transcripts: list[Transcript], nrna: NRNAConfig, point: tuple
+    transcripts: list[Transcript], nascent: NascentConfig, point: tuple
 ) -> tuple[list[Transcript], dict]:
     """A copy of the base transcripts at one nascent setting, and the manifest fields that record it.
 
-    ``additive_ratio`` pools each entity's molecules from its contributors (``apply_nrna_ratio``), ``sparse`` sets
-    each entity's absolute abundance (``apply_sparse_nrna``), and ``file`` keeps the loaded abundances.
+    ``additive_ratio`` pools each entity's molecules from its contributors (``apply_nascent_ratio``), ``sparse`` sets
+    each entity's absolute abundance (``apply_sparse_nascent``), and ``file`` keeps the loaded abundances.
     """
     label, mode, value, index = point
     copied = copy.deepcopy(transcripts)
@@ -309,18 +310,18 @@ def _nascent_transcripts(
     abundance_range: tuple[float, float] | None = None
     if mode == "additive_ratio":
         ratio = float(value or 0.0)
-        apply_nrna_ratio(copied, ratio)
+        apply_nascent_ratio(copied, ratio)
     elif mode == "sparse":
         abundance_range = tuple(value)
-        ratio = apply_sparse_nrna(
-            copied, abundance_range, on_fraction=nrna.on_fraction, seed=nrna.seed + index
+        ratio = apply_sparse_nascent(
+            copied, abundance_range, on_fraction=nascent.on_fraction, seed=nascent.seed + index
         )
     return copied, {
-        "nrna_label": label,
-        "nrna_mode": mode,
-        "nrna_ratio": ratio,
-        "nrna_abundance_range": abundance_range,
-        "nrna_on_fraction": nrna.on_fraction if mode == "sparse" else None,
+        "nascent_label": label,
+        "nascent_mode": mode,
+        "nascent_ratio": ratio,
+        "nascent_abundance_range": abundance_range,
+        "nascent_on_fraction": nascent.on_fraction if mode == "sparse" else None,
     }
 
 
@@ -341,7 +342,7 @@ def _condition_entry(
     name = condition_dir_name(
         gdna_label,
         strand_specificity,
-        nascent["nrna_label"],
+        nascent["nascent_label"],
         capture.label if capture_in_names else None,
         gdna_strand_overdispersion=od,
     )
@@ -378,7 +379,7 @@ def _condition_entry(
 CONDITION_RECORD = "condition.json"
 
 #: A condition entry's fields that record what its simulation produced, not what it was asked to simulate.
-_OUTCOME_KEYS = frozenset({"oracle_bam", "n_mrna_observed", "n_nrna_observed", "n_gdna_observed"})
+_OUTCOME_KEYS = frozenset({"oracle_bam", "n_annotated_observed", "n_nascent_observed", "n_gdna_observed"})
 
 #: Manifest fields that lay out the grid (which conditions exist; each entry records its own point on every axis) or
 #: divide the work, and so say nothing about what one condition is. `gtf` is a path: the index's record carries the
@@ -511,7 +512,7 @@ def _write_condition_truth(
         for fastq in (cond_dir / "sim_R1.fq.gz", cond_dir / "sim_R2.fq.gz"):
             fastq.unlink(missing_ok=True)
     counts = summary["origin_counts"]
-    return {f"n_{kind}_observed": int(counts.get(kind, 0)) for kind in ("mrna", "nrna", "gdna")}
+    return {f"n_{kind}_observed": int(counts.get(kind, 0)) for kind in ("annotated", "nascent", "gdna")}
 
 
 # ── the grid ─────────────────────────────────────────────────────────────────────────────────────
@@ -521,12 +522,12 @@ def run_condition_grid(
     cfg: WholeGenomeSimConfig,
     transcripts: list[Transcript],
     *,
-    has_file_nrna: bool = False,
+    has_file_nascent: bool = False,
     index: dict[str, Any] | None = None,
     n_shadow_transcripts: int = 0,
 ) -> list[dict]:
     """Run every condition *cfg* lays out over *transcripts*, which carry their base abundances, and return the
-    per-condition manifest entries for the caller to write. *has_file_nrna* replaces the nascent sweep with the
+    per-condition manifest entries for the caller to write. *has_file_nascent* replaces the nascent sweep with the
     abundance file's own levels. Every axis is checked before anything is written. *index* and
     *n_shadow_transcripts* are the manifest's (:func:`write_manifest`): a condition whose output exists resumes only
     when the panel recorded it under the same inputs, and each finished condition records them
@@ -536,7 +537,7 @@ def run_condition_grid(
     gdna_axis = _gdna_axis(cfg.gdna)
     genomic_refs = _genomic_refs(cfg.gdna)
     od_axis = _overdispersion_axis(cfg.gdna)
-    nrna_axis = _nrna_axis(cfg.nrna, has_file_nrna)
+    nascent_axis = _nascent_axis(cfg.nascent, has_file_nascent)
     captures, capture_in_names = capture_axis(cfg)
 
     outdir = Path(cfg.outdir)
@@ -549,11 +550,11 @@ def run_condition_grid(
             for c in captures
         }
     cells = list(product(gdna_axis, od_axis, cfg.strand_specificities, captures))
-    total = len(nrna_axis) * len(cells)
+    total = len(nascent_axis) * len(cells)
     conditions: list[dict] = []
-    for point in nrna_axis:
-        nascent_transcripts, nascent = _nascent_transcripts(transcripts, cfg.nrna, point)
-        molar_truth = f"truth_abundances_nrna_{nascent['nrna_label']}.tsv"
+    for point in nascent_axis:
+        nascent_transcripts, nascent = _nascent_transcripts(transcripts, cfg.nascent, point)
+        molar_truth = f"truth_abundances_nascent_{nascent['nascent_label']}.tsv"
         write_molar_truth(nascent_transcripts, outdir / molar_truth)
         for gdna, od, strand_specificity, capture in cells:
             entry = _condition_entry(
@@ -561,7 +562,7 @@ def run_condition_grid(
             )
             print(
                 f"\n  [{len(conditions) + 1}/{total}] {entry['name']}: RNA={entry['n_rna']:,} "
-                f"gDNA={entry['n_gdna']:,} SS={strand_specificity:.2f} nRNA={entry['nrna_label']} "
+                f"gDNA={entry['n_gdna']:,} SS={strand_specificity:.2f} nascent RNA={entry['nascent_label']} "
                 f"capture={capture.label}",
                 flush=True,
             )
@@ -632,7 +633,7 @@ def manifest_record(
         "n_shadow_transcripts": int(n_shadow_transcripts),
         "simulation": _jsonable(cfg.simulation),
         "gdna": _jsonable(cfg.gdna),
-        "nrna": _jsonable(cfg.nrna),
+        "nascent": _jsonable(cfg.nascent),
         "capture": _jsonable(cfg.capture),
         "capture_configs": _jsonable(cfg.capture_configs),
         "abundance": _jsonable(cfg.abundance),
@@ -672,10 +673,10 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
             raise FileNotFoundError(f"shadow GTF not found: {cfg.shadow_gtf}")
         transcripts = merge_shadow_transcripts(transcripts, cfg.shadow_gtf)
 
-    has_file_nrna = assign_base_abundances(transcripts, cfg.abundance)
+    has_file_nascent = assign_base_abundances(transcripts, cfg.abundance)
     n_shadow = len(transcripts) - n_annotated
     conditions = run_condition_grid(
-        cfg, transcripts, has_file_nrna=has_file_nrna, index=index_record, n_shadow_transcripts=n_shadow
+        cfg, transcripts, has_file_nascent=has_file_nascent, index=index_record, n_shadow_transcripts=n_shadow
     )
     manifest_path = write_manifest(outdir, cfg, conditions, index=index_record, n_shadow_transcripts=n_shadow)
     logger.info("Wrote manifest to %s", manifest_path)

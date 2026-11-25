@@ -6,7 +6,7 @@ The truth is what generated the reads: a transcript's true captured length is ``
 (``CaptureSampler.partition_array``) and its plain length ``Σ_w f_pre(w) · off_target_weight · (L_t − w + 1)+``.
 The truth factor is their ratio; an arm's factor is its effective length over the same plain lengths. The two are
 compared in the log, anchored on the fully probed transcripts (a global scale is free), and summarised per probed
-class and per kind (mRNA, annotated single-exon, synthetic span). A factor of exactly 0 is counted and dropped from
+class and per kind (annotated RNA, annotated single-exon, synthetic span). A factor of exactly 0 is counted and dropped from
 the quantiles.
 
 Arms: ``shipped`` is the ruler in ``src/``; ``oracle_gdna`` feeds it the certified true gDNA counts per object
@@ -21,7 +21,7 @@ and the partial classes carry the junction price, which reads a junction's captu
 
 Usage::
 
-    python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.99_nrna_file_capture_on
+    python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.99_nascent_file_capture_on
     python scripts/design/ruler_vs_truth.py --panel test                      # every capture-ON condition, one line each
     python scripts/design/ruler_vs_truth.py --panel test --panel-dir $RIGEL_RUNS/test_reference/scenarios_depth_d10
     python scripts/design/ruler_vs_truth.py --panel ladder --condition C --module proto.py --out table.tsv
@@ -98,7 +98,7 @@ CLASSES = (
     ("partial > ½", 0.5, 0.9),
     ("probed ≥ 0.9", 0.9, 1.01),
 )
-KINDS = ("mRNA", "single-exon", "entity")
+KINDS = ("annotated RNA", "single-exon", "entity")
 #: the tolerance the per-class share is reported at: within ±0.1 nat of the truth, a 10 % effective length
 WITHIN = 0.1
 #: the keys a capture config carries from the panel manifest: every field of the simulator's config
@@ -147,14 +147,14 @@ def sampler_truth(sampler: CaptureSampler, lengths, widths, pmf, off_target: flo
     L_true = np.zeros(n)
     L_plain = np.zeros(n)
     for w, pw in zip(widths, pmf, strict=True):
-        L_true += pw * sampler.partition_array("mrna", rows, L, int(w))
-        L_plain += pw * off_target * sampler.admissible_counts("mrna", rows, L, int(w))
+        L_true += pw * sampler.partition_array("transcript", rows, L, int(w))
+        L_plain += pw * off_target * sampler.admissible_counts("transcript", rows, L, int(w))
     ok = L_plain > 0
     factor = np.where(ok, L_true / np.maximum(L_plain, 1e-12), np.nan)
     binding = float(sampler.config.binding_per_base)
     if sampler.enabled and binding > 0.0:
-        known = sampler.admissible_counts("mrna", rows, L, 1)
-        probed = np.clip(sampler.probed_bases("mrna", rows) / np.maximum(known, 1), 0.0, 1.0)
+        known = sampler.admissible_counts("transcript", rows, L, 1)
+        probed = np.clip(sampler.probed_bases("transcript", rows) / np.maximum(known, 1), 0.0, 1.0)
     else:
         probed = np.zeros(n)
     return L_plain, factor, probed
@@ -239,11 +239,11 @@ def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition
 
 def transcript_kinds(t_df: pd.DataFrame) -> np.ndarray:
     """Per transcript, one of :data:`KINDS`: a synthetic span (``entity``), an annotated single-exon transcript, or
-    an mRNA."""
+    an annotated RNA."""
     return np.where(
         t_df.is_synthetic.to_numpy(bool),
         "entity",
-        np.where(t_df.is_single_exon.to_numpy(bool), "single-exon", "mRNA"),
+        np.where(t_df.is_single_exon.to_numpy(bool), "single-exon", "annotated RNA"),
     )
 
 
@@ -409,7 +409,7 @@ def class_rows(d, measured, truth: Truth) -> list[dict]:
 
 def headline(d, measured, truth: Truth) -> dict:
     """The one-line summary a condition sweep prints: the probed class's share within the tolerance
-    and the unprobed and partial classes' median error, mRNA and single-exon transcripts pooled."""
+    and the unprobed and partial classes' median error, annotated RNA and single-exon transcripts pooled."""
     real = measured & (truth.kind != "entity")
     probed = real & (truth.probed_frac >= 0.9)
     unprobed = real & (truth.probed_frac < 1e-9)
@@ -791,7 +791,7 @@ def footprint_probed_fraction(sim: Sim, blocks: np.ndarray, n_loci: int, id2name
 def junction_probed_flags(sim: Sim, index: TranscriptIndex) -> np.ndarray:
     """Per transcript: does a probe part in the transcript's own space strictly span one of its junctions?
 
-    Read off the sampler's probe map (``probe_intervals("mrna", row)``) against the junction positions in transcript
+    Read off the sampler's probe map (``probe_intervals("transcript", row)``) against the junction positions in transcript
     coordinates, 5′ to 3′. These are the junction-probed transcripts, whose junction placements bind a probe no
     gDNA witness can see."""
     from rigel.types import Strand
@@ -816,7 +816,7 @@ def junction_probed_flags(sim: Sim, index: TranscriptIndex) -> np.ndarray:
         if int(strand[i]) != int(Strand.POS):
             lengths = lengths[::-1]
         junctions = np.cumsum(lengths)[:-1]
-        intervals = sim.sampler.probe_intervals("mrna", i)
+        intervals = sim.sampler.probe_intervals("transcript", i)
         if not intervals:
             continue
         for iv in intervals:
@@ -1110,7 +1110,7 @@ def _check_manifest_loader(panel: _Panel, check) -> None:
     u = panel.u
     check("the loader masks the gDNA reference at the genome's unknown runs",
           loaded.sampler.unknown("gdna", "chr1").tolist() == [[12200, 12300], [13100, 13120]])
-    check("...and each transcript at its own", loaded.sampler.unknown("mrna", u).tolist() == [[700, 720]])
+    check("...and each transcript at its own", loaded.sampler.unknown("transcript", u).tolist() == [[700, 720]])
     plain, factor, _ = sampler_truth(loaded.sampler, panel.L, panel.widths, panel.pmf, 1.0)
     enumerated = sum(
         pw * sum(1 for st in range(int(panel.L[u]) - int(wv) + 1) if st + int(wv) <= 700 or st >= 720)
@@ -1301,10 +1301,10 @@ def _check_gdna_space(panel: _Panel, check) -> None:
     check("a masked gDNA footprint's yield agrees with direct enumeration of the drawable starts",
           np.allclose(Ym, _enumerated_yield(sampler, gap, blocks), rtol=1e-12, atol=1e-9) and (Ym < Ygap).all())
     sampler.mask_unknown("gdna", "chr1", [])
-    sampler.mask_unknown("mrna", p, [(100, 140)])
+    sampler.mask_unknown("transcript", p, [(100, 140)])
     _, _, probed_m = sampler_truth(sampler, panel.L, panel.widths, panel.pmf, off)
     check("a fully probed transcript with unknown bases still reads probed fraction 1", abs(probed_m[p] - 1.0) < 1e-9)
-    sampler.mask_unknown("mrna", p, [])
+    sampler.mask_unknown("transcript", p, [])
 
 
 def _check_footprints(panel: _Panel, sim: Sim, plain: float, check) -> None:

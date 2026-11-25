@@ -45,7 +45,7 @@ from _sim_truth import (
 def _truth_transcript(
     transcript_id: str,
     abundance: float,
-    nrna_abundance: float = 0.0,
+    nascent_abundance: float = 0.0,
 ) -> Transcript:
     transcript = Transcript(
         ref="chr1",
@@ -55,15 +55,15 @@ def _truth_transcript(
         g_id=f"g_{transcript_id}",
         abundance=abundance,
     )
-    transcript.nrna_abundance = nrna_abundance
+    transcript.nascent_abundance = nascent_abundance
     transcript.compute_length()
     return transcript
 
 
-def test_parse_mrna_fastq_origin():
+def test_parse_annotated_fastq_origin():
     origin = parse_origin("@tx1:10-250:f:7/1")
 
-    assert origin.kind == "mrna"
+    assert origin.kind == "annotated"
     assert origin.transcript_id == "tx1"
     assert origin.start == 10
     assert origin.end == 250
@@ -71,10 +71,10 @@ def test_parse_mrna_fastq_origin():
     assert origin.index == 7
 
 
-def test_parse_nrna_bam_origin():
-    origin = parse_origin("nrna_tx2:4-300:r:11")
+def test_parse_nascent_bam_origin():
+    origin = parse_origin("nascent_tx2:4-300:r:11")
 
-    assert origin.kind == "nrna"
+    assert origin.kind == "nascent"
     assert origin.transcript_id == "tx2"
     assert origin.start == 4
     assert origin.end == 300
@@ -110,18 +110,28 @@ def test_parse_origin_keeps_a_colon_inside_a_contig_or_transcript_id():
         3,
     )
 
-    mrna = parse_origin("tx:1:10-250:r:7")
-    assert (mrna.kind, mrna.transcript_id, mrna.start, mrna.end) == ("mrna", "tx:1", 10, 250)
+    annotated = parse_origin("tx:1:10-250:r:7")
+    assert (annotated.kind, annotated.transcript_id, annotated.start, annotated.end) == (
+        "annotated",
+        "tx:1",
+        10,
+        250,
+    )
 
-    nrna = parse_origin("nrna_tx:1:4-300:f:11")
-    assert (nrna.kind, nrna.transcript_id, nrna.start, nrna.end) == ("nrna", "tx:1", 4, 300)
+    nascent = parse_origin("nascent_tx:1:4-300:f:11")
+    assert (nascent.kind, nascent.transcript_id, nascent.start, nascent.end) == (
+        "nascent",
+        "tx:1",
+        4,
+        300,
+    )
 
 
 def test_the_format_functions_write_the_simulator_names():
     """The exact bytes: every oracle BAM and FASTQ already simulated carries names of this form."""
     assert format_rna_name("tx1", 10, 250, STRAND_FORWARD, 7, nascent=False) == "tx1:10-250:f:7"
     assert format_rna_name("tx1", 4, 300, STRAND_REVERSE, 11, nascent=True) == (
-        "nrna_tx1:4-300:r:11"
+        "nascent_tx1:4-300:r:11"
     )
     assert format_gdna_name("chr1", 100, 390, STRAND_REVERSE, 3) == "gdna:chr1:100-390:r:3"
 
@@ -133,11 +143,11 @@ def test_a_formatted_name_parses_back_to_its_fields():
         cases = [
             (
                 format_rna_name("tx:1", 10, 250, strand, 7, nascent=False),
-                Origin("mrna", "tx:1", None, 10, 250, strand, 7),
+                Origin("annotated", "tx:1", None, 10, 250, strand, 7),
             ),
             (
                 format_rna_name("tx:1", 4, 300, strand, 11, nascent=True),
-                Origin("nrna", "tx:1", None, 4, 300, strand, 11),
+                Origin("nascent", "tx:1", None, 4, 300, strand, 11),
             ),
             (
                 format_gdna_name("HLA-A*01:01", 100, 390, strand, 3),
@@ -155,7 +165,7 @@ def test_parse_origin_refuses_a_strand_outside_the_alphabet():
     read as truth."""
     for qname in (
         "tx1:10-250:+:7",
-        "nrna_tx1:4-300:-:11",
+        "nascent_tx1:4-300:-:11",
         "gdna:chr1:100-390:.:3",
         "tx1:10-250:F:7",
         "tx1:10-250::7",
@@ -168,14 +178,14 @@ def test_count_origins_from_fastq(tmp_path):
     fastq = tmp_path / "reads.fq"
     fastq.write_text(
         "@tx1:0-100:f:0/1\nACGT\n+\nIIII\n"
-        "@nrna_tx1:0-100:f:1/1\nACGT\n+\nIIII\n"
+        "@nascent_tx1:0-100:f:1/1\nACGT\n+\nIIII\n"
         "@gdna:chr1:0-100:r:2/1\nACGT\n+\nIIII\n"
     )
 
     counts = summarize_post_capture_truth([], fastq_path=fastq)["origin_counts"]
 
-    assert counts["mrna"] == 1
-    assert counts["nrna"] == 1
+    assert counts["annotated"] == 1
+    assert counts["nascent"] == 1
     assert counts["gdna"] == 1
 
 
@@ -183,7 +193,7 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
     fastq = tmp_path / "reads.fq"
     fastq.write_text(
         "@TX1:0-100:f:0/1\nACGT\n+\nIIII\n"
-        "@nrna_TX1:20-220:f:1/1\nACGT\n+\nIIII\n"
+        "@nascent_TX1:20-220:f:1/1\nACGT\n+\nIIII\n"
         "@TX2:0-80:f:2/1\nACGT\n+\nIIII\n"
         "@gdna:chr1:5-155:r:3/1\nACGT\n+\nIIII\n"
     )
@@ -203,7 +213,7 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
     )
 
     # Each quantity in one column: the molecules before capture, then the fragments realised, with no
-    # copy of the realised count under a molar name (`mrna_abundance`, ...) or as `post_capture_*`.
+    # copy of the realised count under a molar name (`annotated_abundance`, ...) or as `post_capture_*`.
     header = (tmp_path / "truth_abundances.tsv").read_text().splitlines()[0].split("\t")
     assert header == [
         "transcript_id",
@@ -211,11 +221,11 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
         "gene_name",
         "ref",
         "strand",
-        "pre_capture_mrna_abundance",
-        "pre_capture_nrna_abundance",
+        "pre_capture_annotated_abundance",
+        "pre_capture_nascent_abundance",
         "pre_capture_total_rna",
-        "observed_mrna_fragments",
-        "observed_nrna_fragments",
+        "observed_annotated_fragments",
+        "observed_nascent_fragments",
         "observed_total_rna_fragments",
         "n_exons",
         "spliced_length",
@@ -224,20 +234,23 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
     abundances = pd.read_csv(tmp_path / "truth_abundances.tsv", sep="\t")
     tx1 = abundances.set_index("transcript_id").loc["TX1"]
     tx2 = abundances.set_index("transcript_id").loc["TX2"]
-    assert tx1["pre_capture_mrna_abundance"] == 10.0
-    assert tx1["pre_capture_nrna_abundance"] == 2.0
+    assert tx1["pre_capture_annotated_abundance"] == 10.0
+    assert tx1["pre_capture_nascent_abundance"] == 2.0
     assert tx1["pre_capture_total_rna"] == 12.0
-    assert tx1["observed_mrna_fragments"] == 1
-    assert tx1["observed_nrna_fragments"] == 1
+    assert tx1["observed_annotated_fragments"] == 1
+    assert tx1["observed_nascent_fragments"] == 1
     assert tx1["observed_total_rna_fragments"] == 2
-    assert (tx2["observed_mrna_fragments"], tx2["pre_capture_mrna_abundance"]) == (1, 50.0)
+    assert (tx2["observed_annotated_fragments"], tx2["pre_capture_annotated_abundance"]) == (
+        1,
+        50.0,
+    )
 
     fl = pd.read_csv(tmp_path / "truth_fragment_lengths.tsv", sep="\t")
     gdna_150 = fl[(fl["kind"] == "gdna") & (fl["fragment_length"] == 150)]
     rna_200 = fl[(fl["kind"] == "rna") & (fl["fragment_length"] == 200)]
     assert gdna_150["count"].item() == 1
     assert rna_200["count"].item() == 1
-    assert summary["origin_counts"] == {"mrna": 2, "nrna": 1, "gdna": 1}
+    assert summary["origin_counts"] == {"annotated": 2, "nascent": 1, "gdna": 1}
 
     # one key per path: the three tables' paths are written once each, never repeated under `files`
     written_summary = json.loads((tmp_path / "truth_summary.json").read_text())
@@ -257,7 +270,7 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
     assert written_summary["post_capture_fragment_lengths"] == str(
         tmp_path / "truth_fragment_lengths.tsv"
     )
-    assert written_summary["fragment_lengths"]["mrna"]["n"] == 2
+    assert written_summary["fragment_lengths"]["annotated"]["n"] == 2
 
 
 def _molar_transcripts() -> list[Transcript]:
@@ -269,7 +282,7 @@ def _molar_transcripts() -> list[Transcript]:
         ("minus", Strand.NEG, [(1000, 1500)], 1234.56789, 0.0, "gene_minus"),
     ]
     transcripts = []
-    for t_id, strand, exons, abundance, nrna, g_name in spec:
+    for t_id, strand, exons, abundance, nascent, g_name in spec:
         transcript = Transcript(
             ref="chr1",
             strand=strand,
@@ -279,7 +292,7 @@ def _molar_transcripts() -> list[Transcript]:
             g_name=g_name,
             abundance=abundance,
         )
-        transcript.nrna_abundance = nrna
+        transcript.nascent_abundance = nascent
         transcript.compute_length()
         transcripts.append(transcript)
     return transcripts
@@ -292,10 +305,10 @@ def test_the_molar_table_is_written_exactly_and_reads_back_as_an_abundance_input
 
     Perturbation: that truthiness test in ``truth._transcript_metadata`` writes ``spliced``'s span as
     0, and ``.3f`` in ``truth._molar_row`` moves every abundance column."""
-    path = tmp_path / "truth_abundances_nrna_mid.tsv"
+    path = tmp_path / "truth_abundances_nascent_mid.tsv"
     write_molar_truth(_molar_transcripts(), path)
     assert path.read_text() == (
-        "transcript_id\tgene_id\tgene_name\tref\tstrand\tmrna_abundance\tnrna_abundance\t"
+        "transcript_id\tgene_id\tgene_name\tref\tstrand\tannotated_abundance\tnascent_abundance\t"
         "total_rna\tn_exons\tspliced_length\tgenomic_span\n"
         "spliced\tg_spliced\tgene_spliced\tchr1\t+\t12.5000\t0.0000\t12.5000\t2\t200\t300\n"
         "span\tg_span\t\tchr1\t+\t0.0000\t3.1416\t3.1416\t1\t300\t300\n"
@@ -304,11 +317,11 @@ def test_the_molar_table_is_written_exactly_and_reads_back_as_an_abundance_input
 
     read_back = _molar_transcripts()
     for transcript in read_back:
-        transcript.abundance, transcript.nrna_abundance = None, 0.0
+        transcript.abundance, transcript.nascent_abundance = None, 0.0
     assert assign_file_abundances(read_back, path) is True, (
         "the table's nascent column was not read"
     )
-    assert [(t.abundance, t.nrna_abundance) for t in read_back] == [
+    assert [(t.abundance, t.nascent_abundance) for t in read_back] == [
         (12.5, 0.0),
         (0.0, 3.1416),
         (1234.5679, 0.0),
@@ -321,7 +334,7 @@ def test_the_molar_table_is_written_exactly_and_reads_back_as_an_abundance_input
 def test_a_condition_truth_table_is_refused_as_an_abundance_input(tmp_path):
     """A condition's table holds the fragments that condition realised, never molecules, so it is no
     abundance input. The table this writer writes carries no molar-named column at all; an older table
-    also carries the realised counts under ``mrna_abundance`` / ``nrna_abundance``, which the ``sim``
+    also carries the realised counts under ``annotated_abundance`` / ``nascent_abundance``, which the ``sim``
     format would read as molecules, so both are refused by the realised column.
 
     Perturbation: dropping the refusal in ``_sim_abundance._detect_abundance_format`` reads the second
@@ -343,17 +356,17 @@ def test_a_condition_truth_table_is_refused_as_an_abundance_input(tmp_path):
         "gene_name",
         "ref",
         "strand",
-        "mrna_abundance",
-        "nrna_abundance",
+        "annotated_abundance",
+        "nascent_abundance",
         "total_rna",
-        "pre_capture_mrna_abundance",
-        "pre_capture_nrna_abundance",
+        "pre_capture_annotated_abundance",
+        "pre_capture_nascent_abundance",
         "pre_capture_total_rna",
-        "post_capture_mrna_fragments",
-        "post_capture_nrna_fragments",
+        "post_capture_annotated_fragments",
+        "post_capture_nascent_fragments",
         "post_capture_total_rna_fragments",
-        "observed_mrna_fragments",
-        "observed_nrna_fragments",
+        "observed_annotated_fragments",
+        "observed_nascent_fragments",
         "observed_total_rna_fragments",
         "n_exons",
         "spliced_length",
@@ -369,8 +382,10 @@ def test_a_condition_truth_table_is_refused_as_an_abundance_input(tmp_path):
 
 
 def test_condition_dir_name_and_gdna_labels():
-    assert condition_dir_name("low", 0.9, "rand") == "gdna_low_ss_0.90_nrna_rand"
-    assert condition_dir_name("low", 0.9, "rand", "on") == "gdna_low_ss_0.90_nrna_rand_capture_on"
+    assert condition_dir_name("low", 0.9, "rand") == "gdna_low_ss_0.90_nascent_rand"
+    assert (
+        condition_dir_name("low", 0.9, "rand", "on") == "gdna_low_ss_0.90_nascent_rand_capture_on"
+    )
     assert gdna_label_for_rate(0, None, 0) == "r0"
     assert gdna_label_for_rate(0.3, None, 1) == "r0.3"
     assert gdna_label_for_rate(0.3, ["none", "low"], 1) == "low"
@@ -378,7 +393,7 @@ def test_condition_dir_name_and_gdna_labels():
 
 def test_manifest_round_trip(tmp_path):
     config = WholeGenomeSimConfig(simulation=SimulationParams(frag_mean=250))
-    conditions = [{"name": "gdna_none_ss_1.00_nrna_none", "n_rna": 10}]
+    conditions = [{"name": "gdna_none_ss_1.00_nascent_none", "n_rna": 10}]
     index = {"path": "/idx", "manifest": {"sources": {"gtf": {"path": "/a.gtf", "sha256": "ab"}}}}
 
     path = write_manifest(tmp_path, config, conditions, index=index)
@@ -428,7 +443,7 @@ def test_the_condition_grid_names_each_truth_file_under_one_key(tmp_path):
         ),
         strand_specificities=[0.99],
     )
-    entries = run_condition_grid(config, _molar_transcripts(), has_file_nrna=True)
+    entries = run_condition_grid(config, _molar_transcripts(), has_file_nascent=True)
     (entry,) = entries
     tables = ("pre_capture_abundances", "post_capture_abundances", "post_capture_fragment_lengths")
     paths = {key: value for key, value in entry.items() if str(value).endswith((".tsv", ".json"))}

@@ -11,9 +11,9 @@ from contextlib import redirect_stdout
 
 import policy_benchmark as pb
 
-STRANDED_OFF = "gdna_g50_ss_0.99_nrna_mid_capture_off"
-STRANDED_ON = "gdna_g50_ss_0.99_nrna_mid_capture_on"
-UNSTRANDED_ON = "gdna_g50_ss_0.50_nrna_mid_capture_on"
+STRANDED_OFF = "gdna_g50_ss_0.99_nascent_mid_capture_off"
+STRANDED_ON = "gdna_g50_ss_0.99_nascent_mid_capture_on"
+UNSTRANDED_ON = "gdna_g50_ss_0.50_nascent_mid_capture_on"
 
 
 def _row(silent, transfer):

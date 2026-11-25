@@ -666,12 +666,12 @@ class TestGDNA:
         sc.cleanup()
 
 
-class TestNRNA:
-    """Nascent RNA (the simulator's ``nrna_abundance``): tests the EM's nascent spans."""
+class TestNascent:
+    """Nascent RNA (the simulator's ``nascent_abundance``): tests the EM's nascent spans."""
 
-    def test_nrna_moderate(self, tmp_path, update_golden):
+    def test_nascent_moderate(self, tmp_path, update_golden):
         sc = Scenario(
-            "golden_nrna", genome_length=10000, seed=SEED, work_dir=tmp_path / "golden_nrna"
+            "golden_nascent", genome_length=10000, seed=SEED, work_dir=tmp_path / "golden_nascent"
         )
         sc.add_gene(
             "g1",
@@ -687,13 +687,16 @@ class TestNRNA:
                 {"t_id": "t2", "exons": [(4000, 4300), (4700, 5000)], "abundance": 40},
             ],
         )
-        result = sc.build_oracle(n_fragments=N_FRAGS, sim_config=_SIM_SS90, nrna_abundance=30)
-        _run_golden_test("nrna_moderate_ss90", result, result.index, update_golden)
+        result = sc.build_oracle(n_fragments=N_FRAGS, sim_config=_SIM_SS90, nascent_abundance=30)
+        _run_golden_test("nascent_moderate_ss90", result, result.index, update_golden)
         sc.cleanup()
 
-    def test_nrna_heavy(self, tmp_path, update_golden):
+    def test_nascent_heavy(self, tmp_path, update_golden):
         sc = Scenario(
-            "golden_nrna_hi", genome_length=10000, seed=SEED, work_dir=tmp_path / "golden_nrna_hi"
+            "golden_nascent_hi",
+            genome_length=10000,
+            seed=SEED,
+            work_dir=tmp_path / "golden_nascent_hi",
         )
         sc.add_gene(
             "g1",
@@ -709,8 +712,8 @@ class TestNRNA:
                 {"t_id": "t2", "exons": [(4000, 4300), (4700, 5000)], "abundance": 30},
             ],
         )
-        result = sc.build_oracle(n_fragments=N_FRAGS, sim_config=_SIM_SS90, nrna_abundance=70)
-        _run_golden_test("nrna_heavy_ss90", result, result.index, update_golden)
+        result = sc.build_oracle(n_fragments=N_FRAGS, sim_config=_SIM_SS90, nascent_abundance=70)
+        _run_golden_test("nascent_heavy_ss90", result, result.index, update_golden)
         sc.cleanup()
 
 
@@ -864,7 +867,7 @@ class TestCombinedStress:
             ],
         )
         result = sc.build_oracle(
-            n_fragments=N_FRAGS, sim_config=_SIM_SS90, gdna_config=gdna, nrna_abundance=20
+            n_fragments=N_FRAGS, sim_config=_SIM_SS90, gdna_config=gdna, nascent_abundance=20
         )
         _run_golden_test("combo_moderate", result, result.index, update_golden)
         sc.cleanup()
@@ -895,7 +898,7 @@ class TestCombinedStress:
             ],
         )
         result = sc.build_oracle(
-            n_fragments=N_FRAGS, sim_config=_SIM_SS65, gdna_config=gdna, nrna_abundance=60
+            n_fragments=N_FRAGS, sim_config=_SIM_SS65, gdna_config=gdna, nascent_abundance=60
         )
         _run_golden_test("combo_extreme", result, result.index, update_golden)
         sc.cleanup()

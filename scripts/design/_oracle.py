@@ -1,7 +1,7 @@
 """The calibration oracle: the validated ground truth every truth-scoring instrument reads.
 
-The oracle is the production accumulator, partitioned by true fragment origin: the sim BAM is split into gdna / mrna /
-nrna by read-name origin (:func:`rigel.sim.read_name.parse_origin`), the production scanner and accumulator run on each
+The oracle is the production accumulator, partitioned by true fragment origin: the sim BAM is split into gdna / annotated /
+nascent by read-name origin (:func:`rigel.sim.read_name.parse_origin`), the production scanner and accumulator run on each
 partition, and the partitions are asserted to sum to the full payload. Because the accumulator deposits each fragment
 independently, that identity proves the partition is the production payload split by origin, with nothing reimplemented.
 Four populations sit on three axes, each an integer count with two genome-strand columns: ``region_contained`` (the
@@ -28,7 +28,7 @@ from rigel.scan_payload import DEFERRED_RECORD_FIELDS
 from rigel.second_pass import drain
 from rigel.sim.read_name import STRAND_FORWARD, parse_origin
 
-ORIGINS = ("gdna", "mrna", "nrna")
+ORIGINS = ("gdna", "annotated", "nascent")
 
 #: The RNA reads again, split by transcript strand: an additional partition beside :data:`ORIGINS`, not a replacement.
 #: The populations are ``{gDNA, RNA+, RNA−}``, so a per-population measurement needs per-slot RNA truth keyed by the
@@ -36,7 +36,7 @@ ORIGINS = ("gdna", "mrna", "nrna")
 #: strand only at ``ss 0.99``, wrong on the unstranded half this partition exists for. The simulator writes the
 #: transcript's ``f``/``r`` into the read name (`wgs_engine._t_strand_chars`), so no new simulation is needed.
 #: ``ORIGINS`` stays the accumulator's three-way axis that instruments iterate, and since both partitions describe the
-#: same reads, ``rna_pos + rna_neg == mrna + nrna`` is a real check.
+#: same reads, ``rna_pos + rna_neg == annotated + nascent`` is a real check.
 RNA_STRAND_ORIGINS = ("rna_pos", "rna_neg")
 
 #: Every per-object bank on the payload. Sum-to-full is asserted over all of them, so a bank missing here would go
@@ -385,7 +385,7 @@ class OracleTruth:
         Returns ``{"gdna": float64[n_boundaries], "rna": float64[n_boundaries]}``.
         """
         out = {}
-        for name, origins in (("gdna", ("gdna",)), ("rna", ("mrna", "nrna"))):
+        for name, origins in (("gdna", ("gdna",)), ("rna", ("annotated", "nascent"))):
             mass = sum(
                 np.asarray(self.parts[k].boundary_unspliced_mass, np.float64) for k in origins
             )
@@ -403,7 +403,7 @@ class OracleTruth:
         in the schema ``calibrate`` assembles, so ``dataclasses.replace(cal, **override_masses(ra))`` gives a perfect
         calibration.
 
-        gDNA is the gdna partition's count; RNA is the (mrna + nrna) count, spliced-inclusive on the boundary axis to
+        gDNA is the gdna partition's count; RNA is the (annotated + nascent) count, spliced-inclusive on the boundary axis to
         match ``chain_boundary_deconv``'s ``rna = (1−f_g)·unspliced + spliced``. ``gdna + rna`` equals the full object
         count on both axes because the partitions sum to the full payload. ``count_rna_sj`` is the full payload's sj
         flux, equal to the RNA partitions' by the same identity.
@@ -414,11 +414,11 @@ class OracleTruth:
         def total(sub, population):
             return np.asarray(getattr(sub, population).count, np.float64).sum(1)
 
-        rna_region = total(subs["mrna"], "region_contained") + total(
-            subs["nrna"], "region_contained"
+        rna_region = total(subs["annotated"], "region_contained") + total(
+            subs["nascent"], "region_contained"
         )
-        rna_boundary_unspliced = total(subs["mrna"], "boundary_unspliced") + total(
-            subs["nrna"], "boundary_unspliced"
+        rna_boundary_unspliced = total(subs["annotated"], "boundary_unspliced") + total(
+            subs["nascent"], "boundary_unspliced"
         )
         spliced_boundary = total(full, "boundary_spliced")
         return dict(

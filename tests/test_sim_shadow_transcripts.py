@@ -2,7 +2,7 @@
 
 The merge appends shadows to the index's transcript list for simulation, with ``t_index`` continuing after the
 index's rows and no nascent span, and refuses one whose id the index already knows: a shadow the tool can see is not
-a shadow. Their fragments are named like any RNA fragment, so the oracle files them as ``mrna`` without a read-name
+a shadow. Their fragments are named like any RNA fragment, so the oracle files them as ``annotated`` without a read-name
 change (``rigel.sim.read_name.parse_origin``).
 """
 
@@ -53,7 +53,7 @@ def test_shadows_are_appended_after_the_index_rows_with_no_nascent(tmp_path):
     assert [t.t_id for t in merged] == ["A", "B", "S1", "S2"]
     s1, s2 = merged[2], merged[3]
     assert (s1.t_index, s2.t_index) == (2, 3)  # continue after the index's rows
-    assert not s1.is_synthetic and s1.span_t_index == -1 and s1.nrna_abundance == 0.0
+    assert not s1.is_synthetic and s1.span_t_index == -1 and s1.nascent_abundance == 0.0
     assert s2.strand == Strand.NEG
 
 
@@ -65,11 +65,11 @@ def test_a_shadow_the_index_already_knows_is_refused(tmp_path):
         merge_shadow_transcripts(index_tx, gtf)
 
 
-def test_a_shadow_fragment_is_filed_as_mrna_by_the_oracle():
+def test_a_shadow_fragment_is_filed_as_annotated_by_the_oracle():
     """No read-name change is needed: a shadow's fragment is named like any mature RNA fragment and
     parses as RNA of that transcript, so the certified truth shows RNA where the annotation says there
     is none."""
     name = format_rna_name("shadow_U1_SE2kb_plus", 100050, 100260, STRAND_FORWARD, 7, nascent=False)
     o = parse_origin(name)
-    assert o.kind == "mrna"
+    assert o.kind == "annotated"
     assert o.transcript_id == "shadow_U1_SE2kb_plus"

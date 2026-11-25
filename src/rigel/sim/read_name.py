@@ -2,11 +2,11 @@
 :func:`format_gdna_name` and read back by :func:`parse_origin`. The three forms are::
 
     mature RNA    {t_id}:{start}-{end}:{strand}:{index}
-    nascent RNA   nrna_{t_id}:{start}-{end}:{strand}:{index}
+    nascent RNA   nascent_{t_id}:{start}-{end}:{strand}:{index}
     gDNA          gdna:{ref}:{start}-{end}:{strand}:{index}
 
 ``start``-``end`` is the fragment's 0-based half-open interval: on the transcript's own 5'-to-3' sequence for RNA
-(a nascent fragment's template is a single-exon nRNA entity), on reference ``ref`` for gDNA. ``strand`` is ``f`` or
+(a nascent fragment's template is a single-exon nascent RNA entity), on reference ``ref`` for gDNA. ``strand`` is ``f`` or
 ``r``: the transcript's strand for RNA (``r`` for minus, ``f`` otherwise), the fragment's genomic strand for gDNA.
 ``index`` counts the writer's fragments: within an RNA row, and across one writer's gDNA chunks. A FASTQ header's
 leading ``@`` and ``/1`` or ``/2`` suffix are stripped by the parser.
@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-OriginKind = Literal["mrna", "nrna", "gdna"]
+OriginKind = Literal["annotated", "nascent", "gdna"]
 
 #: The strand alphabet: ``f`` forward (+), ``r`` reverse (−).
 STRAND_FORWARD = "f"
@@ -25,7 +25,7 @@ STRAND_REVERSE = "r"
 STRANDS = (STRAND_FORWARD, STRAND_REVERSE)
 
 #: Glued to the transcript id of a nascent-RNA name; a mature-RNA name has no prefix.
-NASCENT_PREFIX = "nrna_"
+NASCENT_PREFIX = "nascent_"
 #: A gDNA name's leading field of its own, followed by ``:{ref}``.
 GDNA_PREFIX = "gdna"
 
@@ -60,7 +60,7 @@ def format_rna_name(
     t_id: str, start: int, end: int, strand: str, index: int, *, nascent: bool
 ) -> str:
     """The read name of an RNA fragment over ``[start, end)`` of transcript ``t_id``'s sequence; ``nascent`` marks a
-    fragment of an nRNA entity's nascent row."""
+    fragment of an nascent RNA entity's nascent row."""
     lead = f"{NASCENT_PREFIX}{t_id}" if nascent else t_id
     return f"{lead}:{start}-{end}:{strand}:{index}"
 
@@ -126,7 +126,7 @@ def parse_origin(qname: str) -> Origin:
         )
     if name.startswith(NASCENT_PREFIX):
         return Origin(
-            kind="nrna",
+            kind="nascent",
             transcript_id=name.removeprefix(NASCENT_PREFIX),
             ref=None,
             start=start,
@@ -135,7 +135,7 @@ def parse_origin(qname: str) -> Origin:
             index=index,
         )
     return Origin(
-        kind="mrna",
+        kind="annotated",
         transcript_id=name,
         ref=None,
         start=start,

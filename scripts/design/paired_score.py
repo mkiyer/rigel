@@ -60,7 +60,7 @@ Numerical Algorithms, 2nd ed., §3.1 and §4.2; ``u = 2^-53``, ``γ(m) = m u / (
 - each locus's gDNA equals the solver's exactly (the same additions in the same order), its RNA and the intergenic
   term within two evaluations' bound;
 - the closure: the four class sums equal the pools ``quant_accuracy.py`` reports for the same run (``score_library``:
-  ``mrna_est``, ``nrna_est``, ``gdna_est``, ``n_intergenic_gdna``), each within two evaluations' bound at the
+  ``annotated_est``, ``nascent_est``, ``gdna_est``, ``n_intergenic_gdna``), each within two evaluations' bound at the
   check's own term count. This holds under fractional assignment.
 
 The protocol is pinned and fractional (``scan.total_threads=1``, ``em.assignment_mode=fractional``), so a pair is
@@ -134,9 +134,9 @@ from rigel.native import EM_CLASSES, EM_WINNER_INTERGENIC  # noqa: E402
 ANN, NAS, GDNA, IG = (EM_CLASSES.index(c) for c in ("annotated", "nascent", "gdna", "intergenic"))
 
 #: The read name's source, as the pools name it: gDNA, annotated RNA (a reference transcript's mature sequence),
-#: nascent RNA. ``parse_origin`` spells them ``gdna``, ``mrna``, ``nrna``.
+#: nascent RNA. ``parse_origin`` spells them ``gdna``, ``annotated``, ``nascent``.
 KINDS = ("gdna", "annotated", "nascent")
-_KIND_OF_ORIGIN = {"gdna": 0, "mrna": 1, "nrna": 2}
+_KIND_OF_ORIGIN = {"gdna": 0, "annotated": 1, "nascent": 2}
 
 #: A read pair's status in a record. Only ``forecast`` is scored.
 STATUSES = ("forecast", "unassigned", "withheld", "excluded")
@@ -715,13 +715,13 @@ def record_bam(arm: str, bam: Path, index, pipeline_config, work_dir: Path, summ
                       for r in est.locus_results},
         intergenic_em=float(est.gdna_intergenic_em_count),
         ledger={k: int(getattr(stats, k)) for k in ("n_read_pairs", "n_excluded", "n_fragments", "n_intergenic")},
-        pools={"annotated": lib["mrna_est"], "nascent": lib["nrna_est"], "gdna": lib["gdna_est"],
+        pools={"annotated": lib["annotated_est"], "nascent": lib["nascent_est"], "gdna": lib["gdna_est"],
                "intergenic": lib["n_intergenic_gdna"]},
         # every pool's other side also adds per transcript, per strand column, per locus, and once more
         n_extra_terms=int(index.num_transcripts) + len(est.locus_results) + NUM_SPLICE_STRAND_COLS + 1,
     )
     arrays, rec = build_record(run, pairs)
-    truth = {k: int(summary.get("origin_counts", {}).get(o, 0)) for k, o in zip(KINDS, ("gdna", "mrna", "nrna"))}
+    truth = {k: int(summary.get("origin_counts", {}).get(k, 0)) for k in KINDS}
     row = {
         **qa.row_stamp(arm, condition, pipeline_config, bam_name),
         "qa_arm": qa_arm,
@@ -731,7 +731,7 @@ def record_bam(arm: str, bam: Path, index, pipeline_config, work_dir: Path, summ
         **rec,
         "truth": truth,
         "not_in_bam": {k: truth[k] - rec["in_bam"][k] for k in KINDS},
-        "library": {k: lib[k] for k in ("mrna_est", "nrna_est", "gdna_est", "n_intergenic_gdna", "gdna_frac_est",
+        "library": {k: lib[k] for k in ("annotated_est", "nascent_est", "gdna_est", "n_intergenic_gdna", "gdna_frac_est",
                                         "gdna_frac_true")},
     }
     return arrays, row
@@ -1192,7 +1192,7 @@ def _toy_run():
         ledger={"n_read_pairs": 5, "n_excluded": 1, "n_fragments": 3, "n_intergenic": 1},
         pools={"annotated": 1.5, "nascent": 0.125, "gdna": 0.375, "intergenic": 1.0}, n_extra_terms=10,
     )
-    names = ["t0:0-100:f:0", "t0:0-100:f:1", "gdna:chr1:0-100:f:2", "nrna_t0:0-100:f:3", "gdna:chr1:5-100:f:4"]
+    names = ["t0:0-100:f:0", "t0:0-100:f:1", "gdna:chr1:0-100:f:2", "nascent_t0:0-100:f:3", "gdna:chr1:5-100:f:4"]
     # (name, flag, ZF): the unit's two mates, the deterministic one, the fast path, the withheld one, then an
     # unmapped pair
     records = [(names[0], 0x41, AF_ANNOTATED), (names[0], 0x81, AF_ANNOTATED), (names[1], 0x41, AF_ANNOTATED),
@@ -1255,13 +1255,13 @@ def _toy_records():
     """Two in-memory records of one condition over six read names (gDNA, annotated, nascent, twice)."""
     rng = np.random.default_rng(1)
     names = [f"gdna:chr1:{i}-{i + 100}:f:{i}" for i in range(2)] + [f"t{i}:0-100:f:{i}" for i in range(2)] + \
-            [f"nrna_t{i}:0-100:f:{i}" for i in range(2)]
+            [f"nascent_t{i}:0-100:f:{i}" for i in range(2)]
     key = np.array([name_key(n) for n in names], np.uint64)
     kind = np.array([0, 0, 1, 1, 2, 2], np.int8)
 
     def rec(arm):
         m = rng.dirichlet(np.ones(len(EM_CLASSES)), size=6)
-        meta = {"accepted": True, "condition": "gdna_g50_ss_0.99_nrna_mid_capture_on", "bam": ORACLE_BAM,
+        meta = {"accepted": True, "condition": "gdna_g50_ss_0.99_nascent_mid_capture_on", "bam": ORACLE_BAM,
                 "arm": arm, "settings": {"em.assignment_mode": "fractional"}, "revision": "r", "closure": {},
                 "not_in_bam": {k: 0 for k in KINDS}}
         return {"meta": meta, "key": key.copy(), "kind": kind.copy(), "status": np.zeros(6, np.int8), "mass": m}
@@ -1307,8 +1307,8 @@ def _check_strata(check) -> None:
     refused."""
     a, b = _toy_records()
     rows = []
-    for cond in ("gdna_g50_ss_0.99_nrna_mid_capture_on", "gdna_g50_ss_0.50_nrna_mid_capture_on",
-                 "gdna_g00_ss_0.99_nrna_mid_capture_on", "gdna_g25_ss_0.99_nrna_mid_capture_on"):
+    for cond in ("gdna_g50_ss_0.99_nascent_mid_capture_on", "gdna_g50_ss_0.50_nascent_mid_capture_on",
+                 "gdna_g00_ss_0.99_nascent_mid_capture_on", "gdna_g25_ss_0.99_nascent_mid_capture_on"):
         ra = {**a, "meta": {**a["meta"], "condition": cond}}
         rb = {**b, "meta": {**b["meta"], "condition": cond}}
         rows.append(pair_records(ra, rb))

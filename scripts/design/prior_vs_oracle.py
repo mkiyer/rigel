@@ -21,7 +21,7 @@ Gate: ``tests/calibration/test_prior_vs_oracle.py``.
 Usage::
 
     python scripts/design/prior_vs_oracle.py --suite DIR --oracle-cache DIR/oracle_cache --jobs 6
-    python scripts/design/prior_vs_oracle.py --conditions gdna_g50_ss_0.50_nrna_mid_capture_on
+    python scripts/design/prior_vs_oracle.py --conditions gdna_g50_ss_0.50_nascent_mid_capture_on
     python scripts/design/prior_vs_oracle.py --index INDEX --work-dir SCRATCH
     python scripts/design/prior_vs_oracle.py --set scan.total_threads=1   # a pinned, reproducible run
 """
@@ -293,8 +293,8 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
 
     g = float(np.asarray(oracle.parts["gdna"].region_start_count, np.int64).sum())
     r = float(
-        np.asarray(oracle.parts["mrna"].region_start_count, np.int64).sum()
-        + np.asarray(oracle.parts["nrna"].region_start_count, np.int64).sum()
+        np.asarray(oracle.parts["annotated"].region_start_count, np.int64).sum()
+        + np.asarray(oracle.parts["nascent"].region_start_count, np.int64).sum()
     )
     return ConditionResult(
         condition=tag,

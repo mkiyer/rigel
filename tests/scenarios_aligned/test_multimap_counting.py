@@ -146,17 +146,17 @@ class TestIntergenicMultimappers:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 include_multimap=True,
-                scenario_name=f"ig_mm_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"ig_mm_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -223,53 +223,53 @@ class TestIntronicIntergenicMultimappers:
         sc.genome.edit(8000, intronic_seq)
         return sc
 
-    def test_nrna_budget(self, tmp_path):
+    def test_nascent_budget(self, tmp_path):
         """Nascent fragments from g1 multimap to the intergenic copy.
         Fragment budget must be conserved."""
-        sc = self._make_scenario(tmp_path, "_nrna")
+        sc = self._make_scenario(tmp_path, "_nascent")
         try:
             bench = build_and_run(
                 sc,
-                nrna_abundance=50,
+                nascent_abundance=50,
                 n_fragments=1000,
                 include_multimap=True,
-                scenario_name="intr_ig_nrna",
+                scenario_name="intr_ig_nascent",
             )
             assert_alignment(bench)
             assert_accountability(bench)
         finally:
             sc.cleanup()
 
-    def test_nrna_plus_gdna(self, tmp_path):
+    def test_nascent_plus_gdna(self, tmp_path):
         """Nascent RNA and gDNA combined.  Both contribute multimappers
         to the intronic/intergenic duplicate."""
-        sc = self._make_scenario(tmp_path, "_nrna_gdna")
+        sc = self._make_scenario(tmp_path, "_nascent_gdna")
         try:
             bench = build_and_run(
                 sc,
-                nrna_abundance=50,
+                nascent_abundance=50,
                 gdna_abundance=30,
                 n_fragments=1500,
                 include_multimap=True,
-                scenario_name="intr_ig_nrna_gdna",
+                scenario_name="intr_ig_nascent_gdna",
             )
             assert_alignment(bench)
             assert_accountability(bench)
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1000,
                 include_multimap=True,
-                scenario_name=f"intr_ig_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"intr_ig_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -386,18 +386,18 @@ class TestExonicParalogBudget:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, name_suffix=f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, name_suffix=f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1000,
                 include_multimap=True,
-                scenario_name=f"para_budget_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"para_budget_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -540,23 +540,23 @@ class TestPseudogene:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
         sc = self._make_scenario(
             tmp_path,
             parent_abund=100,
             pseudo_abund=0,
-            name_suffix=f"_g{gdna}_n{nrna}_s{int(ss * 100)}",
+            name_suffix=f"_g{gdna}_n{nascent}_s{int(ss * 100)}",
         )
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1000,
                 include_multimap=True,
-                scenario_name=f"pseudo_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"pseudo_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -655,18 +655,18 @@ class TestExonicIntergenicMultimappers:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1000,
                 include_multimap=True,
-                scenario_name=f"exon_ig_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"exon_ig_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -786,18 +786,18 @@ class TestTripleMultimapper:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1500,
                 include_multimap=True,
-                scenario_name=f"triple_mm_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"triple_mm_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -927,18 +927,18 @@ class TestMixedMultimapperKitchenSink:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=2000,
                 include_multimap=True,
-                scenario_name=f"kitchen_sink_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"kitchen_sink_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -957,7 +957,7 @@ class TestMixedMultimapperKitchenSink:
                 n_fragments=3000,
                 sim_config=_scenarios.sim_config(strand_specificity=1.0),
                 gdna_config=_scenarios.gdna_config(20),
-                nrna_abundance=0,
+                nascent_abundance=0,
             )
             config = PipelineConfig(
                 em=EMConfig(seed=PIPELINE_SEED),
@@ -1164,10 +1164,10 @@ class TestParalogMultimapping:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
         sc = self._make_scenario(
-            tmp_path, 100, 100, name_suffix=f"_g{gdna}_n{nrna}_s{int(ss * 100)}"
+            tmp_path, 100, 100, name_suffix=f"_g{gdna}_n{nascent}_s{int(ss * 100)}"
         )
         try:
             # 6× the default depth, matching the gDNA sweep above: at heavy gDNA on identical
@@ -1177,10 +1177,10 @@ class TestParalogMultimapping:
                 sc,
                 n_fragments=3000,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 include_multimap=True,
-                scenario_name=f"paralogs_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"paralogs_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -1277,18 +1277,18 @@ class TestDistinguishableParalogs:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, 100, 100, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, 100, 100, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1000,
                 include_multimap=True,
-                scenario_name=f"dist_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"dist_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)

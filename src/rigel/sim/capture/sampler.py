@@ -1,6 +1,6 @@
 """Hybrid-capture runtime: probe loading, and the questions the read engine asks of a panel.
 
-``CaptureSampler`` holds one probe panel as weighted intervals in two coordinate spaces, ``"mrna"`` keyed by
+``CaptureSampler`` holds one probe panel as weighted intervals in two coordinate spaces, ``"transcript"`` keyed by
 transcript row (nascent entities included) and ``"gdna"`` keyed by reference. For a template and a fragment width it
 gives the capture-aware effective length (:meth:`~CaptureSampler.partition_array`), draws fragment starts
 (:meth:`~CaptureSampler.sample_starts`) and weighs one fragment (:meth:`~CaptureSampler.fragment_weight`). Without a
@@ -130,7 +130,7 @@ class CaptureSampler:
         #: overlap. A nascent entity is a single-exon row here, so a probe on another gene's exon inside its span
         #: reaches it as it reaches the gDNA there. Nascent capture must not be scoped to its own transcript's
         #: probes, or nascent RNA would be under-enriched against the gDNA beside it.
-        self._mrna_intervals: dict[int, list[ProbeInterval]] = defaultdict(list)
+        self._transcript_intervals: dict[int, list[ProbeInterval]] = defaultdict(list)
         self._gdna_intervals: dict[str, list[ProbeInterval]] = defaultdict(list)
         #: Each loaded probe's binding strength, in the probe file's order.
         self._probe_strengths: list[float] = []
@@ -151,7 +151,7 @@ class CaptureSampler:
 
     @staticmethod
     def _norm(space: str, key: int | str) -> int | str:
-        return int(key) if space == "mrna" else str(key)
+        return int(key) if space == "transcript" else str(key)
 
     def mask_unknown(self, space: str, key: int | str, runs) -> None:
         """Install one template's unknown runs, ``[start, end)`` pairs in any order, replacing any before; they are
@@ -197,19 +197,19 @@ class CaptureSampler:
             for t_idx in rows:
                 t = self.transcripts[t_idx]
                 if n_before[t.end] == n_before[t.start]:
-                    self.mask_unknown("mrna", t_idx, ())
+                    self.mask_unknown("transcript", t_idx, ())
                     continue
                 template = np.concatenate([isn[e.start : e.end] for e in t.exons])
                 if t.strand == Strand.NEG:
                     template = template[::-1]
-                self.mask_unknown("mrna", t_idx, true_runs(template))
+                self.mask_unknown("transcript", t_idx, true_runs(template))
 
     def _masked_among(self, space: str, keys) -> list[tuple[int, int | str]]:
         """``(position, key)`` of each template in ``keys`` that has unknown runs."""
         masks = self._unknown.get(space)
         if not masks:
             return []
-        if space == "mrna":
+        if space == "transcript":
             karr = np.asarray(keys, dtype=np.int64)
             hit = np.flatnonzero(
                 np.isin(karr, np.fromiter(masks, dtype=np.int64, count=len(masks)))
@@ -331,7 +331,7 @@ class CaptureSampler:
         logger.info(
             "Hybrid capture enabled: %d transcript targets (incl. nascent entities), %d gDNA refs; %d probes, "
             "binding strength 5/50/95 %%: %s",
-            len(sampler._mrna_intervals),
+            len(sampler._transcript_intervals),
             len(sampler._gdna_intervals),
             len(strengths),
             " / ".join(f"{q:.3f}" for q in np.percentile(strengths, [5, 50, 95]))
@@ -367,7 +367,7 @@ class CaptureSampler:
             return cached[0]
 
         intervals_by_key = {
-            "mrna": self._mrna_intervals,
+            "transcript": self._transcript_intervals,
             "gdna": self._gdna_intervals,
         }[space]
 
@@ -743,7 +743,7 @@ class CaptureSampler:
             if not landed:
                 continue
             for start, end in merge_intervals(landed):
-                self._mrna_intervals[int(t_idx)].append(ProbeInterval(start, end, strength))
+                self._transcript_intervals[int(t_idx)].append(ProbeInterval(start, end, strength))
 
     def _add_gdna_blocks(
         self, ref: str, blocks: Sequence[tuple[int, int]], strength: float
@@ -786,9 +786,9 @@ class CaptureSampler:
         return out
 
     def probe_intervals(self, space: str, key: int | str) -> list[ProbeInterval]:
-        """The probe parts mapped onto one template: a transcript row in ``"mrna"``, a reference in ``"gdna"``."""
-        if space == "mrna":
-            return self._mrna_intervals.get(int(key), [])
+        """The probe parts mapped onto one template: a transcript row in ``"transcript"``, a reference in ``"gdna"``."""
+        if space == "transcript":
+            return self._transcript_intervals.get(int(key), [])
         if space == "gdna":
             return self._gdna_intervals.get(str(key), [])
         raise ValueError(f"unknown capture coordinate space: {space!r}")

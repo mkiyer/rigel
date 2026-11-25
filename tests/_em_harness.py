@@ -26,9 +26,9 @@ def _make_locus_em_data(
     count_cols_per_unit=None,
     num_transcripts=None,
     rc=None,
-    include_nrna=False,
+    include_nascent=False,
     include_gdna=False,
-    nrna_log_lik=-2.0,
+    nascent_log_lik=-2.0,
     gdna_log_lik=0.0,
     gdna_prior_count=1.0,
 ):
@@ -43,7 +43,7 @@ def _make_locus_em_data(
         Global transcript indices per unit.
     rc : AbundanceEstimator or None
         If provided, used for unambig_counts.
-    include_nrna : bool
+    include_nascent : bool
         If True, units are marked as unspliced (``is_spliced=False``).
         Nothing is appended for nascent RNA: synthetic spans are ordinary
         transcripts, listed among a unit's candidates like any other.
@@ -75,8 +75,8 @@ def _make_locus_em_data(
     n_candidates = len(flat_t)
 
     # is_spliced: True (spliced) → no gDNA candidate.
-    # For include_nrna or include_gdna, set False (unspliced).
-    if include_nrna or include_gdna:
+    # For include_nascent or include_gdna, set False (unspliced).
+    if include_nascent or include_gdna:
         is_spliced = np.zeros(n_units, dtype=bool)
     else:
         is_spliced = np.ones(n_units, dtype=bool)
@@ -121,7 +121,7 @@ def _make_locus_em_data(
 
 def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterations=10):
     """Run batch locus EM via the partitioned path, with *rc*'s EM budget set to ``em_iterations`` EM steps. Returns
-    the totals assigned: ``mrna`` (every transcript's EM count), ``nrna`` (the synthetic spans') and ``gdna``.
+    the totals assigned: ``annotated`` (every transcript's EM count), ``nascent`` (the synthetic spans') and ``gdna``.
 
     Accepts either the tuple form (em_data, loci, gdna_prior_count) separately,
     or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
@@ -152,13 +152,13 @@ def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterati
     locus_t_lists = [loc.transcript_indices for loc in loci]
 
     rc.em_config = dataclasses.replace(rc.em_config, iterations=em_iterations)
-    total_gdna, _locus_mrna, _locus_gdna = rc.run_batch_locus_em_partitioned(
+    total_gdna, _locus_rna, _locus_gdna = rc.run_batch_locus_em_partitioned(
         partition_tuples, locus_t_lists, gdna_prior_count
     )
     rc._gdna_em_total += total_gdna
 
     return {
-        "mrna": float(rc.em_counts.sum()),
-        "nrna": float(rc.synthetic_count),
+        "annotated": float(rc.em_counts.sum()),
+        "nascent": float(rc.synthetic_count),
         "gdna": float(total_gdna),
     }

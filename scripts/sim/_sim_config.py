@@ -37,17 +37,17 @@ class AbundanceConfig:
 
 
 @dataclass
-class NRNAConfig:
+class NascentConfig:
     """Nascent RNA sweep: the mode that sets the entity levels, and its sweep values. A field of the other mode is
     refused, not ignored.
 
     - ``sparse`` (``abundance_ranges`` + ``on_fraction``): each nascent entity is on with probability
       ``on_fraction`` and, if on, draws an absolute abundance log-uniformly from ``(lo, hi)``, independent of the
       mature level, so ``nascent > mature`` occurs and an intron can be exactly nascent-free.
-    - ``additive_ratio`` (``ratios``): ``nrna_abundance = mrna_abundance * ratio`` on every expressed multi-exon
+    - ``additive_ratio`` (``ratios``): ``nascent_abundance = annotated_abundance * ratio`` on every expressed multi-exon
       span, so nascent tracks mature and never exceeds it.
 
-    An abundance file with its own nRNA values replaces the sweep with one condition.
+    An abundance file with its own nascent RNA values replaces the sweep with one condition.
     """
 
     mode: str = "additive_ratio"
@@ -89,7 +89,7 @@ class WholeGenomeSimConfig:
     simulation: SimulationParams = field(default_factory=SimulationParams)
     abundance: AbundanceConfig = field(default_factory=AbundanceConfig)
     gdna: GDNASimConfig = field(default_factory=GDNASimConfig)
-    nrna: NRNAConfig = field(default_factory=NRNAConfig)
+    nascent: NascentConfig = field(default_factory=NascentConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)
     capture_configs: list[CaptureScenario] = field(default_factory=list)
     strand_specificities: list[float] = field(default_factory=lambda: [1.0])
@@ -190,60 +190,60 @@ def _read_fields(raw: dict, section, casts: dict[str, Callable]) -> None:
 #: The fields each nascent mode reads. A field of the other mode is refused: ``abundance_ranges`` + ``on_fraction``
 #: with ``mode:`` omitted would otherwise run ``additive_ratio`` at ratio 0.0, a nascent-free run named like the
 #: configured one.
-_NRNA_MODE_FIELDS = {
+_NASCENT_MODE_FIELDS = {
     "additive_ratio": ("ratios",),
     "sparse": ("abundance_ranges", "on_fraction"),
 }
 
 
-def _read_nrna(raw: dict, nrna: NRNAConfig) -> None:
-    nrna.mode = str(raw.get("mode", nrna.mode))
-    if nrna.mode not in _NRNA_MODE_FIELDS:
-        raise ValueError("nrna.mode must be 'additive_ratio' or 'sparse'")
+def _read_nascent(raw: dict, nascent: NascentConfig) -> None:
+    nascent.mode = str(raw.get("mode", nascent.mode))
+    if nascent.mode not in _NASCENT_MODE_FIELDS:
+        raise ValueError("nascent.mode must be 'additive_ratio' or 'sparse'")
     if raw.get("ratios") is not None:
-        nrna.ratios = [float(r) for r in raw["ratios"]]
+        nascent.ratios = [float(r) for r in raw["ratios"]]
     ranges = raw.get("abundance_ranges")
     if ranges is not None:
         for pair in ranges:
             # a range must be a pair: truncating a longer entry would run another scenario
             if not hasattr(pair, "__len__") or len(pair) != 2:
-                raise ValueError(f"nrna.abundance_ranges entries must be [lo, hi] pairs; got {pair!r}")
-        nrna.abundance_ranges = [(float(pair[0]), float(pair[1])) for pair in ranges]
-    nrna.ratio_labels = raw.get("ratio_labels", nrna.ratio_labels)
-    nrna.on_fraction = float(raw.get("on_fraction", nrna.on_fraction))
-    nrna.seed = int(raw.get("seed", nrna.seed))
-    _check_nrna(raw, nrna)
+                raise ValueError(f"nascent.abundance_ranges entries must be [lo, hi] pairs; got {pair!r}")
+        nascent.abundance_ranges = [(float(pair[0]), float(pair[1])) for pair in ranges]
+    nascent.ratio_labels = raw.get("ratio_labels", nascent.ratio_labels)
+    nascent.on_fraction = float(raw.get("on_fraction", nascent.on_fraction))
+    nascent.seed = int(raw.get("seed", nascent.seed))
+    _check_nascent(raw, nascent)
 
 
-def _check_nrna(raw: dict, nrna: NRNAConfig) -> None:
+def _check_nascent(raw: dict, nascent: NascentConfig) -> None:
     """Refuse a nascent section its mode cannot run as written."""
-    if nrna.mode == "sparse" and nrna.abundance_ranges is None:
-        raise ValueError("nrna.abundance_ranges is required for mode='sparse'")
-    own = _NRNA_MODE_FIELDS[nrna.mode]
+    if nascent.mode == "sparse" and nascent.abundance_ranges is None:
+        raise ValueError("nascent.abundance_ranges is required for mode='sparse'")
+    own = _NASCENT_MODE_FIELDS[nascent.mode]
     ignored = sorted(
         f
-        for mode, fields in _NRNA_MODE_FIELDS.items()
-        if mode != nrna.mode
+        for mode, fields in _NASCENT_MODE_FIELDS.items()
+        if mode != nascent.mode
         for f in fields
         if f in raw and f not in own
     )
     if ignored:
         raise ValueError(
-            f"nrna.mode={nrna.mode!r} cannot read {ignored} — those fields belong to another mode "
+            f"nascent.mode={nascent.mode!r} cannot read {ignored} — those fields belong to another mode "
             f"and would be silently ignored. Remove them, or set the mode they belong to."
         )
-    if not 0.0 <= nrna.on_fraction <= 1.0:
-        raise ValueError("nrna.on_fraction must be between 0 and 1")
-    if nrna.mode == "additive_ratio":
-        n_conditions = len(nrna.ratios)
+    if not 0.0 <= nascent.on_fraction <= 1.0:
+        raise ValueError("nascent.on_fraction must be between 0 and 1")
+    if nascent.mode == "additive_ratio":
+        n_conditions = len(nascent.ratios)
     else:
-        for lo, hi in nrna.abundance_ranges:
+        for lo, hi in nascent.abundance_ranges:
             # a log-uniform draw has no zero end: express "no nascent" with on_fraction = 0
             if lo <= 0 or hi < lo:
-                raise ValueError("nrna.abundance_ranges entries must satisfy 0 < min <= max")
-        n_conditions = len(nrna.abundance_ranges)
-    if nrna.ratio_labels is not None and len(nrna.ratio_labels) != n_conditions:
-        raise ValueError("nrna.ratio_labels must match the number of nRNA scenarios")
+                raise ValueError("nascent.abundance_ranges entries must satisfy 0 < min <= max")
+        n_conditions = len(nascent.abundance_ranges)
+    if nascent.ratio_labels is not None and len(nascent.ratio_labels) != n_conditions:
+        raise ValueError("nascent.ratio_labels must match the number of nascent RNA scenarios")
 
 
 # ── the capture section ──────────────────────────────────────────────────────────────────────────
@@ -345,7 +345,7 @@ _TOP_KEYS = frozenset(
         *_PATH_KEYS,
         "simulation",
         "abundance",
-        "nrna",
+        "nascent",
         "gdna",
         "capture",
         "strand_specificities",
@@ -358,7 +358,7 @@ _TOP_KEYS = frozenset(
 _SECTION_KEYS = {
     "simulation": frozenset(_SIMULATION_FIELDS),
     "abundance": frozenset(_ABUNDANCE_FIELDS),
-    "nrna": frozenset({"mode", "ratios", "abundance_ranges", "ratio_labels", "on_fraction", "seed"}),
+    "nascent": frozenset({"mode", "ratios", "abundance_ranges", "ratio_labels", "on_fraction", "seed"}),
     "gdna": frozenset(_GDNA_FIELDS),
 }
 
@@ -395,7 +395,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         setattr(cfg, key, expand_config_path(raw.get(key, getattr(cfg, key)), key))
     _read_fields(raw.get("simulation", {}), cfg.simulation, _SIMULATION_FIELDS)
     _read_fields(raw.get("abundance", {}), cfg.abundance, _ABUNDANCE_FIELDS)
-    _read_nrna(raw.get("nrna", {}), cfg.nrna)
+    _read_nascent(raw.get("nascent", {}), cfg.nascent)
     _read_fields(raw.get("gdna", {}), cfg.gdna, _GDNA_FIELDS)
     _read_capture(raw.get("capture", {}), cfg)
     cfg.strand_specificities = [float(s) for s in raw.get("strand_specificities", [1.0])]

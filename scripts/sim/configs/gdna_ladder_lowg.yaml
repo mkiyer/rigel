@@ -57,7 +57,7 @@ gdna:
 
 strand_specificities: [0.99]
 
-nrna:
+nascent:
   mode: sparse
   abundance_ranges: [[1.0, 100.0]]
   on_fraction: 0.50

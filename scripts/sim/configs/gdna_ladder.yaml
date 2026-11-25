@@ -112,8 +112,8 @@ strand_specificities: [0.50, 0.99]
 # on_fraction 0.50 is a development stress level, not real data (a realistic setting is about 0.10). The
 # fragment share is emergent: on_fraction 0.50 × logU(1, 100) puts about a fifth of the RNA fragments in
 # nascent RNA on this index. The label `mid` names the condition and must stay: instruments default to
-# `nrna_mid`.
-nrna:
+# `nascent_mid`.
+nascent:
   mode: sparse
   abundance_ranges: [[1.0, 100.0]]
   on_fraction: 0.50

@@ -29,7 +29,7 @@ from ..types import Strand
 from .annotation import GeneBuilder
 from .genome import MutableGenome
 from .reads import GDNAConfig, ReadSimConfig
-from .transcriptome import assign_nrna_to_entities, load_transcripts_from_index
+from .transcriptome import assign_nascent_to_entities, load_transcripts_from_index
 from .wgs_config import GDNASimConfig, SimulationParams
 from .wgs_engine import WholeGenomeSimulator
 
@@ -160,7 +160,7 @@ class Scenario:
         n_fragments: int = CONSTANTS.simulator.scenario_fragments,
         sim_config: ReadSimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
-        nrna_abundance: float = 0.0,
+        nascent_abundance: float = 0.0,
     ) -> ScenarioResult:
         """Write the genome and GTF, build the index, simulate paired-end FASTQ, and align it with minimap2 into a
         name-sorted BAM.
@@ -173,17 +173,17 @@ class Scenario:
             Read simulation config; ``None`` uses the defaults at the scenario's seed.
         gdna_config : GDNAConfig or None
             gDNA contamination config; ``None`` simulates no gDNA.
-        nrna_abundance : float
+        nascent_abundance : float
             When > 0, the nascent molecular abundance of every expressed multi-exon transcript,
             independent of its ``abundance``; 0.0 (default) keeps the values from ``add_gene``.
             Reads are drawn in proportion to ``abundance × spliced_eff_len`` against
-            ``nrna_abundance × genomic_span_eff_len``.
+            ``nascent_abundance × genomic_span_eff_len``.
 
         Returns
         -------
         ScenarioResult
         """
-        fasta_path, gtf_path, index_dir, index, rows = self._reference(nrna_abundance)
+        fasta_path, gtf_path, index_dir, index, rows = self._reference(nascent_abundance)
         sim = self._simulator(fasta_path, rows, sim_config, gdna_config)
         n_rna, n_gdna = sim.rna_gdna_split(n_fragments, _gdna_abundance(gdna_config))
         logger.info(f"[{self.name}] Simulating {n_fragments} fragments...")
@@ -210,7 +210,7 @@ class Scenario:
         n_fragments: int = CONSTANTS.simulator.scenario_fragments,
         sim_config: ReadSimConfig | None = None,
         gdna_config: GDNAConfig | None = None,
-        nrna_abundance: float = 0.0,
+        nascent_abundance: float = 0.0,
         n_rna_fragments: int | None = None,
         gdna_fraction: float | None = None,
     ) -> ScenarioResult:
@@ -221,7 +221,7 @@ class Scenario:
         ----------
         n_fragments : int
             Fixed total, split between RNA and gDNA by abundance; ignored when *n_rna_fragments* is set.
-        sim_config, gdna_config, nrna_abundance
+        sim_config, gdna_config, nascent_abundance
             As for :meth:`build`.
         n_rna_fragments : int or None
             Fixed RNA fragment count, with ``n_rna_fragments × gdna_fraction`` gDNA fragments added.
@@ -235,7 +235,7 @@ class Scenario:
             Result with ``fastq_r1/r2=None``.
         """
         _check_gdna_fraction(gdna_fraction, n_rna_fragments, gdna_config)
-        fasta_path, gtf_path, index_dir, index, rows = self._reference(nrna_abundance)
+        fasta_path, gtf_path, index_dir, index, rows = self._reference(nascent_abundance)
         sim = self._simulator(fasta_path, rows, sim_config, gdna_config)
         if n_rna_fragments is not None:
             n_rna = n_rna_fragments
@@ -256,11 +256,11 @@ class Scenario:
     # -- Build steps ------------------------------------------------------------
 
     def _reference(
-        self, nrna_abundance: float
+        self, nascent_abundance: float
     ) -> tuple[Path, Path, Path, TranscriptIndex, list[Transcript]]:
         """Write the genome and the GTF, build the index, and return the transcriptome `rigel quant` will read, with
         the annotation's abundances carried onto it by ``t_id`` and each multi-exon transcript's nascent molecules
-        pooled onto its entity. ``nrna_abundance`` is :meth:`build`'s.
+        pooled onto its entity. ``nascent_abundance`` is :meth:`build`'s.
 
         Returns ``(fasta_path, gtf_path, index_dir, index, rows)``, ``rows`` every index row.
         """
@@ -283,11 +283,13 @@ class Scenario:
             if len(row.exons) > 1:
                 # a transcript's own nascent abundance is independent of its mature one; the build's override names
                 # the nascent abundance of every expressed multi-exon transcript
-                own = float(src.nrna_abundance or 0.0)
+                own = float(src.nascent_abundance or 0.0)
                 per_contributor[i] = (
-                    (nrna_abundance if row.abundance > 0 else 0.0) if nrna_abundance > 0 else own
+                    (nascent_abundance if row.abundance > 0 else 0.0)
+                    if nascent_abundance > 0
+                    else own
                 )
-        assign_nrna_to_entities(rows, per_contributor)
+        assign_nascent_to_entities(rows, per_contributor)
         return fasta_path, gtf_path, index_dir, TranscriptIndex.load(index_dir), rows
 
     def _simulator(

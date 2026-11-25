@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 GDNA_LEVELS = [0, 20, 100]
 STRAND_LEVELS = [0.65, 0.9, 1.0]
-NRNA_LEVELS = [0, 30, 70]
+NASCENT_LEVELS = [0, 30, 70]
 
 # Stress combos: one moderate and one extreme
 STRESS_COMBOS = [
@@ -77,7 +77,7 @@ def build_and_run(
     n_fragments=N_FRAGMENTS,
     gdna_abundance=0,
     strand_specificity=1.0,
-    nrna_abundance=0,
+    nascent_abundance=0,
     include_multimap=True,
     scenario_name="",
     em_config=None,
@@ -89,7 +89,7 @@ def build_and_run(
         n_fragments=n_fragments,
         sim_config=sim_config(strand_specificity=strand_specificity),
         gdna_config=gdna_config(gdna_abundance),
-        nrna_abundance=nrna_abundance,
+        nascent_abundance=nascent_abundance,
     )
     config = PipelineConfig(
         em=em_config if em_config is not None else EMConfig(seed=PIPELINE_SEED),
@@ -113,7 +113,7 @@ def assert_accountability(bench, tolerance=5):
     """Every fragment is accounted for: annotated, synthetic (nascent), gDNA or gated out."""
     n_gated_out = bench.stats_dict.get("n_gated_out", 0)
     # n_synthetic_observed already includes the synthetic spans' counts,
-    # so n_nrna_pipeline is not added separately.
+    # so n_nascent_pipeline is not added separately.
     total = bench.total_observed + bench.n_synthetic_observed + bench.n_gdna_pipeline + n_gated_out
     gap = abs(total - bench.n_fragments)
     assert gap <= tolerance, (
@@ -122,7 +122,7 @@ def assert_accountability(bench, tolerance=5):
 
 
 def assert_transcript_accuracy(bench, max_abs_diff=3, exclude_ids=("t_ctrl", "t_helper")):
-    """Per-transcript mRNA accuracy (skips controls/helpers)."""
+    """Per-transcript annotated RNA accuracy (skips controls/helpers)."""
     for ta in bench.transcripts:
         if ta.t_id in exclude_ids:
             continue
@@ -132,7 +132,7 @@ def assert_transcript_accuracy(bench, max_abs_diff=3, exclude_ids=("t_ctrl", "t_
 
 
 def assert_negative_control(bench, ctrl_id="t_ctrl", *, gdna_abundance=0, strand_specificity=1.0):
-    """A negative-control transcript must carry near-zero mRNA counts.
+    """A negative-control transcript must carry near-zero annotated RNA counts.
 
     The control expresses nothing, so every fragment it holds is one the EM split onto it from a pool it shares
     fragments with: gDNA landing on its exons, and at imperfect strand specificity a neighbour's mis-stranded RNA. An
@@ -168,10 +168,12 @@ def assert_gdna_accuracy(bench, gdna_abundance, max_rel_err=0.60):
         )
 
 
-def assert_nrna_detected(bench, nrna_abundance):
+def assert_nascent_detected(bench, nascent_abundance):
     """When nascent RNA is present and not swamped by gDNA, the pipeline detects some."""
-    if nrna_abundance == 0 or bench.n_nrna_expected <= 5:
+    if nascent_abundance == 0 or bench.n_nascent_expected <= 5:
         return
-    if bench.n_gdna_expected > 3 * bench.n_nrna_expected:
+    if bench.n_gdna_expected > 3 * bench.n_nascent_expected:
         return
-    assert bench.n_nrna_pipeline > 0, f"No nRNA detected but expected {bench.n_nrna_expected:.0f}"
+    assert bench.n_nascent_pipeline > 0, (
+        f"No nascent RNA detected but expected {bench.n_nascent_expected:.0f}"
+    )

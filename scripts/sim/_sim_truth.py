@@ -30,8 +30,8 @@ _MOLAR_COLUMNS = (
     "gene_name",
     "ref",
     "strand",
-    "mrna_abundance",
-    "nrna_abundance",
+    "annotated_abundance",
+    "nascent_abundance",
     "total_rna",
     "n_exons",
     "spliced_length",
@@ -45,11 +45,11 @@ _POST_CAPTURE_COLUMNS = (
     "gene_name",
     "ref",
     "strand",
-    "pre_capture_mrna_abundance",
-    "pre_capture_nrna_abundance",
+    "pre_capture_annotated_abundance",
+    "pre_capture_nascent_abundance",
     "pre_capture_total_rna",
-    "observed_mrna_fragments",
-    "observed_nrna_fragments",
+    "observed_annotated_fragments",
+    "observed_nascent_fragments",
     "observed_total_rna_fragments",
     "n_exons",
     "spliced_length",
@@ -57,7 +57,7 @@ _POST_CAPTURE_COLUMNS = (
 )
 
 #: The fragment-length table's origin pools, in the order it lists them.
-_LENGTH_POOLS = ("mrna", "nrna", "rna", "gdna", "all")
+_LENGTH_POOLS = ("annotated", "nascent", "rna", "gdna", "all")
 
 
 # ── the read names ───────────────────────────────────────────────────────────────────────────────
@@ -106,8 +106,8 @@ def _transcript_metadata(transcript) -> dict[str, object]:
     length = transcript.length or transcript.compute_length()
     # 0 for a transcript with no exon, whose start and end are both 0
     genomic_span = transcript.end - transcript.start
-    pre_capture_mrna = float(transcript.abundance or 0.0)
-    pre_capture_nrna = float(transcript.nrna_abundance)
+    pre_capture_annotated = float(transcript.abundance or 0.0)
+    pre_capture_nascent = float(transcript.nascent_abundance)
     return {
         "transcript_id": transcript.t_id,
         "gene_id": transcript.g_id,
@@ -117,9 +117,9 @@ def _transcript_metadata(transcript) -> dict[str, object]:
         "n_exons": len(transcript.exons),
         "spliced_length": int(length),
         "genomic_span": int(genomic_span),
-        "pre_capture_mrna_abundance": pre_capture_mrna,
-        "pre_capture_nrna_abundance": pre_capture_nrna,
-        "pre_capture_total_rna": pre_capture_mrna + pre_capture_nrna,
+        "pre_capture_annotated_abundance": pre_capture_annotated,
+        "pre_capture_nascent_abundance": pre_capture_nascent,
+        "pre_capture_total_rna": pre_capture_annotated + pre_capture_nascent,
     }
 
 
@@ -136,8 +136,8 @@ def _molar_row(transcript) -> dict[str, object]:
     meta = _transcript_metadata(transcript)
     return {
         **meta,
-        "mrna_abundance": f"{meta['pre_capture_mrna_abundance']:.4f}",
-        "nrna_abundance": f"{meta['pre_capture_nrna_abundance']:.4f}",
+        "annotated_abundance": f"{meta['pre_capture_annotated_abundance']:.4f}",
+        "nascent_abundance": f"{meta['pre_capture_nascent_abundance']:.4f}",
         "total_rna": f"{meta['pre_capture_total_rna']:.4f}",
     }
 
@@ -162,7 +162,7 @@ def summarize_post_capture_truth(
     Under capture these realised counts are the abundance truth, since capture changes which templates and starts
     are drawn; the pre-capture molecules are kept beside them as provenance.
     """
-    by_transcript: dict[OriginKind, Counter[str]] = {"mrna": Counter(), "nrna": Counter()}
+    by_transcript: dict[OriginKind, Counter[str]] = {"annotated": Counter(), "nascent": Counter()}
     origin_counts: Counter[OriginKind] = Counter()
     length_counts: dict[str, Counter[int]] = {pool: Counter() for pool in _LENGTH_POOLS}
 
@@ -181,20 +181,20 @@ def summarize_post_capture_truth(
     transcript_rows = []
     for transcript in transcripts:
         meta = _transcript_metadata(transcript)
-        mrna = int(by_transcript["mrna"].get(str(meta["transcript_id"]), 0))
-        nrna = int(by_transcript["nrna"].get(str(meta["transcript_id"]), 0))
+        annotated = int(by_transcript["annotated"].get(str(meta["transcript_id"]), 0))
+        nascent = int(by_transcript["nascent"].get(str(meta["transcript_id"]), 0))
         transcript_rows.append(
             {
                 **meta,
-                "observed_mrna_fragments": mrna,
-                "observed_nrna_fragments": nrna,
-                "observed_total_rna_fragments": mrna + nrna,
+                "observed_annotated_fragments": annotated,
+                "observed_nascent_fragments": nascent,
+                "observed_total_rna_fragments": annotated + nascent,
             }
         )
 
     return {
         "transcript_rows": transcript_rows,
-        "origin_counts": {kind: int(origin_counts.get(kind, 0)) for kind in ("mrna", "nrna", "gdna")},
+        "origin_counts": {kind: int(origin_counts.get(kind, 0)) for kind in ("annotated", "nascent", "gdna")},
         "fragment_length_counts": length_counts,
         "fragment_lengths": {pool: _length_stats(counts) for pool, counts in length_counts.items()},
     }

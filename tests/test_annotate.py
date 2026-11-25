@@ -869,7 +869,7 @@ class TestAnnotatedBamIntegration:
             seed=42,
         )
         result = winner_kinds_scenario.build(
-            n_fragments=600, sim_config=sim_config, nrna_abundance=60
+            n_fragments=600, sim_config=sim_config, nascent_abundance=60
         )
 
         annotated_bam = tmp_path / "annotated_kinds.bam"

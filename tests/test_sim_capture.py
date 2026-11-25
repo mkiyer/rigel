@@ -89,9 +89,9 @@ def test_transcript_probe_weights_match_overlap_example(tmp_path, at_optimum):
         fasta=at_optimum,
     )
 
-    assert sampler.fragment_weight("mrna", 0, 2000, 1000, 200) == pytest.approx(1.0)
-    assert sampler.fragment_weight("mrna", 0, 2000, 1310, 200) == pytest.approx(11.0)
-    assert sampler.fragment_weight("mrna", 0, 2000, 1480, 200) == pytest.approx(121.0)
+    assert sampler.fragment_weight("transcript", 0, 2000, 1000, 200) == pytest.approx(1.0)
+    assert sampler.fragment_weight("transcript", 0, 2000, 1310, 200) == pytest.approx(11.0)
+    assert sampler.fragment_weight("transcript", 0, 2000, 1480, 200) == pytest.approx(121.0)
 
 
 def test_a_split_probe_binds_every_template_through_one_contiguous_part(tmp_path, at_optimum):
@@ -113,14 +113,14 @@ def test_a_split_probe_binds_every_template_through_one_contiguous_part(tmp_path
     )
 
     # the spliced transcript holds the whole probe contiguously
-    assert sampler.fragment_weight("mrna", 0, 200, 80, 60) == pytest.approx(61.0)
+    assert sampler.fragment_weight("transcript", 0, 200, 80, 60) == pytest.approx(61.0)
     # gDNA over both parts, across the intron: the better part (40), not their sum
     assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(41.0)
     # the entity: transcript coordinate 70 of its 400-bp span is genomic 170, the same fragment
-    assert sampler.fragment_weight("mrna", 1, 400, 70, 280) == pytest.approx(41.0)
+    assert sampler.fragment_weight("transcript", 1, 400, 70, 280) == pytest.approx(41.0)
     # there is no per-transcript nascent space: the entity is a transcript row
     with pytest.raises(ValueError):
-        sampler.fragment_weight("nrna", 0, 400, 70, 280)
+        sampler.fragment_weight("nascent", 0, 400, 70, 280)
 
 
 def test_gdna_and_cdna_bind_the_same_half_of_a_split_probe_alike(tmp_path, at_optimum):
@@ -139,7 +139,7 @@ def test_gdna_and_cdna_bind_the_same_half_of_a_split_probe_alike(tmp_path, at_op
     )
 
     # T2 coordinates 60..120 are genomic 160..200 then 600..620: they hold genomic 180..200
-    cdna_half = sampler.fragment_weight("mrna", 1, 200, 60, 60)
+    cdna_half = sampler.fragment_weight("transcript", 1, 200, 60, 60)
     gdna_half = sampler.fragment_weight("gdna", "chr1", 1000, 150, 60)
     assert cdna_half == pytest.approx(21.0)
     assert gdna_half == pytest.approx(cdna_half)
@@ -166,14 +166,16 @@ def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path, a
         fasta=at_optimum,
     )
     # a 60-bp fragment lying exactly under the probe, in each transcript's own coordinates
-    assert sampler.fragment_weight("mrna", 0, 200, 20, 60) == pytest.approx(61.0)  # T1
-    assert sampler.fragment_weight("mrna", 1, 200, 20, 60) == pytest.approx(61.0)  # sibling
+    assert sampler.fragment_weight("transcript", 0, 200, 20, 60) == pytest.approx(61.0)  # T1
+    assert sampler.fragment_weight("transcript", 1, 200, 20, 60) == pytest.approx(61.0)  # sibling
     # antisense transcript A = genomic [150, 300) on −, so its coordinate x is genomic 300 − x and the
     # probe's overlap with it is genomic [150, 180) = A's [120, 150): a 60-bp fragment at A's 90
     # covers genomic [150, 210) and binds the 30 overlapping bases
-    assert sampler.fragment_weight("mrna", 2, 150, 90, 60) == pytest.approx(31.0)
-    assert sampler.fragment_weight("mrna", 3, 600, 20, 60) == pytest.approx(61.0)  # entity
-    assert sampler.fragment_weight("mrna", 4, 100, 20, 60) == pytest.approx(1.0)  # far: off target
+    assert sampler.fragment_weight("transcript", 2, 150, 90, 60) == pytest.approx(31.0)
+    assert sampler.fragment_weight("transcript", 3, 600, 20, 60) == pytest.approx(61.0)  # entity
+    assert sampler.fragment_weight("transcript", 4, 100, 20, 60) == pytest.approx(
+        1.0
+    )  # far: off target
     assert sampler.fragment_weight("gdna", "chr1", 1000, 120, 60) == pytest.approx(61.0)
 
 
@@ -193,7 +195,7 @@ def test_bed12_probe_projects_to_transcript_and_gdna(tmp_path, at_optimum):
         fasta=at_optimum,
     )
 
-    assert sampler.fragment_weight("mrna", 0, 200, 80, 60) == pytest.approx(61.0)
+    assert sampler.fragment_weight("transcript", 0, 200, 80, 60) == pytest.approx(61.0)
     # gDNA holds the two blocks apart across the intron and binds the better one (40)
     assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(41.0)
 
@@ -212,8 +214,8 @@ def test_capture_partition_increases_targeted_transcript_weight(tmp_path, at_opt
         fasta=at_optimum,
     )
 
-    targeted = sampler.partition("mrna", 0, 1000, 100)
-    untargeted = sampler.partition("mrna", 1, 1000, 100)
+    targeted = sampler.partition("transcript", 0, 1000, 100)
+    untargeted = sampler.partition("transcript", 1, 1000, 100)
 
     assert targeted > untargeted * 20
 
@@ -229,7 +231,7 @@ def test_overlapping_probes_do_not_stack_capture_strength(tmp_path, at_optimum):
         fasta=at_optimum,
     )
 
-    assert sampler.fragment_weight("mrna", 0, 300, 140, 80) == pytest.approx(81.0)
+    assert sampler.fragment_weight("transcript", 0, 300, 140, 80) == pytest.approx(81.0)
 
     expected_extra = 0.0
     for start in range(300 - 80 + 1):
@@ -237,7 +239,7 @@ def test_overlapping_probes_do_not_stack_capture_strength(tmp_path, at_optimum):
         first = max(0, min(frag_end, 220) - max(start, 100))
         second = max(0, min(frag_end, 260) - max(start, 140))
         expected_extra += max(first, second)
-    assert sampler.partition("mrna", 0, 300, 80) == pytest.approx(221 + expected_extra)
+    assert sampler.partition("transcript", 0, 300, 80) == pytest.approx(221 + expected_extra)
 
 
 def test_duplicate_isoform_probes_do_not_stack_gdna_strength(tmp_path, at_optimum):
@@ -347,6 +349,16 @@ def test_parse_yaml_capture_config_sweep(tmp_path):
     assert cfg.capture_configs[1].config.binding_per_base == pytest.approx(7.0)
 
 
+def test_a_condition_seed_reads_its_axes_not_its_name(monkeypatch):
+    """The seed is a function of the base seed, the gDNA label and the strand specificity alone: renaming a label or
+    the directory name's format (as the move from ``nrna`` to ``nascent`` did) moves no draw."""
+    import _sim_grid
+
+    seed = capture_paired_condition_seed(42, "g05", 0.99)
+    monkeypatch.setattr(_sim_grid, "condition_dir_name", lambda *a, **k: "any_other_format")
+    assert _sim_grid.capture_paired_condition_seed(42, "g05", 0.99) == seed
+
+
 def test_capture_sweep_uses_paired_condition_seed():
     seed = capture_paired_condition_seed(42, "none", 0.99)
 
@@ -386,12 +398,12 @@ def test_whole_genome_simulator_uses_capture_partition_for_assignment(tmp_path):
         capture_config=CaptureConfig(probes=str(probes), binding_per_base=10.0),
     )
     try:
-        mrna_counts, _ = sim._accumulate_rna_counts(500)
+        annotated_counts, _ = sim._accumulate_rna_counts(500)
     finally:
         sim.close()
 
-    t1_count = sum(mrna_counts.get(0, {}).values())
-    t2_count = sum(mrna_counts.get(1, {}).values())
+    t1_count = sum(annotated_counts.get(0, {}).values())
+    t2_count = sum(annotated_counts.get(1, {}).values())
     assert t1_count > t2_count * 20
 
 
@@ -497,8 +509,8 @@ def test_random_probe_writer_masks_shared_isoform_sequence_by_abundance(tmp_path
         fasta=at_optimum,
     )
 
-    assert sampler.fragment_weight("mrna", 0, 200, 0, 100) > 1.0
-    assert sampler.fragment_weight("mrna", 1, 200, 0, 100) > 1.0
+    assert sampler.fragment_weight("transcript", 0, 200, 0, 100) > 1.0
+    assert sampler.fragment_weight("transcript", 1, 200, 0, 100) > 1.0
 
 
 def test_random_probe_writer_selects_capture_pool_by_gene(tmp_path):
@@ -575,7 +587,7 @@ def brute_force_partition(
 
 
 def make_sampler(intervals_by_key: dict[int, list[ProbeInterval]], **overrides) -> CaptureSampler:
-    """A sampler whose mRNA intervals are injected directly, bypassing probe-file parsing."""
+    """A sampler whose annotated RNA intervals are injected directly, bypassing probe-file parsing."""
     config = CaptureConfig(
         probes="unused",
         probe_format="transcript",
@@ -588,7 +600,7 @@ def make_sampler(intervals_by_key: dict[int, list[ProbeInterval]], **overrides) 
     # and hand-sets a few attributes tests its own rebuild: any state `__init__` gains is absent here,
     # and the whole file fails with `AttributeError` while the sampler works in production.
     sampler = CaptureSampler(config, transcripts=(), ref_lengths={}, enabled=True)
-    sampler._mrna_intervals = intervals_by_key
+    sampler._transcript_intervals = intervals_by_key
     return sampler
 
 
@@ -644,7 +656,7 @@ class TestAgainstBruteForce:
             min_overlap=1,
         )
         lengths = np.array([SEQ_LEN], dtype=np.int64)
-        actual = float(sampler.partition_array("mrna", [0], lengths, frag_len)[0])
+        actual = float(sampler.partition_array("transcript", [0], lengths, frag_len)[0])
         assert actual == pytest.approx(expected, rel=1e-12, abs=1e-9), (
             f"{layout_name} at w={frag_len}: got {actual}, enumeration says {expected}"
         )
@@ -665,7 +677,7 @@ class TestAgainstBruteForce:
             binding_per_base=10.0,
             min_overlap=1,
         )
-        assert sampler.partition("mrna", 0, SEQ_LEN, frag_len) == pytest.approx(
+        assert sampler.partition("transcript", 0, SEQ_LEN, frag_len) == pytest.approx(
             expected, rel=1e-12, abs=1e-9
         )
 
@@ -683,7 +695,7 @@ class TestAgainstBruteForce:
             min_overlap=min_overlap,
         )
         lengths = np.array([SEQ_LEN], dtype=np.int64)
-        actual = float(sampler.partition_array("mrna", [0], lengths, frag_len)[0])
+        actual = float(sampler.partition_array("transcript", [0], lengths, frag_len)[0])
         assert actual == pytest.approx(expected, rel=1e-12, abs=1e-9)
 
     def test_a_multi_key_pool_matches_enumeration_key_by_key(self) -> None:
@@ -695,7 +707,9 @@ class TestAgainstBruteForce:
         lengths = np.array([SEQ_LEN + 137 * i for i in range(len(names))], dtype=np.int64)
 
         for frag_len in (50, 200, 500, 1200):
-            actual = sampler.partition_array("mrna", list(range(len(names))), lengths, frag_len)
+            actual = sampler.partition_array(
+                "transcript", list(range(len(names))), lengths, frag_len
+            )
             for key, name in enumerate(names):
                 expected = brute_force_partition(
                     LAYOUTS[name],
@@ -715,7 +729,7 @@ class TestAgainstBruteForce:
         intervals = LAYOUTS[SPLIT_LAYOUT]
         sampler = make_sampler({0: intervals})
         # a 400-base fragment from 80 holds 60 of each part: its weight is one part's, 1 + 10 * 60
-        assert sampler.fragment_weight("mrna", 0, SEQ_LEN, 80, 400) == pytest.approx(601.0)
+        assert sampler.fragment_weight("transcript", 0, SEQ_LEN, 80, 400) == pytest.approx(601.0)
         sampler = make_sampler({0: intervals})
         lengths = np.array([SEQ_LEN], dtype=np.int64)
         for frag_len in (50, 200, 500):
@@ -728,7 +742,7 @@ class TestAgainstBruteForce:
                 min_overlap=1,
             )
             assert float(
-                sampler.partition_array("mrna", [0], lengths, frag_len)[0]
+                sampler.partition_array("transcript", [0], lengths, frag_len)[0]
             ) == pytest.approx(expected, rel=1e-12, abs=1e-9)
 
 
@@ -743,10 +757,10 @@ class TestPartitionArray:
         lengths = np.array([SEQ_LEN + 37 * i for i in range(len(intervals_by_key))], dtype=np.int64)
         sampler = make_sampler(intervals_by_key)
 
-        actual = sampler.partition_array("mrna", range(len(lengths)), lengths, frag_len)
+        actual = sampler.partition_array("transcript", range(len(lengths)), lengths, frag_len)
         expected = np.array(
             [
-                sampler.partition("mrna", key, int(lengths[key]), frag_len)
+                sampler.partition("transcript", key, int(lengths[key]), frag_len)
                 for key in range(len(lengths))
             ]
         )
@@ -762,20 +776,20 @@ class TestPartitionArray:
         }
         sampler = make_sampler(intervals_by_key)
         lengths_all = np.array([SEQ_LEN, SEQ_LEN + 500, SEQ_LEN + 900], dtype=np.int64)
-        full = sampler.partition_array("mrna", [0, 1, 2], lengths_all, 200)
-        subset = sampler.partition_array("mrna", [0, 2], lengths_all[[0, 2]], 200)
+        full = sampler.partition_array("transcript", [0, 1, 2], lengths_all, 200)
+        subset = sampler.partition_array("transcript", [0, 2], lengths_all[[0, 2]], 200)
         np.testing.assert_allclose(subset, full[[0, 2]], rtol=1e-12, atol=1e-9)
 
     def test_a_pool_where_nothing_is_on_panel_is_pure_off_target(self) -> None:
         sampler = make_sampler({})
         lengths = np.array([1000, 500, 250], dtype=np.int64)
-        actual = sampler.partition_array("mrna", range(3), lengths, 200)
+        actual = sampler.partition_array("transcript", range(3), lengths, 200)
         np.testing.assert_array_equal(actual, lengths - 200 + 1)
 
     def test_templates_shorter_than_the_fragment_contribute_nothing(self) -> None:
         sampler = make_sampler({0: LAYOUTS["three probes, dense"]})
         lengths = np.array([150], dtype=np.int64)
-        assert sampler.partition_array("mrna", range(1), lengths, 200)[0] == 0.0
+        assert sampler.partition_array("transcript", range(1), lengths, 200)[0] == 0.0
 
 
 class TestNoUnboundedCache:
@@ -798,7 +812,7 @@ class TestNoUnboundedCache:
         sizes_before = {k: len(v) for k, v in vars(sampler).items() if isinstance(v, dict)}
         widths = list(range(50, 350))
         for frag_len in widths:
-            sampler.partition_array("mrna", range(40), lengths, frag_len)
+            sampler.partition_array("transcript", range(40), lengths, frag_len)
         for name, size in sizes_before.items():
             if name == "_partition_memo":
                 continue
@@ -813,13 +827,13 @@ class TestNoUnboundedCache:
 
         # repeating the same sweep must add nothing: that is what makes it a cache rather than a leak
         for frag_len in widths:
-            sampler.partition_array("mrna", range(40), lengths, frag_len)
+            sampler.partition_array("transcript", range(40), lengths, frag_len)
         assert len(sampler._partition_memo) == len(widths), "a repeat sweep must be pure cache hits"
 
         # and a different template population must not accumulate beside the first
         other = np.full(40, SEQ_LEN + 1, dtype=np.int64)
         for frag_len in widths:
-            sampler.partition_array("mrna", range(40), other, frag_len)
+            sampler.partition_array("transcript", range(40), other, frag_len)
         assert len(sampler._partition_memo) == len(widths), (
             "a second population must CLEAR the memo, not accumulate beside it — that is the 38 GB"
         )
@@ -832,10 +846,10 @@ class TestNoUnboundedCache:
         cached_sampler = make_sampler(layout)
         lengths = np.full(4, SEQ_LEN, dtype=np.int64)
         for frag_len in (60, 120, 121, 200):
-            first = cached_sampler.partition_array("mrna", range(4), lengths, frag_len)
+            first = cached_sampler.partition_array("transcript", range(4), lengths, frag_len)
             first[:] = -12345.0  # a caller mutating its result
-            again = cached_sampler.partition_array("mrna", range(4), lengths, frag_len)
-            fresh = make_sampler(layout).partition_array("mrna", range(4), lengths, frag_len)
+            again = cached_sampler.partition_array("transcript", range(4), lengths, frag_len)
+            fresh = make_sampler(layout).partition_array("transcript", range(4), lengths, frag_len)
             np.testing.assert_allclose(again, fresh, err_msg=f"memo differs at width {frag_len}")
 
     def test_sample_starts_does_not_accumulate_state_either(self) -> None:
@@ -843,7 +857,7 @@ class TestNoUnboundedCache:
         rng = np.random.default_rng(0)
         sizes_before = {k: len(v) for k, v in vars(sampler).items() if isinstance(v, dict)}
         for frag_len in range(50, 350):
-            sampler.sample_starts("mrna", 0, SEQ_LEN, frag_len, 3, rng)
+            sampler.sample_starts("transcript", 0, SEQ_LEN, frag_len, 3, rng)
         for name, size in sizes_before.items():
             grown = len(getattr(sampler, name)) - size
             assert grown <= 1, f"{name} grew by {grown} entries across 300 fragment lengths"
@@ -962,10 +976,10 @@ def _gdna_lengths(simulator, n: int) -> dict[int, int]:
     return counts
 
 
-def _mrna_lengths(simulator, n: int) -> dict[int, int]:
+def _annotated_lengths(simulator, n: int) -> dict[int, int]:
     counts: dict[int, int] = {}
-    mrna, _nrna = simulator._accumulate_rna_counts(n)
-    for per_length in mrna.values():
+    annotated, _nascent = simulator._accumulate_rna_counts(n)
+    for per_length in annotated.values():
         for length, count in per_length.items():
             counts[length] = counts.get(length, 0) + count
     return counts
@@ -994,7 +1008,7 @@ def arms(panel):
             gdna_sim.close()
         rna_sim = _simulator(fasta, transcripts, probe_file)
         try:
-            rna = _mrna_lengths(rna_sim, n)
+            rna = _annotated_lengths(rna_sim, n)
         finally:
             rna_sim.close()
         result[label] = {
@@ -1093,7 +1107,7 @@ class TestTheOnProbeConditional:
 
         shares = []
         for width in (60, 120, 240, 480, 800):
-            total = sampler.partition("mrna", 0, transcript_length, width)
+            total = sampler.partition("transcript", 0, transcript_length, width)
             baseline = config.off_target_weight * (transcript_length - width + 1)
             expected = baseline + config.binding_per_base * probe_length * width
             assert total == pytest.approx(expected), f"width {width}"
@@ -1122,7 +1136,7 @@ def test_a_probe_naming_a_merged_duplicate_binds_its_kept_twin(tmp_path, at_opti
         {"chr1": 2000},
         fasta=at_optimum,
     )
-    assert sampler.fragment_weight("mrna", 0, 2000, 250, 200) == pytest.approx(71.0)
+    assert sampler.fragment_weight("transcript", 0, 2000, 250, 200) == pytest.approx(71.0)
 
 
 def test_a_probe_naming_no_transcript_is_refused(tmp_path, at_optimum):
@@ -1326,7 +1340,7 @@ def test_a_split_probe_is_one_probe_whose_parts_share_the_strength_of_its_joined
     s = gc_strength(0.5, sampler.config)
     assert s < 1.0
     assert [p.strength for p in sampler.probe_intervals("gdna", "chr1")] == [s, s]
-    assert [(p.start, p.end, p.strength) for p in sampler.probe_intervals("mrna", 0)] == [
+    assert [(p.start, p.end, p.strength) for p in sampler.probe_intervals("transcript", 0)] == [
         (100, 220, s)
     ]
     # a fragment over either part alone in gDNA binds its 60 bases at the probe's one strength
@@ -1337,7 +1351,7 @@ def test_a_split_probe_is_one_probe_whose_parts_share_the_strength_of_its_joined
         1.0 + 10.0 * 60 * s, rel=1e-12
     )
     # the transcript holding the junction sees it whole
-    assert sampler.fragment_weight("mrna", 0, 760, 100, 120) == pytest.approx(
+    assert sampler.fragment_weight("transcript", 0, 760, 100, 120) == pytest.approx(
         1.0 + 10.0 * 120 * s, rel=1e-12
     )
 

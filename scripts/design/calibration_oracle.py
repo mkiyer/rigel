@@ -1,12 +1,12 @@
 """What is the certified per-object truth? Run this before debugging calibration against anything.
 
 For every slot of the chain, in the drained frame production calibrates, this derives the accumulator's tally
-``count``, the realized ``n_gdna`` / ``n_nrna`` / ``n_mrna`` from the origin-split oracle caches, the RNA split by
+``count``, the realized ``n_gdna`` / ``n_nascent`` / ``n_annotated`` from the origin-split oracle caches, the RNA split by
 transcript strand (``n_rna_pos`` / ``n_rna_neg``), and ``true_f_g``. No solver runs. It writes
 ``slot_truth.npz`` beside each oracle cache only if the gates pass:
 
 - sum-to-full: the partitions reconstruct every bank of the full scan;
-- partition-projects-exactly: ``n_gdna + n_nrna + n_mrna == count`` at every slot;
+- partition-projects-exactly: ``n_gdna + n_nascent + n_annotated == count`` at every slot;
 - gdna-field-uniformity (capture-OFF only): each slot's gDNA count is Poisson about ``rho_ref x E_g``, scored as
   a z per slot and a ratio-z per object class, which is how a counting or divisor bug shows;
 - exact-zeros: a bank that must be empty is identically zero (an empty selection is vacuous, not a pass);
@@ -236,7 +236,7 @@ def slot_refs(chain, region_arrays) -> np.ndarray:
 
 def origin_slot_counts(index, oracle_cache: Path, condition: str, payload, lift: dict, region_arrays, chain):
     """``(truth, counts, n_ambiguous_strands)``: the drained whole's per-slot count and each origin-split partition's,
-    by origin (``n_gdna`` / ``n_nrna`` / ``n_mrna``) and by transcript strand (``n_rna_pos`` / ``n_rna_neg``), every
+    by origin (``n_gdna`` / ``n_nascent`` / ``n_annotated``) and by transcript strand (``n_rna_pos`` / ``n_rna_neg``), every
     partition drained by replaying the whole's choices."""
     OA = sibling("_oracle_arms.py")
     # sum-to-full is a hard gate inside from_cached_parts on the drained frame; an exception is the verdict
@@ -246,7 +246,7 @@ def origin_slot_counts(index, oracle_cache: Path, condition: str, payload, lift:
     def count(p):
         return slot_counts(p, region_arrays, chain)
 
-    counts = {"count": count(payload), **{f"n_{k}": count(truth.parts[k]) for k in ("gdna", "nrna", "mrna")}}
+    counts = {"count": count(payload), **{f"n_{k}": count(truth.parts[k]) for k in ("gdna", "nascent", "annotated")}}
     # the same RNA reads keyed by transcript strand, the per-component truth; refused if absent
     try:
         strand_parts = OA.oracle_parts(oracle_cache, condition, index, RNA_STRAND_ORIGINS)
@@ -328,7 +328,7 @@ def derive(index, suite: Path, condition: str) -> tuple[dict, list[dict]]:
     truth, c, n_amb_strand = origin_slot_counts(
         index, Path(suite) / "oracle_cache", condition, payload, lift, region_arrays, chain
     )
-    n_g, n_n, n_m = c["n_gdna"], c["n_nrna"], c["n_mrna"]
+    n_g, n_n, n_m = c["n_gdna"], c["n_nascent"], c["n_annotated"]
     ref = slot_refs(chain, region_arrays)
     eff_g = np.asarray(geom.eff_gdna, np.float64)
     manifest = json.loads((Path(suite) / "manifest.json").read_text())

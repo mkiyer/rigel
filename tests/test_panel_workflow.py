@@ -183,7 +183,7 @@ def test_an_oracle_condition_needs_every_part(tmp_path, capsys):
         (p.oracle_cache / "c1" / part).mkdir(parents=True)
         (p.oracle_cache / "c1" / part / "payload.npz").touch()
 
-    for part in ("gdna", "mrna", "nrna"):  # no strand pair — deliberately incomplete
+    for part in ("gdna", "annotated", "nascent"):  # no strand pair — deliberately incomplete
         write(part)
     panel.cmd_status(p, None)
     assert "oracle cache 0/1" in capsys.readouterr().out
@@ -415,7 +415,9 @@ def test_align_rebuilds_a_missing_pair_from_the_simulators_bam(tmp_path):
         ("gdna_chr1:400-640:f:1", "TTGACCAG", "CAGTACGT"),
     ]
     _simulator_bam(d / "sim_oracle.bam", pairs)
-    (d / "truth_summary.json").write_text(json.dumps({"origin_counts": {"mrna": 1, "gdna": 1}}))
+    (d / "truth_summary.json").write_text(
+        json.dumps({"origin_counts": {"annotated": 1, "gdna": 1}})
+    )
     index = tmp_path / "index"
     index.mkdir()
     (index / "SA").write_bytes(b"")

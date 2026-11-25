@@ -780,7 +780,7 @@ class TestGDNAInLocusEM:
         bundle = _make_locus_em_data(
             [[0, 1]] * 200,
             num_transcripts=2,
-            include_nrna=True,
+            include_nascent=True,
             include_gdna=True,
             gdna_prior_count=3.0,
         )

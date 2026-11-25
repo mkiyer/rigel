@@ -3,7 +3,7 @@
 derived from it.
 
 `test_reference/test_chr.yaml` is the one hand-edited file. It is the `rigel sim` scenario schema
-(``genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}``, exons 0-based
+(``genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nascent_abundance}]}``, exons 0-based
 half-open) plus two keys: ``probed`` per gene (the capture panels are designed from it) and ``shadow_genes``
 (unannotated transcription on the blank contig, simulator-only). Every other file in `test_reference/` is
 rendered from it by this script and is never edited by hand:
@@ -11,7 +11,7 @@ rendered from it by this script and is never edited by hand:
 ===========================  ========================================================================
 `test_chr.gtf`               one `exon` line per exon, what `rigel index` reads
 `test_shadow.gtf`            the shadow transcripts on `test_blank`, what the simulator reads
-`test_abundances.tsv`        `transcript_id / mrna_abundance / nrna_abundance` (no comment lines: both
+`test_abundances.tsv`        `transcript_id / annotated_abundance / nascent_abundance` (no comment lines: both
                              readers key on the first line)
 `test_probes.bed`            the benign panel: each probed gene's exon union tiled 8 × 125 bp seamless
                              from each union piece's start, never spanning a junction
@@ -29,7 +29,7 @@ and copied into the runs dir. ``--check`` re-renders in memory and refuses if a 
 The FASTA is derived rather than versioned: a spliced transcript needs a GT..AG at every intron or the aligner
 and the simulator disagree with the annotation, so the chromosome is regenerated from a fixed seed and every
 declared intron gets its motif. Nascent RNA needs no declaration: `rigel index` creates a single-exon nascent
-entity spanning each multi-exon transcript, weighted by its contributor's ``nrna_abundance``. Every gene carries
+entity spanning each multi-exon transcript, weighted by its contributor's ``nascent_abundance``. Every gene carries
 an explicit strand, and the builder refuses a chromosome whose + and − counts differ by more than one, since a
 sign error in a strand-dependent rule is invisible on a one-strand chromosome.
 
@@ -117,12 +117,12 @@ class Spec:
     @property
     def abundances(self) -> dict[str, tuple[float, float]]:
         return {
-            t.t_id: (float(t.abundance or 0.0), float(t.nrna_abundance or 0.0))
+            t.t_id: (float(t.abundance or 0.0), float(t.nascent_abundance or 0.0))
             for t in self.transcripts + self.shadows
         }
 
 
-def _tx(t_id: str, g_id: str, ref: str, strand: str, exons, abundance: float, nrna: float) -> Transcript:
+def _tx(t_id: str, g_id: str, ref: str, strand: str, exons, abundance: float, nascent: float) -> Transcript:
     t = Transcript(
         ref=ref,
         strand=Strand.from_str(strand),
@@ -130,7 +130,7 @@ def _tx(t_id: str, g_id: str, ref: str, strand: str, exons, abundance: float, nr
         t_id=t_id,
         g_id=g_id,
         abundance=float(abundance),
-        nrna_abundance=float(nrna),
+        nascent_abundance=float(nascent),
     )
     t.length = t.compute_length()
     return t
@@ -161,7 +161,7 @@ def spec_from_dict(cfg: dict) -> Spec:
                     problems.append(f"{tid}: exons must be a non-empty list of [start, end) pairs")
                     continue
                 txs.append(_tx(tid, gid, ref, strand, exons, td.get("abundance", 0.0),
-                               td.get("nrna_abundance", 0.0)))
+                               td.get("nascent_abundance", 0.0)))
             if not txs and not problems:
                 problems.append(f"{gid}: a gene needs at least one transcript")
             out.append(Gene(gid, strand, probed, txs))
@@ -299,9 +299,9 @@ def _num(x: float) -> str:
 
 def render_abundances(spec: Spec) -> str:
     """No comment lines: both readers key on the first line."""
-    lines = ["transcript_id\tmrna_abundance\tnrna_abundance"]
+    lines = ["transcript_id\tannotated_abundance\tnascent_abundance"]
     for t in spec.transcripts + spec.shadows:
-        lines.append(f"{t.t_id}\t{_num(t.abundance or 0.0)}\t{_num(t.nrna_abundance or 0.0)}")
+        lines.append(f"{t.t_id}\t{_num(t.abundance or 0.0)}\t{_num(t.nascent_abundance or 0.0)}")
     return "\n".join(lines) + "\n"
 
 
@@ -469,7 +469,7 @@ def build(spec_path: Path, out: Path, render_dir: Path | None = HERE) -> dict:
 #: the self-test's spec: one probed two-exon gene, one unprobed single-exon gene and a shadow
 _SELF_TEST_SPEC = {"genome_length": 50_000, "genes": [
     {"gene_id": "gA", "strand": "+", "probed": True,
-     "transcripts": [{"t_id": "A", "exons": [[1000, 2000], [9000, 10000]], "abundance": 10, "nrna_abundance": 3}]},
+     "transcripts": [{"t_id": "A", "exons": [[1000, 2000], [9000, 10000]], "abundance": 10, "nascent_abundance": 3}]},
     {"gene_id": "gB", "strand": "-", "transcripts": [{"t_id": "B", "exons": [[20000, 21000]], "abundance": 5}]},
 ], "shadow_genes": [
     {"gene_id": "gS", "strand": "-", "transcripts": [{"t_id": "S", "exons": [[100, 600]], "abundance": 2}]},
@@ -588,7 +588,7 @@ def _check_renders(check) -> None:
     check("a − exon renders with its strand", "\t20001\t21000\t.\t-\t" in gtf)
     tsv = render_abundances(spec)
     check("the abundances render with no comment lines and the header first",
-          tsv.splitlines()[0] == "transcript_id\tmrna_abundance\tnrna_abundance" and "A\t10\t3" in tsv and "S\t2\t0" in tsv)
+          tsv.splitlines()[0] == "transcript_id\tannotated_abundance\tnascent_abundance" and "A\t10\t3" in tsv and "S\t2\t0" in tsv)
     ben = probe_lines(spec.genes, "benign")
     check("the benign panel tiles only the probed gene, 8 per exon piece", len(ben) == 16 and all("gA" in line for line in ben))
     check("the benign tiling starts at the exon start and never spans the sj",

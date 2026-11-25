@@ -8,8 +8,8 @@
 # one hand-edited source, `build_test_reference.py` renders the GTFs, the abundance TSV and the probe panels from
 # it, and the FASTA, the index and this sweep are derived (docs/TESTING.md §0a).
 #
-# There is no `nrna:` block: under `abundance.mode: file` the TSV's `nrna_abundance` column is the only source of
-# nascent weight, so the nascent sweep is skipped and every condition is labelled `nrna_file`.
+# There is no `nascent:` block: under `abundance.mode: file` the TSV's `nascent_abundance` column is the only source of
+# nascent weight, so the nascent sweep is skipped and every condition is labelled `nascent_file`.
 #
 # Two axes live in the substrate rather than here. Capture: under `capture: on` about half the genes are probed
 # and the rest have no probe, so every condition holds both captured and uncaptured structures. Nascent: only the

@@ -455,7 +455,7 @@ class TestLargerIndex:
             if t_id.startswith("RIGEL_NASCENT_"):
                 # synthetic spans are single-exon
                 assert exons.shape[0] == 1, (
-                    f"{t_id} (t_idx={t_idx}): synthetic nRNA should have "
+                    f"{t_id} (t_idx={t_idx}): synthetic nascent RNA should have "
                     f"1 exon, got {exons.shape[0]}"
                 )
             else:
@@ -861,7 +861,7 @@ def test_the_index_writes_no_column_nothing_reads(tmp_path: Path):
     fasta, gtf = _mini_sources(tmp_path)
     TranscriptIndex.build(fasta, gtf, tmp_path / "idx")
     t_columns = set(pd.read_feather(tmp_path / "idx" / TRANSCRIPTS_FEATHER).columns)
-    assert not t_columns & {"abundance", "nrna_abundance", "n_exons"}
+    assert not t_columns & {"abundance", "nascent_abundance", "n_exons"}
     assert "interval_type" not in pd.read_feather(tmp_path / "idx" / SJ_FEATHER).columns
     assert TranscriptIndex.load(tmp_path / "idx").num_transcripts > 0
 

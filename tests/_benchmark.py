@@ -34,14 +34,14 @@ def _read_names(scenario_result) -> Iterable[str]:
 
 
 def simulated_truth(scenario_result) -> tuple[dict[str, int], Counter]:
-    """The scenario's truth: mature-RNA fragments per transcript id, and fragments per origin kind (``mrna``,
-    ``nrna``, ``gdna``)."""
+    """The scenario's truth: mature-RNA fragments per transcript id, and fragments per origin kind (``annotated``,
+    ``nascent``, ``gdna``)."""
     by_transcript: Counter[str] = Counter()
     by_kind: Counter[str] = Counter()
     for name in _read_names(scenario_result):
         origin = parse_origin(name)
         by_kind[origin.kind] += 1
-        if origin.kind == "mrna" and origin.transcript_id is not None:
+        if origin.kind == "annotated" and origin.transcript_id is not None:
             by_transcript[origin.transcript_id] += 1
     return dict(by_transcript), by_kind
 
@@ -114,8 +114,8 @@ class BenchmarkResult:
     n_intergenic: int
     n_gdna_expected: int = 0
     n_gdna_pipeline: float = 0.0
-    n_nrna_expected: int = 0
-    n_nrna_pipeline: float = 0.0
+    n_nascent_expected: int = 0
+    n_nascent_pipeline: float = 0.0
     n_synthetic_observed: float = 0.0
     transcripts: list[TranscriptAccuracy] = field(default_factory=list)
     stats_dict: dict = field(default_factory=dict)
@@ -134,7 +134,7 @@ class BenchmarkResult:
 
     @property
     def total_observed(self) -> float:
-        """Sum of observed counts across all transcripts (mRNA only)."""
+        """Sum of observed counts across all transcripts (annotated RNA only)."""
         return sum(t.observed for t in self.transcripts)
 
     @property
@@ -167,9 +167,9 @@ class BenchmarkResult:
         return abs(self.n_gdna_pipeline - self.n_gdna_expected)
 
     @property
-    def nrna_abs_diff(self) -> float:
-        """Absolute difference between expected and pipeline nRNA counts."""
-        return abs(self.n_nrna_pipeline - self.n_nrna_expected)
+    def nascent_abs_diff(self) -> float:
+        """Absolute difference between expected and pipeline nascent RNA counts."""
+        return abs(self.n_nascent_pipeline - self.n_nascent_expected)
 
     # -- Display --------------------------------------------------------------
 
@@ -188,11 +188,11 @@ class BenchmarkResult:
                 f"pipeline={self.n_gdna_pipeline:.0f}, "
                 f"diff={self.gdna_abs_diff:.0f}"
             )
-        if self.n_nrna_expected > 0 or self.n_nrna_pipeline > 0:
+        if self.n_nascent_expected > 0 or self.n_nascent_pipeline > 0:
             boundaries.append(
-                f"  nRNA: expected={self.n_nrna_expected}, "
-                f"pipeline={self.n_nrna_pipeline:.0f}, "
-                f"diff={self.nrna_abs_diff:.0f}"
+                f"  nascent RNA: expected={self.n_nascent_expected}, "
+                f"pipeline={self.n_nascent_pipeline:.0f}, "
+                f"diff={self.nascent_abs_diff:.0f}"
             )
         boundaries.extend(
             [
@@ -230,7 +230,7 @@ def run_benchmark(
     """
     simulated_counts, by_kind = simulated_truth(scenario_result)
     n_gdna_expected = by_kind["gdna"]
-    n_nrna_expected = by_kind["nrna"]
+    n_nascent_expected = by_kind["nascent"]
 
     t_counts = pipeline_result.estimator.t_counts
     observed_per_t = t_counts.sum(axis=1)
@@ -244,7 +244,7 @@ def run_benchmark(
     )
 
     # Nascent RNA: the synthetic spans' counts.
-    n_nrna_pipeline = float(pipeline_result.estimator.synthetic_count)
+    n_nascent_pipeline = float(pipeline_result.estimator.synthetic_count)
 
     transcript_results: list[TranscriptAccuracy] = []
     annotated_t_indices: set[int] = set()
@@ -281,8 +281,8 @@ def run_benchmark(
         n_intergenic=stats.n_intergenic,
         n_gdna_expected=n_gdna_expected,
         n_gdna_pipeline=n_gdna_pipeline,
-        n_nrna_expected=n_nrna_expected,
-        n_nrna_pipeline=n_nrna_pipeline,
+        n_nascent_expected=n_nascent_expected,
+        n_nascent_pipeline=n_nascent_pipeline,
         n_synthetic_observed=n_synthetic_observed,
         transcripts=transcript_results,
         stats_dict=stats.to_dict(),

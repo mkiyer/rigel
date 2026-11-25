@@ -22,7 +22,7 @@ from rigel.pipeline import library_fl_models, scan_and_buffer
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 
-def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float) -> float:
+def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nascent_abundance: float) -> float:
     """Build the toy AMBIG scenario, calibrate, and return the AMBIG region's contained gDNA fraction."""
     sc = Scenario("ambig_reg", genome_length=30000, seed=7, work_dir=work_dir)
     # Overlapping opposite-strand pair → an AMBIG region at 5000-6000 with single-strand flanks.
@@ -74,7 +74,7 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
             seed=7,
         ),
         gdna_config=gd,
-        nrna_abundance=float(nrna_abundance),
+        nascent_abundance=float(nascent_abundance),
     )
     idx, bam = res.index, str(res.bam_path)
     cfg = PipelineConfig()
@@ -116,12 +116,12 @@ def test_ambig_no_false_gdna_from_nascent(tmp_path):
     """
     # gDNA=0 + nascent: the AMBIG region must not read the nascent/mature RNA as gDNA. Imputation from the strand-clean
     # flanking boundaries drives it to ~0.
-    frac = _ambig_gdna_fraction(tmp_path / "none", gdna_abundance=0, nrna_abundance=30.0)
+    frac = _ambig_gdna_fraction(tmp_path / "none", gdna_abundance=0, nascent_abundance=30.0)
     assert frac < 0.08, f"AMBIG gDNA fraction {frac:.3f} too high at gDNA=0+nascent (expected ~0)"
 
 
 def test_ambig_reads_gdna_when_present(tmp_path):
     # With real gDNA and no nascent the AMBIG region, imputed from its flanks, reads substantial gDNA, so the test above
     # is not satisfied by always reading 0.
-    frac = _ambig_gdna_fraction(tmp_path / "gdna", gdna_abundance=200, nrna_abundance=0.0)
+    frac = _ambig_gdna_fraction(tmp_path / "gdna", gdna_abundance=200, nascent_abundance=0.0)
     assert frac > 0.2, f"AMBIG gDNA fraction {frac:.3f} too low with real gDNA present"

@@ -211,7 +211,7 @@ class WholeGenomeSimulator:
     effective length; each row's fragments are then extracted at once and written to FASTQ and BAM together.
 
     Nascent RNA is a transcript here: the index's nascent entities are single-exon rows over each TSS/TES span,
-    carrying the pooled nascent molecules (`transcriptome.assign_nrna_to_entities`). An entity's template is its own
+    carrying the pooled nascent molecules (`transcriptome.assign_nascent_to_entities`). An entity's template is its own
     sequence and its capture intervals are whatever probes overlap its span, as for gDNA; a nascent row differs
     from a transcript row only by its read-name tag.
     """
@@ -244,8 +244,12 @@ class WholeGenomeSimulator:
         self._quals_cache: dict[int, str] = {}
         self._has_errors = sim_params.error_rate > 0
         # frag_max is clamped to the longest transcript
-        max_mrna = int(self._t_lengths.max()) if len(transcripts) > 0 else 0
-        self._frag_max = min(sim_params.frag_max, max_mrna) if max_mrna > 0 else sim_params.frag_max
+        longest_transcript = int(self._t_lengths.max()) if len(transcripts) > 0 else 0
+        self._frag_max = (
+            min(sim_params.frag_max, longest_transcript)
+            if longest_transcript > 0
+            else sim_params.frag_max
+        )
 
         self._load_genomic_refs(genomic_refs)
 
@@ -266,7 +270,7 @@ class WholeGenomeSimulator:
             "Simulator ready: %d transcripts, %d gDNA refs, max sequence length=%d",
             len(transcripts),
             len(self.genomic_refs),
-            max_mrna,
+            longest_transcript,
         )
 
     # -- Setup ----------------------------------------------------------------
@@ -286,16 +290,16 @@ class WholeGenomeSimulator:
         self._t_strand_chars: list[str] = [
             STRAND_REVERSE if t.strand == Strand.NEG else STRAND_FORWARD for t in transcripts
         ]
-        self._mrna_abund = np.array([t.abundance or 0.0 for t in transcripts])
+        self._annotated_abund = np.array([t.abundance or 0.0 for t in transcripts])
         # Nascent must live on single-exon entity rows: on a multi-exon row it would be drawn from a spliced
         # template.
-        self._nrna_abund = np.array([t.nrna_abundance for t in transcripts])
-        bad = [t.t_id for t in transcripts if t.nrna_abundance > 0 and len(t.exons) != 1]
+        self._nascent_abund = np.array([t.nascent_abundance for t in transcripts])
+        bad = [t.t_id for t in transcripts if t.nascent_abundance > 0 and len(t.exons) != 1]
         if bad:
             raise ValueError(
-                f"{len(bad)} multi-exon transcripts carry nrna_abundance > 0 (e.g. {bad[:3]}); "
-                "nascent RNA must be pooled onto single-exon nRNA entities "
-                "(transcriptome.assign_nrna_to_entities)"
+                f"{len(bad)} multi-exon transcripts carry nascent_abundance > 0 (e.g. {bad[:3]}); "
+                "nascent RNA must be pooled onto single-exon nascent RNA entities "
+                "(transcriptome.assign_nascent_to_entities)"
             )
 
     def _load_genomic_refs(self, genomic_refs: Sequence[str]) -> None:
@@ -444,9 +448,9 @@ class WholeGenomeSimulator:
         self, n_rna: int
     ) -> tuple[dict[int, dict[int, int]], dict[int, dict[int, int]]]:
         """Draw ``n_rna`` fragments from one multinomial over every RNA row, each transcript's ``abundance`` and each
-        entity's ``nrna_abundance``, weighted by capture-aware effective length on its own template.
+        entity's ``nascent_abundance``, weighted by capture-aware effective length on its own template.
 
-        Returns ``(mrna_counts, nrna_counts)``, each ``dict[t_idx, dict[frag_len, count]]``, apart only because the
+        Returns ``(annotated_counts, nascent_counts)``, each ``dict[t_idx, dict[frag_len, count]]``, apart only because the
         writer names the two rows' reads differently.
         """
         if n_rna <= 0:
@@ -456,20 +460,22 @@ class WholeGenomeSimulator:
         rng = self._rng
         frag_lengths = self._sample_rna_frag_lengths(n_rna)
 
-        mrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
-        nrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        annotated_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        nascent_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
         # The effective length is evaluated on the rows with abundance only; `eff` keeps zeros in the rest, so the
         # draw is bit-identical to computing every row.
-        live = np.flatnonzero((self._mrna_abund > 0) | (self._nrna_abund > 0))
+        live = np.flatnonzero((self._annotated_abund > 0) | (self._nascent_abund > 0))
         live_keys = live.tolist()
         live_lengths = self._t_lengths[live]
 
         def weights_at(width: int) -> np.ndarray:
             eff = np.zeros(N, dtype=np.float64)
             if live.size:
-                eff[live] = self.capture.partition_array("mrna", live_keys, live_lengths, width)
-            return np.concatenate([self._mrna_abund * eff, self._nrna_abund * eff])
+                eff[live] = self.capture.partition_array(
+                    "transcript", live_keys, live_lengths, width
+                )
+            return np.concatenate([self._annotated_abund * eff, self._nascent_abund * eff])
 
         widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
             frag_lengths, weights_at, rng, "RNA"
@@ -486,11 +492,11 @@ class WholeGenomeSimulator:
             for idx, cnt in zip(unique_idx, idx_counts):
                 idx, cnt = int(idx), int(cnt)
                 if idx < N:
-                    mrna_counts[idx][fl] += cnt
+                    annotated_counts[idx][fl] += cnt
                 else:
-                    nrna_counts[idx - N][fl] += cnt
+                    nascent_counts[idx - N][fl] += cnt
 
-        return dict(mrna_counts), dict(nrna_counts)
+        return dict(annotated_counts), dict(nascent_counts)
 
     def _accumulate_gdna_counts(self, n_gdna: int) -> dict[tuple[int, int], int]:
         """Draw ``n_gdna`` fragments over lengths and genomic references: ``{(ref_idx, frag_len): count}``."""
@@ -611,13 +617,13 @@ class WholeGenomeSimulator:
         fastq: _FastqPair,
         bam_fh: pysam.AlignmentFile | None,
         *,
-        is_nrna: bool,
+        is_nascent: bool,
     ) -> int:
-        """Write all reads of one RNA row: a transcript's row, or an entity's nascent row (``is_nrna``), which differs
+        """Write all reads of one RNA row: a transcript's row, or an entity's nascent row (``is_nascent``), which differs
         only by its read-name tag. The template is the row's own sequence; an entity's is its genomic span.
         """
         t = self.transcripts[t_idx]
-        if is_nrna and len(t.exons) != 1:
+        if is_nascent and len(t.exons) != 1:
             raise ValueError(f"nascent row on a multi-exon transcript {t.t_id}")
         seq_bytes = self._t_seq_bytes[t_idx]
         seq_len = int(self._t_lengths[t_idx])
@@ -630,12 +636,14 @@ class WholeGenomeSimulator:
             if seq_len - frag_len + 1 <= 0:
                 continue
             read_len = min(self.sim_params.read_length, frag_len)
-            starts = self.capture.sample_starts("mrna", t_idx, seq_len, frag_len, count, self._rng)
+            starts = self.capture.sample_starts(
+                "transcript", t_idx, seq_len, frag_len, count, self._rng
+            )
             flips = self._rna_flips(count)
             reads = self._read_pairs(seq_bytes, starts, frag_len, read_len, flips)
             qnames = [
                 format_rna_name(
-                    t.t_id, start, start + frag_len, strand_char, n_written + i, nascent=is_nrna
+                    t.t_id, start, start + frag_len, strand_char, n_written + i, nascent=is_nascent
                 )
                 for i, start in enumerate(starts.tolist())
             ]
@@ -770,8 +778,8 @@ class WholeGenomeSimulator:
         """Σ over every RNA row of abundance × capture-aware effective length at the mean RNA fragment length."""
         mean_frag = int(self.sim_params.frag_mean)
         n = len(self.transcripts)
-        eff = self.capture.partition_array("mrna", range(n), self._t_lengths, mean_frag)
-        return float(np.sum((self._mrna_abund + self._nrna_abund) * eff))
+        eff = self.capture.partition_array("transcript", range(n), self._t_lengths, mean_frag)
+        return float(np.sum((self._annotated_abund + self._nascent_abund) * eff))
 
     def rna_gdna_split(self, n_total: int, gdna_abundance: float) -> tuple[int, int]:
         """Split ``n_total`` fragments into ``(n_rna, n_gdna)`` by abundance × effective length, gDNA weighing
@@ -813,18 +821,18 @@ class WholeGenomeSimulator:
 
         # Counts are drawn in the parent from self._rng, so they follow the configured seed.
         logger.info("Accumulating RNA fragment counts...")
-        mrna_counts, nrna_counts = self._accumulate_rna_counts(n_rna)
+        annotated_counts, nascent_counts = self._accumulate_rna_counts(n_rna)
         gdna_counts = self._accumulate_gdna_counts(n_gdna)
 
-        total_mrna = sum(sum(d.values()) for d in mrna_counts.values())
-        total_nrna = sum(sum(d.values()) for d in nrna_counts.values())
+        total_annotated = sum(sum(d.values()) for d in annotated_counts.values())
+        total_nascent = sum(sum(d.values()) for d in nascent_counts.values())
         total_gdna = sum(gdna_counts.values())
         logger.info(
-            "Fragment counts: %d mRNA (%d txs), %d nRNA (%d txs), %d gDNA chunks",
-            total_mrna,
-            len(mrna_counts),
-            total_nrna,
-            len(nrna_counts),
+            "Fragment counts: %d annotated RNA (%d txs), %d nascent RNA (%d txs), %d gDNA chunks",
+            total_annotated,
+            len(annotated_counts),
+            total_nascent,
+            len(nascent_counts),
             len(gdna_counts),
         )
 
@@ -833,8 +841,8 @@ class WholeGenomeSimulator:
                 r1_path,
                 r2_path,
                 bam_path,
-                [(t_idx, mrna_counts[t_idx]) for t_idx in sorted(mrna_counts)],
-                [(t_idx, nrna_counts[t_idx]) for t_idx in sorted(nrna_counts)],
+                [(t_idx, annotated_counts[t_idx]) for t_idx in sorted(annotated_counts)],
+                [(t_idx, nascent_counts[t_idx]) for t_idx in sorted(nascent_counts)],
                 list(gdna_counts.items()),
                 threads=CONSTANTS.resources.fastq_gzip_threads,
             )
@@ -845,15 +853,15 @@ class WholeGenomeSimulator:
                 r1_path,
                 r2_path,
                 bam_path,
-                mrna_counts,
-                nrna_counts,
+                annotated_counts,
+                nascent_counts,
                 gdna_counts,
                 n_workers,
             )
 
         logger.info(
             "Wrote %d read pairs -> %s (RNA=%d, gDNA=%d, oracle=%s, workers=%d)",
-            total_mrna + total_nrna + total_gdna,
+            total_annotated + total_nascent + total_gdna,
             output_dir,
             n_rna,
             n_gdna,
@@ -869,8 +877,8 @@ class WholeGenomeSimulator:
         r1_path: Path,
         r2_path: Path,
         bam_path: Path | None,
-        mrna_items: list[tuple[int, dict[int, int]]],
-        nrna_items: list[tuple[int, dict[int, int]]],
+        annotated_items: list[tuple[int, dict[int, int]]],
+        nascent_items: list[tuple[int, dict[int, int]]],
         gdna_items: list[tuple[tuple[int, int], int]],
         *,
         threads: int,
@@ -886,10 +894,10 @@ class WholeGenomeSimulator:
             if bam_path is not None:
                 bam_fh = pysam.AlignmentFile(str(bam_path), "wb", header=self._bam_header)
             try:
-                for t_idx, len_counts in mrna_items:
-                    self._write_rna_reads(t_idx, len_counts, fastq, bam_fh, is_nrna=False)
-                for t_idx, len_counts in nrna_items:
-                    self._write_rna_reads(t_idx, len_counts, fastq, bam_fh, is_nrna=True)
+                for t_idx, len_counts in annotated_items:
+                    self._write_rna_reads(t_idx, len_counts, fastq, bam_fh, is_nascent=False)
+                for t_idx, len_counts in nascent_items:
+                    self._write_rna_reads(t_idx, len_counts, fastq, bam_fh, is_nascent=True)
                 n_offset = 0
                 for (ref_idx, fl), count in gdna_items:
                     n_offset += self._write_gdna_chunk(ref_idx, fl, count, fastq, bam_fh, n_offset)
@@ -905,8 +913,8 @@ class WholeGenomeSimulator:
         r1_path: Path,
         r2_path: Path,
         bam_path: Path | None,
-        mrna_counts: dict[int, dict[int, int]],
-        nrna_counts: dict[int, dict[int, int]],
+        annotated_counts: dict[int, dict[int, int]],
+        nascent_counts: dict[int, dict[int, int]],
         gdna_counts: dict[tuple[int, int], int],
         n_workers: int,
     ) -> None:
@@ -916,11 +924,11 @@ class WholeGenomeSimulator:
         def by_row(item):
             return sum(item[1].values())
 
-        mrna_shards = _shard_by_count(
-            [(t, dict(d)) for t, d in mrna_counts.items()], n_workers, weight=by_row
+        annotated_shards = _shard_by_count(
+            [(t, dict(d)) for t, d in annotated_counts.items()], n_workers, weight=by_row
         )
-        nrna_shards = _shard_by_count(
-            [(t, dict(d)) for t, d in nrna_counts.items()], n_workers, weight=by_row
+        nascent_shards = _shard_by_count(
+            [(t, dict(d)) for t, d in nascent_counts.items()], n_workers, weight=by_row
         )
         gdna_shards = _shard_by_count(
             list(gdna_counts.items()), n_workers, weight=lambda item: item[1]
@@ -933,8 +941,8 @@ class WholeGenomeSimulator:
         tasks = [
             (
                 k,
-                mrna_shards[k],
-                nrna_shards[k],
+                annotated_shards[k],
+                nascent_shards[k],
                 gdna_shards[k],
                 str(shard_dir),
                 prefix,
@@ -961,8 +969,8 @@ class WholeGenomeSimulator:
     def _run_shard(
         self,
         shard_id: int,
-        mrna_items: list[tuple[int, dict[int, int]]],
-        nrna_items: list[tuple[int, dict[int, int]]],
+        annotated_items: list[tuple[int, dict[int, int]]],
+        nascent_items: list[tuple[int, dict[int, int]]],
         gdna_items: list[tuple[tuple[int, int], int]],
         shard_dir: str,
         prefix: str,
@@ -976,7 +984,9 @@ class WholeGenomeSimulator:
         r2_path = Path(f"{shard}.R2.fq.gz")
         bam_path = Path(f"{shard}.bam") if oracle_bam else None
         # one compressor thread per file: the shards are the parallelism, each a process of its own
-        self._write_files(r1_path, r2_path, bam_path, mrna_items, nrna_items, gdna_items, threads=1)
+        self._write_files(
+            r1_path, r2_path, bam_path, annotated_items, nascent_items, gdna_items, threads=1
+        )
         return (str(r1_path), str(r2_path), str(bam_path) if bam_path else None)
 
     def close(self) -> None:

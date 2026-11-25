@@ -19,7 +19,7 @@ from rigel.sim import Scenario
 
 from _scenarios import (
     STRAND_LEVELS,
-    NRNA_LEVELS,
+    NASCENT_LEVELS,
     STRESS_COMBOS,
     STRESS_IDS,
     SIM_SEED,
@@ -27,7 +27,7 @@ from _scenarios import (
     assert_alignment,
     assert_accountability,
     assert_negative_control,
-    assert_nrna_detected,
+    assert_nascent_detected,
 )
 
 
@@ -73,38 +73,42 @@ class TestAntisenseIntronicOverlap:
         yield sc
         sc.cleanup()
 
-    def test_mrna_only_no_leak(self, scenario):
-        """Pure mRNA from g1: zero nRNA, zero T2 counts."""
-        bench = build_and_run(scenario, n_fragments=2000, scenario_name="anti_intron_mRNA")
+    def test_annotated_only_no_leak(self, scenario):
+        """Pure annotated RNA from g1: zero nascent RNA, zero T2 counts."""
+        bench = build_and_run(scenario, n_fragments=2000, scenario_name="anti_intron_annotated")
         assert_alignment(bench)
         assert_accountability(bench)
         assert_negative_control(bench)
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-        assert t2.observed <= 1, f"T2 received {t2.observed:.0f} mRNA counts (expected 0)"
-        assert bench.n_nrna_pipeline <= 3, f"nRNA leak: {bench.n_nrna_pipeline:.0f} (expected ~0)"
+        assert t2.observed <= 1, f"T2 received {t2.observed:.0f} annotated RNA counts (expected 0)"
+        assert bench.n_nascent_pipeline <= 3, (
+            f"nascent RNA leak: {bench.n_nascent_pipeline:.0f} (expected ~0)"
+        )
 
-    @pytest.mark.parametrize("nrna", NRNA_LEVELS, ids=[f"nrna_{n}" for n in NRNA_LEVELS])
-    def test_nrna_sweep(self, scenario, nrna):
-        """nRNA from g1 creates intronic reads overlapping g2 exon.
+    @pytest.mark.parametrize(
+        "nascent", NASCENT_LEVELS, ids=[f"nascent_{n}" for n in NASCENT_LEVELS]
+    )
+    def test_nascent_sweep(self, scenario, nascent):
+        """nascent RNA from g1 creates intronic reads overlapping g2 exon.
 
-        T2 must still get zero assignments; all nRNA goes to T1.
+        T2 must still get zero assignments; all nascent RNA goes to T1.
         """
         bench = build_and_run(
             scenario,
-            nrna_abundance=nrna,
+            nascent_abundance=nascent,
             n_fragments=2000,
-            scenario_name=f"anti_intron_nrna_{nrna}",
+            scenario_name=f"anti_intron_nascent_{nascent}",
         )
         assert_alignment(bench)
         assert_accountability(bench)
         assert_negative_control(bench)
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-        assert t2.observed <= 2, f"T2 mRNA leak: {t2.observed:.0f} (expected 0)"
-        if nrna > 0:
-            assert_nrna_detected(bench, nrna)
+        assert t2.observed <= 2, f"T2 annotated RNA leak: {t2.observed:.0f} (expected 0)"
+        if nascent > 0:
+            assert_nascent_detected(bench, nascent)
 
     @pytest.mark.parametrize("ss", STRAND_LEVELS, ids=[f"ss_{s}" for s in STRAND_LEVELS])
-    def test_strand_sweep_with_nrna(self, request, scenario, ss):
+    def test_strand_sweep_with_nascent(self, request, scenario, ss):
         """Nascent RNA at reduced strand specificity, which is where the separating channel weakens.
 
         `t2`'s truth is 0 and it must stay 0. The failure this holds off is not only a leak into `t2`
@@ -118,10 +122,10 @@ class TestAntisenseIntronicOverlap:
         """
         bench = build_and_run(
             scenario,
-            nrna_abundance=50,
+            nascent_abundance=50,
             strand_specificity=ss,
             n_fragments=2000,
-            scenario_name=f"anti_intron_nrna50_ss{ss}",
+            scenario_name=f"anti_intron_nascent50_ss{ss}",
         )
         assert_alignment(bench)
         assert_accountability(bench)
@@ -129,7 +133,9 @@ class TestAntisenseIntronicOverlap:
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
         # Allow some T2 leak at low SS
         max_t2 = 5 if ss >= 0.9 else 20
-        assert t2.observed <= max_t2, f"T2 mRNA leak: {t2.observed:.0f} at SS={ss} (limit={max_t2})"
+        assert t2.observed <= max_t2, (
+            f"T2 annotated RNA leak: {t2.observed:.0f} at SS={ss} (limit={max_t2})"
+        )
 
 
 # =====================================================================
@@ -193,25 +199,25 @@ class TestAntisenseIntronicMultiIsoform:
         yield sc
         sc.cleanup()
 
-    def test_multi_isoform_nrna(self, scenario):
-        """nRNA from multi-isoform g1: T2 must get zero."""
+    def test_multi_isoform_nascent(self, scenario):
+        """nascent RNA from multi-isoform g1: T2 must get zero."""
         bench = build_and_run(
-            scenario, nrna_abundance=40, n_fragments=2000, scenario_name="anti_iso_nrna40"
+            scenario, nascent_abundance=40, n_fragments=2000, scenario_name="anti_iso_nascent40"
         )
         assert_alignment(bench)
         assert_accountability(bench)
         assert_negative_control(bench)
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-        assert t2.observed <= 2, f"T2 mRNA leak: {t2.observed:.0f}"
+        assert t2.observed <= 2, f"T2 annotated RNA leak: {t2.observed:.0f}"
 
-    def test_multi_isoform_nrna_low_ss(self, scenario):
-        """nRNA + SS=0.9 + multiple isoforms."""
+    def test_multi_isoform_nascent_low_ss(self, scenario):
+        """nascent RNA + SS=0.9 + multiple isoforms."""
         bench = build_and_run(
             scenario,
-            nrna_abundance=40,
+            nascent_abundance=40,
             strand_specificity=0.9,
             n_fragments=2000,
-            scenario_name="anti_iso_nrna40_s90",
+            scenario_name="anti_iso_nascent40_s90",
         )
         assert_alignment(bench)
         assert_accountability(bench)
@@ -222,15 +228,15 @@ class TestAntisenseIntronicMultiIsoform:
         # rather than zero.
         assert t2.observed <= 20, f"T2 annotated-RNA leak: {t2.observed:.0f} at SS=0.9 (limit 20)"
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, scenario, gdna, nrna, ss):
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, scenario, gdna, nascent, ss):
         bench = build_and_run(
             scenario,
             gdna_abundance=gdna,
-            nrna_abundance=nrna,
+            nascent_abundance=nascent,
             strand_specificity=ss,
             n_fragments=2000,
-            scenario_name=f"anti_iso_stress_{gdna}_{nrna}_{int(ss * 100)}",
+            scenario_name=f"anti_iso_stress_{gdna}_{nascent}_{int(ss * 100)}",
         )
         assert_alignment(bench)
         assert_accountability(bench)
@@ -238,7 +244,7 @@ class TestAntisenseIntronicMultiIsoform:
 
 
 # =====================================================================
-# Multi-exon antisense: nRNA prior not zeroed, strand-only defense
+# Multi-exon antisense: nascent RNA prior not zeroed, strand-only defense
 # =====================================================================
 
 
@@ -283,19 +289,19 @@ class TestAntisenseIntronicMultiExonT2:
         yield sc
         sc.cleanup()
 
-    def test_nrna_multiexon_t2(self, scenario):
-        """nRNA from T1 with multi-exon T2: strand model must hold."""
+    def test_nascent_multiexon_t2(self, scenario):
+        """nascent RNA from T1 with multi-exon T2: strand model must hold."""
         bench = build_and_run(
-            scenario, nrna_abundance=50, n_fragments=2000, scenario_name="anti_me_nrna50"
+            scenario, nascent_abundance=50, n_fragments=2000, scenario_name="anti_me_nascent50"
         )
         assert_alignment(bench)
         assert_accountability(bench)
         assert_negative_control(bench)
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-        assert t2.observed <= 2, f"T2 mRNA leak with multi-exon T2: {t2.observed:.0f}"
+        assert t2.observed <= 2, f"T2 annotated RNA leak with multi-exon T2: {t2.observed:.0f}"
 
-    def test_nrna_multiexon_t2_low_ss(self, scenario):
-        """nRNA + multi-exon T2 + SS=0.65 (worst case).
+    def test_nascent_multiexon_t2_low_ss(self, scenario):
+        """nascent RNA + multi-exon T2 + SS=0.65 (worst case).
 
         The host's synthetic nascent entity must get its share of the locus's RNA pseudocount, or the
         nascent fragments it should hold land on the annotated antisense `t2`, the only other component
@@ -304,10 +310,10 @@ class TestAntisenseIntronicMultiExonT2:
         """
         bench = build_and_run(
             scenario,
-            nrna_abundance=50,
+            nascent_abundance=50,
             strand_specificity=0.65,
             n_fragments=2000,
-            scenario_name="anti_me_nrna50_s65",
+            scenario_name="anti_me_nascent50_s65",
         )
         assert_alignment(bench)
         assert_accountability(bench)
@@ -315,4 +321,6 @@ class TestAntisenseIntronicMultiExonT2:
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
         # At SS=0.65 we expect some leakage
         max_t2 = 50
-        assert t2.observed <= max_t2, f"T2 mRNA leak at SS=0.65: {t2.observed:.0f} (limit={max_t2})"
+        assert t2.observed <= max_t2, (
+            f"T2 annotated RNA leak at SS=0.65: {t2.observed:.0f} (limit={max_t2})"
+        )

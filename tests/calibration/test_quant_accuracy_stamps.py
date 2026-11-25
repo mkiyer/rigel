@@ -21,7 +21,7 @@ from rigel.config import CalibrationConfig, PipelineConfig
 import _shared
 import quant_accuracy as qa
 
-COND = "gdna_g50_ss_0.99_nrna_mid_capture_off"
+COND = "gdna_g50_ss_0.99_nascent_mid_capture_off"
 PINNED = ("scan.total_threads=1", "em.assignment_mode=fractional")
 
 

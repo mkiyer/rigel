@@ -88,12 +88,12 @@ def _answer(pr, result) -> dict:
 
 
 @pytest.mark.parametrize(
-    ("gdna", "nrna", "strand_specificity", "n_loci"),
+    ("gdna", "nascent", "strand_specificity", "n_loci"),
     [(0, 0, 1.0, 2), (0, 50, 0.9, 1), (50, 0, 0.9, 1), (50, 50, 0.9, 1)],
     ids=["rna_only", "nascent", "gdna", "nascent_and_gdna"],
 )
 def test_the_loci_and_the_answer_do_not_depend_on_fragment_order(
-    tmp_path, gdna, nrna, strand_specificity, n_loci
+    tmp_path, gdna, nascent, strand_specificity, n_loci
 ):
     """The two transcripts are separate loci until nascent spans or gDNA candidates join them, and the run on the
     permuted BAM gives the same answer to the bit."""
@@ -102,7 +102,7 @@ def test_the_loci_and_the_answer_do_not_depend_on_fragment_order(
         n_fragments=N_FRAGMENTS,
         sim_config=_sim_config(strand_specificity),
         gdna_config=_gdna_config(gdna),
-        nrna_abundance=nrna,
+        nascent_abundance=nascent,
     )
     config = PipelineConfig(
         em=EMConfig(seed=PIPELINE_SEED), scan=BamScanConfig(sj_strand_tag="auto")

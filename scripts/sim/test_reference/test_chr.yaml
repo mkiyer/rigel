@@ -15,13 +15,13 @@
 #       strand: "+"                explicit, always (the strand rule below)
 #       probed: false              the capture panels are designed from this flag
 #       transcripts:
-#         - {t_id: B1_clean, exons: [[20000, 21000], ...], abundance: 10, nrna_abundance: 0}
+#         - {t_id: B1_clean, exons: [[20000, 21000], ...], abundance: 10, nascent_abundance: 0}
 #   shadow_genes:                  transcripts on the blank contig `test_blank`: simulated, never indexed
 #
 # Exons are 0-based half-open [start, end), as in every `rigel sim` scenario (a GTF line reads start+1 .. end).
-# `abundance` and `nrna_abundance` are relative molecular sampling weights of the spliced and the nascent RNA.
+# `abundance` and `nascent_abundance` are relative molecular sampling weights of the spliced and the nascent RNA.
 # `rigel index` creates a single-exon nascent entity spanning each multi-exon transcript and the simulator
-# pools the transcript's nrna_abundance onto it; an annotated single-exon transcript is its own nascent-class
+# pools the transcript's nascent_abundance onto it; an annotated single-exon transcript is its own nascent-class
 # entity, so its whole weight goes in `abundance`.
 #
 # Strand rule: every gene has an explicit strand and the + and − counts differ by at most one (the builder
@@ -60,10 +60,10 @@ genes:
   #      nasc     unprobed, nascent on: a contaminated message source
   #      cap      probed, no nascent: the enrichment cliff between a source and a destination
   #      capnasc  probed, nascent on: both at once
-  #      silent   probed, mrna = 0: every object is pure gDNA, so any RNA called here is a false positive
-  #    Mature runs up the blocks and nascent down, in half-decade steps: mrna 10/30/100/300/1000 (silent 0),
-  #    nrna 100/30/10/3/1 (nasc and capnasc only). The nascent entity spans 17 kb against 3 kb spliced, so a
-  #    gene's nascent:mature fragment ratio is ≈ 5.67·nrna/mrna, from 57 down to 0.0057 across the blocks;
+  #      silent   probed, annotated = 0: every object is pure gDNA, so any RNA called here is a false positive
+  #    Mature runs up the blocks and nascent down, in half-decade steps: annotated 10/30/100/300/1000 (silent 0),
+  #    nascent 100/30/10/3/1 (nasc and capnasc only). The nascent entity spans 17 kb against 3 kb spliced, so a
+  #    gene's nascent:mature fragment ratio is ≈ 5.67·nascent/annotated, from 57 down to 0.0057 across the blocks;
   #    the library-wide nascent share is a stress load, not a model of real data.
   - gene_id: gB1_clean
     strand: "-"
@@ -74,7 +74,7 @@ genes:
     strand: "+"
     probed: false
     transcripts:
-      - {t_id: B1_nasc, exons: [[57000, 58000], [65000, 66000], [73000, 74000]], abundance: 10, nrna_abundance: 100}
+      - {t_id: B1_nasc, exons: [[57000, 58000], [65000, 66000], [73000, 74000]], abundance: 10, nascent_abundance: 100}
   - gene_id: gB1_cap
     strand: "-"
     probed: true
@@ -84,7 +84,7 @@ genes:
     strand: "+"
     probed: true
     transcripts:
-      - {t_id: B1_capnasc, exons: [[131000, 132000], [139000, 140000], [147000, 148000]], abundance: 10, nrna_abundance: 100}
+      - {t_id: B1_capnasc, exons: [[131000, 132000], [139000, 140000], [147000, 148000]], abundance: 10, nascent_abundance: 100}
   - gene_id: gB1_silent
     strand: "-"
     probed: true
@@ -99,7 +99,7 @@ genes:
     strand: "-"
     probed: false
     transcripts:
-      - {t_id: B2_nasc, exons: [[242000, 243000], [250000, 251000], [258000, 259000]], abundance: 30, nrna_abundance: 30}
+      - {t_id: B2_nasc, exons: [[242000, 243000], [250000, 251000], [258000, 259000]], abundance: 30, nascent_abundance: 30}
   - gene_id: gB2_cap
     strand: "+"
     probed: true
@@ -109,7 +109,7 @@ genes:
     strand: "-"
     probed: true
     transcripts:
-      - {t_id: B2_capnasc, exons: [[316000, 317000], [324000, 325000], [332000, 333000]], abundance: 30, nrna_abundance: 30}
+      - {t_id: B2_capnasc, exons: [[316000, 317000], [324000, 325000], [332000, 333000]], abundance: 30, nascent_abundance: 30}
   - gene_id: gB2_silent
     strand: "+"
     probed: true
@@ -124,7 +124,7 @@ genes:
     strand: "+"
     probed: false
     transcripts:
-      - {t_id: B3_nasc, exons: [[427000, 428000], [435000, 436000], [443000, 444000]], abundance: 100, nrna_abundance: 10}
+      - {t_id: B3_nasc, exons: [[427000, 428000], [435000, 436000], [443000, 444000]], abundance: 100, nascent_abundance: 10}
   - gene_id: gB3_cap
     strand: "-"
     probed: true
@@ -134,7 +134,7 @@ genes:
     strand: "+"
     probed: true
     transcripts:
-      - {t_id: B3_capnasc, exons: [[501000, 502000], [509000, 510000], [517000, 518000]], abundance: 100, nrna_abundance: 10}
+      - {t_id: B3_capnasc, exons: [[501000, 502000], [509000, 510000], [517000, 518000]], abundance: 100, nascent_abundance: 10}
   - gene_id: gB3_silent
     strand: "-"
     probed: true
@@ -149,7 +149,7 @@ genes:
     strand: "-"
     probed: false
     transcripts:
-      - {t_id: B4_nasc, exons: [[612000, 613000], [620000, 621000], [628000, 629000]], abundance: 300, nrna_abundance: 3}
+      - {t_id: B4_nasc, exons: [[612000, 613000], [620000, 621000], [628000, 629000]], abundance: 300, nascent_abundance: 3}
   - gene_id: gB4_cap
     strand: "+"
     probed: true
@@ -159,7 +159,7 @@ genes:
     strand: "-"
     probed: true
     transcripts:
-      - {t_id: B4_capnasc, exons: [[686000, 687000], [694000, 695000], [702000, 703000]], abundance: 300, nrna_abundance: 3}
+      - {t_id: B4_capnasc, exons: [[686000, 687000], [694000, 695000], [702000, 703000]], abundance: 300, nascent_abundance: 3}
   - gene_id: gB4_silent
     strand: "+"
     probed: true
@@ -174,7 +174,7 @@ genes:
     strand: "+"
     probed: false
     transcripts:
-      - {t_id: B5_nasc, exons: [[797000, 798000], [805000, 806000], [813000, 814000]], abundance: 1000, nrna_abundance: 1}
+      - {t_id: B5_nasc, exons: [[797000, 798000], [805000, 806000], [813000, 814000]], abundance: 1000, nascent_abundance: 1}
   - gene_id: gB5_cap
     strand: "-"
     probed: true
@@ -184,7 +184,7 @@ genes:
     strand: "+"
     probed: true
     transcripts:
-      - {t_id: B5_capnasc, exons: [[871000, 872000], [879000, 880000], [887000, 888000]], abundance: 1000, nrna_abundance: 1}
+      - {t_id: B5_capnasc, exons: [[871000, 872000], [879000, 880000], [887000, 888000]], abundance: 1000, nascent_abundance: 1}
   - gene_id: gB5_silent
     strand: "-"
     probed: true
@@ -192,7 +192,7 @@ genes:
       - {t_id: B5_silent, exons: [[908000, 909000], [916000, 917000], [924000, 925000]], abundance: 0}
   # ── THE MONO BLOCK: single-exon transcripts, 4 types × 5 blocks, first gene at 945,000, pitch 21,000 ────
   #    One 1 kb exon and no junction, so the gene edge is the only message source. mono / capmono (unprobed /
-  #    probed, mrna by block); monosilent / capmonosilent (mrna = 0, the false-positive controls). No nascent.
+  #    probed, annotated by block); monosilent / capmonosilent (annotated = 0, the false-positive controls). No nascent.
   - gene_id: gB1_mono
     strand: "-"
     probed: false

@@ -441,7 +441,7 @@ for (const [strand,cap] of STRATA){
         + `<td class="num was">${fmtP(gw)}</td><td class="num">${fmtP(g)}</td>`
         + `<td class="num">${f.est.toFixed(4)}</td><td class="num was">${f.true_aligned.toFixed(4)}</td>`
         + `<td class="num">${(d>=0?"+":"−")+Math.abs(d).toFixed(4)}</td>`
-        + `<td class="num">${n0(r.unaligned.gdna)}</td><td class="num">${n0(r.unaligned.mrna + r.unaligned.nrna)}</td></tr>`;
+        + `<td class="num">${n0(r.unaligned.gdna)}</td><td class="num">${n0(r.unaligned.annotated + r.unaligned.nascent)}</td></tr>`;
     }
   }
   document.getElementById("star-table").innerHTML = t + "</tbody>";

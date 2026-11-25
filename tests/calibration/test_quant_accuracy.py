@@ -136,10 +136,12 @@ def test_an_injection_that_never_fires_raises_rather_than_reporting_no_effect(
     """
     cond = tmp_path / "c1"
     cond.mkdir()
-    pd.DataFrame({"transcript_id": ["a"], "observed_mrna_fragments": [1]}).to_csv(
+    pd.DataFrame({"transcript_id": ["a"], "observed_annotated_fragments": [1]}).to_csv(
         cond / "truth_abundances.tsv", sep="\t", index=False
     )
-    (cond / "truth_summary.json").write_text('{"origin_counts": {"gdna": 0, "mrna": 1, "nrna": 0}}')
+    (cond / "truth_summary.json").write_text(
+        '{"origin_counts": {"gdna": 0, "annotated": 1, "nascent": 0}}'
+    )
     monkeypatch.setattr(qa, "run_pipeline", lambda *a, **k: None)
     monkeypatch.setattr(qa, "load_oracle", lambda *a, **k: object())
     with pytest.raises(RuntimeError, match="never wrapped-and-called"):
@@ -151,9 +153,9 @@ def test_an_injection_that_never_fires_raises_rather_than_reporting_no_effect(
 
 def test_the_scorer_reads_the_realised_fragment_column_and_refuses_the_molar_table(tmp_path):
     """The panel ships two truth tables holding different quantities. A condition's ``truth_abundances.tsv`` gives the
-    realised observed fragment count (``observed_mrna_fragments``) beside the pre-capture molar abundance
-    (``pre_capture_mrna_abundance``); the suite-level ``truth_abundances_nrna_<label>.tsv`` gives the molar abundance
-    alone, as ``mrna_abundance``. Scoring a fragment estimate against a molar truth would charge the tool for hybrid
+    realised observed fragment count (``observed_annotated_fragments``) beside the pre-capture molar abundance
+    (``pre_capture_annotated_abundance``); the suite-level ``truth_abundances_nascent_<label>.tsv`` gives the molar abundance
+    alone, as ``annotated_abundance``. Scoring a fragment estimate against a molar truth would charge the tool for hybrid
     capture, which it never claims to invert.
 
     Both tables are written by the simulator's own writers and read as the instrument reads them. The scorer must score
@@ -189,9 +191,9 @@ def test_the_scorer_reads_the_realised_fragment_column_and_refuses_the_molar_tab
         cond / "truth_summary.json",
         fastq_path=fastq,
     )
-    write_molar_truth(transcripts, tmp_path / "truth_abundances_nrna_none.tsv")
+    write_molar_truth(transcripts, tmp_path / "truth_abundances_nascent_none.tsv")
     realised = pd.read_csv(cond / "truth_abundances.tsv", sep="\t")
-    molar = pd.read_csv(tmp_path / "truth_abundances_nrna_none.tsv", sep="\t")
+    molar = pd.read_csv(tmp_path / "truth_abundances_nascent_none.tsv", sep="\t")
 
     quant = pd.DataFrame(
         {
@@ -206,11 +208,12 @@ def test_the_scorer_reads_the_realised_fragment_column_and_refuses_the_molar_tab
     assert exact["count_abs_err"] == pytest.approx(0.0)
     assert exact["fp_mass"] == pytest.approx(0.0)
 
-    with pytest.raises(KeyError, match="observed_mrna_fragments"):
+    with pytest.raises(KeyError, match="observed_annotated_fragments"):
         qa.score_transcripts(quant, molar)
 
     wrong = qa.score_transcripts(
-        quant, realised.assign(observed_mrna_fragments=realised["pre_capture_mrna_abundance"])
+        quant,
+        realised.assign(observed_annotated_fragments=realised["pre_capture_annotated_abundance"]),
     )
     assert wrong["count_abs_err"] > 1000.0, (
         "a molar truth scored as a fragment count produced almost no error — the two units are not "
@@ -228,7 +231,7 @@ def test_false_positive_and_false_negative_mass_are_separate_and_reconcile():
     than the truth would keep it there.
     """
     truth = pd.DataFrame(
-        {"transcript_id": ["a", "b", "c"], "observed_mrna_fragments": [100.0, 0.0, 50.0]}
+        {"transcript_id": ["a", "b", "c"], "observed_annotated_fragments": [100.0, 0.0, 50.0]}
     )
     quant = pd.DataFrame(
         {
@@ -245,7 +248,7 @@ def test_false_positive_and_false_negative_mass_are_separate_and_reconcile():
     assert s["count_over"] - s["count_under"] == pytest.approx(s["count_net_err"])
     assert s["count_over"] + s["count_under"] == pytest.approx(s["count_abs_err"])
 
-    lifted = truth.assign(observed_mrna_fragments=[100.0, 25.0, 50.0])
+    lifted = truth.assign(observed_annotated_fragments=[100.0, 25.0, 50.0])
     s2 = qa.score_transcripts(quant, lifted)
     assert s2["fp_mass"] == pytest.approx(0.0), (
         "a transcript the truth now expresses is still counted as a false positive — fp_mass is "
@@ -262,7 +265,7 @@ def test_the_gene_row_collapses_isoform_ambiguity_and_sees_real_gene_error():
         {
             "transcript_id": ["a1", "a2", "b1"],
             "gene_id": ["A", "A", "B"],
-            "observed_mrna_fragments": [100.0, 0.0, 50.0],
+            "observed_annotated_fragments": [100.0, 0.0, 50.0],
         }
     )
     swapped = pd.DataFrame(
@@ -290,15 +293,15 @@ def test_the_library_gdna_fraction_counts_intergenic_and_the_em_only_view_does_n
     drops them from the numerator while RNA stays in the denominator reads far low against truth. The deliverable
     includes the intergenic fragments, the EM-only diagnostic does not, and the two must differ.
     """
-    mrna, gdna_em, intergenic = 5_000_000.0, 2_330_992.0, 2_601_271.0
-    quant = pd.DataFrame({"transcript_id": ["a"], "count": [mrna]})
+    annotated, gdna_em, intergenic = 5_000_000.0, 2_330_992.0, 2_601_271.0
+    quant = pd.DataFrame({"transcript_id": ["a"], "count": [annotated]})
     result = _FakeResult(synthetic_count=0.0, gdna_em_count=gdna_em, n_intergenic=intergenic)
-    summary = {"origin_counts": {"gdna": 5_000_000, "mrna": 5_000_000, "nrna": 0}}
+    summary = {"origin_counts": {"gdna": 5_000_000, "annotated": 5_000_000, "nascent": 0}}
     lib = qa.score_library(result, quant, summary)
 
     # The expectations are derived from the fixture's own inputs, never pasted from a run.
-    want_deliverable = (gdna_em + intergenic) / (mrna + gdna_em + intergenic)
-    want_em_only = gdna_em / (mrna + gdna_em)
+    want_deliverable = (gdna_em + intergenic) / (annotated + gdna_em + intergenic)
+    want_em_only = gdna_em / (annotated + gdna_em)
     assert lib["gdna_frac_true"] == pytest.approx(0.5)
     assert lib["gdna_frac_est"] == pytest.approx(want_deliverable), (
         "the deliverable fraction is not counting intergenic fragments as gDNA"
@@ -346,22 +349,24 @@ class _FakeResult:
 def test_every_intergenic_fragment_is_gdna_in_the_library_split():
     """An intergenic fragment is unspliced (the scan withholds a spliced hit no transcript holds), so every one is
     gDNA, as in ``cli.py``'s ``fraction_gdna``."""
-    mrna, gdna_em, intergenic = 5_000.0, 2_000.0, 3_000.0
-    quant = pd.DataFrame({"transcript_id": ["a"], "count": [mrna]})
-    summary = {"origin_counts": {"gdna": 4_900, "mrna": 5_100, "nrna": 0}}
+    annotated, gdna_em, intergenic = 5_000.0, 2_000.0, 3_000.0
+    quant = pd.DataFrame({"transcript_id": ["a"], "count": [annotated]})
+    summary = {"origin_counts": {"gdna": 4_900, "annotated": 5_100, "nascent": 0}}
     lib = qa.score_library(_FakeResult(0.0, gdna_em, n_intergenic=intergenic), quant, summary)
     assert lib["gdna_frac_est"] == pytest.approx(
-        (gdna_em + intergenic) / (mrna + gdna_em + intergenic)
+        (gdna_em + intergenic) / (annotated + gdna_em + intergenic)
     )
     assert "n_intergenic_rna" not in lib and lib["n_intergenic_gdna"] == intergenic
-    assert lib["rna_est"] == mrna
+    assert lib["rna_est"] == annotated
 
 
 def test_the_count_metrics_do_not_move_when_the_length_model_does():
     """The count rows must be free of the fragment-length model, or the instrument would price the length models too and
     neither number would be attributable. Changing one transcript's effective length by 100x must not move them.
     """
-    truth = pd.DataFrame({"transcript_id": ["a", "b"], "observed_mrna_fragments": [100.0, 50.0]})
+    truth = pd.DataFrame(
+        {"transcript_id": ["a", "b"], "observed_annotated_fragments": [100.0, 50.0]}
+    )
     quant = pd.DataFrame(
         {
             "transcript_id": ["a", "b"],
@@ -394,7 +399,7 @@ def test_the_report_refuses_arms_with_different_row_sets(tmp_path):
     rows = [
         {
             "arm": "a",
-            "condition": f"gdna_g{g}_ss_0.99_nrna_none_capture_on",
+            "condition": f"gdna_g{g}_ss_0.99_nascent_none_capture_on",
             "axis": ax,
             "count_abs_err": 1.0,
             "fp_mass": 1.0,
@@ -407,10 +412,10 @@ def test_the_report_refuses_arms_with_different_row_sets(tmp_path):
             # the pool-level fields table ⑥ reads, part of the `library` row's real schema
             "gdna_est": 1.0,
             "gdna_true": 1.0,
-            "nrna_est": 0.0,
-            "nrna_true": 0.0,
-            "mrna_est": 1.0,
-            "mrna_true": 1.0,
+            "nascent_est": 0.0,
+            "nascent_true": 0.0,
+            "annotated_est": 1.0,
+            "annotated_true": 1.0,
             "n_intergenic_gdna": 0.0,
         }
         for g in ("01", "50")
@@ -714,7 +719,7 @@ def test_the_report_refuses_arms_scored_under_different_assignment_modes(tmp_pat
     report the mode's effect as the arm's. Every row carries its mode and the report refuses a mix; a row without the
     stamp counts as a different mode."""
     row = dict(
-        condition="gdna_g05_ss_0.99_nrna_mid_capture_on", axis="transcript", count_abs_err=1.0
+        condition="gdna_g05_ss_0.99_nascent_mid_capture_on", axis="transcript", count_abs_err=1.0
     )
     a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
     a.write_text(json.dumps(dict(row, assignment_mode="fractional")) + "\n")
@@ -736,16 +741,16 @@ def test_the_report_refuses_arms_scored_under_different_assignment_modes(tmp_pat
 def _arm_rows(tmp_path, **over):
     """One condition, three axes, written as an arm jsonl, with numbers chosen so every quantity the report derives is
     distinguishable from every other."""
-    cond = "gdna_g50_ss_0.99_nrna_mid_capture_off"
+    cond = "gdna_g50_ss_0.99_nascent_mid_capture_off"
     lib = {
         "condition": cond,
         "axis": "library",
         "arm": "a",
         "assignment_mode": "fractional",
-        "mrna_est": 4_000.0,
-        "mrna_true": 4_100.0,
-        "nrna_est": 900.0,
-        "nrna_true": 1_000.0,
+        "annotated_est": 4_000.0,
+        "annotated_true": 4_100.0,
+        "nascent_est": 900.0,
+        "nascent_true": 1_000.0,
         "rna_est": 4_900.0,
         "rna_true": 5_100.0,
         #: EM-only. The comparable total is this plus the intergenic fragments.
@@ -828,7 +833,7 @@ def test_the_transcript_and_gene_sections_score_the_annotated_pool_alone(tmp_pat
     md = _render(tmp_path)
     src, cond = _arm_rows(tmp_path)
     rows = qa._load(src)
-    assert rows[(cond, "transcript")]["count_true"] == rows[(cond, "library")]["mrna_true"]
+    assert rows[(cond, "transcript")]["count_true"] == rows[(cond, "library")]["annotated_true"]
     assert rows[(cond, "transcript")]["count_true"] != rows[(cond, "library")]["rna_true"]
     assert "10.00 %" in md, "Σ|Δ| as a share of the annotated truth (410/4,100) is missing"
 
@@ -850,7 +855,7 @@ def test_the_deferred_stratum_is_marked_wherever_it_appears(tmp_path):
     error, so a reader who misses the mark would read a pooled total as the tool's accuracy."""
     lib, tx, gene = (json.loads(x) for x in _arm_rows(tmp_path)[0].read_text().splitlines())
     for r in (lib, tx, gene):
-        r["condition"] = "gdna_g50_ss_0.50_nrna_mid_capture_on"
+        r["condition"] = "gdna_g50_ss_0.50_nascent_mid_capture_on"
     src = tmp_path / "def.jsonl"
     src.write_text("\n".join(json.dumps(r) for r in (lib, tx, gene)) + "\n")
     out = tmp_path / "d.md"
@@ -922,7 +927,7 @@ def test_every_gdna_rung_is_labelled_from_its_truth_not_from_a_map_of_known_rung
     """
     rungs = {"g00": (0.0, "0 %"), "g001": (0.001, "0.1 %"), "g05": (0.0500004, "5 %"),
              "g25": (0.25, "25 %"), "g98": (0.98, "98 %")}  # fmt: skip
-    conds = {f"gdna_{k}_ss_0.99_nrna_mid_capture_off": f for k, (f, _label) in rungs.items()}
+    conds = {f"gdna_{k}_ss_0.99_nascent_mid_capture_off": f for k, (f, _label) in rungs.items()}
     out = tmp_path / "rungs.md"
     qa.markdown_report(_arm_file(tmp_path, conds), out)
     md = out.read_text()
@@ -936,13 +941,16 @@ def test_a_strand_specificity_in_neither_half_is_reported_apart_never_pooled(tmp
     (`_shared.strandedness`) serves every instrument, and a name that spells no specificity raises rather than landing
     in a half.
     """
-    assert _shared.strandedness("gdna_g50_ss_0.50_nrna_mid_capture_on") == "unstranded"
-    assert _shared.strandedness("gdna_g50_ss_0.99_nrna_mid_capture_on") == "stranded"
-    assert _shared.strandedness("gdna_g50_ss_0.70_nrna_file_capture_on") == "ss 0.70"
+    assert _shared.strandedness("gdna_g50_ss_0.50_nascent_mid_capture_on") == "unstranded"
+    assert _shared.strandedness("gdna_g50_ss_0.99_nascent_mid_capture_on") == "stranded"
+    assert _shared.strandedness("gdna_g50_ss_0.70_nascent_file_capture_on") == "ss 0.70"
     with pytest.raises(ValueError):
-        _shared.strandedness("gdna_g50_nrna_mid_capture_on")
+        _shared.strandedness("gdna_g50_nascent_mid_capture_on")
 
-    c50, c70 = "gdna_g50_ss_0.50_nrna_file_capture_off", "gdna_g50_ss_0.70_nrna_file_capture_off"
+    c50, c70 = (
+        "gdna_g50_ss_0.50_nascent_file_capture_off",
+        "gdna_g50_ss_0.70_nascent_file_capture_off",
+    )
     assert _shared.strata([c50, c70]) == [*_shared.STRATA, ("ss 0.70", "capture OFF")]
     out = tmp_path / "apart.md"
     qa.markdown_report(_arm_file(tmp_path, {c50: 0.5, c70: 0.5}), out)
@@ -961,13 +969,13 @@ def test_a_strand_specificity_in_neither_half_is_reported_apart_never_pooled(tmp
 
 def _alloc_truth_table():
     """Two annotated transcripts and the synthetic span of each of their genes, as the simulator writes them: a
-    synthetic span's fragments are ``observed_nrna_fragments`` on its own row, and its ``observed_mrna_fragments`` is
+    synthetic span's fragments are ``observed_nascent_fragments`` on its own row, and its ``observed_annotated_fragments`` is
     zero because a synthetic span emits no mature RNA. A single-exon annotated transcript carries both columns."""
     return pd.DataFrame(
         {
-            "transcript_id": ["t_spliced", "t_single_exon", "nrna_gene_a", "nrna_gene_b"],
-            "observed_mrna_fragments": [900.0, 100.0, 0.0, 0.0],
-            "observed_nrna_fragments": [0.0, 7.0, 300.0, 50.0],
+            "transcript_id": ["t_spliced", "t_single_exon", "nascent_gene_a", "nascent_gene_b"],
+            "observed_annotated_fragments": [900.0, 100.0, 0.0, 0.0],
+            "observed_nascent_fragments": [0.0, 7.0, 300.0, 50.0],
         }
     )
 
@@ -1028,7 +1036,7 @@ def test_the_allocation_arm_never_weighs_an_rna_emitting_transcript_at_zero():
     index = _AllocIndex(truth["transcript_id"])
     w = qa.truth_weights(truth, index)
 
-    emits = (truth["observed_mrna_fragments"] + truth["observed_nrna_fragments"]).to_numpy()
+    emits = (truth["observed_annotated_fragments"] + truth["observed_nascent_fragments"]).to_numpy()
     assert np.all(w[emits > 0] > 0.0), (
         "a transcript the simulator gave RNA fragments received a weight of ZERO — a zero weight is "
         "a suppression, not an allocation"
@@ -1041,12 +1049,12 @@ def test_the_allocation_arm_never_weighs_an_rna_emitting_transcript_at_zero():
 def test_the_allocation_weights_refuse_a_truth_table_that_carries_no_nascent_column():
     """A truth table with a mature column and no nascent one cannot express a synthetic span's allocation, so the arm
     refuses rather than weighting every synthetic span at zero. The suite-level molar table is refused too: its
-    ``mrna_abundance`` / ``nrna_abundance`` pair counts molecules, not the fragments a condition realised."""
-    truth = _alloc_truth_table().drop(columns=["observed_nrna_fragments"])
+    ``annotated_abundance`` / ``nascent_abundance`` pair counts molecules, not the fragments a condition realised."""
+    truth = _alloc_truth_table().drop(columns=["observed_nascent_fragments"])
     with pytest.raises(SystemExit, match="nascent"):
         qa.truth_weights(truth, _AllocIndex(truth["transcript_id"]))
     molar = _alloc_truth_table().set_axis(
-        ["transcript_id", "mrna_abundance", "nrna_abundance"], axis=1
+        ["transcript_id", "annotated_abundance", "nascent_abundance"], axis=1
     )
     with pytest.raises(SystemExit, match="nascent"):
         qa.truth_weights(molar, _AllocIndex(molar["transcript_id"]))
@@ -1088,7 +1096,7 @@ def _unmap(r):
 def _origin_counts(groups):
     from rigel.sim.read_name import parse_origin
 
-    counts = {"gdna": 0, "mrna": 0, "nrna": 0}
+    counts = {"gdna": 0, "annotated": 0, "nascent": 0}
     for name, _recs in groups:
         counts[parse_origin(name).kind] += 1
     return counts
@@ -1104,7 +1112,7 @@ def test_the_aligner_loss_counts_unmapped_templates_by_their_true_origin(toy, tm
     from rigel.sim.read_name import parse_origin
 
     header, groups = _templates(toy.bam_path)
-    expected = {"gdna": 0, "mrna": 0, "nrna": 0}
+    expected = {"gdna": 0, "annotated": 0, "nascent": 0}
     half = None
     for i, (name, recs) in enumerate(groups):
         if i % 5 == 0:

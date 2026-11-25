@@ -92,7 +92,7 @@ def test_every_template_is_masked_at_its_own_unknown_bases(tmp_path):
         2: seq[500:1700],
     }
     for k, template in templates.items():
-        assert sampler.unknown("mrna", k).tolist() == [list(r) for r in _runs_of(template)], k
+        assert sampler.unknown("transcript", k).tolist() == [list(r) for r in _runs_of(template)], k
 
 
 # ── the masked totals and draws, against enumeration ───────────────────────────────────────────────
@@ -120,7 +120,7 @@ def _sampler(intervals, enabled=True, off=1.0, binding=10.0):
         probes="unused", probe_format="transcript", off_target_weight=off, binding_per_base=binding
     )
     sampler = CaptureSampler(config, transcripts=(), ref_lengths={}, enabled=enabled)
-    sampler._mrna_intervals = {0: list(intervals)} if intervals else {}
+    sampler._transcript_intervals = {0: list(intervals)} if intervals else {}
     return sampler
 
 
@@ -149,16 +149,18 @@ def test_the_masked_partition_is_the_enumerated_sum_over_known_starts(enabled, m
     Perturbation: a mask that blocks only the run's own starts (not the `width − 1` before it), or one the binding
     term ignores, departs from the enumeration."""
     sampler = _sampler(LAYOUTS[layout], enabled=enabled)
-    sampler.mask_unknown("mrna", 0, MASKS[mask])
+    sampler.mask_unknown("transcript", 0, MASKS[mask])
     lengths = np.array([SEQ_LEN], dtype=np.int64)
     w = _weights(LAYOUTS[layout], MASKS[mask], width, enabled)
-    assert sampler.partition_array("mrna", [0], lengths, width)[0] == pytest.approx(
+    assert sampler.partition_array("transcript", [0], lengths, width)[0] == pytest.approx(
         w.sum(), rel=1e-12, abs=1e-9
     )
-    assert sampler.partition("mrna", 0, SEQ_LEN, width) == pytest.approx(
+    assert sampler.partition("transcript", 0, SEQ_LEN, width) == pytest.approx(
         w.sum(), rel=1e-12, abs=1e-9
     )
-    assert int(sampler.admissible_counts("mrna", [0], lengths, width)[0]) == int((w > 0).sum())
+    assert int(sampler.admissible_counts("transcript", [0], lengths, width)[0]) == int(
+        (w > 0).sum()
+    )
 
 
 @pytest.mark.parametrize("enabled", [True, False])
@@ -171,9 +173,9 @@ def test_the_draws_avoid_unknown_bases_and_follow_the_masked_weights(enabled, ma
     unmasked, puts mass where the weights say none."""
     layout = LAYOUTS["two probes"]
     sampler = _sampler(layout, enabled=enabled)
-    sampler.mask_unknown("mrna", 0, MASKS[mask])
+    sampler.mask_unknown("transcript", 0, MASKS[mask])
     width, n = 120, 400_000
-    starts = sampler.sample_starts("mrna", 0, SEQ_LEN, width, n, np.random.default_rng(5))
+    starts = sampler.sample_starts("transcript", 0, SEQ_LEN, width, n, np.random.default_rng(5))
     w = _weights(layout, MASKS[mask], width, enabled)
     assert (w[starts] > 0).all(), "a draw covered an unknown base"
     observed = np.bincount(starts, minlength=len(w))
@@ -183,7 +185,7 @@ def test_the_draws_avoid_unknown_bases_and_follow_the_masked_weights(enabled, ma
     dof = int(live.sum()) - 1
     assert abs(chi2 - dof) < 6 * np.sqrt(2 * dof), (chi2, dof)
     for s in range(len(w)):  # every start, the blocked ones too, which no draw reaches
-        assert sampler.fragment_weight("mrna", 0, SEQ_LEN, s, width) == pytest.approx(w[s]), s
+        assert sampler.fragment_weight("transcript", 0, SEQ_LEN, s, width) == pytest.approx(w[s]), s
 
 
 def test_a_mask_is_kept_sorted_and_merged_whatever_order_it_arrives_in():
@@ -192,24 +194,24 @@ def test_a_mask_is_kept_sorted_and_merged_whatever_order_it_arrives_in():
 
     Perturbation: storing the runs as given."""
     sampler = _sampler([])
-    sampler.mask_unknown("mrna", 0, [(700, 760), (100, 120), (110, 130)])
-    assert sampler.unknown("mrna", 0).tolist() == [[100, 130], [700, 760]]
+    sampler.mask_unknown("transcript", 0, [(700, 760), (100, 120), (110, 130)])
+    assert sampler.unknown("transcript", 0).tolist() == [[100, 130], [700, 760]]
     w = _weights([], [(100, 130), (700, 760)], 50, False)
-    assert sampler.partition_array("mrna", [0], np.array([SEQ_LEN]), 50)[0] == pytest.approx(
+    assert sampler.partition_array("transcript", [0], np.array([SEQ_LEN]), 50)[0] == pytest.approx(
         w.sum()
     )
     for bad in ([(5, 5)], [(-3, 4)]):
         with pytest.raises(ValueError):
-            sampler.mask_unknown("mrna", 0, bad)
+            sampler.mask_unknown("transcript", 0, bad)
 
 
 def test_fragments_asked_of_a_template_with_no_known_start_are_refused():
     """A template whose every start covers an unknown base has no opportunity, so the allocation gives it no
     fragment; asked for some anyway, the sampler refuses and names why rather than drawing over the gap."""
     sampler = _sampler([], enabled=False)
-    sampler.mask_unknown("mrna", 0, [(100, 900)])
+    sampler.mask_unknown("transcript", 0, [(100, 900)])
     with pytest.raises(ValueError, match="unknown base"):
-        sampler.sample_starts("mrna", 0, SEQ_LEN, 950, 5, np.random.default_rng(0))
+        sampler.sample_starts("transcript", 0, SEQ_LEN, 950, 5, np.random.default_rng(0))
 
 
 def test_an_unchanged_mask_keeps_the_memo_and_a_changed_one_clears_it():
@@ -217,12 +219,12 @@ def test_an_unchanged_mask_keeps_the_memo_and_a_changed_one_clears_it():
     identical mask must keep the per-width memo (it is minutes of work), and a different one must not reuse it."""
     sampler = _sampler(LAYOUTS["one probe"])
     lengths = np.array([SEQ_LEN], dtype=np.int64)
-    sampler.mask_unknown("mrna", 0, MASKS["mid"])
-    before = sampler.partition_array("mrna", [0], lengths, 120)[0]
-    sampler.mask_unknown("mrna", 0, MASKS["mid"])
+    sampler.mask_unknown("transcript", 0, MASKS["mid"])
+    before = sampler.partition_array("transcript", [0], lengths, 120)[0]
+    sampler.mask_unknown("transcript", 0, MASKS["mid"])
     assert sampler._partition_memo, "an identical mask cleared the memo"
-    sampler.mask_unknown("mrna", 0, MASKS["none"])
-    after = sampler.partition_array("mrna", [0], lengths, 120)[0]
+    sampler.mask_unknown("transcript", 0, MASKS["none"])
+    after = sampler.partition_array("transcript", [0], lengths, 120)[0]
     assert after > before
 
 
@@ -244,7 +246,7 @@ def test_no_read_covers_an_unknown_base_and_gdna_goes_where_sequence_is_known(tm
     fasta.write_text(f">chrA\n{a.seq}\n>chrB\n{b.seq}\n")
     pysam.faidx(str(fasta))
     span = _transcript(
-        "span", [(1_000, 3_000)], ref="chrA", is_synthetic=True, nrna_abundance=100.0
+        "span", [(1_000, 3_000)], ref="chrA", is_synthetic=True, nascent_abundance=100.0
     )
     tx = _transcript("tx", [(16_000, 16_500), (17_000, 17_500)], ref="chrA", abundance=100.0)
     sim = WholeGenomeSimulator(
@@ -274,7 +276,7 @@ def test_no_read_covers_an_unknown_base_and_gdna_goes_where_sequence_is_known(tm
             per_ref[o.ref] += 1
             lo, hi = o.start, o.end
             assert not any(lo < e and hi > s for s, e in unknown[o.ref]), name
-        elif o.kind == "nrna":
+        elif o.kind == "nascent":
             lo, hi = span_start + o.start, span_start + o.end
             assert not (lo < 2_003 and hi > 2_000), name
     # known opportunity: chrA's two known stretches against chrB's whole length, at the mean width

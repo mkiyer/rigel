@@ -853,7 +853,7 @@ def quant_output(tmp_path_factory) -> Path:
         sim_config=sim,
         gdna_fraction=0.2,
         gdna_config=GDNAConfig(),
-        nrna_abundance=15.0,
+        nascent_abundance=15.0,
     )
     config = PipelineConfig(
         em=EMConfig(seed=42, assignment_mode="fractional", n_threads=1),

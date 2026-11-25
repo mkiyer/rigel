@@ -28,11 +28,11 @@ class _TranscriptSpec:
     ref: str
     exons: list[Interval]
     abundance: float = 100.0
-    nrna_abundance: float = 0.0
+    nascent_abundance: float = 0.0
 
 
 #: Every key a transcript entry of ``add_gene`` reads, and the ones it must have.
-TRANSCRIPT_KEYS = frozenset({"t_id", "exons", "abundance", "nrna_abundance"})
+TRANSCRIPT_KEYS = frozenset({"t_id", "exons", "abundance", "nascent_abundance"})
 _TRANSCRIPT_REQUIRED = frozenset({"t_id", "exons"})
 
 
@@ -113,10 +113,10 @@ class GeneBuilder:
             - ``"exons"`` (list[tuple[int,int]]): 0-based half-open exon coords
             - ``"abundance"`` (float, optional): the transcript's molecular
               abundance, default 100 (TPM-like).
-            - ``"nrna_abundance"`` (float, optional): its nascent molecular
+            - ``"nascent_abundance"`` (float, optional): its nascent molecular
               abundance, default 0, independent of ``"abundance"``. Read
               fractions follow ``abundance × spliced_eff_len`` against
-              ``nrna_abundance × genomic_span_eff_len``.
+              ``nascent_abundance × genomic_span_eff_len``.
         gene_name : str or None
             Gene symbol. Defaults to *gene_id*.
         gene_type : str
@@ -132,7 +132,7 @@ class GeneBuilder:
             t_id = tdef["t_id"]
             raw_exons = tdef["exons"]
             abundance = tdef.get("abundance", _TranscriptSpec.abundance)
-            nrna_abundance = tdef.get("nrna_abundance", _TranscriptSpec.nrna_abundance)
+            nascent_abundance = tdef.get("nascent_abundance", _TranscriptSpec.nascent_abundance)
 
             exons = sorted(Interval(s, e) for s, e in raw_exons)
             self._validate_exons(t_id, exons)
@@ -150,7 +150,7 @@ class GeneBuilder:
                     ref=self.ref_name,
                     exons=exons,
                     abundance=abundance,
-                    nrna_abundance=nrna_abundance,
+                    nascent_abundance=nascent_abundance,
                 )
             )
 
@@ -203,7 +203,7 @@ class GeneBuilder:
                 g_index=g_id_to_index[spec.g_id],
                 is_basic=True,
                 abundance=spec.abundance,
-                nrna_abundance=spec.nrna_abundance,
+                nascent_abundance=spec.nascent_abundance,
             )
             t.compute_length()
             transcripts.append(t)

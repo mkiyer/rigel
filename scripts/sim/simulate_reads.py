@@ -71,19 +71,19 @@ def main() -> int:
     print(f"  Workers:          {cfg.simulation.n_workers}", flush=True)
     print(f"  gDNA rates:       {cfg.gdna.rates}", flush=True)
     print(f"  Strand specs:     {cfg.strand_specificities}", flush=True)
-    # the configured nRNA mode; whether the nascent sweep runs is decided later, by whether the abundance file
-    # carries an `nrna_abundance` column, so the file case prints a conditional line of its own
-    if cfg.nrna.mode == "additive_ratio":
-        print(f"  nRNA ratios:      {cfg.nrna.ratios}", flush=True)
-    elif cfg.nrna.mode == "sparse":
+    # the configured nascent RNA mode; whether the nascent sweep runs is decided later, by whether the abundance file
+    # carries an `nascent_abundance` column, so the file case prints a conditional line of its own
+    if cfg.nascent.mode == "additive_ratio":
+        print(f"  nascent RNA ratios:      {cfg.nascent.ratios}", flush=True)
+    elif cfg.nascent.mode == "sparse":
         print(
-            f"  nRNA ranges:      {cfg.nrna.abundance_ranges} (LOG-uniform, absolute)", flush=True
+            f"  nascent RNA ranges:      {cfg.nascent.abundance_ranges} (LOG-uniform, absolute)", flush=True
         )
-        print(f"  nRNA on_fraction: {cfg.nrna.on_fraction} of gene spans", flush=True)
+        print(f"  nascent RNA on_fraction: {cfg.nascent.on_fraction} of gene spans", flush=True)
     if cfg.abundance.mode == "file":
         print(
-            "  nRNA:             the sweep above is SKIPPED if the abundance file supplies "
-            "nrna_abundance",
+            "  nascent RNA:             the sweep above is SKIPPED if the abundance file supplies "
+            "nascent_abundance",
             flush=True,
         )
     print(f"  Oracle BAM:       {cfg.oracle_bam}", flush=True)

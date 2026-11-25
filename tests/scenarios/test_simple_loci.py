@@ -21,7 +21,7 @@ from _scenarios import (
     assert_transcript_accuracy,
     assert_negative_control,
     assert_gdna_accuracy,
-    assert_nrna_detected,
+    assert_nascent_detected,
 )
 
 
@@ -98,17 +98,17 @@ class TestTwoIsoforms:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, 100, 10, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, 100, 10, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1000,
-                scenario_name=f"iso_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"iso_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -174,11 +174,11 @@ class TestSingleExon:
         else:
             assert_gdna_accuracy(bench, gdna)
 
-    @pytest.mark.parametrize("nrna", [30, 70], ids=[f"nrna_{n}" for n in [30, 70]])
-    def test_nrna_sweep(self, scenario, nrna):
-        """Nascent RNA on a single-exon gene is identical to mRNA."""
+    @pytest.mark.parametrize("nascent", [30, 70], ids=[f"nascent_{n}" for n in [30, 70]])
+    def test_nascent_sweep(self, scenario, nascent):
+        """Nascent RNA on a single-exon gene is identical to annotated RNA."""
         bench = build_and_run(
-            scenario, nrna_abundance=nrna, scenario_name=f"single_exon_nrna_{nrna}"
+            scenario, nascent_abundance=nascent, scenario_name=f"single_exon_nascent_{nascent}"
         )
         assert_alignment(bench)
         assert_accountability(bench)
@@ -193,14 +193,14 @@ class TestSingleExon:
         if ss >= 0.95:
             assert_transcript_accuracy(bench, max_abs_diff=55)
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, scenario, gdna, nrna, ss):
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, scenario, gdna, nascent, ss):
         bench = build_and_run(
             scenario,
             gdna_abundance=gdna,
-            nrna_abundance=nrna,
+            nascent_abundance=nascent,
             strand_specificity=ss,
-            scenario_name=f"single_exon_g{gdna}_n{nrna}_s{int(ss * 100)}",
+            scenario_name=f"single_exon_g{gdna}_n{nascent}_s{int(ss * 100)}",
         )
         assert_alignment(bench)
         assert_accountability(bench)
@@ -211,7 +211,7 @@ class TestSingleExon:
 
 
 class TestSplicedGene:
-    """Splice junctions provide strong mRNA anchors, making gDNA/RNA separation
+    """Splice junctions provide strong annotated RNA anchors, making gDNA/RNA separation
     easier than the unspliced case."""
 
     @pytest.fixture
@@ -254,14 +254,16 @@ class TestSplicedGene:
         else:
             assert_gdna_accuracy(bench, gdna)
 
-    @pytest.mark.parametrize("nrna", [30, 70], ids=[f"nrna_{n}" for n in [30, 70]])
-    def test_nrna_sweep(self, scenario, nrna):
-        """Spliced gene: nRNA produces intronic reads detectable by pipeline."""
-        bench = build_and_run(scenario, nrna_abundance=nrna, scenario_name=f"spliced_nrna_{nrna}")
+    @pytest.mark.parametrize("nascent", [30, 70], ids=[f"nascent_{n}" for n in [30, 70]])
+    def test_nascent_sweep(self, scenario, nascent):
+        """Spliced gene: nascent RNA produces intronic reads detectable by pipeline."""
+        bench = build_and_run(
+            scenario, nascent_abundance=nascent, scenario_name=f"spliced_nascent_{nascent}"
+        )
         assert_alignment(bench)
         assert_accountability(bench)
         assert_negative_control(bench)
-        assert_nrna_detected(bench, nrna)
+        assert_nascent_detected(bench, nascent)
 
     @pytest.mark.parametrize("ss", STRAND_LEVELS, ids=[f"ss_{s}" for s in STRAND_LEVELS])
     def test_strand_sweep(self, scenario, ss):
@@ -275,14 +277,14 @@ class TestSplicedGene:
             f"t1: {t1.observed:.0f} too low vs {t1.expected} at ss={ss}"
         )
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, scenario, gdna, nrna, ss):
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, scenario, gdna, nascent, ss):
         bench = build_and_run(
             scenario,
             gdna_abundance=gdna,
-            nrna_abundance=nrna,
+            nascent_abundance=nascent,
             strand_specificity=ss,
-            scenario_name=f"spliced_g{gdna}_n{nrna}_s{int(ss * 100)}",
+            scenario_name=f"spliced_g{gdna}_n{nascent}_s{int(ss * 100)}",
         )
         assert_alignment(bench)
         assert_accountability(bench)
@@ -348,15 +350,15 @@ class TestNonOverlappingGenes:
         else:
             assert_gdna_accuracy(bench, gdna)
 
-    @pytest.mark.parametrize("nrna", [30, 70], ids=[f"nrna_{n}" for n in [30, 70]])
-    def test_nrna_sweep(self, scenario, nrna):
+    @pytest.mark.parametrize("nascent", [30, 70], ids=[f"nascent_{n}" for n in [30, 70]])
+    def test_nascent_sweep(self, scenario, nascent):
         bench = build_and_run(
-            scenario, nrna_abundance=nrna, scenario_name=f"nonoverlap_nrna_{nrna}"
+            scenario, nascent_abundance=nascent, scenario_name=f"nonoverlap_nascent_{nascent}"
         )
         assert_alignment(bench)
         assert_accountability(bench)
         assert_negative_control(bench)
-        assert_nrna_detected(bench, nrna)
+        assert_nascent_detected(bench, nascent)
 
     @pytest.mark.parametrize("ss", STRAND_LEVELS, ids=[f"ss_{s}" for s in STRAND_LEVELS])
     def test_strand_sweep(self, scenario, ss):
@@ -367,14 +369,14 @@ class TestNonOverlappingGenes:
         if ss >= 0.95:
             assert_transcript_accuracy(bench, max_abs_diff=40)
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, scenario, gdna, nrna, ss):
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, scenario, gdna, nascent, ss):
         bench = build_and_run(
             scenario,
             gdna_abundance=gdna,
-            nrna_abundance=nrna,
+            nascent_abundance=nascent,
             strand_specificity=ss,
-            scenario_name=f"nonoverlap_g{gdna}_n{nrna}_s{int(ss * 100)}",
+            scenario_name=f"nonoverlap_g{gdna}_n{nascent}_s{int(ss * 100)}",
         )
         assert_alignment(bench)
         assert_accountability(bench)

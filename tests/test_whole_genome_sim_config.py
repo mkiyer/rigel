@@ -23,7 +23,7 @@ from rigel.types import Interval, Strand
 
 import _shared
 import simulate_reads
-from _sim_abundance import apply_nrna_ratio, apply_sparse_nrna
+from _sim_abundance import apply_nascent_ratio, apply_sparse_nascent
 from _sim_config import parse_yaml_config
 from _sim_grid import run_simulation
 from ruler_vs_truth import fl_pmf
@@ -67,7 +67,7 @@ def test_sparse_nascent_pools_onto_entities_and_the_span_is_the_unit():
     """Nascent molecules live on the index's nascent entities, and under the sparse model the entity
     is also the unit of the on/off draw: one gene span is transcribed or it is not, however many
     isoforms share it. A span whose only contributor is silent gets nothing, single-exon transcripts
-    contribute nothing, and the contributors themselves end at ``nrna_abundance = 0``. Drawing per
+    contribute nothing, and the contributors themselves end at ``nascent_abundance = 0``. Drawing per
     contributor instead compounds the probability over the isoforms, so the intron slots calibration
     reads would be several times less sparse than configured."""
     multi_a = _transcript("multi_a", 100.0, [(0, 100), (200, 300)])
@@ -82,12 +82,14 @@ def test_sparse_nascent_pools_onto_entities_and_the_span_is_the_unit():
     off.span_t_index = 5
     transcripts = [multi_a, multi_b, single, off, shared, lone]
 
-    realized_ratio = apply_sparse_nrna(transcripts, (150.0, 150.0), on_fraction=1.0, seed=17)
+    realized_ratio = apply_sparse_nascent(transcripts, (150.0, 150.0), on_fraction=1.0, seed=17)
 
     # the two contributors share one span, so the span is one draw, not one per isoform
-    assert shared.nrna_abundance == pytest.approx(150.0)
-    assert lone.nrna_abundance == 0.0, "a span whose only contributor is silent is not transcribed"
-    assert all(t.nrna_abundance == 0.0 for t in (multi_a, multi_b, single, off))
+    assert shared.nascent_abundance == pytest.approx(150.0)
+    assert lone.nascent_abundance == 0.0, (
+        "a span whose only contributor is silent is not transcribed"
+    )
+    assert all(t.nascent_abundance == 0.0 for t in (multi_a, multi_b, single, off))
     assert realized_ratio == pytest.approx(150.0 / 600.0)
 
 
@@ -97,7 +99,7 @@ def test_a_multi_exon_contributor_with_no_entity_is_a_defect_not_a_skip():
     orphan = _transcript("orphan", 100.0, [(0, 100), (200, 300)])
     orphan.t_index = 0
     with pytest.raises(ValueError, match="nascent entity"):
-        apply_nrna_ratio([orphan], 0.25)
+        apply_nascent_ratio([orphan], 0.25)
 
 
 def test_the_fl_pmf_is_the_one_the_engine_draws_from():
@@ -145,12 +147,12 @@ def test_an_empty_fragment_length_window_is_refused_not_drawn_from_forever():
     assert truncated_normal_frag_lengths(Bounded(), 5, 250.0, 50.0, 250, 250).tolist() == [250] * 5
 
 
-def test_parse_sparse_nrna_config(tmp_path):
+def test_parse_sparse_nascent_config(tmp_path):
     config_path = tmp_path / "sim.yaml"
     config_path.write_text(
         "genome: /tmp/genome.fa\n"
         "gtf: /tmp/genes.gtf\n"
-        "nrna:\n"
+        "nascent:\n"
         "  mode: sparse\n"
         "  abundance_ranges:\n"
         "    - [1.0, 10.0]\n"
@@ -162,16 +164,18 @@ def test_parse_sparse_nrna_config(tmp_path):
 
     config = parse_yaml_config(config_path)
 
-    assert config.nrna.mode == "sparse"
-    assert config.nrna.abundance_ranges == [(1.0, 10.0), (10.0, 1000.0)]
-    assert config.nrna.ratio_labels == ["low", "mixed"]
-    assert config.nrna.on_fraction == 0.5
-    assert config.nrna.seed == 123
+    assert config.nascent.mode == "sparse"
+    assert config.nascent.abundance_ranges == [(1.0, 10.0), (10.0, 1000.0)]
+    assert config.nascent.ratio_labels == ["low", "mixed"]
+    assert config.nascent.on_fraction == 0.5
+    assert config.nascent.seed == 123
 
 
 def test_sparse_requires_abundance_ranges(tmp_path):
     config_path = tmp_path / "sim.yaml"
-    config_path.write_text("genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\nnrna:\n  mode: sparse\n")
+    config_path.write_text(
+        "genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\nnascent:\n  mode: sparse\n"
+    )
 
     with pytest.raises(ValueError, match="abundance_ranges"):
         parse_yaml_config(config_path)
@@ -182,7 +186,7 @@ def test_a_log_uniform_range_may_not_touch_zero(tmp_path):
     Absence is expressed by ``on_fraction``, which is the model's own switch."""
     config_path = tmp_path / "sim.yaml"
     config_path.write_text(
-        "genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\nnrna:\n  mode: sparse\n"
+        "genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\nnascent:\n  mode: sparse\n"
         "  abundance_ranges:\n    - [0.0, 10.0]\n  ratio_labels: [bad]\n"
     )
     with pytest.raises(ValueError, match="0 < min"):
@@ -196,7 +200,7 @@ def test_an_unknown_key_is_refused_at_the_top_level_and_in_each_section(tmp_path
         ("strand_specificity: [0.5]\n", "strand_specificity"),
         ("simulation:\n  n_total_fragment: 1000\n", "n_total_fragment"),
         ("abundance:\n  frac_expresed: 0.5\n", "frac_expresed"),
-        ("nrna:\n  ratio: [0.1]\n", "ratio"),
+        ("nascent:\n  ratio: [0.1]\n", "ratio"),
         ("gdna:\n  rate: [0.5]\n", "rate"),
     ]:
         config_path.write_text("genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\n" + body)
@@ -207,14 +211,14 @@ def test_an_unknown_key_is_refused_at_the_top_level_and_in_each_section(tmp_path
 @pytest.mark.parametrize(
     ("body", "key"),
     [
-        ("nrna:\n  shares: [0.2]\n  ratio_labels: [s20]\n", "shares"),
+        ("nascent:\n  shares: [0.2]\n  ratio_labels: [s20]\n", "shares"),
         ("transcript_filter: all\n", "transcript_filter"),
     ],
     ids=["shares", "transcript_filter"],
 )
 def test_a_key_nothing_reads_is_refused_not_run_on_a_default(tmp_path, body, key):
-    """`nrna.shares` and `transcript_filter` are read by nothing, so each is refused as an unknown key
-    rather than accepted: `nrna: {shares: [0.2], ratio_labels: [s20]}` would run `additive_ratio` at
+    """`nascent.shares` and `transcript_filter` are read by nothing, so each is refused as an unknown key
+    rather than accepted: `nascent: {shares: [0.2], ratio_labels: [s20]}` would run `additive_ratio` at
     ratio 0.0, a nascent-free condition named `s20`, and the transcriptome is the index's, so there is
     nothing to filter. Perturbation: putting either back on its allow-list fails this gate."""
     config_path = tmp_path / "sim.yaml"
@@ -319,7 +323,7 @@ def test_every_in_repo_sim_config_parses(monkeypatch):
 
 
 def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list[Transcript]]:
-    """``n`` expressed multi-exon transcripts, one entity each, so an entity's ``nrna_abundance`` reads
+    """``n`` expressed multi-exon transcripts, one entity each, so an entity's ``nascent_abundance`` reads
     back exactly one draw. Mature abundances span four decades (log-uniform 1 → 10,000), which is
     what lets the independence gate below see a correlation if there is one."""
     rng = np.random.default_rng(seed)
@@ -348,10 +352,10 @@ def test_the_on_fraction_leaves_most_gene_spans_at_exactly_zero():
     """
     n, frac = 400, 0.1
     contributors, entities = _sparse_population(n)
-    apply_sparse_nrna(contributors + entities, (1.0, 1000.0), on_fraction=frac, seed=11)
+    apply_sparse_nascent(contributors + entities, (1.0, 1000.0), on_fraction=frac, seed=11)
 
-    on = [e for e in entities if e.nrna_abundance > 0.0]
-    off = [e for e in entities if e.nrna_abundance == 0.0]
+    on = [e for e in entities if e.nascent_abundance > 0.0]
+    off = [e for e in entities if e.nascent_abundance == 0.0]
     assert len(on) + len(off) == n, "a span is either on or exactly zero"
     assert on and off, "zero-inflation is not observable — the Bernoulli draw did nothing"
     sd = (n * frac * (1 - frac)) ** 0.5
@@ -365,12 +369,14 @@ def test_the_on_fraction_leaves_most_gene_spans_at_exactly_zero():
 def test_on_fraction_zero_transcribes_nothing_and_one_every_eligible_span():
     """The two closed ends, exactly: a fraction is a fraction only if its endpoints are honoured."""
     contributors, entities = _sparse_population(40)
-    assert apply_sparse_nrna(contributors + entities, (1.0, 1000.0), on_fraction=0.0, seed=5) == 0.0
-    assert all(e.nrna_abundance == 0.0 for e in entities)
+    assert (
+        apply_sparse_nascent(contributors + entities, (1.0, 1000.0), on_fraction=0.0, seed=5) == 0.0
+    )
+    assert all(e.nascent_abundance == 0.0 for e in entities)
 
     contributors, entities = _sparse_population(40)
-    apply_sparse_nrna(contributors + entities, (1.0, 1000.0), on_fraction=1.0, seed=5)
-    assert all(e.nrna_abundance > 0.0 for e in entities)
+    apply_sparse_nascent(contributors + entities, (1.0, 1000.0), on_fraction=1.0, seed=5)
+    assert all(e.nascent_abundance > 0.0 for e in entities)
 
 
 def test_the_level_is_log_uniform_over_the_range_not_linear():
@@ -381,8 +387,8 @@ def test_the_level_is_log_uniform_over_the_range_not_linear():
     """
     lo, hi = 1.0, 1000.0
     contributors, entities = _sparse_population(600)
-    apply_sparse_nrna(contributors + entities, (lo, hi), on_fraction=1.0, seed=7)
-    levels = np.array([e.nrna_abundance for e in entities])
+    apply_sparse_nascent(contributors + entities, (lo, hi), on_fraction=1.0, seed=7)
+    levels = np.array([e.nascent_abundance for e in entities])
 
     assert levels.min() >= lo and levels.max() <= hi, "levels escaped the range"
     # three decades, so a log-uniform draw puts ~1/3 of the mass in each; a linear draw puts ~0.9 in
@@ -404,10 +410,10 @@ def test_the_nascent_level_is_independent_of_the_mature_level():
     ratio model reads 1.0), and spans where nascent exceeds mature actually occur.
     """
     contributors, entities = _sparse_population(500, seed=9)
-    apply_sparse_nrna(contributors + entities, (1.0, 1000.0), on_fraction=1.0, seed=23)
+    apply_sparse_nascent(contributors + entities, (1.0, 1000.0), on_fraction=1.0, seed=23)
 
     mature = np.array([c.abundance for c in contributors])
-    nascent = np.array([e.nrna_abundance for e in entities])
+    nascent = np.array([e.nascent_abundance for e in entities])
     rank_m = np.argsort(np.argsort(mature)).astype(float)
     rank_n = np.argsort(np.argsort(nascent)).astype(float)
     rho = float(np.corrcoef(rank_m, rank_n)[0, 1])
@@ -451,9 +457,9 @@ def test_the_on_off_draw_is_per_span_not_per_isoform():
             t.t_index = sp * k + j
             t.span_t_index = 10_000 + sp
             rows.append(t)
-    apply_sparse_nrna(rows + entities, (1.0, 1000.0), on_fraction=p, seed=31)
+    apply_sparse_nascent(rows + entities, (1.0, 1000.0), on_fraction=p, seed=31)
 
-    on_frac = float(np.mean([e.nrna_abundance > 0.0 for e in entities]))
+    on_frac = float(np.mean([e.nascent_abundance > 0.0 for e in entities]))
     per_isoform = 1.0 - (1.0 - p) ** k  # 0.41 — what a per-contributor draw would give
     sd = (p * (1 - p) / n_spans) ** 0.5
     assert abs(on_frac - p) < 5 * sd, (
@@ -466,14 +472,14 @@ def test_the_seed_actually_drives_the_draw():
     """Two seeds disagree, and one seed reproduces itself exactly.
 
     Every other gate here is statistical, so replacing `default_rng(seed)` with a constant seed passes
-    all of them. The orchestrator adds `seed + nrna_index` so a multi-range sweep gets different
+    all of them. The orchestrator adds `seed + nascent_index` so a multi-range sweep gets different
     on-sets, which would otherwise collapse to one pattern silently.
     """
 
     def draw(seed):
         contributors, entities = _sparse_population(200)
-        apply_sparse_nrna(contributors + entities, (1.0, 100.0), on_fraction=0.5, seed=seed)
-        return np.array([e.nrna_abundance for e in entities])
+        apply_sparse_nascent(contributors + entities, (1.0, 100.0), on_fraction=0.5, seed=seed)
+        return np.array([e.nascent_abundance for e in entities])
 
     a, b, a_again = draw(1), draw(2), draw(1)
     assert np.array_equal(a, a_again), "the same seed did not reproduce its own draw"
@@ -484,17 +490,17 @@ def test_the_seed_actually_drives_the_draw():
 
 
 def test_a_multi_exon_contributor_with_no_entity_raises_in_the_sparse_path_too():
-    """The sparse path raises on its own: with the rule gated only through `apply_nrna_ratio`, replacing
+    """The sparse path raises on its own: with the rule gated only through `apply_nascent_ratio`, replacing
     its raise with `continue` would pass every test. A transcript list without entities is not a rigel
     index's, and dropping its molecules silently is the failure the rule exists to stop."""
     orphan = _transcript("orphan", 100.0, [(0, 100), (200, 300)])
     orphan.t_index = 0  # span_t_index stays unset/-1: no entity
     with pytest.raises(ValueError, match="nascent entity"):
-        apply_sparse_nrna([orphan], (1.0, 100.0), on_fraction=1.0, seed=1)
+        apply_sparse_nascent([orphan], (1.0, 100.0), on_fraction=1.0, seed=1)
 
 
 def test_the_function_validates_its_own_range_and_fraction_not_just_the_parser():
-    """The parser is not the only door. `apply_sparse_nrna` is public, and a caller that builds its
+    """The parser is not the only door. `apply_sparse_nascent` is public, and a caller that builds its
     arguments directly never passes through `parse_yaml_config`, so the function's own guards are all
     that stands between a range of `(0, 100)` and `log(0) = -inf` inside the draw. Perturbation:
     deleting either guard passes every other gate in this file."""
@@ -505,10 +511,10 @@ def test_the_function_validates_its_own_range_and_fraction_not_just_the_parser()
         ((100.0, 1.0), "inverted endpoints"),
     ]:
         with pytest.raises(ValueError, match="0 < lo <= hi|abundance_range"):
-            apply_sparse_nrna(list(rows), bad, on_fraction=0.5, seed=1)
+            apply_sparse_nascent(list(rows), bad, on_fraction=0.5, seed=1)
     for bad in (1.5, -0.1):
         with pytest.raises(ValueError, match="on_fraction"):
-            apply_sparse_nrna(list(rows), (1.0, 10.0), on_fraction=bad, seed=1)
+            apply_sparse_nascent(list(rows), (1.0, 10.0), on_fraction=bad, seed=1)
 
 
 # ── a run: the index the transcriptome comes from, and the outputs it keeps ─────────────────────────

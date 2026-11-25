@@ -73,13 +73,13 @@ class Transcript:
     """The number of annotated multi-exon transcripts whose merged spans this entity stands for; zero except on
     synthetic spans and the single-exon transcripts that carry a span."""
     abundance: float | None = None
-    nrna_abundance: float = 0.0
+    nascent_abundance: float = 0.0
     """A simulator input, read only by ``rigel.sim``: the abundance of RNA that has not spliced, sampled contiguously
-    over the genomic span (pooled onto the span's single-exon entity, ``sim.transcriptome.assign_nrna_to_entities``).
+    over the genomic span (pooled onto the span's single-exon entity, ``sim.transcriptome.assign_nascent_to_entities``).
     Independent of ``abundance``; read fractions are proportional to::
 
         spliced template : abundance      × spliced_effective_length
-        genomic span     : nrna_abundance × genomic_span_effective_length
+        genomic span     : nascent_abundance × genomic_span_effective_length
     """
     aliases: tuple[str, ...] = ()
     """The IDs of the identical transcripts ``--collapse-duplicate-transcripts`` folded into this one."""

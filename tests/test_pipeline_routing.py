@@ -472,15 +472,15 @@ def test_nm_penalty_discriminates_multimapper_hits():
 
     assert em.n_units == 1
     # Both transcripts should be candidates
-    mRNA_t = em.t_indices
-    mRNA_ll = em.log_liks
-    assert len(mRNA_t) == 2
+    annotated_t = em.t_indices
+    annotated_ll = em.log_liks
+    assert len(annotated_t) == 2
     # t0 (NM=0) should have higher log-lik than t1 (NM=1)
-    t0_idx = np.where(mRNA_t == 0)[0][0]
-    t1_idx = np.where(mRNA_t == 1)[0][0]
+    t0_idx = np.where(annotated_t == 0)[0][0]
+    t1_idx = np.where(annotated_t == 1)[0][0]
     # one mismatch at the price for ε = 0.002, −7.3 nats
-    assert mRNA_ll[t0_idx] > mRNA_ll[t1_idx]
-    assert mRNA_ll[t0_idx] - mRNA_ll[t1_idx] == pytest.approx(-MISMATCH_LP, abs=0.01)
+    assert annotated_ll[t0_idx] > annotated_ll[t1_idx]
+    assert annotated_ll[t0_idx] - annotated_ll[t1_idx] == pytest.approx(-MISMATCH_LP, abs=0.01)
 
 
 def test_a_one_hit_fragment_reads_no_sequence():

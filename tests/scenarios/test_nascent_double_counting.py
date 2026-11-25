@@ -5,14 +5,14 @@ A 20 kb genome with two multi-exon transcripts::
     t1     (+)  eight 500 bp exons across chr1:2000-10000   abundance 100  ← positive control
     t_ctrl (−)  eight 500 bp exons across chr1:12000-19500  abundance 0    ← negative control
 
-t1's ~4 kb of intronic span gives the nRNA estimate ample signal, and t_ctrl is unexpressed, on the
+t1's ~4 kb of intronic span gives the nascent RNA estimate ample signal, and t_ctrl is unexpressed, on the
 opposite strand and physically separated, so any count on it is a false positive. The sweep covers
-gDNA abundance [0, 20, 100] × nRNA abundance [0, 30, 70] × strand specificity [0.65, 0.9, 1.0], and
-the property held is that the EM separates the three pools: pipeline nRNA must not exceed the truth by
-more than the per-tier ratio, total RNA (mRNA + nRNA) must be accounted for, and per-transcript mRNA
+gDNA abundance [0, 20, 100] × nascent RNA abundance [0, 30, 70] × strand specificity [0.65, 0.9, 1.0], and
+the property held is that the EM separates the three pools: pipeline nascent RNA must not exceed the truth by
+more than the per-tier ratio, total RNA (annotated RNA + nascent RNA) must be accounted for, and per-transcript annotated RNA
 must be accurate on the clean conditions. The bounds widen with gDNA and with the gap to perfect
-strand specificity, because nRNA fragments lying entirely inside exons are physically
-indistinguishable from mRNA and antisense nRNA is genuinely confusable with gDNA — at near-random
+strand specificity, because nascent RNA fragments lying entirely inside exons are physically
+indistinguishable from annotated RNA and antisense nascent RNA is genuinely confusable with gDNA — at near-random
 strand specificity the strand model says almost nothing, and the leak is real rather than a defect
 this test can see.
 """
@@ -38,30 +38,30 @@ logger = logging.getLogger(__name__)
 # =====================================================================
 
 GDNA_LEVELS = [0, 20, 100]
-NRNA_LEVELS = [0, 30, 70]
+NASCENT_LEVELS = [0, 30, 70]
 SS_LEVELS = [0.65, 0.9, 1.0]
 
-# All (gdna, nrna, ss) combos for the exhaustive sweep
-_FULL_GRID = [(g, n, s) for g in GDNA_LEVELS for n in NRNA_LEVELS for s in SS_LEVELS]
+# All (gdna, nascent, ss) combos for the exhaustive sweep
+_FULL_GRID = [(g, n, s) for g in GDNA_LEVELS for n in NASCENT_LEVELS for s in SS_LEVELS]
 _FULL_IDS = [f"g{g}_n{n}_s{int(s * 100)}" for g, n, s in _FULL_GRID]
 
 N_FRAGMENTS = 2000
 
 
-class TestNrnaDoubleCounting:
-    """nRNA counts must not be double-counted."""
+class TestNascentDoubleCounting:
+    """nascent RNA counts must not be double-counted."""
 
     @pytest.fixture
     def scenario(self, tmp_path):
         sc = Scenario(
-            "nrna_double_count",
+            "nascent_double_count",
             genome_length=20000,
             seed=SIM_SEED,
-            work_dir=tmp_path / "nrna_double_count",
+            work_dir=tmp_path / "nascent_double_count",
         )
         # Positive control: multi-exon gene on the + strand. 4 kb of exon in eight pieces, so
         # annotated spliced observations are well represented, and an 8 kb span so that the
-        # nRNA-versus-gDNA separation problem stays live.
+        # nascent RNA-versus-gDNA separation problem stays live.
         sc.add_gene(
             "g1",
             "+",
@@ -108,11 +108,11 @@ class TestNrnaDoubleCounting:
         sc.cleanup()
 
     # -----------------------------------------------------------------
-    # Exhaustive sweep: every (gDNA, nRNA, SS) combination
+    # Exhaustive sweep: every (gDNA, nascent RNA, SS) combination
     # -----------------------------------------------------------------
 
-    @pytest.mark.parametrize("gdna,nrna,ss", _FULL_GRID, ids=_FULL_IDS)
-    def test_full_sweep(self, scenario, gdna, nrna, ss):
+    @pytest.mark.parametrize("gdna,nascent,ss", _FULL_GRID, ids=_FULL_IDS)
+    def test_full_sweep(self, scenario, gdna, nascent, ss):
         """Full hyperparameter sweep — all three pools must stay separated.
 
         The assertion tiers are by difficulty: no gDNA is tight and is where the double-counting
@@ -123,9 +123,9 @@ class TestNrnaDoubleCounting:
             scenario,
             n_fragments=N_FRAGMENTS,
             gdna_abundance=gdna,
-            nrna_abundance=nrna,
+            nascent_abundance=nascent,
             strand_specificity=ss,
-            scenario_name=f"nrna_dc_g{gdna}_n{nrna}_s{int(ss * 100)}",
+            scenario_name=f"nascent_dc_g{gdna}_n{nascent}_s{int(ss * 100)}",
         )
         assert_alignment(bench)
         assert_accountability(bench, tolerance=10)
@@ -135,27 +135,27 @@ class TestNrnaDoubleCounting:
             strand_specificity=ss,
         )
 
-        # ----- Core nRNA double-counting assertion -----
-        # When nRNA is present and gDNA is not overwhelming, the pipeline's nRNA count must not
+        # ----- Core nascent RNA double-counting assertion -----
+        # When nascent RNA is present and gDNA is not overwhelming, the pipeline's nascent RNA count must not
         # exceed the truth by more than the limit. A synthetic nascent transcript competes as an
         # ordinary transcript in the EM, so with gDNA present the three-way competition
-        # (mRNA / nRNA / gDNA) gets more slack than the two-way one.
-        if bench.n_nrna_expected > 20 and gdna <= 20:
-            nrna_ratio = bench.n_nrna_pipeline / bench.n_nrna_expected
+        # (annotated RNA / nascent RNA / gDNA) gets more slack than the two-way one.
+        if bench.n_nascent_expected > 20 and gdna <= 20:
+            nascent_ratio = bench.n_nascent_pipeline / bench.n_nascent_expected
             if gdna > 0:
                 max_ratio = 2.0 if ss >= 0.85 else 2.5
             else:
                 max_ratio = 1.50 if ss >= 0.85 else 2.0
-            assert nrna_ratio < max_ratio, (
-                f"nRNA over-estimation: pipeline={bench.n_nrna_pipeline:.0f}, "
-                f"expected={bench.n_nrna_expected}, ratio={nrna_ratio:.2f} "
-                f"(gdna={gdna}, nrna={nrna}, ss={ss})"
+            assert nascent_ratio < max_ratio, (
+                f"nascent RNA over-estimation: pipeline={bench.n_nascent_pipeline:.0f}, "
+                f"expected={bench.n_nascent_expected}, ratio={nascent_ratio:.2f} "
+                f"(gdna={gdna}, nascent={nascent}, ss={ss})"
             )
 
         # ----- Total RNA accountability -----
-        # mRNA + nRNA should account for all non-gDNA fragments. Known limitation: below perfect
-        # strand specificity, with nRNA present, some antisense nRNA is classified as gDNA.
-        total_rna_expected = bench.total_expected + bench.n_nrna_expected
+        # annotated RNA + nascent RNA should account for all non-gDNA fragments. Known limitation: below perfect
+        # strand specificity, with nascent RNA present, some antisense nascent RNA is classified as gDNA.
+        total_rna_expected = bench.total_expected + bench.n_nascent_expected
         total_rna_observed = bench.total_rna_observed
         if total_rna_expected > 0:
             rna_rel_err = abs(total_rna_observed - total_rna_expected) / total_rna_expected
@@ -170,7 +170,7 @@ class TestNrnaDoubleCounting:
                     f"rel_err={rna_rel_err:.2f}"
                 )
             elif gdna == 0:
-                # Imperfect SS with nRNA present leaks into false gDNA, so the tolerance depends on
+                # Imperfect SS with nascent RNA present leaks into false gDNA, so the tolerance depends on
                 # SS: the lower it is, the more antisense confusion there is. At near-random SS the
                 # strand model is uninformative and the gDNA length model, trained from misidentified
                 # antisense RNA, matches real RNA — so the leak approaches total.
@@ -192,8 +192,8 @@ class TestNrnaDoubleCounting:
                 )
             # gdna=100: extreme stress — just check accountability passed
 
-        # ----- mRNA accuracy (clean conditions only) -----
-        if gdna == 0 and nrna == 0:
+        # ----- annotated RNA accuracy (clean conditions only) -----
+        if gdna == 0 and nascent == 0:
             # The three tiers are the same defect seen at three strengths: on a zero-gDNA library
             # with imperfect strand specificity, calibration cannot deconvolve the last few percent
             # and leaves a false-gDNA phantom, which costs this transcript exactly those fragments.
@@ -204,17 +204,17 @@ class TestNrnaDoubleCounting:
             assert_transcript_accuracy(bench, max_abs_diff=tol)
 
     # -----------------------------------------------------------------
-    # Focused: nRNA pool accuracy across strand specificities
+    # Focused: nascent RNA pool accuracy across strand specificities
     # -----------------------------------------------------------------
 
-    @pytest.mark.parametrize("nrna", [30, 70], ids=[f"nrna_{n}" for n in [30, 70]])
-    def test_nrna_strand_inversion(self, scenario, nrna):
-        """Higher strand specificity must not degrade nRNA accuracy.
+    @pytest.mark.parametrize("nascent", [30, 70], ids=[f"nascent_{n}" for n in [30, 70]])
+    def test_nascent_strand_inversion(self, scenario, nascent):
+        """Higher strand specificity must not degrade nascent RNA accuracy.
 
         The inversion this gates is paradoxical and therefore easy to miss: a strand model that
         double-counts nascent RNA gets worse as the strand signal gets stronger, so a sweep that only
         looked at the near-random arm would read the defect as noise. The property is across arms, so
-        every arm runs here and each higher one is held to every lower one: its nRNA error may exceed
+        every arm runs here and each higher one is held to every lower one: its nascent RNA error may exceed
         the lower arm's by no more than the nascent count's own Poisson spread, ``sqrt(expected)``,
         while a double count moves it by a large fraction of the count itself.
         """
@@ -223,23 +223,26 @@ class TestNrnaDoubleCounting:
             bench = build_and_run(
                 scenario,
                 n_fragments=N_FRAGMENTS,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
-                scenario_name=f"nrna_inversion_n{nrna}_s{int(ss * 100)}",
+                scenario_name=f"nascent_inversion_n{nascent}_s{int(ss * 100)}",
             )
-            if bench.n_nrna_expected <= 10:
+            if bench.n_nascent_expected <= 10:
                 continue
-            nrna_ratio = bench.n_nrna_pipeline / bench.n_nrna_expected
-            # At near-random SS the strand model provides almost no signal and nRNA detection may
+            nascent_ratio = bench.n_nascent_pipeline / bench.n_nascent_expected
+            # At near-random SS the strand model provides almost no signal and nascent RNA detection may
             # fail outright, the nascent fragments leaking to gDNA; at higher SS the signal is clear.
             lower_bound = 0.0 if ss < 0.7 else (0.30 if ss >= 0.8 else 0.05)
             # Upper bound: nascent RNA must not be double-counted
-            assert lower_bound <= nrna_ratio < 1.50, (
-                f"nRNA ratio {nrna_ratio:.2f} out of [{lower_bound}, 1.50] "
-                f"(pipeline={bench.n_nrna_pipeline:.0f}, "
-                f"expected={bench.n_nrna_expected}, ss={ss})"
+            assert lower_bound <= nascent_ratio < 1.50, (
+                f"nascent RNA ratio {nascent_ratio:.2f} out of [{lower_bound}, 1.50] "
+                f"(pipeline={bench.n_nascent_pipeline:.0f}, "
+                f"expected={bench.n_nascent_expected}, ss={ss})"
             )
-            errors[ss] = (abs(bench.n_nrna_pipeline - bench.n_nrna_expected), bench.n_nrna_expected)
+            errors[ss] = (
+                abs(bench.n_nascent_pipeline - bench.n_nascent_expected),
+                bench.n_nascent_expected,
+            )
         assert len(errors) == len(SS_LEVELS), (
             f"an arm carried no nascent RNA to score: {sorted(errors)}"
         )
@@ -247,44 +250,44 @@ class TestNrnaDoubleCounting:
             for hi in (s for s in errors if s > lo):
                 spread = errors[hi][1] ** 0.5
                 assert errors[hi][0] <= errors[lo][0] + spread, (
-                    f"nRNA error grows with strand specificity: {errors[hi][0]:.0f} at ss={hi} against "
+                    f"nascent RNA error grows with strand specificity: {errors[hi][0]:.0f} at ss={hi} against "
                     f"{errors[lo][0]:.0f} at ss={lo} (noise {spread:.0f})"
                 )
 
     # -----------------------------------------------------------------
-    # Focused: mRNA should be unaffected by nRNA presence
+    # Focused: annotated RNA should be unaffected by nascent RNA presence
     # -----------------------------------------------------------------
 
-    @pytest.mark.parametrize("nrna", [0, 30, 70], ids=[f"nrna_{n}" for n in [0, 30, 70]])
-    def test_mrna_stable_across_nrna(self, scenario, nrna):
-        """Total RNA (mRNA + nRNA) is conserved whatever the nRNA level.
+    @pytest.mark.parametrize("nascent", [0, 30, 70], ids=[f"nascent_{n}" for n in [0, 30, 70]])
+    def test_annotated_stable_across_nascent(self, scenario, nascent):
+        """Total RNA (annotated RNA + nascent RNA) is conserved whatever the nascent RNA level.
 
-        Run at perfect strand specificity on purpose, so the known antisense-nRNA-to-gDNA leak is out
+        Run at perfect strand specificity on purpose, so the known antisense-nascent RNA-to-gDNA leak is out
         of the way and what is left is the nascent accounting alone.
         """
         bench = build_and_run(
             scenario,
             n_fragments=N_FRAGMENTS,
-            nrna_abundance=nrna,
+            nascent_abundance=nascent,
             strand_specificity=1.0,
-            scenario_name=f"nrna_mrna_stable_n{nrna}",
+            scenario_name=f"nascent_annotated_stable_n{nascent}",
         )
         # Total RNA should be near-perfect, there being no gDNA. The bound is not zero for the same
-        # reason as the sweep's zero-gDNA perfect-SS branch: a small antisense-nRNA phantom gDNA
+        # reason as the sweep's zero-gDNA perfect-SS branch: a small antisense-nascent RNA phantom gDNA
         # share survives calibration.
         total_rna = bench.total_rna_observed
-        total_expected = bench.total_expected + bench.n_nrna_expected
+        total_expected = bench.total_expected + bench.n_nascent_expected
         if total_expected > 0:
             rel_err = abs(total_rna - total_expected) / total_expected
             assert rel_err < 0.08, (
                 f"Total RNA conservation violated: "
                 f"expected={total_expected}, observed={total_rna:.0f}, "
-                f"rel_err={rel_err:.2f} (nrna={nrna})"
+                f"rel_err={rel_err:.2f} (nascent={nascent})"
             )
-        # For clean condition (no nRNA), check mRNA directly
-        if nrna == 0:
+        # For clean condition (no nascent RNA), check annotated RNA directly
+        if nascent == 0:
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             assert t1.abs_diff <= 15, (
-                f"t1 mRNA error: expected={t1.expected}, "
+                f"t1 annotated RNA error: expected={t1.expected}, "
                 f"observed={t1.observed:.0f}, diff={t1.abs_diff:.0f}"
             )

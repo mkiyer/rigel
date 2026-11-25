@@ -87,7 +87,7 @@ gdna:
 strand_specificities: [0.50, 0.99]
 
 # ── Nascent — the ladder's block, verbatim (`gdna_ladder.yaml` holds the rationale) ─────────────
-nrna:
+nascent:
   mode: sparse
   abundance_ranges: [[1.0, 100.0]]
   on_fraction: 0.50

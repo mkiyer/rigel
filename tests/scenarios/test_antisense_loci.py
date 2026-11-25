@@ -124,17 +124,17 @@ class TestOverlappingAntisense:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, 100, 100, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, 100, 100, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1000,
-                scenario_name=f"anti_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"anti_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)
@@ -242,17 +242,17 @@ class TestContainedAntisense:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
-    def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, 100, 100, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+    @pytest.mark.parametrize("gdna,nascent,ss", STRESS_COMBOS, ids=STRESS_IDS)
+    def test_stress(self, tmp_path, gdna, nascent, ss):
+        sc = self._make_scenario(tmp_path, 100, 100, f"_g{gdna}_n{nascent}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
                 sc,
                 gdna_abundance=gdna,
-                nrna_abundance=nrna,
+                nascent_abundance=nascent,
                 strand_specificity=ss,
                 n_fragments=1000,
-                scenario_name=f"contained_anti_stress_{gdna}_{nrna}_{int(ss * 100)}",
+                scenario_name=f"contained_anti_stress_{gdna}_{nascent}_{int(ss * 100)}",
             )
             assert_alignment(bench)
             assert_accountability(bench)

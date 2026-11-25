@@ -342,8 +342,8 @@ def test_a_contiguous_boundary_carries_no_reach(sample_graph):
         assert nonzero == 0, f"{nonzero} contiguous rows carry a {column} nothing reads"
 
 
-def test_a_synthetic_nrna_span_is_excluded_from_everything():
-    """A synthetic nRNA span row contributes no region_bound, no flag and no reach. The filter is ``~is_synthetic``
+def test_a_synthetic_nascent_span_is_excluded_from_everything():
+    """A synthetic nascent RNA span row contributes no region_bound, no flag and no reach. The filter is ``~is_synthetic``
     alone: ``is_single_exon`` is also true of a real single-exon transcript, so using it would delete real transcripts.
     """
     real = _tx([(400, 600), (1000, 1200)], t_id="real")

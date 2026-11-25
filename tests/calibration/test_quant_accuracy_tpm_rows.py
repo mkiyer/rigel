@@ -17,7 +17,7 @@ import quant_accuracy as qa
 def _annotated():
     """Three annotated transcripts the tool scores perfectly: its TPM is the truth's own."""
     truth = pd.DataFrame(
-        {"transcript_id": ["a", "b", "c"], "observed_mrna_fragments": [100.0, 50.0, 0.0]}
+        {"transcript_id": ["a", "b", "c"], "observed_annotated_fragments": [100.0, 50.0, 0.0]}
     )
     eff = [1000.0, 500.0, 800.0]
     rate = [100.0 / 1000.0, 50.0 / 500.0, 0.0]
@@ -42,7 +42,10 @@ def test_a_perfect_estimate_scores_zero_tpm_error():
 def test_a_shadow_transcript_does_not_move_the_annotated_rows_tpm():
     truth, quant = _annotated()
     shadow = pd.concat(
-        [truth, pd.DataFrame({"transcript_id": ["shadow"], "observed_mrna_fragments": [50.0]})],
+        [
+            truth,
+            pd.DataFrame({"transcript_id": ["shadow"], "observed_annotated_fragments": [50.0]}),
+        ],
         ignore_index=True,
     )
     row = qa.score_transcripts(quant, shadow)
@@ -56,7 +59,7 @@ def test_a_tool_row_with_zero_length_is_out_of_both_vectors():
     denominator as well as the truth's, so the other rows still compare exactly."""
     truth, quant = _annotated()
     truth = pd.concat(
-        [truth, pd.DataFrame({"transcript_id": ["z"], "observed_mrna_fragments": [30.0]})],
+        [truth, pd.DataFrame({"transcript_id": ["z"], "observed_annotated_fragments": [30.0]})],
         ignore_index=True,
     )
     rate = [100.0 / 1000.0, 50.0 / 500.0, 0.0, 30.0]  # the tool floors a zero length at 1
@@ -86,7 +89,10 @@ def test_a_tool_row_with_zero_length_is_out_of_both_vectors():
 def test_the_count_rows_still_carry_the_shadow_fragments():
     truth, quant = _annotated()
     shadow = pd.concat(
-        [truth, pd.DataFrame({"transcript_id": ["shadow"], "observed_mrna_fragments": [50.0]})],
+        [
+            truth,
+            pd.DataFrame({"transcript_id": ["shadow"], "observed_annotated_fragments": [50.0]}),
+        ],
         ignore_index=True,
     )
     row = qa.score_transcripts(quant, shadow)

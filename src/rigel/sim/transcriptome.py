@@ -2,7 +2,7 @@
 onto the index's nascent entities.
 
 Nascent abundance lives on the entities: every multi-exon transcript links through ``span_t_index`` to the entity
-over its TSS/TES cluster and keeps ``nrna_abundance = 0`` itself. Sampling is one multinomial over all RNA rows,
+over its TSS/TES cluster and keeps ``nascent_abundance = 0`` itself. Sampling is one multinomial over all RNA rows,
 transcript and entity alike, in proportion to abundance x effective length, so the nascent fragment share follows
 from molecules and lengths and is never imposed.
 """
@@ -21,7 +21,7 @@ from ..types import Interval, Strand
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["assign_nrna_to_entities", "load_transcripts_from_index"]
+__all__ = ["assign_nascent_to_entities", "load_transcripts_from_index"]
 
 
 def _aliases(index_dir: Path) -> dict[str, list[str]]:
@@ -83,17 +83,17 @@ def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
     return transcripts
 
 
-def assign_nrna_to_entities(transcripts: list[Transcript], per_contributor: np.ndarray) -> int:
+def assign_nascent_to_entities(transcripts: list[Transcript], per_contributor: np.ndarray) -> int:
     """Pool each contributor's nascent molecules onto its nascent entity; return how many entities received any.
 
     ``per_contributor[i]`` is transcript ``i``'s nascent molecular abundance. Each multi-exon transcript links
     through ``span_t_index`` to one single-exon entity (synthetic, or an annotated transcript covering the span),
-    whose ``nrna_abundance`` becomes the sum over its contributors; every other row ends at 0. Raises when a
+    whose ``nascent_abundance`` becomes the sum over its contributors; every other row ends at 0. Raises when a
     contributor is single-exon or has no entity: the list did not come from a rigel index.
     """
     by_index = {t.t_index: t for t in transcripts}
     for t in transcripts:
-        t.nrna_abundance = 0.0
+        t.nascent_abundance = 0.0
     n_entities = 0
     for t, amount in zip(transcripts, per_contributor):
         if amount <= 0.0:
@@ -106,7 +106,7 @@ def assign_nrna_to_entities(transcripts: list[Transcript], per_contributor: np.n
                 f"{t.span_t_index}); the transcript list did not come from a rigel index"
             )
         entity = by_index[t.span_t_index]
-        if entity.nrna_abundance == 0.0:
+        if entity.nascent_abundance == 0.0:
             n_entities += 1
-        entity.nrna_abundance += float(amount)
+        entity.nascent_abundance += float(amount)
     return n_entities

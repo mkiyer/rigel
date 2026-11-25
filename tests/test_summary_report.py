@@ -189,7 +189,7 @@ def _build_scenario(work_dir: Path):
         sim_config=sim,
         gdna_fraction=0.2,
         gdna_config=GDNAConfig(),
-        nrna_abundance=15.0,
+        nascent_abundance=15.0,
     )
 
 

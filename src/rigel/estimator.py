@@ -270,7 +270,7 @@ class AbundanceEstimator:
     Locus-level EM architecture::
 
         Per locus:
-        [0, n_t)       - transcript components (annotated transcripts + synthetic nRNA spans)
+        [0, n_t)       - transcript components (annotated transcripts + synthetic nascent RNA spans)
         [n_t]          - gDNA: one component per locus
 
     Parameters
@@ -431,7 +431,7 @@ class AbundanceEstimator:
         tuple
             (total_gdna_em, locus_rna, locus_gdna[, winner_tid, winner_post, n_candidates][,
             class_mass]): the EM's total gDNA count, then per locus its RNA count (annotated
-            transcripts plus synthetic nRNA spans) and its gDNA count.
+            transcripts plus synthetic nascent RNA spans) and its gDNA count.
         """
         n_transcripts = self.num_transcripts
         n_loci = len(partition_tuples)

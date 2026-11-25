@@ -1,4 +1,4 @@
-transcript_id	mrna_abundance	nrna_abundance
+transcript_id	annotated_abundance	nascent_abundance
 B1_clean	10	0
 B1_nasc	10	100
 B1_cap	10	0

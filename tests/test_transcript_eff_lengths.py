@@ -48,7 +48,7 @@ def scenario(tmp_path_factory):
         sim_config=sim,
         gdna_fraction=0.2,
         gdna_config=GDNAConfig(),
-        nrna_abundance=15.0,
+        nascent_abundance=15.0,
     )
     yield result
     sc.cleanup()

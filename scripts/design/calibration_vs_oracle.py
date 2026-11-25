@@ -203,9 +203,9 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     truth = pool_ledger(Path(suite) / condition)
     row["pools"] = {
         "true_gdna": truth["gdna"],
-        "true_mrna": truth["mrna"],
-        "true_nrna": truth["nrna"],
-        "true_rna": truth["mrna"] + truth["nrna"],
+        "true_annotated": truth["annotated"],
+        "true_nascent": truth["nascent"],
+        "true_rna": truth["annotated"] + truth["nascent"],
         # conserved fragment counts (each axis converted by its population's mass per crossing), not incidences
         "P_gdna": p_arm.library_gdna_fragments,
         "P_rna": p_arm.library_rna_fragments,
@@ -257,21 +257,21 @@ def _print_pool_ledger(rows: list[dict], selections) -> None:
     print("  ⓪ ⭐⭐⭐ THE POOL LEDGER — FRAGMENT COUNTS, not ratios. What went in, and what calibration says.")
     print("     ⛔ THREE pools on the truth side, TWO on the answer side: `calibrate` splits gDNA from RNA")
     print("        and CANNOT split mature from nascent — that is the EM's job (`quant_accuracy.py`).")
-    print(f"    {'condition / stratum':<44} {'true gDNA':>12} {'true mRNA':>12} {'true nRNA':>10} "
+    print(f"    {'condition / stratum':<44} {'true gDNA':>12} {'true annotated RNA':>12} {'true nascent RNA':>10} "
           f"{'P gDNA':>13} {'P RNA':>13} {'ΔgDNA vs O':>13} {'P/O gDNA':>9}")
     print("    " + "-" * 142)
     for title, sub in selections:
         if not sub:
             continue
         t = {k: sum(r["pools"][k] for r in sub) for k in
-             ("true_gdna", "true_mrna", "true_nrna", "P_gdna", "P_rna", "O_gdna")}
+             ("true_gdna", "true_annotated", "true_nascent", "P_gdna", "P_rna", "O_gdna")}
         d = t["P_gdna"] - t["O_gdna"]
         ratio = t["P_gdna"] / t["O_gdna"] if t["O_gdna"] > 0 else float("nan")
-        print(f"    {title:<44} {t['true_gdna']:>12,.0f} {t['true_mrna']:>12,.0f} "
-              f"{t['true_nrna']:>10,.0f} {t['P_gdna']:>13,.0f} {t['P_rna']:>13,.0f} "
+        print(f"    {title:<44} {t['true_gdna']:>12,.0f} {t['true_annotated']:>12,.0f} "
+              f"{t['true_nascent']:>10,.0f} {t['P_gdna']:>13,.0f} {t['P_rna']:>13,.0f} "
               f"{d:>+13,.0f} {ratio:>9.4f}")
-    if all(r["pools"]["true_nrna"] == 0.0 for r in rows):
-        print("    ⛔ EVERY condition has true nRNA = 0 — this panel cannot resolve the nascent axis at")
+    if all(r["pools"]["true_nascent"] == 0.0 for r in rows):
+        print("    ⛔ EVERY condition has true nascent RNA = 0 — this panel cannot resolve the nascent axis at")
         print("       all. A gDNA-vs-nascent-vs-annotated verdict needs nascent-bearing conditions.")
     print("    ⚠ `P/O gDNA` is the like-for-like comparison. The simulator's own count is the OUTER")
     print("      reference and differs from O by the accumulator's retention, which is a different axis.")
@@ -519,14 +519,14 @@ def _check_pool_ledger(check) -> None:
     """The pool ledger reads the file, and a pool it cannot find reads 0."""
     with tempfile.TemporaryDirectory() as td:
         (Path(td) / "truth_summary.json").write_text(
-            json.dumps({"origin_counts": {"gdna": 7.0, "mrna": 11.0, "nrna": 13.0}})
+            json.dumps({"origin_counts": {"gdna": 7.0, "annotated": 11.0, "nascent": 13.0}})
         )
         led = pool_ledger(Path(td))
         check("pool ledger reads all three origin pools",
-              (led["gdna"], led["mrna"], led["nrna"]) == (7.0, 11.0, 13.0))
+              (led["gdna"], led["annotated"], led["nascent"]) == (7.0, 11.0, 13.0))
         (Path(td) / "truth_summary.json").write_text(json.dumps({"origin_counts": {"gdna": 7.0}}))
         check("pool ledger reports a MISSING pool as 0, not as absent",
-              pool_ledger(Path(td)) == {"gdna": 7.0, "mrna": 0.0, "nrna": 0.0})
+              pool_ledger(Path(td)) == {"gdna": 7.0, "annotated": 0.0, "nascent": 0.0})
 
 
 def _check_scope(check) -> None:

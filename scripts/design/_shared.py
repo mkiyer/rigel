@@ -158,15 +158,15 @@ def stratum_selections(conds, label=" x ".join) -> list[tuple[str, typing.Callab
 
 
 def pool_ledger(condition_dir: Path) -> dict:
-    """The simulator's starting fragment count per origin pool (``gdna``, ``mrna``, ``nrna``).
+    """The simulator's starting fragment count per origin pool (``gdna``, ``annotated``, ``nascent``).
 
-    ``calibrate`` answers in gDNA and RNA only, so its RNA answer is scored against ``mrna + nrna``; the
+    ``calibrate`` answers in gDNA and RNA only, so its RNA answer is scored against ``annotated + nascent``; the
     split between annotated and nascent RNA is the EM's, scored in ``quant_accuracy.py``'s pool table. Read
     from ``truth_summary.json``, never from the condition name; a missing pool reads 0, a missing file raises.
     """
     summary = json.loads((Path(condition_dir) / "truth_summary.json").read_text())
     counts = summary["origin_counts"]
-    return {k: float(counts.get(k, 0.0)) for k in ("gdna", "mrna", "nrna")}
+    return {k: float(counts.get(k, 0.0)) for k in ("gdna", "annotated", "nascent")}
 
 
 def capture_label(cond: str) -> str:

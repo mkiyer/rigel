@@ -147,7 +147,7 @@ python scripts/sim/panel.py cache    --config $CFG --jobs 8
 # 2. CALIBRATION AGAINST ORACLE CALIBRATION, per stratum — no EM.
 python scripts/design/calibration_vs_oracle.py --suite $LADDER --index $INDEX --oracle-cache $LADDER/oracle_cache
 python scripts/design/prior_vs_oracle.py --suite $LADDER --index $INDEX --oracle-cache $LADDER/oracle_cache --jobs 6
-python scripts/design/ruler_vs_truth.py --panel ladder --condition gdna_g05_ss_0.99_nrna_mid_capture_on --scale
+python scripts/design/ruler_vs_truth.py --panel ladder --condition gdna_g05_ss_0.99_nascent_mid_capture_on --scale
 python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
 
 # 3. THE TOOL END TO END — fractional, scan pinned; --jobs 2 (a 10 M-fragment condition holds ~8.5 GB).
@@ -163,7 +163,7 @@ done
 # 4. A RENAME OR REFACTOR must be a numeric no-op against a frozen reference; a SPEED-UP the same within --rtol 1e-9 up
 #    to the EM, and its counts unmoved against truth on the ladder (TESTING.md §6).
 python scripts/design/rename_identity.py --check --suite $LADDER --index $INDEX \
-       --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference <frozen reference>
+       --condition gdna_g05_ss_0.99_nascent_mid_capture_off --reference <frozen reference>
 ```
 
 A scan change is decided on the STAR rung (`TESTING.md` §0d), and once the scan is final every panel is re-cached

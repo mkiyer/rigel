@@ -51,7 +51,7 @@ def build_toy(tmp_path_factory):
     return sc.build_oracle(
         n_rna_fragments=4000,
         gdna_fraction=1.0,
-        nrna_abundance=15.0,
+        nascent_abundance=15.0,
         sim_config=_SIM,
         gdna_config=GDNAConfig(abundance=0.0, frag_mean=240, frag_std=45),
     )
@@ -63,7 +63,7 @@ def build_toy_zero_gdna(tmp_path_factory):
     return sc.build_oracle(
         n_rna_fragments=4000,
         gdna_fraction=0.0,
-        nrna_abundance=15.0,
+        nascent_abundance=15.0,
         sim_config=_SIM,
         gdna_config=GDNAConfig(abundance=0.0, frag_mean=240, frag_std=45),
     )

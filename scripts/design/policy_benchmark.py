@@ -22,7 +22,7 @@ Usage::
 
     python scripts/design/policy_benchmark.py --panel test                                   # the development loop
     python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer       # the shipping judgement
-    python scripts/design/policy_benchmark.py --panel test --conditions gdna_g50_ss_0.50_nrna_file_capture_off
+    python scripts/design/policy_benchmark.py --panel test --conditions gdna_g50_ss_0.50_nascent_file_capture_off
     python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
     python scripts/design/policy_benchmark.py --panel test --set calibration.sweep_logodds_step=0.1    # a config arm
 """

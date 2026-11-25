@@ -153,7 +153,7 @@ chr1\ttest\texon\t501\t700\t.\t+\t.\tgene_id "g1"; transcript_id "t1";
 # six 500 bp exons + a single-exon nascent parent covering the whole 1000..6500 span
 _MULTIEXON_GTF = (
     "".join(
-        f'chr1\ttest\texon\t{s + 1}\t{s + 500}\t.\t+\t.\tgene_id "gm"; transcript_id "mrna";\n'
+        f'chr1\ttest\texon\t{s + 1}\t{s + 500}\t.\t+\t.\tgene_id "gm"; transcript_id "annotated";\n'
         for s in range(1000, 6500, 1000)
     )
     + 'chr1\ttest\texon\t1001\t6500\t.\t+\t.\tgene_id "gm"; transcript_id "nasc";\n'
@@ -434,7 +434,7 @@ def test_a_field_contracts_and_never_expands(multiexon_index):
 
 
 def test_the_length_is_the_share_weighted_mean_of_the_objects_efficiencies(multiexon_index):
-    """The claim, computed independently: the six-exon mRNA's 500 bp exons each hold ``501 − E[w]`` of
+    """The claim, computed independently: the six-exon annotated RNA's 500 bp exons each hold ``501 − E[w]`` of
     contained share and each junction between them ``E[w − 1]`` (no fragment reaches a second cut); with
     exons 1–3 at 1, 4–6 at 0.2 and the introns at 0.001, each junction prices at its two exons' mean."""
     idx = multiexon_index
@@ -443,7 +443,7 @@ def test_the_length_is_the_share_weighted_mean_of_the_objects_efficiencies(multi
     level = [1.0, 1.0, 1.0, 0.2, 0.2, 0.2]
     for k, s in enumerate(range(1000, 6500, 1000)):
         c[_exon_mask(ra, s, s + 500)] = level[k]
-    m = _tidx(idx, "mrna")
+    m = _tidx(idx, "annotated")
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = _lengths(_cal(ra, c, 1.0), ra, idx, fl, _one_law(PMF))
     contained, cut = 501.0 - MU, MU - 1.0
@@ -455,7 +455,7 @@ def test_the_length_is_the_share_weighted_mean_of_the_objects_efficiencies(multi
 def test_a_junction_adds_its_two_sides_it_does_not_average_them(multiexon_index):
     """A fragment across a junction between two captured exons is all captured exon, while the gDNA fragments across its
     low and high boundaries are half exon, half intron. With every exon at 1, every intron at 0.001 and every boundary
-    at its flanks' mean (0.5005), the mRNA's junctions price at ``0.5005 + 0.5005 − 0.001 = 1`` and the mRNA reads its
+    at its flanks' mean (0.5005), the annotated RNA's junctions price at ``0.5005 + 0.5005 − 0.001 = 1`` and the annotated RNA reads its
     full length. Pricing a junction at the mean of its two boundaries (0.5005) would read it near half. (The mean of its
     adjacent pieces is right on this uniform field but wrong where a piece beside the junction holds no fragment; the
     tiny-exon and short-intron tests below cover that.)
@@ -465,7 +465,7 @@ def test_a_junction_adds_its_two_sides_it_does_not_average_them(multiexon_index)
     c = np.full(ra.n_regions, 0.001)
     for s in range(1000, 6500, 1000):
         c[_exon_mask(ra, s, s + 500)] = 1.0
-    m = _tidx(idx, "mrna")
+    m = _tidx(idx, "annotated")
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = _lengths(_cal(ra, c, 1.0), ra, idx, fl, _one_law(PMF))
     assert eff[m] == pytest.approx(fl[m], rel=1e-12)
@@ -476,9 +476,9 @@ def test_a_junction_is_captured_no_more_than_a_fully_captured_piece(multiexon_in
     captured exons is captured no more than one wholly inside either. Where probes tile the exons to their edges, a gDNA
     fragment crossing an exon's boundary still binds most of a probe, so the boundary reads most of the exon's level
     rather than half, and the plain sum ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`` would price the junction well
-    above 1. With every exon at 1, every intron at 0.001 and every boundary at 0.835, the mRNA's junctions price at 1,
+    above 1. With every exon at 1, every intron at 0.001 and every boundary at 0.835, the annotated RNA's junctions price at 1,
     it reads its full fl-marginal length, and no transcript reads longer than its own. The uncapped sum would read the
-    mRNA long; a cap at the boundaries' own level would read it short.
+    annotated RNA long; a cap at the boundaries' own level would read it short.
     """
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
@@ -486,7 +486,7 @@ def test_a_junction_is_captured_no_more_than_a_fully_captured_piece(multiexon_in
     for s in range(1000, 6500, 1000):
         c[_exon_mask(ra, s, s + 500)] = 1.0
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
-    m = _tidx(idx, "mrna")
+    m = _tidx(idx, "annotated")
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = _lengths(_cal(ra, c, 1.0, boundary=np.full(ne, 0.835)), ra, idx, fl, _one_law(PMF))
     assert eff[m] == pytest.approx(fl[m], rel=1e-12)
@@ -496,7 +496,7 @@ def test_a_junction_is_captured_no_more_than_a_fully_captured_piece(multiexon_in
 def test_a_junction_the_introns_out_capture_prices_at_zero_never_below(multiexon_index):
     """Conservation takes the intron pieces' capture off the two boundaries', and where the introns are captured and
     the exons' edges are not it would go negative: every exon and boundary at 1 and every intron at 10 gives
-    ``1 + 1 − 10``. A yield is not negative, so the junction prices at 0 and the mRNA reads its exons alone.
+    ``1 + 1 − 10``. A yield is not negative, so the junction prices at 0 and the annotated RNA reads its exons alone.
     """
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
@@ -504,16 +504,16 @@ def test_a_junction_the_introns_out_capture_prices_at_zero_never_below(multiexon
     for s in range(1000, 6500, 1000):
         c[_exon_mask(ra, s, s + 500)] = 1.0
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
-    m = _tidx(idx, "mrna")
+    m = _tidx(idx, "annotated")
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = _lengths(
         _cal(ra, c, 1e-3, boundary=np.ones(ne), saturation=10.0), ra, idx, fl, _one_law(PMF)
     )
-    assert eff[m] == pytest.approx(_mrna_length(fl[m], [1.0] * 6, [0.0] * 5), rel=1e-12)
+    assert eff[m] == pytest.approx(_annotated_length(fl[m], [1.0] * 6, [0.0] * 5), rel=1e-12)
 
 
-def _mrna_length(fl_m: float, exon_levels, junction_prices) -> float:
-    """The six-exon mRNA's length from its objects: each 500 bp exon holds ``501 − E[w]`` of contained share and
+def _annotated_length(fl_m: float, exon_levels, junction_prices) -> float:
+    """The six-exon annotated RNA's length from its objects: each 500 bp exon holds ``501 − E[w]`` of contained share and
     each junction ``E[w − 1]`` (no fragment reaches a second cut)."""
     contained, cut = 501.0 - MU, MU - 1.0
     return (
@@ -535,20 +535,20 @@ def test_a_junction_may_out_capture_every_object_it_touches_up_to_saturation(mul
     for s in range(1000, 6500, 1000):
         c[_exon_mask(ra, s, s + 500)] = 40.0
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
-    m = _tidx(idx, "mrna")
+    m = _tidx(idx, "annotated")
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = _lengths(
         _cal(ra, c, 1e-3, boundary=np.full(ne, 40.0), saturation=100.0), ra, idx, fl, _one_law(PMF)
     )
-    assert eff[m] == pytest.approx(_mrna_length(fl[m], [40.0] * 6, [79.0] * 5), rel=1e-12)
-    assert eff[m] > _mrna_length(fl[m], [40.0] * 6, [40.0] * 5) * (1.0 + 1e-6)
+    assert eff[m] == pytest.approx(_annotated_length(fl[m], [40.0] * 6, [79.0] * 5), rel=1e-12)
+    assert eff[m] > _annotated_length(fl[m], [40.0] * 6, [40.0] * 5) * (1.0 + 1e-6)
 
 
 def test_a_junction_beside_an_object_above_saturation_may_reach_that_objects_level(multiexon_index):
     """Capture saturates per level: an object of a stronger probe reads above the library's saturated level, and a
     junction beside it is captured as that object is, not cut back to the library's level. Saturation 100, every exon
     and boundary at 300, the introns at the bulk: the sum ``599`` is bounded by the best touched object, 300, and the
-    mRNA reads every object at 300. A bound at saturation alone would price the junctions at 100, under the exons beside
+    annotated RNA reads every object at 300. A bound at saturation alone would price the junctions at 100, under the exons beside
     them.
     """
     idx = multiexon_index
@@ -557,7 +557,7 @@ def test_a_junction_beside_an_object_above_saturation_may_reach_that_objects_lev
     for s in range(1000, 6500, 1000):
         c[_exon_mask(ra, s, s + 500)] = 300.0
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
-    m = _tidx(idx, "mrna")
+    m = _tidx(idx, "annotated")
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = _lengths(
         _cal(ra, c, 1e-3, boundary=np.full(ne, 300.0), saturation=100.0), ra, idx, fl, _one_law(PMF)
@@ -723,9 +723,9 @@ def test_no_nascent_mature_inversion_under_capture(multiexon_index):
     c[_exon_mask(ra, 1000, 1500)] = 1.0
     fl = contained_support(idx.t_df["length"].to_numpy(), PMF)
     eff = _lengths(_cal(ra, c, 1.0), ra, idx, fl, _one_law(PMF))
-    mrna, nasc = _tidx(idx, "mrna"), _tidx(idx, "nasc")
-    assert eff[nasc] >= eff[mrna] - 1e-9
-    assert eff[mrna] < fl[mrna] - 1e-6
+    annotated, nasc = _tidx(idx, "annotated"), _tidx(idx, "nasc")
+    assert eff[nasc] >= eff[annotated] - 1e-9
+    assert eff[annotated] < fl[annotated] - 1e-6
 
 
 # --- the efficiencies are gDNA's, carried to the EM's two tables ------------------------------------------------------
@@ -1526,10 +1526,10 @@ def test_the_junction_cap_is_the_level_rnas_spliced_split_supports(cap_index):
     a1 = _tidx(idx, "a1")
     # the transcript's length at the fitted cap is its exons at 400 and its junctions at the cap
     assert _lengths(cal, ra, idx, fl, _one_law(PMF), cap)[a1] == pytest.approx(
-        _mrna_length(fl[a1], [_LEVEL] * 3, [cap] * 2), rel=1e-12
+        _annotated_length(fl[a1], [_LEVEL] * 3, [cap] * 2), rel=1e-12
     )
     assert _lengths(cal, ra, idx, fl, _one_law(PMF))[a1] == pytest.approx(
-        _mrna_length(fl[a1], [_LEVEL] * 3, [_LEVEL] * 2), rel=1e-12
+        _annotated_length(fl[a1], [_LEVEL] * 3, [_LEVEL] * 2), rel=1e-12
     )
 
 
@@ -1881,7 +1881,7 @@ def test_the_lengths_and_the_place_weights_read_the_cap_they_are_handed(cap_inde
     a1 = _tidx(idx, "a1")
     assert transcript_capture_eff_lengths(cal, TranscriptFrame(idx, ra, _one_law(PMF)), fl, 600.0)[
         a1
-    ] == pytest.approx(_mrna_length(fl[a1], [_LEVEL] * 3, [600.0] * 2), rel=1e-12)
+    ] == pytest.approx(_annotated_length(fl[a1], [_LEVEL] * 3, [600.0] * 2), rel=1e-12)
 
 
 def test_a_run_builds_the_pieces_once_and_each_tables_shares_once(tmp_path_factory, monkeypatch):

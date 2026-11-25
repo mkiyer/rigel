@@ -58,7 +58,7 @@ from rigel.pipeline import run_pipeline  # noqa: E402
 
 from _shared import DEFAULT_INDEX, DEFAULT_SUITE, ORACLE_BAM, RUNS  # noqa: E402
 
-DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_mid_capture_off"
+DEFAULT_CONDITION = "gdna_g00_ss_0.99_nascent_mid_capture_off"
 REFERENCE = RUNS / "arms" / "rename_identity_reference.json"
 
 #: every source of run-to-run variation, pinned; removing any one makes "bit-identical" unprovable.

@@ -44,7 +44,7 @@ def toy(tmp_path_factory):
     return sc.build_oracle(
         n_rna_fragments=3000,
         gdna_fraction=1.0,
-        nrna_abundance=15.0,
+        nascent_abundance=15.0,
         sim_config=ReadSimConfig(
             frag_mean=180,
             frag_std=30,
@@ -200,9 +200,9 @@ def test_a_no_capture_record_reads_no_capture_and_closes_on_quant_accuracys_no_c
     )
     for arrays, row in (base, nc):
         assert row["accepted"], row["checks"]
-    pools = ("mrna_est", "nrna_est", "gdna_est", "n_intergenic_gdna")
+    pools = ("annotated_est", "nascent_est", "gdna_est", "n_intergenic_gdna")
     assert [nc[1]["library"][k] for k in pools] == [want[k] for k in pools]
-    assert base[1]["library"]["mrna_est"] != want["mrna_est"], (
+    assert base[1]["library"]["annotated_est"] != want["annotated_est"], (
         "the plant moved nothing, so this test checks nothing"
     )
     assert (base[1]["qa_arm"], nc[1]["qa_arm"]) == ("base", "no_capture")

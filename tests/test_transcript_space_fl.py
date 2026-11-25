@@ -681,11 +681,11 @@ class TestNegativeStrand:
 # =====================================================================
 
 
-class TestNRNAFragLength:
+class TestNascentFragLength:
     """A nascent span is one synthetic exon over the gene's genomic interval, so a candidate's length on it is the
     fragment's genomic span (no introns to skip)."""
 
-    def test_nrna_fl_equals_genomic_span(self, basic_index):
+    def test_nascent_fl_equals_genomic_span(self, basic_index):
         """Blocks (1500, 1600) + (5500, 5600), inside g1's nascent span: the length on it is 5600 - 1500 = 4100."""
         frag = make_fragment(
             exons=(
@@ -698,11 +698,11 @@ class TestNRNAFragLength:
         assert result is not None
         # The nascent spans are the synthetic transcripts
         t_df = basic_index.t_df
-        nrna_mask = t_df["is_synthetic"].values if "is_synthetic" in t_df.columns else None
-        if nrna_mask is not None:
-            nrna_tidxs = set(t_df.loc[nrna_mask.astype(bool), "t_index"].tolist())
+        nascent_mask = t_df["is_synthetic"].values if "is_synthetic" in t_df.columns else None
+        if nascent_mask is not None:
+            nascent_tidxs = set(t_df.loc[nascent_mask.astype(bool), "t_index"].tolist())
             fl_dict = result.frag_lengths
-            for t_idx in nrna_tidxs:
+            for t_idx in nascent_tidxs:
                 if t_idx in fl_dict:
                     assert fl_dict[t_idx] == 4100
 

@@ -2,7 +2,7 @@
 
 The oracle's correctness rests on one identity: partitioning the sim BAM by true fragment origin and running the
 production accumulator on each partition reproduces the full payload, because the accumulator deposits each fragment
-independently. A tiny gDNA + mRNA + nascent scenario asserts that identity on every bank, so an accumulator change that
+independently. A tiny gDNA + annotated RNA + nascent scenario asserts that identity on every bank, so an accumulator change that
 breaks per-fragment linearity fails here instead of corrupting the truth source every instrument reads. The other tests
 cover the perfect-calibration lever built from the same partitions and the two frames the validator recognises: a
 spliced deposit in the gdna partition is impossible before the drain and a recorded fact after it, while sum-to-full
@@ -29,7 +29,7 @@ def oracle_scenario(tmp_path_factory):
     result = sc.build_oracle(
         n_rna_fragments=1500,
         gdna_fraction=1.0,
-        nrna_abundance=20.0,
+        nascent_abundance=20.0,
         sim_config=ReadSimConfig(
             frag_mean=180,
             frag_std=30,
@@ -67,8 +67,8 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
     # The scenario must exercise the RNA-only banks, or "gDNA is zero there" is vacuous.
     assert np.asarray(orc.full.sj_count, np.int64).sum() > 0
 
-    # every read accounted for; gDNA and mRNA partitions both non-empty (scenario has both).
-    assert orc.read_counts["gdna"] > 0 and orc.read_counts["mrna"] > 0
+    # every read accounted for; gDNA and annotated RNA partitions both non-empty (scenario has both).
+    assert orc.read_counts["gdna"] > 0 and orc.read_counts["annotated"] > 0
 
 
 def test_oracle_override_conserves_mass_on_each_axis_separately(oracle_scenario, tmp_path):
