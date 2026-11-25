@@ -384,7 +384,7 @@ def _annotated(rows: list[Transcript]) -> list[Transcript]:
 
 
 def _minimap2_into_sort(minimap2: list[str], sort: list[str]) -> None:
-    """Run ``minimap2 | samtools sort``. A failed sort raises; a failed minimap2 only warns."""
+    """Run ``minimap2 | samtools sort``; either failing raises, since a BAM from a failed aligner is not the reads."""
     p1 = subprocess.Popen(minimap2, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     p2 = subprocess.Popen(sort, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     # Allow p1 to receive SIGPIPE if p2 exits early
@@ -396,6 +396,6 @@ def _minimap2_into_sort(minimap2: list[str], sort: list[str]) -> None:
     if p2.returncode != 0:
         raise RuntimeError(f"samtools sort failed (rc={p2.returncode}): {p2_stderr.decode()}")
     if p1.returncode != 0:
-        logger.warning(
-            "minimap2 exited with rc=%d: %s", p1.returncode, p1_stderr.decode(errors="replace")
+        raise RuntimeError(
+            f"minimap2 failed (rc={p1.returncode}): {p1_stderr.decode(errors='replace')}"
         )

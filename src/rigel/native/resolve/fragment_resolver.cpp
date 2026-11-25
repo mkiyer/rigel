@@ -67,7 +67,8 @@ void FragmentResolver::build_exon_index(const std::vector<int32_t>& offsets, con
 }
 
 void FragmentResolver::set_max_fragment_length(int32_t L) {
-    if (L < 0) throw std::invalid_argument("set_max_fragment_length: must be >= 0, got " + std::to_string(L));
+    // at 0 no pair has a length in range, so every one would be refused
+    if (L < 1) throw std::invalid_argument("set_max_fragment_length: must be >= 1, got " + std::to_string(L));
     max_fragment_length_ = L;
 }
 

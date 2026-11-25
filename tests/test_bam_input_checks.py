@@ -313,6 +313,12 @@ def test_the_scanner_refuses_a_count_below_one(built, bad):
         )
 
 
+def test_the_resolver_refuses_a_fragment_length_limit_below_one(built):
+    """A limit of 0 would refuse every pair, so the resolver refuses it as the config does."""
+    with pytest.raises(ValueError, match="max_fragment_length"):
+        built.index.resolver.set_max_fragment_length(0)
+
+
 def test_the_resolver_refuses_a_negative_overhang_tolerance(built):
     """A negative intron-overhang tolerance is refused, rather than read as 0."""
     with pytest.raises(ValueError, match="overhang"):

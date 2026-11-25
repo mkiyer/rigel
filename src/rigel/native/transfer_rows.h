@@ -6,7 +6,7 @@
 #pragma once
 
 #include <algorithm>
-#include <cassert>
+
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -313,7 +313,6 @@ inline void level_map_lambda(const double* lam, int K, double density_b, double 
 // counting variances, so positive.
 inline void level_bound_row(const double* lam, int K, double density_b, double opportunity_i, double total_i,
                             double v, double* out) {
-    assert(v > 0.0);
     const double log_d = std::log(density_b);
     for (int j = 0; j < K; ++j) {
         const double x = std::log(std::max(sigmoid(lam[j]) * total_i / opportunity_i, LOG_FLOOR)) - log_d;

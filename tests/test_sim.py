@@ -8,6 +8,7 @@ a scenario whose genes the index reads differently is a truth source that does n
 
 import pytest
 
+from rigel.sim import scenario as sim_scenario
 from rigel.sim.annotation import GeneBuilder
 from rigel.sim.genome import MutableGenome, reverse_complement
 from rigel.transcript import Transcript
@@ -406,3 +407,9 @@ class TestGeneBuilderIndexIntegration:
         assert index.num_transcripts == 4  # 2 annotated + 2 synthetic spans
         assert index.num_annotated_genes == 2
         assert index.num_genes == 4  # 2 annotated + 2 synthetic gene rows
+
+
+def test_a_failed_minimap2_raises_rather_than_leaving_a_bam():
+    """The aligner's failure is the run's: a sorted BAM of whatever it wrote before it died is not the reads."""
+    with pytest.raises(RuntimeError, match="minimap2 failed"):
+        sim_scenario._minimap2_into_sort(["sh", "-c", "exit 3"], ["cat"])

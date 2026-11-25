@@ -104,8 +104,9 @@ def quant_command(args: argparse.Namespace) -> int:
         if isinstance(args.sj_strand_tag, str):
             args.sj_strand_tag = [args.sj_strand_tag]
         pipeline_config = build_pipeline_config(args)
-    # a TypeError is a setting of the wrong type, as YAML's string `1e3` for an integer
-    except (ValueError, TypeError) as exc:
+    # a TypeError is a setting of the wrong type, as YAML's string `1e3` for an integer; an OSError a --config this
+    # run cannot read or an output directory it cannot make
+    except (ValueError, TypeError, OSError) as exc:
         sys.exit(f"Error: {exc}")
     _check_annotated_bam_target(pipeline_config.annotated_bam_path, bam_path)
 
@@ -1154,12 +1155,15 @@ def _read_config_file(config_path, defaults: dict, block: str = "quant") -> dict
 
     with open(config_path) as fh:
         text = fh.read()
-    raw = yaml.safe_load(text) or {}
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{config_path} is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError(
             f"{config_path} must hold a mapping of keys to values, not a {type(raw).__name__}"
         )
-    raw_normalized = {k.replace("-", "_"): v for k, v in raw.items()}
+    raw_normalized = {str(k).replace("-", "_"): v for k, v in raw.items()}
     own = raw_normalized.pop(block, None)
     raw_normalized.pop("index" if block == "quant" else "quant", None)
     yaml_config: dict = {}

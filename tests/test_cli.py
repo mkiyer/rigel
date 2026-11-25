@@ -407,6 +407,27 @@ def test_quant_reports_an_index_missing_a_file_as_an_error_not_a_traceback(
     assert "Rebuild" in message
 
 
+@pytest.mark.parametrize(
+    "text, said",
+    [("em_iterations: [500\n", "is not valid YAML"), ("1: 500\n", "unknown config key")],
+)
+def test_quant_refuses_a_malformed_config_with_an_error_not_a_traceback(tmp_path, text, said):
+    """A config YAML cannot parse, or names a key that is not a name: each is refused as an error."""
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(text)
+    args = _parse_quant("--config", str(cfg))
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    assert str(exited.value.code).startswith("Error: ") and said in str(exited.value.code)
+
+
+def test_quant_refuses_a_missing_config_with_an_error_not_a_traceback(tmp_path):
+    args = _parse_quant("--config", str(tmp_path / "absent.yaml"))
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    assert str(exited.value.code).startswith("Error: ")
+
+
 def test_quant_refuses_a_config_that_is_not_a_mapping(tmp_path):
     cfg = tmp_path / "cfg.yaml"
     cfg.write_text("- em_iterations\n- 500\n")

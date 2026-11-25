@@ -649,7 +649,9 @@ class CaptureSampler:
             if len(fields) < 12:
                 raise ValueError(f"{path}:{row_number}: expected 12 BED fields")
             if not _is_int(fields[1]) or not _is_int(fields[2]):
-                continue
+                if row_number == 1:  # a header, as the transcript format allows on its first row
+                    continue
+                raise ValueError(f"{path}:{row_number}: chromStart and chromEnd must be integers")
             ref = fields[0]
             chrom_start = int(fields[1])
             block_count = int(fields[9])
@@ -657,13 +659,12 @@ class CaptureSampler:
             block_starts = _parse_bed_list(fields[11])
             if block_count != len(block_sizes) or block_count != len(block_starts):
                 raise ValueError(f"{path}:{row_number}: BED12 blockCount mismatch")
+            if min(block_sizes) < 1:
+                raise ValueError(f"{path}:{row_number}: a BED12 block holds no base")
             blocks = [
                 (chrom_start + rel_start, chrom_start + rel_start + size)
                 for size, rel_start in zip(block_sizes, block_starts)
-                if size > 0
             ]
-            if not blocks:
-                continue
             self._add_genomic_probe(
                 ref, blocks, self._probe_strength(ref, blocks, fasta, f"{path}:{row_number}")
             )

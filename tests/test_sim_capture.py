@@ -1202,6 +1202,32 @@ def _composed(n: int, n_gc: int) -> str:
     return ("GC" * n)[:n_gc] + ("AT" * n)[: n - n_gc]
 
 
+@pytest.mark.parametrize(
+    "rows, said",
+    [
+        (
+            "chr1\t180\t440\tp\t0\t+\t180\t440\t0\t1\t260\t0\nchr1\tx\t440\tq\t0\t+\t180\t440\t0\t1\t260\t0\n",
+            "must be integers",
+        ),
+        ("chr1\t180\t440\tp\t0\t+\t180\t440\t0\t2\t0,40\t0,220\n", "holds no base"),
+    ],
+)
+def test_a_bed12_probe_the_loader_cannot_read_is_refused_not_dropped(
+    tmp_path, at_optimum, rows, said
+):
+    """A row past the first whose coordinates are not integers, and a block of no bases, are refused as the
+    transcript format refuses a bad row, never skipped."""
+    bed = tmp_path / "probes.bed"
+    bed.write_text(rows)
+    with pytest.raises(ValueError, match=said):
+        CaptureSampler.from_config(
+            CaptureConfig(probes=str(bed), probe_format="bed12", binding_per_base=1.0),
+            [_transcript("T", [(100, 200), (400, 500)])],
+            {"chr1": 1000},
+            fasta=at_optimum,
+        )
+
+
 def _bed12(path: Path, rows: list[tuple[str, list[tuple[int, int]]]]) -> Path:
     """One BED12 line per probe, ``(ref, blocks)`` with absolute genomic blocks."""
     lines = []
