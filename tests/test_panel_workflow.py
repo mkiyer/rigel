@@ -448,6 +448,60 @@ def test_align_rebuilds_a_missing_pair_from_the_simulators_bam(tmp_path):
         panel.cmd_align(p, args)
 
 
+def _one_condition_to_align(tmp_path):
+    """A panel with one simulated condition, a fake aligner, an index and a private copy of the parameter file."""
+    cfg = _config(tmp_path)
+    p = panel.Panel(cfg)
+    d = p.dir / "c1"
+    d.mkdir(parents=True)
+    _simulator_bam(d / "sim_oracle.bam", [("rna_T1:10-210:r:0", "ACGTTGCA", "GGATCCAT")])
+    (d / "truth_summary.json").write_text(json.dumps({"origin_counts": {"annotated": 1}}))
+    index = tmp_path / "index"
+    index.mkdir()
+    (index / "SA").write_bytes(b"")
+    params = tmp_path / "star.params.txt"
+    params.write_text(pathlib.Path(panel.STAR_PARAMS).read_text())
+    args = _args(
+        cfg,
+        "align",
+        "--conditions",
+        "c1",
+        "--aligner",
+        str(_fake_aligner(tmp_path)),
+        "--aligner-index",
+        str(index),
+        "--threads",
+        "1",
+        "--params",
+        str(params),
+    )
+    return p, d, params, args
+
+
+def test_an_alignment_under_other_parameters_is_refused_not_kept(tmp_path):
+    """An edited parameter file under the same output name: the alignment on disk answers another request, so it is
+    refused (never silently kept) until `--force` replaces it."""
+    p, d, params, args = _one_condition_to_align(tmp_path)
+    assert panel.cmd_align(p, args) == 0
+    assert panel.cmd_align(p, args) == 0  # the same request: kept
+    params.write_text(params.read_text() + "\n--outFilterMismatchNmax 4\n")
+    with pytest.raises(SystemExit, match="params_md5"):
+        panel.cmd_align(p, args)
+    args.force = True
+    assert panel.cmd_align(p, args) == 0
+
+
+def test_a_mate_on_disk_survives_the_rebuild_of_its_pair(tmp_path):
+    """One FASTQ mate on disk: the pair is rebuilt from the simulator's BAM in a directory of its own, so the mate
+    already there is neither overwritten nor deleted."""
+    p, d, _params, args = _one_condition_to_align(tmp_path)
+    mate = d / "sim_R1.fq.gz"
+    mate.write_bytes(b"the user's own mate")
+    assert panel.cmd_align(p, args) == 0
+    assert mate.read_bytes() == b"the user's own mate"
+    assert not list(d.glob(".reads_*")), "the rebuilt pair's directory was left behind"
+
+
 def test_an_aligned_input_counts_only_with_its_record(tmp_path):
     """`status` counts a condition aligned only when `align` finished it: the BAM and the record it writes
     last, after the BAM's templates were checked against the simulator's. A BAM alone is an interrupted run."""

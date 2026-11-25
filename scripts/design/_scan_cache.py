@@ -33,6 +33,7 @@ hashes is always the one the classes have when it is computed.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import json
 import logging
@@ -136,18 +137,25 @@ def scan_cache_key(manifest: dict) -> str:
     return _digest(json.dumps(key, sort_keys=True).encode())
 
 
+@functools.lru_cache(maxsize=None)
+def _bytes_digest(path: str, size: int, inode: int, ctime_ns: int) -> str:
+    """The digest of one file's bytes, read once per process for one (path, size, inode, change time): an instrument
+    checks many caches of one BAM, and any write to the file, in place or by replacement, moves its change time, which
+    unlike the modification time cannot be set back."""
+    with open(path, "rb") as handle:
+        return hashlib.file_digest(handle, lambda: hashlib.blake2b(digest_size=8)).hexdigest()
+
+
 def bam_identity(bam: str | Path) -> dict:
     """What the cache records about the BAM it scanned: the resolved path, the size, the modification time and a
-    digest of the bytes. The time lets an unchanged file skip the digest; the digest decides when the time moved."""
+    digest of the bytes. The digest decides; the time is a record, never a substitute for it."""
     path = Path(bam).resolve()
     stat = path.stat()
-    with path.open("rb") as handle:
-        digest = hashlib.file_digest(handle, lambda: hashlib.blake2b(digest_size=8)).hexdigest()
     return {
         "path": str(path),
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
-        "blake2b": digest,
+        "blake2b": _bytes_digest(str(path), stat.st_size, stat.st_ino, stat.st_ctime_ns),
     }
 
 
@@ -155,8 +163,8 @@ def check_bam_identity(recorded, bam: str | Path | None) -> None:
     """Refuse *bam* unless its bytes are the ones the cache was scanned from.
 
     A manifest without an identity is refused before *bam* is looked at, so *bam* may be None then. A different
-    size refuses at once. The same size and modification time accept without reading the file. Any other case is
-    decided by the digest, so a copy under a new time still matches.
+    size refuses at once; otherwise the digest decides, so a copy under a new time still matches and different bytes
+    under the recorded size and time do not.
     """
     if not isinstance(recorded, dict) or not {"size", "mtime_ns", "blake2b"} <= recorded.keys():
         raise ScanCacheKeyError(
@@ -170,8 +178,6 @@ def check_bam_identity(recorded, bam: str | Path | None) -> None:
             f"the BAM at {path} has {stat.st_size:,} bytes; the cache was scanned from {recorded['size']:,}. "
             f"Re-scan."
         )
-    if stat.st_mtime_ns == recorded["mtime_ns"]:
-        return
     if bam_identity(path)["blake2b"] != recorded["blake2b"]:
         raise ScanCacheKeyError(
             f"the BAM at {path} is not the one this cache was scanned from: its bytes differ. Re-scan."

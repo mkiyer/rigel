@@ -644,6 +644,18 @@ class TestTheCacheDescribesItsBAM:
         with pytest.raises(ScanCacheKeyError, match="BAM"):
             read_scan_cache(cache_dir, index)
 
+    def test_other_bytes_under_the_recorded_size_and_time_are_refused(self, scanned, tmp_path):
+        """A replacement with its time set back to the recorded one: the digest still decides, so the cache of
+        another BAM is never reused under a matched time."""
+        index, local, cache_dir = self._cache_of(scanned, tmp_path)
+        stat = local.stat()
+        data = bytearray(local.read_bytes())
+        data[len(data) // 2] ^= 0xFF
+        local.write_bytes(bytes(data))
+        os.utime(local, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        with pytest.raises(ScanCacheKeyError, match="BAM"):
+            read_scan_cache(cache_dir, index)
+
     def test_a_copy_of_the_bam_matches(self, scanned, tmp_path):
         """The same bytes under a new modification time are the same BAM: the content digest decides."""
         index, local, cache_dir = self._cache_of(scanned, tmp_path)

@@ -89,6 +89,27 @@ def test_two_arms_that_differ_in_the_arm_and_the_revision_only_are_compared(tmp_
     qa._check_comparable([(qa._load(a), "base"), (qa._load(b), "no_capture")])
 
 
+def test_two_arms_scored_on_different_inputs_are_refused(tmp_path):
+    """One condition read from the simulator's alignments by one arm and from an aligner's by the other: the alignment
+    would be reported as the arm's effect."""
+    a = _arm_file(tmp_path, "base", dict(_stamp(*PINNED), bam="sim_oracle.bam"))
+    b = _arm_file(
+        tmp_path,
+        "no_capture",
+        dict(_stamp(*PINNED, arm="no_capture"), bam="rustar_recommended.bam"),
+    )
+    with pytest.raises(SystemExit, match="different inputs"):
+        qa._check_comparable([(qa._load(a), "base"), (qa._load(b), "no_capture")])
+
+
+def test_an_arm_holding_a_row_twice_is_refused(tmp_path):
+    """A shard appended twice: the loader refuses rather than let the file's last copy win."""
+    p = _arm_file(tmp_path, "base", _stamp(*PINNED))
+    p.write_text(p.read_text() * 2)
+    with pytest.raises(SystemExit, match="twice"):
+        qa._load(p)
+
+
 def _text_report(tmp_path, stamp):
     p = _arm_file(tmp_path, "arm", stamp)
     buf = io.StringIO()

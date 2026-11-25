@@ -237,15 +237,10 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     them, so a difference is a fragment the tool put somewhere the simulator did not. ``fp_mass`` is the estimate
     on transcripts the simulator gave zero fragments: contamination the deconvolution failed to remove, with
     nothing to cancel it. ``fn_mass`` is its mirror, real RNA the tool assigned nowhere. They are reported apart
-    because one ``Σ|Δ|`` cannot separate two failures with different fixes.
+    because one ``Σ|Δ|`` cannot separate two failures with different fixes. Every transcript of either table is
+    scored (:func:`_joined`): one the truth does not hold is an estimate with truth 0, never dropped.
     """
-    m = truth.merge(
-        quant[["transcript_id", "count", "count_em", "tpm", "effective_length"]],
-        on="transcript_id",
-        how="left",
-    )
-    for col in ("count", "count_em", "tpm", "effective_length"):
-        m[col] = m[col].fillna(0.0)
+    m = _joined(quant, truth, ["count", "count_em", "tpm", "effective_length"])
     t = m["observed_annotated_fragments"].to_numpy(np.float64)
     e = m["count"].to_numpy(np.float64)
     expressed = t > 0.0
@@ -270,6 +265,22 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     }
 
 
+def _joined(quant: pd.DataFrame, truth: pd.DataFrame, estimate_cols: list[str]) -> pd.DataFrame:
+    """Truth and estimate over the union of their transcripts, one row each: a transcript only one side holds reads 0
+    on the other. Each side must name a transcript once (a repeated id would count its fragments twice), and every
+    estimated fragment must survive the join: the scored total is reconciled against the table's."""
+    m = truth.merge(
+        quant[["transcript_id", *estimate_cols]], on="transcript_id", how="outer", validate="one_to_one"
+    )
+    m["observed_annotated_fragments"] = m["observed_annotated_fragments"].fillna(0.0)
+    for col in estimate_cols:
+        m[col] = m[col].fillna(0.0)
+    scored, table = float(m["count"].sum()), float(quant["count"].sum())
+    if not np.isclose(scored, table, rtol=1e-12, atol=0.0):
+        raise ValueError(f"the scored estimate ({scored!r}) is not the table's ({table!r})")
+    return m
+
+
 def _per_million(x: np.ndarray) -> np.ndarray:
     """``x`` scaled to sum to one million, or zeros when it sums to nothing."""
     total = x.sum()
@@ -281,11 +292,19 @@ def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
 
     Summing a gene's isoforms removes the error of not knowing which isoform a fragment came from. What remains is
     error in deciding whether a fragment was RNA from this gene at all, the question Rigel is for. Genes come from
-    the truth table's ``gene_id``, so both sides share one grouping. Synthetic nascent entities are absent from
-    ``quant`` (``get_counts_df`` drops them); their mass is on the library row as ``nascent_est``.
+    the truth table's ``gene_id``, so both sides share one grouping; a transcript the truth does not hold is grouped
+    by the estimate's own ``gene_id``, which it must then carry. Synthetic nascent entities are absent from ``quant``
+    (``get_counts_df`` drops them); their mass is on the library row as ``nascent_est``.
     """
-    m = truth.merge(quant[["transcript_id", "count"]], on="transcript_id", how="left")
-    m["count"] = m["count"].fillna(0.0)
+    extra = ~quant["transcript_id"].isin(truth["transcript_id"])
+    m = _joined(quant, truth, ["count"])
+    if extra.any():
+        if "gene_id" not in quant.columns:
+            raise ValueError(f"{int(extra.sum())} estimated transcripts the truth does not hold carry no gene_id")
+        estimate_gene = quant.loc[extra].set_index("transcript_id")["gene_id"].astype(str)
+        gene = m["gene_id"].astype(object)
+        gene = gene.where(gene.notna(), m["transcript_id"].map(estimate_gene))
+        m["gene_id"] = gene
     g = m.groupby("gene_id", observed=True)[["observed_annotated_fragments", "count"]].sum()
     # `n_tx` counts genes here, named as on the transcript row so one table renders both
     return _count_scores(g["observed_annotated_fragments"].to_numpy(np.float64), g["count"].to_numpy(np.float64))
@@ -732,8 +751,16 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
 
 
 def _load(path: Path) -> dict:
+    """An arm's rows by ``(condition, axis)``, each once: a repeated row (a shard appended twice) would otherwise win by
+    its position in the file."""
     rows = [json.loads(x) for x in Path(path).read_text().splitlines() if x.strip()]
-    return {(r["condition"], r["axis"]): r for r in rows}
+    by_key: dict = {}
+    for r in rows:
+        key = (r["condition"], r["axis"])
+        if key in by_key:
+            raise SystemExit(f"⛔ {path} holds the row {key} twice — rebuild the arm rather than pick one.")
+        by_key[key] = r
+    return by_key
 
 
 def _gdna_level(library_row: dict) -> str:
@@ -966,7 +993,8 @@ _POOL_FIELDS = ("gdna_est", "gdna_true", "nascent_est", "nascent_true", "annotat
 
 
 def _check_comparable(arms: list[tuple[dict, str]]) -> None:
-    """Refuse arms scored under different assignment modes or config stamps, or over different row sets."""
+    """Refuse arms scored under different assignment modes or config stamps, over different row sets, or on different
+    inputs for one condition."""
     modes = {(name, r.get("assignment_mode")) for a, name in arms for r in a.values()}
     if len({m for _n, m in modes}) > 1:
         # `--set em.assignment_mode=fractional` moves every count, so a mix would report the mode's effect as
@@ -991,6 +1019,18 @@ def _check_comparable(arms: list[tuple[dict, str]]) -> None:
                 f"⛔ {name} has a different row set ({len(a)} vs {len(keys)}) — an arm that is "
                 "missing conditions must not be aggregated against one that is not."
             )
+    # one input per condition: an aligner's rows beside the simulator's would report the alignment as the arm's
+    # effect. A row with no stamp reads as its own input, not as agreement.
+    inputs = {(r["condition"], name, r.get("bam")) for a, name in arms for r in a.values()}
+    by_condition: dict = {}
+    for condition, name, bam in inputs:
+        by_condition.setdefault(condition, set()).add(bam)
+    mixed = sorted(c for c, bams in by_condition.items() if len(bams) > 1)
+    if mixed:
+        raise SystemExit(
+            f"⛔ the arms read different inputs for {len(mixed)} condition(s), e.g. {mixed[0]}: "
+            f"{sorted(by_condition[mixed[0]], key=str)} — compare arms scored on one input."
+        )
 
 
 def _stamps(rows) -> tuple[str, str, str]:

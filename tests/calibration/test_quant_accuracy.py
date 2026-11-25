@@ -1162,3 +1162,35 @@ def test_another_input_bam_is_scored_by_the_truth_free_arms_alone_and_must_exist
     with pytest.raises(SystemExit, match="base"):
         qa.check_input_bam(tmp_path, ["c1"], "oracle", "aligned.bam")
     qa.check_input_bam(tmp_path, ["c1", "c2"], "oracle", qa.ORACLE_BAM)  # the simulator's: any arm
+
+
+def _extra_estimate():
+    truth = pd.DataFrame(
+        {"transcript_id": ["t"], "gene_id": ["g"], "observed_annotated_fragments": [10.0]}
+    )
+    quant = pd.DataFrame(
+        {
+            "transcript_id": ["t", "extra"],
+            "gene_id": ["g", "extra-gene"],
+            "count": [10.0, 7.0],
+            "count_em": [10.0, 7.0],
+            "tpm": [600000.0, 400000.0],
+            "effective_length": [100.0, 100.0],
+        }
+    )
+    return quant, truth
+
+
+@pytest.mark.parametrize("scorer", ["score_transcripts", "score_genes"])
+def test_an_estimate_on_a_transcript_the_truth_does_not_hold_is_scored(scorer):
+    """Seven fragments on a transcript absent from the truth are an error of seven, not a dropped row: the scorers
+    join the union of both tables, so the estimated total is the table's 17."""
+    quant, truth = _extra_estimate()
+    s = getattr(qa, scorer)(quant, truth)
+    assert s["count_est"] == pytest.approx(17.0) and s["count_abs_err"] == pytest.approx(7.0)
+
+
+def test_a_transcript_named_twice_is_refused():
+    quant, truth = _extra_estimate()
+    with pytest.raises(pd.errors.MergeError):
+        qa.score_transcripts(pd.concat([quant, quant.iloc[:1]]), truth)

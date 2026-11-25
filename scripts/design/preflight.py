@@ -85,8 +85,11 @@ def check_reference(rep: Report) -> None:
             str(REFERENCE),
             "scripts/sim/build_suite_reference.py --fasta <source.fa> --gtf <source.gtf> "
             "--refs chr21 chr22 --ercc -o <reference>")
-    rep.add(SUITE_INDEX.is_dir(), "panel rigel index", str(SUITE_INDEX),
-            "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
+    _, why = _load_index(SUITE_INDEX)
+    rep.add(not why, "panel rigel index loads (its format is this build's)", why or str(SUITE_INDEX),
+            f"rigel index --fasta {REFERENCE / 'genome.fa'} --gtf {REFERENCE / 'genes.gtf'} "
+            f"--collapse-duplicate-transcripts --no-mappability --no-tsv -o {SUITE_INDEX}, then each panel's "
+            "`panel.py simulate` and `panel.py cache`")
     rep.add((REFERENCE / "capture_panel.tsv").is_file(), "panel capture probes", "",
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
     # the method-development reference: one hand-edited YAML in the repo, the GTFs / abundances /
@@ -98,9 +101,11 @@ def check_reference(rep: Report) -> None:
             "python scripts/sim/build_test_reference.py")
     rep.add((TESTREF / "test_chr.fa").is_file(), "test chromosome FASTA (DERIVED)", str(TESTREF),
             "python scripts/sim/build_test_reference.py")
-    rep.add(TESTREF_INDEX.is_dir(), "test chromosome rigel index (DERIVED)", "",
-            "rigel index --fasta <T>/test_chr.fa --gtf <T>/test_chr.gtf --no-mappability "
-            "--no-tsv -o <T>/idx")
+    _, why = _load_index(TESTREF_INDEX)
+    rep.add(not why, "test chromosome rigel index loads (DERIVED)", why,
+            f"rigel index --fasta {TESTREF / 'test_chr.fa'} --gtf {TESTREF / 'test_chr.gtf'} "
+            f"--collapse-duplicate-transcripts --no-mappability --no-tsv -o {TESTREF_INDEX}, then each test panel's "
+            "`panel.py simulate` and `panel.py cache`")
 
 
 def _sim_script(name: str):
@@ -130,8 +135,21 @@ def test_chromosome_renders_in_sync(spec: Path) -> bool:
 
 
 def _conditions(root: Path) -> list[str]:
+    """The panel's conditions as its manifest names them, never as its caches do: a condition whose cache is missing
+    must be reported missing, not dropped from the check."""
+    import json
+
+    manifest = root / "manifest.json"
+    if not manifest.is_file():
+        return []
+    return sorted(c["name"] for c in json.loads(manifest.read_text()).get("conditions", []))
+
+
+def _unexpected_caches(root: Path, conds: list[str]) -> list[tuple[str, str]]:
+    """A cache directory the manifest names no condition for: left by another simulation of the panel."""
     d = root / "scan_cache"
-    return sorted(p.name for p in d.iterdir() if p.is_dir()) if d.is_dir() else []
+    found = sorted(p.name for p in d.iterdir() if p.is_dir()) if d.is_dir() else []
+    return [(name, "not a condition of the panel's manifest") for name in found if name not in set(conds)]
 
 
 def _refusal(check, *args) -> str:
@@ -156,8 +174,7 @@ def _cache_refusal(cache_dir: Path, index) -> str:
 
     The cache module's own check, from the manifest alone: `_scan_cache.check_scan_cache`, the one
     `build_scan_cache.py` decides a skip by, under the scan settings every instrument reads a cache with. The BAM is
-    compared at its recorded path when it is still there, and its bytes are read only when its size matches and its
-    modification time does not."""
+    compared at its recorded path when it is still there, by its size and then the digest of its bytes."""
     from rigel.config import BamScanConfig
     from _scan_cache import check_scan_cache
 
@@ -213,7 +230,9 @@ def check_panel(rep: Report, root: Path, index_dir: Path, label: str, rebuild: s
             rep.add(False, f"{label}: {what}", f"{len(conds)} conditions, keys unchecked: {why}",
                     "the index must load first; REFERENCE DATA names the command that builds it")
     else:
-        ok, detail = cache_verdict([(c, _cache_refusal(root / "scan_cache" / c, index)) for c in conds])
+        ok, detail = cache_verdict(
+            [(c, _cache_refusal(root / "scan_cache" / c, index)) for c in conds] + _unexpected_caches(root, conds)
+        )
         rep.add(ok, f"{label}: scan caches", detail, recache)
         parts = _sim_script("panel").ORACLE_PARTS
         ok, detail = cache_verdict([_first_part_refusal(oracle / c, parts, index) for c in conds])

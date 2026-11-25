@@ -28,6 +28,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -363,6 +364,12 @@ def rebuild_reads(c: str, d: Path, r1: Path, r2: Path) -> None:
         what=f"rebuild {c}'s reads from {oracle.name}")
 
 
+def bytes_digest(path: Path) -> str:
+    """A file's bytes as one short digest: what an alignment record keeps of the reads it aligned."""
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, lambda: hashlib.blake2b(digest_size=8)).hexdigest()
+
+
 def count_templates(bam: Path) -> int:
     """The templates an aligned BAM holds: its primary read-1 records."""
     import pysam
@@ -375,11 +382,13 @@ def cmd_align(p: Panel, args) -> int:
     """Every condition's simulated reads aligned by STAR or rustar (its Rust port, which reads STAR's index and
     options) into `<condition>/<name>.bam`: the input a real library gives Rigel, beside the simulator's own
     alignments, which place every read where it was drawn. One condition at a time with every thread; the
-    alignment is done once and `score --bam <name>` re-reads it after every change to Rigel. A condition with its
-    record is skipped unless `--force`. The record (`<name>.align.json`: the aligner and its version, the index,
-    the parameter file, the time) is written last, once the BAM holds every template the simulator drew, so an
-    interrupted alignment never counts. A missing FASTQ pair is rebuilt from the simulator's BAM (`samtools fastq
-    -N` gives back its FASTQs byte for byte) and deleted once aligned."""
+    alignment is done once and `score --bam <name>` re-reads it after every change to Rigel. The record
+    (`<name>.align.json`: the aligner and its version, the index, the parameter file, the reads' digest, the time) is
+    written last, once the BAM holds every template the simulator drew, so an interrupted alignment never counts. A
+    condition whose record matches this request (aligner, version, index, parameters and reads) is skipped; one aligned
+    under any other is refused unless `--force`, never silently kept. A missing FASTQ pair is rebuilt from the
+    simulator's BAM (`samtools fastq -N` gives back its FASTQs byte for byte) in a directory of its own, so a mate
+    already on disk is never overwritten or deleted, and that directory is removed once aligned."""
     conds = args.conditions or p.conditions
     need(bool(conds), "simulated conditions", "panel.py simulate")
     aligner = Path(args.aligner) if args.aligner else None
@@ -392,35 +401,41 @@ def cmd_align(p: Panel, args) -> int:
     params = Path(args.params)
     opts = star_options(params)
     version = subprocess.run([str(aligner), "--version"], capture_output=True, text=True).stdout.strip()
+    params_md5 = hashlib.md5(params.read_bytes()).hexdigest()
     gunzip = shutil.which("gzcat") or "zcat"  # one word, as rustar takes it; macOS's zcat is not gzip's
     for c in conds:
         d = p.dir / c
         bam, record = d / f"{args.name}.bam", d / f"{args.name}.align.json"
+        oracle = d / ORACLE_BAM
+        requested = {"aligner": str(aligner), "version": version, "index": str(index), "params_md5": params_md5,
+                     "reads": bytes_digest(oracle) if oracle.is_file() else None}
         if record.is_file() and bam.is_file() and not args.force:
+            kept = json.loads(record.read_text())
+            differ = sorted(k for k, v in requested.items() if kept.get(k) != v)
+            if differ:
+                raise SystemExit(f"⛔ align {c}: {bam.name} was aligned under another {', '.join(differ)} than "
+                                 "this request's — rerun with --force to replace it, or choose another --name")
             print(f"   ✔ {c}: aligned ({record.name})")
             continue
-        r1, r2 = d / "sim_R1.fq.gz", d / "sim_R2.fq.gz"
-        rebuilt = not (r1.is_file() and r2.is_file())
-        if rebuilt:
-            rebuild_reads(c, d, r1, r2)
         record.unlink(missing_ok=True)
         prefix = d / args.name
         start = time.time()
-        try:
+        with tempfile.TemporaryDirectory(prefix=".reads_", dir=d) as reads_dir:
+            r1, r2 = d / "sim_R1.fq.gz", d / "sim_R2.fq.gz"
+            if not (r1.is_file() and r2.is_file()):
+                # rebuilt beside, never over, a mate already on disk
+                r1, r2 = Path(reads_dir) / r1.name, Path(reads_dir) / r2.name
+                rebuild_reads(c, d, r1, r2)
             run([aligner, "--runThreadN", args.threads, "--genomeDir", index, "--readFilesIn", r1, r2,
                  "--readFilesCommand", gunzip, "--outFileNamePrefix", f"{prefix}.", *opts], what=f"align {c}")
-        finally:
-            if rebuilt:
-                r1.unlink(missing_ok=True)
-                r2.unlink(missing_ok=True)
-        os.replace(f"{prefix}.Aligned.out.bam", bam)
-        n = count_templates(bam)
+        aligned = Path(f"{prefix}.Aligned.out.bam")
+        n = count_templates(aligned)
         drawn = sum(json.loads((d / "truth_summary.json").read_text())["origin_counts"].values())
         if n != drawn:
-            raise SystemExit(f"⛔ align {c}: {bam.name} holds {n} templates, the simulator drew {drawn}")
+            raise SystemExit(f"⛔ align {c}: {aligned.name} holds {n} templates, the simulator drew {drawn}")
+        os.replace(aligned, bam)
         record.write_text(json.dumps({
-            "aligner": str(aligner), "version": version, "index": str(index), "params": params.name,
-            "params_md5": hashlib.md5(params.read_bytes()).hexdigest(), "options": opts,
+            **requested, "params": params.name, "options": opts,
             "threads": args.threads, "seconds": round(time.time() - start, 1), "templates": n,
         }, indent=1) + "\n")
         print(f"   ⭐ {c}: {n:,} templates, {time.time() - start:.0f} s -> {bam.name}", flush=True)
