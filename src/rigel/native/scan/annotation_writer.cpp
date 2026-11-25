@@ -17,11 +17,13 @@ namespace nb = nanobind;
 namespace rigel {
 
 BamAnnotationWriter::BamAnnotationWriter(const FragmentResolver& resolver, const std::string& sj_tag_spec,
-                                         bool skip_duplicates, bool include_multimap)
+                                         bool skip_duplicates, bool include_multimap, int32_t max_fragment_length,
+                                         int32_t intron_overhang_tolerance)
     : resolver_(&resolver),
       sj_tag_mode_(parse_sj_tag_spec(sj_tag_spec)),
       skip_duplicates_(skip_duplicates),
-      include_multimap_(include_multimap) {}
+      include_multimap_(include_multimap),
+      policy_(max_fragment_length, intron_overhang_tolerance) {}
 
 namespace {
 
@@ -75,8 +77,8 @@ public:
     AnnotationPass(const std::string& bam_path, const std::string& output_path,
                    const BamAnnotationWriter::Annotations& annotations, const std::vector<std::string>& t_ids,
                    const std::vector<std::string>& g_ids, const std::vector<std::string>& g_names,
-                   const FragmentResolver& resolver, SJTagMode sj_tag_mode, bool skip_duplicates,
-                   bool include_multimap);
+                   const FragmentResolver& resolver, ResolverPolicy policy, SJTagMode sj_tag_mode,
+                   bool skip_duplicates, bool include_multimap);
 
     nb::dict run();
 
@@ -140,7 +142,8 @@ AnnotationPass::AnnotationPass(const std::string& bam_path, const std::string& o
                                const BamAnnotationWriter::Annotations& annotations,
                                const std::vector<std::string>& t_ids, const std::vector<std::string>& g_ids,
                                const std::vector<std::string>& g_names, const FragmentResolver& resolver,
-                               SJTagMode sj_tag_mode, bool skip_duplicates, bool include_multimap)
+                               ResolverPolicy policy, SJTagMode sj_tag_mode, bool skip_duplicates,
+                               bool include_multimap)
     : bam_path_(bam_path),
       output_path_(output_path),
       ann_(annotations),
@@ -154,7 +157,7 @@ AnnotationPass::AnnotationPass(const std::string& bam_path, const std::string& o
       hdr_(read_header(in_.get(), bam_path)),
       out_(open_output(output_path, hdr_.get())),
       parser_(hdr_.get(), resolver, sj_tag_mode),
-      scratch_(resolver.n_transcripts()) {
+      scratch_(resolver.n_transcripts(), policy) {
     row_of_.reserve(static_cast<size_t>(ann_.size));
     for (int64_t i = 0; i < ann_.size; i++) row_of_[ann_.frag_ids.data()[i]] = i;
 }
@@ -331,8 +334,8 @@ nb::dict BamAnnotationWriter::write(const std::string& bam_path, const std::stri
                                     const Annotations& annotations, const std::vector<std::string>& t_ids,
                                     const std::vector<std::string>& g_ids,
                                     const std::vector<std::string>& g_names) const {
-    AnnotationPass pass(bam_path, output_path, annotations, t_ids, g_ids, g_names, *resolver_, sj_tag_mode_,
-                        skip_duplicates_, include_multimap_);
+    AnnotationPass pass(bam_path, output_path, annotations, t_ids, g_ids, g_names, *resolver_, policy_,
+                        sj_tag_mode_, skip_duplicates_, include_multimap_);
     return pass.run();
 }
 

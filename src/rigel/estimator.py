@@ -333,8 +333,8 @@ class AbundanceEstimator:
         self.locus_id_per_transcript = np.full(num_transcripts, -1, dtype=np.int32)
 
         # Per-transcript confidence tracking:
-        self._em_posterior_sum: np.ndarray | None = None
-        self._em_n_assigned: np.ndarray | None = None
+        self._em_posterior_sq_sum: np.ndarray | None = None
+        self._em_posterior_mass: np.ndarray | None = None
 
         # Per-locus profiling stats (populated if emit_locus_stats=True)
         self.locus_stats: list[dict] | None = None
@@ -438,9 +438,9 @@ class AbundanceEstimator:
         gdna_eff_len = _per_locus(gdna_eff_len, n_loci, "gdna_eff_len", fill=1.0)
         rna_prior_count = _per_locus(rna_prior_count, n_loci, "rna_prior_count", fill=0.0)
         t_rna_prior_weight = _rna_prior_shares(rna_prior_weight, n_transcripts)
-        if self._em_posterior_sum is None:
-            self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
-            self._em_n_assigned = np.zeros(n_transcripts, dtype=np.float64)
+        if self._em_posterior_sq_sum is None:
+            self._em_posterior_sq_sum = np.zeros(n_transcripts, dtype=np.float64)
+            self._em_posterior_mass = np.zeros(n_transcripts, dtype=np.float64)
 
         rng_seed = int(self._rng.integers(0, 2**63))
 
@@ -469,15 +469,13 @@ class AbundanceEstimator:
             t_eff_lens,
             t_rna_prior_weight,
             self.em_counts,
-            self._em_posterior_sum,
-            self._em_n_assigned,
+            self._em_posterior_sq_sum,
+            self._em_posterior_mass,
             self.em_config.iterations,
             self.em_config.convergence_delta,
             self.em_config.mode == "vbem",
             ASSIGNMENT_MODE_CODES[self.em_config.assignment_mode],
             rng_seed,
-            n_transcripts,
-            NUM_SPLICE_STRAND_COLS,
             self.em_config.n_threads,
             emit_locus_stats,
             emit_assignments,
@@ -510,17 +508,11 @@ class AbundanceEstimator:
         transcript (in sample mode the units drawn to it), ``p`` each unit's posterior there. ``NaN`` where the EM
         assigned it nothing: a transcript whose every fragment is deterministic, or that no unit gave any posterior
         (a component the EM left at zero takes none)."""
-        n_assigned = self._em_n_assigned
-        if n_assigned is None:
+        mass = self._em_posterior_mass
+        if mass is None:
             return np.full(self.num_transcripts, np.nan)
-        post_sum = self._em_posterior_sum
         with np.errstate(divide="ignore", invalid="ignore"):
-            result = np.where(
-                n_assigned > 0,
-                post_sum / n_assigned,
-                np.nan,
-            )
-        return result
+            return np.where(mass > 0, self._em_posterior_sq_sum / mass, np.nan)
 
     # ------------------------------------------------------------------
     # Output - primary counts

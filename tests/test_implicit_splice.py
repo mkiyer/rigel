@@ -10,6 +10,8 @@ real scan: a determined path deposits, and an undetermined one is held in the de
 
 from __future__ import annotations
 
+import dataclasses
+
 import textwrap
 
 import numpy as np
@@ -73,26 +75,33 @@ def implicit_index(tmp_path_factory):
     return build_test_index(tmp_path_factory, IMPLICIT_GTF, genome_size=70000, name="implicit_idx")
 
 
+@dataclasses.dataclass
+class _Tuned:
+    """An index and the intron-overhang tolerance a test resolves under, its own: the setting is a pass's, never the
+    shared resolver's."""
+
+    index: object
+    K: int = 0
+
+
 @pytest.fixture
 def with_tolerance(implicit_index):
-    """Yield (index, set_K) so tests choose K explicitly and we restore at teardown."""
-    resolver = implicit_index.resolver
+    """Yield (tuned index, set_K): each test chooses its K, which only its own resolves read."""
+    tuned = _Tuned(implicit_index)
 
     def _set(k: int) -> None:
-        resolver.set_intron_overhang_tolerance(int(k))
+        tuned.K = int(k)
 
-    yield implicit_index, _set
-    # Restore default K=0 between tests so ordering does not bleed state.
-    resolver.set_intron_overhang_tolerance(0)
+    return tuned, _set
 
 
 def _exon(start: int, end: int) -> GenomicInterval:
     return GenomicInterval("chr1", start, end, Strand.POS)
 
 
-def _resolve(index, exons, introns=()):
+def _resolve(tuned, exons, introns=()):
     frag = make_fragment(exons=exons, introns=introns)
-    return resolve_fragment(frag, index)
+    return resolve_fragment(frag, tuned.index, intron_overhang_tolerance=tuned.K)
 
 
 # ---------------------------------------------------------------------------

@@ -264,7 +264,7 @@ void intron_rows(const Sweep& W, const Block& b, Arena& A) {
         const double* r = nullptr;
         if (W.background != nullptr && !b.obs.is_bnd[i] && !b.obs.is_exon[i] && (b.obs.fp[i] || b.obs.fn[i])) {
             double* dest = A.intron.data() + static_cast<size_t>(i) * K;
-            intron_row(*W.background, b.obs.cnt[2 * i] + b.obs.cnt[2 * i + 1], b.obs.a_g[i], W.lam, K, dest);
+            intron_row(*W.background, A.sums.n_u[i], b.obs.a_g[i], W.lam, K, dest);
             r = dest;
         }
         A.intron_ptr[i] = r;
@@ -562,15 +562,10 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
     if (static_cast<int>(cnt.shape(1)) != 2 || static_cast<int64_t>(cnt.shape(0)) != n)
         throw std::invalid_argument("solve_blocks: the counts are (n, 2)");
     P::Arm curve;  // the fitted gDNA arm's curve, or none
-    Vec log_rho, logP;
-    if (!gdna.is_none()) {
-        nb::tuple t = nb::cast<nb::tuple>(gdna);
-        log_rho = exact<Vec>(t[0]);
-        logP = exact<Vec>(t[1]);
-        curve.log_rho = log_rho.data(); curve.logP = logP.data();
-        curve.G = static_cast<int>(log_rho.shape(0));
-        if (curve.G < 1 || static_cast<int>(logP.shape(0)) != curve.G)
-            throw std::invalid_argument("solve_blocks: the gDNA arm's curve is two (G,) arrays");
+    const std::vector<Vec> arm = arm_tuple(gdna, 2, "solve_blocks");
+    if (!arm.empty()) {
+        curve.log_rho = arm[0].data(); curve.logP = arm[1].data();
+        curve.G = static_cast<int>(arm[0].shape(0));
     }
     Background bg{};  // the intergenic background's law, or none
     const Background* bg_ptr = nullptr;

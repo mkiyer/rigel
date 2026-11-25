@@ -66,12 +66,6 @@ void FragmentResolver::build_exon_index(const std::vector<int32_t>& offsets, con
     exon_ends_ = ends;
 }
 
-void FragmentResolver::set_max_fragment_length(int32_t L) {
-    // at 0 no pair has a length in range, so every one would be refused
-    if (L < 1) throw std::invalid_argument("set_max_fragment_length: must be >= 1, got " + std::to_string(L));
-    max_fragment_length_ = L;
-}
-
 int32_t FragmentResolver::ref_id(const char* name) const {
     const auto it = ref_to_id_.find(name);
     return it == ref_to_id_.end() ? -1 : it->second;
@@ -284,8 +278,8 @@ int64_t distinct_intron_length(std::vector<IntronBlock>& cut) {
 
 int32_t FragmentResolver::validate_pair(int32_t ref_id, const PairMate& f, const PairMate& r,
                                         const std::vector<IntronBlock>& junctions, ResolverScratch& scratch) const {
-    const int32_t K = intron_overhang_tolerance_;
-    const int64_t max_len = max_fragment_length_;
+    const int32_t K = scratch.policy.intron_overhang_tolerance;
+    const int64_t max_len = scratch.policy.max_fragment_length;
     const auto in_range = [max_len](int64_t length) { return length >= 1 && length <= max_len; };
     const int32_t a = f.blocks->front().first - f.clip_lead;
     const int32_t b = r.blocks->back().second + r.clip_trail;
@@ -623,7 +617,7 @@ void FragmentResolver::enumerate_gap_hypotheses(const std::vector<ExonBlock>& ex
         return;
     }
 
-    const int32_t K = intron_overhang_tolerance_;
+    const int32_t K = scratch.policy.intron_overhang_tolerance;
     auto& blocks = scratch.held_blocks;  // as `transcript_contradicts_blocks` reads them
     blocks.clear();
     for (const auto& e : exons) blocks.push_back({e.start, e.end});

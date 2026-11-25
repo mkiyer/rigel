@@ -33,7 +33,7 @@ public:
 
     /// The scan's own settings (pass 1's), so the pass reads and judges the BAM as the scan did.
     BamAnnotationWriter(const FragmentResolver& resolver, const std::string& sj_tag_spec, bool skip_duplicates,
-                        bool include_multimap);
+                        bool include_multimap, int32_t max_fragment_length, int32_t intron_overhang_tolerance);
 
     /// Write ``bam_path``'s records to ``output_path``, each stamped with its fragment's tags (the transcript, gene and
     /// gene name ids from ``t_ids``, ``g_ids`` and ``g_names``). Returns the read pairs and records as this pass judged
@@ -47,6 +47,7 @@ private:
     SJTagMode sj_tag_mode_;
     bool skip_duplicates_;
     bool include_multimap_;
+    ResolverPolicy policy_;  // the scan's own settings, never the shared resolver's
 };
 
 }  // namespace rigel

@@ -86,11 +86,12 @@ std::unique_ptr<AccumulatorSet> ScanPartition::make_set() const {
 }
 
 BamScanner::BamScanner(const FragmentResolver& resolver, const std::string& sj_tag_spec, bool skip_duplicates,
-                       bool include_multimap)
+                       bool include_multimap, int32_t max_fragment_length, int32_t intron_overhang_tolerance)
     : resolver_(&resolver),
       sj_tag_mode_(parse_sj_tag_spec(sj_tag_spec)),
       skip_duplicates_(skip_duplicates),
-      include_multimap_(include_multimap) {}
+      include_multimap_(include_multimap),
+      policy_(max_fragment_length, intron_overhang_tolerance) {}
 
 void BamScanner::set_regions(Array1<int64_t> region_bounds, Array1<int64_t> ref_region_bound_offsets,
                              int32_t n_refs, Array1<uint8_t> region_types, int max_length) {
@@ -176,11 +177,12 @@ struct BamScanner::QnameBatch {
 /// its stats, strand observations and accumulator set are merged once the BAM is read.
 class BamScanner::Worker {
 public:
-    Worker(const FragmentResolver& resolver, const ScanPartition& partition, bool include_multimap, int64_t chunk_size)
+    Worker(const FragmentResolver& resolver, ResolverPolicy policy, const ScanPartition& partition,
+           bool include_multimap, int64_t chunk_size)
         : resolver_(resolver),
           include_multimap_(include_multimap),
           chunk_size_(chunk_size),
-          scratch_(resolver.n_transcripts()),
+          scratch_(resolver.n_transcripts(), policy),
           acc_set_(partition.make_set()) {
         reserve_chunk(chunk_, chunk_size_);
     }
@@ -632,43 +634,61 @@ nb::dict BamScanner::scan(const std::string& bam_path, nb::callable chunk_callba
     BoundedQueue<FragmentChunk> output(static_cast<size_t>(n_workers * OUTPUT_CHUNKS_PER_WORKER));
     std::vector<std::unique_ptr<Worker>> workers;
     for (int i = 0; i < n_workers; i++)
-        workers.push_back(std::make_unique<Worker>(*resolver_, partition_, include_multimap_, chunk_size));
+        workers.push_back(std::make_unique<Worker>(*resolver_, policy_, partition_, include_multimap_, chunk_size));
 
     // Workers take batches and push full chunks; the first worker exception is kept and aborts both queues.
     FirstError worker_error;
     std::vector<std::thread> worker_threads;
-    for (auto& worker : workers) {
-        worker_threads.emplace_back([&input, &output, &worker_error, w = worker.get()] {
-            try {
-                w->run(input, output);
-            } catch (...) {
-                worker_error.keep(std::current_exception());
-                input.abort();
-                output.abort();
-            }
-        });
-    }
     const auto join_workers = [&worker_threads] {
         for (auto& t : worker_threads)
             if (t.joinable()) t.join();
     };
+    // A thread that fails to start: the ones already running return from their aborted queues and are joined before
+    // the failure propagates, since a joinable thread destroyed in the unwinding would end the process.
+    const auto abandon_start = [&] {
+        input.abort();
+        output.abort();
+        join_workers();
+    };
+    try {
+        for (auto& worker : workers) {
+            worker_threads.emplace_back([&input, &output, &worker_error, w = worker.get()] {
+                try {
+                    w->run(input, output);
+                } catch (...) {
+                    worker_error.keep(std::current_exception());
+                    input.abort();
+                    output.abort();
+                }
+            });
+        }
+    } catch (...) {
+        abandon_start();
+        throw;
+    }
 
     // The reader reads the BAM, then waits for the workers and merges what they found.
     std::exception_ptr reader_error;
-    std::thread reader([&] {
-        try {
-            read_bam(bam_path, n_decomp_threads, qname_batch_size, input);
-            input.close();
-            join_workers();
-            merge_workers(workers);
-            output.close();
-        } catch (...) {
-            reader_error = std::current_exception();
-            input.abort();
-            join_workers();
-            output.abort();
-        }
-    });
+    std::thread reader;
+    try {
+        reader = std::thread([&] {
+            try {
+                read_bam(bam_path, n_decomp_threads, qname_batch_size, input);
+                input.close();
+                join_workers();
+                merge_workers(workers);
+                output.close();
+            } catch (...) {
+                reader_error = std::current_exception();
+                input.abort();
+                join_workers();
+                output.abort();
+            }
+        });
+    } catch (...) {
+        abandon_start();
+        throw;
+    }
     const std::exception_ptr main_error = hand_chunks_to_python(output, input, chunk_callback);
     reader.join();
 

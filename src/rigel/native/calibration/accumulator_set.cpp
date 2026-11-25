@@ -211,12 +211,8 @@ std::optional<DepositOutcome> AccumulatorSet::admit_placements(const Placement* 
     sc.admitted.clear();
     for (std::size_t i = 0; i < n; ++i) {
         const Placement& pl = placements[i];
-        if (pl.ref_id < 0 || static_cast<std::size_t>(pl.ref_id) >= accs_.size()) {
-            ++empty_rejected;
-            continue;
-        }
         std::int64_t s = 0, e = 0;
-        const int column = accs_[static_cast<std::size_t>(pl.ref_id)].admit(pl.offered, &s, &e);
+        const int column = at(pl.ref_id).admit(pl.offered, &s, &e);  // an unknown reference is refused, as for one
         if (column == Accumulator::ADMIT_NO_STRAND) { ++strand_rejected; continue; }
         if (column == Accumulator::ADMIT_EMPTY) { ++empty_rejected; continue; }
         sc.admitted.append(with_unspliced_default(pl.offered), pl.ref_id, s, e);  // one record per placement, clipped

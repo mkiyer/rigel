@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "constants.h"
 #include "fast_exp.h"
 
 namespace transfer_rows {
@@ -94,6 +95,10 @@ inline double vmin(const double* r, int K) {
 }
 inline double ptp(const double* r, int K) { return vmax(r, K) - vmin(r, K); }
 
+// A row with no shape: its spread is within FLAT_ROW_SPREAD (a spread that is not a number counts as flat). Such a row
+// says nothing about the composition.
+inline bool is_flat(const double* r, int K) { return !(ptp(r, K) > FLAT_ROW_SPREAD); }
+
 // empty_node(n_u, a): a node with no unspliced count, or no opportunity in a lane, holds no level of its own there.
 inline bool empty_node(double n_u, double a) { return !(n_u > 0.0) || !(a > 0.0); }
 
@@ -105,7 +110,7 @@ constexpr double ROW_VARIANCE_FLOOR = 1.0e-12;
 // none, flat as the transfer reads one (FLAT_ROW_SPREAD), so a row is evidence to the solve exactly when it is one to
 // the message layer.
 inline double row_precision(const double* row, const double* lam, int K) {
-    if (!(ptp(row, K) > FLAT_ROW_SPREAD)) return 0.0;
+    if (is_flat(row, K)) return 0.0;
     const double m = vmax(row, K);
     double z = 0.0, s1 = 0.0, s2 = 0.0;
     for (int k = 0; k < K; ++k) {
@@ -197,12 +202,12 @@ inline void blur_row_at_step(const double* row, int K, double dlam, double v, do
             } else {
                 // Preserve the same convolution below the normal probability
                 // range; a probability floor would erase relative evidence.
-                double peak = -std::numeric_limits<double>::infinity();
+                double peak = rigel::NEG_INF;
                 for (int t = 0; t < W; ++t) {
                     const int i = std::clamp(j + t - half, 0, K - 1);
                     peak = std::max(peak, out[i] + logkern[t]);
                 }
-                if (peak == -std::numeric_limits<double>::infinity()) {
+                if (peak == rigel::NEG_INF) {
                     pr[j] = peak;
                     continue;
                 }
@@ -225,7 +230,7 @@ inline void blur_row(const double* row, int K, const double* lam, double v, doub
 }
 
 inline void lower_side(const double* p, int K, double* out) {
-    double m = -std::numeric_limits<double>::infinity();
+    double m = rigel::NEG_INF;
     for (int j = 0; j < K; ++j) {
         if (p[j] > m) m = p[j];
         out[j] = m;
@@ -273,7 +278,7 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
                            double a_g_b, double a_g_e, double a_r_b, double a_r_e, double splice_rate,
                            const double* nodes, int n_nodes, Scratch& S,
                            double* out) {
-    if (!(n_u > 0.0 && a_g_b > 0.0 && a_g_e > 0.0 && a_r_b > 0.0 && a_r_e > 0.0) || ptp(row_e, K) <= FLAT_ROW_SPREAD) {
+    if (!(n_u > 0.0 && a_g_b > 0.0 && a_g_e > 0.0 && a_r_b > 0.0 && a_r_e > 0.0) || is_flat(row_e, K)) {
         std::fill(out, out + K, 0.0);
         return;
     }
@@ -302,14 +307,14 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
     }
     for (int j = 0; j < K; ++j) out[j] = std::log(std::max(S.d[j] / n_nodes, LOG_FLOOR));
     norm_inplace(out, K);
-    if (ptp(out, K) <= FLAT_ROW_SPREAD) std::fill(out, out + K, 0.0);
+    if (is_flat(out, K)) std::fill(out, out + K, 0.0);
 }
 
 // level_row: the row read through the inverse of `map` and blurred by `v`; a flat row, or a flat result, carries
 // nothing.
 inline void level_row(const double* row_b, const double* lam, int K, const double* map, double v, Scratch& S,
                       double* out) {
-    if (ptp(row_b, K) <= FLAT_ROW_SPREAD) {
+    if (is_flat(row_b, K)) {
         std::fill(out, out + K, 0.0);
         return;
     }
@@ -318,7 +323,7 @@ inline void level_row(const double* row_b, const double* lam, int K, const doubl
     interp(lam, K, map, lam, K, lam[0], lam[K - 1], S.b.data());  // the preimage
     interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
     blur_row(S.c.data(), K, lam, v, out, S.blur);
-    if (ptp(out, K) <= FLAT_ROW_SPREAD) std::fill(out, out + K, 0.0);
+    if (is_flat(out, K)) std::fill(out, out + K, 0.0);
 }
 
 // ---- the builders' rows: the maps and levels a node's own numbers make -----------------------------

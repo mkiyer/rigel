@@ -111,7 +111,7 @@ struct LocusProfile {
 struct LocusScratch {
     LocusSubProblem sub;
     std::vector<int32_t> local_map;   // global transcript -> local component, -1 between loci
-    explicit LocusScratch(int n_transcripts) : local_map(static_cast<size_t>(n_transcripts) + 1, -1) {}
+    explicit LocusScratch(int n_transcripts) : local_map(static_cast<size_t>(n_transcripts), -1) {}
 };
 
 // The loci's partitions (8-tuples of per-locus arrays) and transcript lists, as views, each checked here once so the
@@ -128,7 +128,7 @@ std::vector<PartitionView> read_partitions(nb::list partition_tuples, nb::list l
     std::vector<PartitionView> views(nb::len(partition_tuples));
     if (nb::len(locus_transcript_indices) != views.size())
         throw std::invalid_argument("batch_locus_em_partitioned: one transcript list per locus partition");
-    // the locus that last named each transcript, so a candidate is checked against its own locus's list
+    // the locus that holds each transcript: loci are disjoint, and a candidate is checked against its own locus's list
     std::vector<int64_t> named_by(static_cast<size_t>(std::max(n_transcripts_total, 0)), -1);
     for (size_t i = 0; i < views.size(); ++i) {
         const auto refuse = [i](const std::string& what) {
@@ -162,6 +162,10 @@ std::vector<PartitionView> read_partitions(nb::list partition_tuples, nb::list l
             const int32_t t = transcripts.data()[k];
             if (t < 0 || t >= n_transcripts_total)
                 refuse("names transcript " + std::to_string(t) + ", outside the " + std::to_string(n_transcripts_total));
+            const int64_t owner = named_by[static_cast<size_t>(t)];
+            if (owner == static_cast<int64_t>(i)) refuse("names transcript " + std::to_string(t) + " twice");
+            if (owner >= 0)
+                refuse("names transcript " + std::to_string(t) + ", which locus " + std::to_string(owner) + " holds");
             named_by[static_cast<size_t>(t)] = static_cast<int64_t>(i);
         }
         for (size_t j = 0; j < n_candidates; ++j) {
@@ -257,7 +261,7 @@ struct BatchEM {
                                                  sub.coverage_wts.data(), sub.n_local_units, ig.idx);
         const auto t_classes = now();
 
-        const AggregatePrior prior{nonnegative_finite(gdna_prior[li]), nonnegative_finite(rna_prior[li]), sub.gdna_idx,
+        const AggregatePrior prior{gdna_prior[li], rna_prior[li], sub.gdna_idx,
                                    sub.has_gdna_candidate,
                                    sub.component_rna_prior_weight.empty() ? nullptr
                                                                           : sub.component_rna_prior_weight.data()};
@@ -365,15 +369,13 @@ nb::tuple batch_locus_em_partitioned(
     f64_1d t_eff_lens_arr,              // per transcript, the EM's capture-contracted effective length
     f64_1d t_rna_prior_weight_arr,      // per transcript, or empty: the RNA prior follows the current evidence
     f64_2d_out em_counts_out,           // the accumulators, added into
-    f64_1d_out posterior_sum_out,
-    f64_1d_out n_assigned_out,
+    f64_1d_out posterior_sq_sum_out,
+    f64_1d_out posterior_mass_out,
     int max_iterations,
     double convergence_delta,
     bool use_vbem,
     int assignment_mode,
     uint64_t rng_seed,
-    int n_transcripts_total,
-    int n_splice_strand_cols,
     int n_threads,
     bool emit_locus_stats,
     bool emit_assignments,
@@ -381,13 +383,33 @@ nb::tuple batch_locus_em_partitioned(
     u8_1d t_is_synthetic_arr)           // per transcript, or empty: with it, every unit's class masses are returned
 {
     check_assignment_mode(assignment_mode);
-    const int n_cols = n_splice_strand_cols;
+    // The count matrix is the transcript axis and the column axis; every per-transcript array is checked against it
+    // here, once, so the EM reads and writes every one unguarded.
+    const int n_transcripts_total = static_cast<int>(unambig_counts.shape(0));
+    const int n_cols = static_cast<int>(unambig_counts.shape(1));
+    const auto per_transcript = [&](size_t len, const char* name) {
+        if (static_cast<int>(len) != n_transcripts_total)
+            throw std::invalid_argument(std::string("batch_locus_em_partitioned: ") + name +
+                                        " is not one per transcript");
+    };
+    per_transcript(t_eff_lens_arr.shape(0), "t_eff_lens");
+    per_transcript(posterior_sq_sum_out.shape(0), "posterior_sq_sum_out");
+    per_transcript(posterior_mass_out.shape(0), "posterior_mass_out");
+    per_transcript(em_counts_out.shape(0), "em_counts_out");
+    if (static_cast<int>(em_counts_out.shape(1)) != n_cols)
+        throw std::invalid_argument("batch_locus_em_partitioned: em_counts_out's columns are not unambig_counts'");
     const std::vector<PartitionView> views =
         read_partitions(partition_tuples, locus_transcript_indices, n_transcripts_total, n_cols);
     const size_t n_loci = views.size();
     check_length(locus_gdna_eff_lens, n_loci, "locus_gdna_eff_lens");
     check_length(locus_gdna_prior_count, n_loci, "locus_gdna_prior_count");
     check_length(locus_rna_prior_count, n_loci, "locus_rna_prior_count");
+    // A prior count is a count of pseudo-fragments: one that is not finite and nonnegative is the caller's error.
+    for (const f64_1d* prior : {&locus_gdna_prior_count, &locus_rna_prior_count})
+        for (size_t li = 0; li < n_loci; ++li)
+            if (!(std::isfinite(prior->data()[li]) && prior->data()[li] >= 0.0))
+                throw std::invalid_argument(
+                    "batch_locus_em_partitioned: a locus prior count is negative or not finite");
     // Checked against the transcript axis, not the locus one: a wrong-axis array would index out of bounds, so it is
     // refused rather than resized.
     if (t_rna_prior_weight_arr.size() != 0 &&
@@ -422,9 +444,9 @@ nb::tuple batch_locus_em_partitioned(
                   convergence_delta,
                   use_vbem,
                   rng_seed,
-                  intergenic_rate > 0.0 ? std::log(intergenic_rate) : -std::numeric_limits<double>::infinity(),
+                  intergenic_rate > 0.0 ? std::log(intergenic_rate) : NEG_INF,
                   emit_locus_stats,
-                  AssignmentSinks{em_counts_out.data(), posterior_sum_out.data(), n_assigned_out.data(),
+                  AssignmentSinks{em_counts_out.data(), posterior_sq_sum_out.data(), posterior_mass_out.data(),
                                   n_transcripts_total, n_cols, annotate ? winner_tid.data() : nullptr,
                                   annotate ? winner_post.data() : nullptr, annotate ? n_candidates.data() : nullptr,
                                   classes ? class_mass.data() : nullptr,
@@ -492,15 +514,13 @@ NB_MODULE(_em_impl, m) {
           nb::arg("t_eff_lens"),
           nb::arg("t_rna_prior_weight"),
           nb::arg("em_counts_out").noconvert(),
-          nb::arg("posterior_sum_out").noconvert(),
-          nb::arg("n_assigned_out").noconvert(),
+          nb::arg("posterior_sq_sum_out").noconvert(),
+          nb::arg("posterior_mass_out").noconvert(),
           nb::arg("max_iterations"),
           nb::arg("convergence_delta"),
           nb::arg("use_vbem"),
           nb::arg("assignment_mode"),
           nb::arg("rng_seed"),
-          nb::arg("n_transcripts_total"),
-          nb::arg("n_splice_strand_cols"),
           nb::arg("n_threads") = 0,
           nb::arg("emit_locus_stats") = false,
           nb::arg("emit_assignments") = false,

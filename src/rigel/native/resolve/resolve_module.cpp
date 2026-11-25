@@ -37,20 +37,7 @@ NB_MODULE(_resolve_impl, m) {
              "during resolution; synthetics are not in cgranges.")
         .def("build_exon_index", &FragmentResolver::build_exon_index, nb::arg("offsets"), nb::arg("starts"),
              nb::arg("ends"),
-             "Build the per-transcript exon CSR: each candidate's introns, for its path and its length.")
-        .def("set_max_fragment_length", &FragmentResolver::set_max_fragment_length,
-             nb::arg("max_fragment_length"),
-             "The library's fragment-length limit: no pair whose molecule is longer, along the genome and "
-             "along every witness transcript, is one.")
-        .def("set_intron_overhang_tolerance", &FragmentResolver::set_intron_overhang_tolerance, nb::arg("K"),
-             "Set the intron-overhang tolerance K (bp): how many bases an alignment\n"
-             "may run into an annotated intron, and an annotated intron overhang a\n"
-             "mate gap, and still be read as spliced there. In the gap-hypothesis\n"
-             "enumeration an annotated intron in an unsequenced gap may overlap up\n"
-             "to K aligned bases on either side and is still cut whole, and a\n"
-             "transcript is contradicted only by an intron overlapping more than K\n"
-             "bases of an aligned block. A negative K is refused; the resolver's\n"
-             "own default, before this is called, is 0.");
+             "Build the per-transcript exon CSR: each candidate's introns, for its path and its length.");
 
     rigel::bind_testing(m.def_submodule("testing", "The resolver's test seams; production never imports them."));
 }

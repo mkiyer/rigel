@@ -313,13 +313,15 @@ def test_the_scanner_refuses_a_count_below_one(built, bad):
         )
 
 
-def test_the_resolver_refuses_a_fragment_length_limit_below_one(built):
-    """A limit of 0 would refuse every pair, so the resolver refuses it as the config does."""
-    with pytest.raises(ValueError, match="max_fragment_length"):
-        built.index.resolver.set_max_fragment_length(0)
+@pytest.mark.parametrize(
+    "policy, said",
+    [((0, 0), "max_fragment_length"), ((1000, -1), "intron_overhang_tolerance")],
+    ids=["a-length-limit-below-one", "a-negative-overhang-tolerance"],
+)
+def test_each_pass_refuses_settings_it_cannot_resolve_under(built, policy, said):
+    """A pass's own settings: a limit of 0 would refuse every pair, and a negative tolerance is not read as 0."""
+    from rigel.native import BamAnnotationWriter, BamScanner
 
-
-def test_the_resolver_refuses_a_negative_overhang_tolerance(built):
-    """A negative intron-overhang tolerance is refused, rather than read as 0."""
-    with pytest.raises(ValueError, match="overhang"):
-        built.index.resolver.set_intron_overhang_tolerance(-1)
+    for native_pass in (BamScanner, BamAnnotationWriter):
+        with pytest.raises(ValueError, match=said):
+            native_pass(built.index.resolver, "ts", True, True, *policy)

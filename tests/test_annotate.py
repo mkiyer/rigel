@@ -1073,3 +1073,115 @@ class TestAnnotatedBamWriterRobustness:
         with pytest.raises(RuntimeError, match="annotated-BAM pass"):
             args.func(args)
         assert (out / "quant.feather").exists() and (out / "summary.json").exists()
+
+
+# ── the second pass reads the alignments the first did ───────────────────────────────────────────────────────────
+
+
+def _two_gene_index(root):
+    """Genes A and B, one two-exon transcript each, identical layouts 1,000 bases apart."""
+    import pysam
+
+    from rigel.index import TranscriptIndex
+
+    fasta, gtf = root / "genome.fa", root / "genes.gtf"
+    fasta.write_text(">chr1\n" + "ACGT" * 625 + "\n")
+    pysam.faidx(str(fasta))
+    rows = [
+        f'chr1\tfixture\texon\t{s + off}\t{e + off}\t.\t+\t.\tgene_id "{g}"; transcript_id "{g}";\n'
+        for g, off in (("A", 0), ("B", 1000))
+        for s, e in ((101, 300), (501, 700))
+    ]
+    gtf.write_text("".join(rows))
+    TranscriptIndex.build(fasta, gtf, root / "index", write_tsv=False)
+    return TranscriptIndex.load(root / "index")
+
+
+def _three_pairs(path, offset):
+    """Three spliced pairs placed wholly at A (offset 0) or wholly at B (offset 1000): the same names, flags, record
+    counts and placement outcomes either way."""
+    import pysam
+
+    header = {"HD": {"VN": "1.6", "SO": "queryname"}, "SQ": [{"SN": "chr1", "LN": 2500}]}
+    mates = [(250, 99, "50M200N50M", 100, 555), (555, 147, "80M", 80, 250)]
+    with pysam.AlignmentFile(path, "wb", header=header) as out:
+        for pair in range(3):
+            for start, flag, cigar, length, mate in mates:
+                read = pysam.AlignedSegment(out.header)
+                read.query_name = f"pair{pair}"
+                read.reference_id = read.next_reference_id = 0
+                read.reference_start = start + offset
+                read.next_reference_start = mate + offset
+                read.mapping_quality, read.flag, read.cigarstring = 60, flag, cigar
+                read.query_sequence = "A" * length
+                read.set_tags([("NH", 1), ("NM", 0), ("XS", "+", "A")])
+                out.write(read)
+
+
+def test_a_bam_replaced_between_the_passes_by_one_at_another_gene_is_refused(tmp_path):
+    """The second pass re-reads the BAM; replaced by one whose pairs sit at gene B with every counter the scan kept
+    unchanged, it must not tag B's alignments with A's transcript. The digest both passes keep reads each record's
+    reference, position, flags and CIGAR, so the replacement is refused and its annotated BAM deleted."""
+    from rigel.config import BamScanConfig, CalibrationConfig, EMConfig, PipelineConfig
+    from rigel.pipeline import run_pipeline
+
+    index = _two_gene_index(tmp_path)
+    reads, moved, tagged = tmp_path / "reads.bam", tmp_path / "moved.bam", tmp_path / "tagged.bam"
+    _three_pairs(reads, 0)
+    _three_pairs(moved, 1000)
+    config = PipelineConfig(
+        scan=BamScanConfig(total_threads=1),
+        em=EMConfig(n_threads=1),
+        calibration=CalibrationConfig(n_threads=1),
+        annotated_bam_path=tagged,
+    )
+    with pytest.raises(RuntimeError, match="did not see what the scan saw"):
+        run_pipeline(
+            reads, index, config=config, before_annotated_bam=lambda _result: moved.replace(reads)
+        )
+    assert not tagged.exists()
+
+
+def test_the_same_bam_read_twice_passes_the_cross_check(tmp_path):
+    from rigel.config import BamScanConfig, CalibrationConfig, EMConfig, PipelineConfig
+    from rigel.pipeline import run_pipeline
+
+    index = _two_gene_index(tmp_path)
+    reads, tagged = tmp_path / "reads.bam", tmp_path / "tagged.bam"
+    _three_pairs(reads, 0)
+    config = PipelineConfig(
+        scan=BamScanConfig(total_threads=1),
+        em=EMConfig(n_threads=1),
+        calibration=CalibrationConfig(n_threads=1),
+        annotated_bam_path=tagged,
+    )
+    run_pipeline(reads, index, config=config)
+    assert tagged.exists()
+
+
+def test_a_pass_built_with_other_settings_inside_a_run_leaves_the_run_alone(tmp_path):
+    """The resolver's settings are each pass's own: a scanner built inside the run's pre-annotation callback, on the
+    same loaded index with a 60-base fragment cap, changes nothing the run's own annotation pass reads. When the
+    settings lived on the index's shared resolver, the inner scanner's cap reached the outer pass, which then refused
+    pairs the scan had accepted."""
+    from rigel.config import BamScanConfig, CalibrationConfig, EMConfig, PipelineConfig
+    from rigel.pipeline import _native_scanner, run_pipeline
+
+    index = _two_gene_index(tmp_path)
+    reads, tagged = tmp_path / "reads.bam", tmp_path / "tagged.bam"
+    _three_pairs(reads, 0)
+    config = PipelineConfig(
+        scan=BamScanConfig(total_threads=1),
+        em=EMConfig(n_threads=1),
+        calibration=CalibrationConfig(n_threads=1),
+        annotated_bam_path=tagged,
+    )
+    run_pipeline(
+        reads,
+        index,
+        config=config,
+        before_annotated_bam=lambda _result: _native_scanner(
+            index, BamScanConfig(max_frag_length=60)
+        ),
+    )
+    assert tagged.exists()

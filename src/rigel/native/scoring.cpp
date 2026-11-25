@@ -125,17 +125,20 @@ static double compute_fragment_weight(int32_t frag_start,
     return w / area_per_base;
 }
 
-// A fragment-length log-probability table: its entries up to max_size, then a fixed decay per base beyond it. An
-// absent table reads 0, as does a length of 0 or less.
+// A fragment-length log-probability table over lengths 0..max_size, its last entry the overflow bin, then a fixed decay
+// per base beyond it from that bin. An absent table reads 0, as does a length of 0 or less.
 struct LengthTable {
     std::vector<double> log_prob;
     int32_t max_size = 0;
     double  tail_base = 0.0;
     bool    present = false;
 
-    LengthTable(nb::object table, int32_t max_size_, double tail_base_)
-        : max_size(max_size_), tail_base(tail_base_), present(!table.is_none()) {
-        if (present) log_prob = copy_of(nb::cast<f64_1d>(table));
+    explicit LengthTable(nb::object table) : present(!table.is_none()) {
+        if (!present) return;
+        log_prob = copy_of(nb::cast<f64_1d>(table));
+        if (log_prob.empty()) throw std::invalid_argument("a fragment-length table holds no length");
+        max_size = static_cast<int32_t>(log_prob.size()) - 1;
+        tail_base = log_prob.back();
     }
 
     inline double log_lik(int32_t flen) const {
@@ -246,11 +249,7 @@ public:
         double mismatch_log_pen,
         double clip_log_pen,
         nb::object fl_log_prob_obj,
-        int32_t fl_max_size,
-        double  fl_tail_base,
         nb::object gdna_fl_log_prob_obj,
-        int32_t gdna_fl_max_size,
-        double  gdna_fl_tail_base,
         i8_1d   t_strand_arr,
         i32_1d  t_length_arr,
         i32_1d  exon_offsets_arr,
@@ -267,8 +266,8 @@ public:
         oh_log_pen_(std::isinf(oh_log_pen) && oh_log_pen < 0.0 ? 0.0 : oh_log_pen),
         mismatch_log_pen_(mismatch_log_pen),
         clip_log_pen_(clip_log_pen),
-        rna_fl_(fl_log_prob_obj, fl_max_size, fl_tail_base),
-        gdna_fl_(gdna_fl_log_prob_obj, gdna_fl_max_size, gdna_fl_tail_base),
+        rna_fl_(fl_log_prob_obj),
+        gdna_fl_(gdna_fl_log_prob_obj),
         t_strand_(copy_of(t_strand_arr)),
         t_length_(copy_of(t_length_arr)),
         t_is_synthetic_(copy_of(t_is_synthetic_arr)),
@@ -454,6 +453,12 @@ private:
         return stype * 2 + (antisense ? 1 : 0);
     }
 
+    // A hit's bases past candidate entry `k`'s exons: its aligned bases (at least one) less those on the exons.
+    static int32_t overhang(const ChunkPtrs& cp, int row, int64_t k) {
+        const int rl = cp.r_len[row] > 0 ? static_cast<int>(cp.r_len[row]) : 1;
+        return std::max(rl - static_cast<int>(cp.e_bp[k]), 0);
+    }
+
     // The term of row `row`'s candidate entry `k`: strand, the fragment length the transcript implies, and the
     // overhang past its exons. A term the whole hit shares is the caller's. False when the entry is no candidate: no
     // exonic base, or an overhang under the overhang gate.
@@ -461,8 +466,7 @@ private:
         const int32_t t_idx = cp.t_ind[k];
         const int32_t ebp = cp.e_bp[k];
         if (ebp <= 0) return false;
-        const int rl = cp.r_len[row] > 0 ? static_cast<int>(cp.r_len[row]) : 1;
-        const int32_t oh = std::max(rl - ebp, 0);
+        const int32_t oh = overhang(cp, row, k);
         if (oh_gate_ && oh > 0) return false;
 
         const int exon_str = cp.e_str[row];
@@ -661,13 +665,11 @@ private:
     void count_deterministic(const ChunkPtrs& cp, int i, FillState& st) const {
         const int64_t start = cp.t_off[i];
         const int32_t t_idx = cp.t_ind[start];
-        const int rl = cp.r_len[i] > 0 ? static_cast<int>(cp.r_len[i]) : 1;
-        if (oh_gate_ && rl - cp.e_bp[start] > 0) {
+        if (oh_gate_ && overhang(cp, i, start) > 0) {
             gate(st, cp.f_id[i], cp.fc[i]);
             return;
         }
-        const int32_t col = count_col(cp.s_type[i], cp.e_str[i], t_idx);
-        if (col < st.ua_ncols) st.ua_counts[t_idx * st.ua_ncols + col] += 1.0;
+        st.ua_counts[t_idx * st.ua_ncols + count_col(cp.s_type[i], cp.e_str[i], t_idx)] += 1.0;
         st.det_ti.push_back(t_idx);
         st.det_fid.push_back(cp.f_id[i]);
         ++st.stats.deterministic;
@@ -739,7 +741,12 @@ class StreamingScorer {
     bool finished_ = false;
 
 public:
+    // The count matrix is checked here, once: one row per transcript and one column per (splice type, strand), so a
+    // deterministic count lands in it unguarded.
     StreamingScorer(NativeFragmentScorer& scorer, f64_2d_out unambig_counts) : scorer_(scorer) {
+        if (unambig_counts.shape(0) != scorer.t_strand_.size() ||
+            unambig_counts.shape(1) != 2 * rigel::NUM_SPLICE_TYPES)
+            throw std::invalid_argument("StreamingScorer: unambig_counts is not (n_transcripts, 2 x splice types)");
         st_.ua_counts = unambig_counts.data();
         st_.ua_ncols = static_cast<int>(unambig_counts.shape(1));
     }
@@ -791,8 +798,7 @@ NB_MODULE(_scoring_impl, m) {
     nb::class_<NativeFragmentScorer>(m, "NativeFragmentScorer")
         .def(nb::init<
                  double, double, bool, double, double, double,
-                 nb::object, int32_t, double,
-                 nb::object, int32_t, double,
+                 nb::object, nb::object,
                  i8_1d, i32_1d,
                  i32_1d, i32_1d, i32_1d, i32_1d,
                  u8_1d, i32_1d, double>(),
@@ -803,11 +809,7 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("mismatch_log_penalty"),
              nb::arg("clip_log_penalty"),
              nb::arg("fl_log_prob").none(),
-             nb::arg("fl_max_size"),
-             nb::arg("fl_tail_base"),
              nb::arg("gdna_fl_log_prob").none(),
-             nb::arg("gdna_fl_max_size"),
-             nb::arg("gdna_fl_tail_base"),
              nb::arg("t_strand_arr"),
              nb::arg("t_length_arr"),
              nb::arg("exon_offsets"),

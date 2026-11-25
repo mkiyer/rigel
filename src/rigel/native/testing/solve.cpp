@@ -71,8 +71,9 @@ void gdna_arm(Vec log_rho, Vec logP, Vec lam, Vec mass, Vec eff, Mat out) {
     const int m = static_cast<int>(mass.shape(0)), K = K_of(lam);
     if (static_cast<int>(out.shape(0)) != m || static_cast<int>(out.shape(1)) != K)
         throw std::invalid_argument("gdna_arm: the output is not (m, K)");
-    if (logP.shape(0) != log_rho.shape(0) || log_rho.shape(0) < 1 || static_cast<int>(eff.shape(0)) != m)
-        throw std::invalid_argument("gdna_arm: the curve is two (G,) arrays and the support one (mass, eff) per slot");
+    check_arm_curve(log_rho, logP, "gdna_arm");
+    if (static_cast<int>(eff.shape(0)) != m)
+        throw std::invalid_argument("gdna_arm: the support is not one (mass, eff) per slot");
     const P::Arm arm{log_rho.data(), logP.data(), static_cast<int>(log_rho.shape(0)), mass.data(), eff.data()};
     std::vector<double> log_frac(K);
     for (int k = 0; k < K; ++k) log_frac[k] = P::arm_abscissa(sigmoid(lam.data()[k]));

@@ -41,14 +41,18 @@ bool cigar_advances_ref(int op) {
     return op == BAM_CMATCH || op == BAM_CDEL || op == BAM_CEQUAL || op == BAM_CDIFF;
 }
 
-/// The soft clips at the CIGAR's first and last operation.
+/// The soft clips at the CIGAR's two ends, each read past a hard clip outside it: SAM puts a hard clip outermost, so
+/// `90M5S5H` clips five bases at its end as `90M5S` does.
 void read_soft_clips(const bam1_t* b, int32_t& lead, int32_t& trail) {
     lead = trail = 0;
     const int32_t n_cigar = b->core.n_cigar;
     if (n_cigar == 0) return;
     const uint32_t* cigar = bam_get_cigar(b);
-    if (bam_cigar_op(cigar[0]) == BAM_CSOFT_CLIP) lead = bam_cigar_oplen(cigar[0]);
-    if (bam_cigar_op(cigar[n_cigar - 1]) == BAM_CSOFT_CLIP) trail = bam_cigar_oplen(cigar[n_cigar - 1]);
+    int32_t first = 0, last = n_cigar - 1;
+    if (first < last && bam_cigar_op(cigar[first]) == BAM_CHARD_CLIP) ++first;
+    if (last > first && bam_cigar_op(cigar[last]) == BAM_CHARD_CLIP) --last;
+    if (bam_cigar_op(cigar[first]) == BAM_CSOFT_CLIP) lead = bam_cigar_oplen(cigar[first]);
+    if (bam_cigar_op(cigar[last]) == BAM_CSOFT_CLIP) trail = bam_cigar_oplen(cigar[last]);
 }
 
 /// The CIGAR's aligned blocks and junctions. A deletion lies inside a block, since it occupies reference positions;

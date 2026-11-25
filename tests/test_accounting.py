@@ -429,19 +429,21 @@ def test_the_annotation_pass_sees_what_the_scan_saw(index, tmp_path):
     ).exists()
 
 
-def test_an_annotation_pass_that_judges_otherwise_stops_the_run(index, tmp_path):
+def test_an_annotation_pass_that_judges_otherwise_stops_the_run(index, tmp_path, monkeypatch):
     """The pass re-judges every read pair; one told another fragment-length limit than the scan's judges otherwise,
     and the run stops, the annotated BAM deleted, rather than stamp what the scan did not decide."""
-    try:
-        with pytest.raises(RuntimeError, match="annotation pass"):
-            _run_with_annotation(
-                tmp_path,
-                index,
-                _bam(tmp_path, _counters_bam_records()),
-                before=lambda _result: index.resolver.set_max_fragment_length(100),
-            )
-    finally:
-        index.resolver.set_max_fragment_length(BamScanConfig().max_frag_length)
+    import dataclasses
+
+    import rigel.annotate
+
+    real = rigel.annotate.write_annotated_bam
+
+    def told_another_limit(*args, scan, **kwargs):
+        return real(*args, scan=dataclasses.replace(scan, max_frag_length=100), **kwargs)
+
+    monkeypatch.setattr(rigel.annotate, "write_annotated_bam", told_another_limit)
+    with pytest.raises(RuntimeError, match="annotation pass"):
+        _run_with_annotation(tmp_path, index, _bam(tmp_path, _counters_bam_records()))
     assert not (tmp_path / "annotated.bam").exists()
 
 

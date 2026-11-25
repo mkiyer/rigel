@@ -74,3 +74,33 @@ def test_a_partition_the_em_cannot_read_is_refused(part, transcripts, said):
 def test_a_candidate_csr_naming_a_transcript_past_the_index_is_refused():
     with pytest.raises(ValueError, match="candidate transcript 7 is outside the 4"):
         connected_components(np.array([0, 2], np.int64), np.array([0, 7], np.int32), np.int32(4))
+
+
+def _run_loci(parts: list, transcripts: list, gdna_prior: list[float], rna_prior: list[float]):
+    est = AbundanceEstimator(4, em_config=EMConfig(n_threads=1, seed=7))
+    return est.run_batch_locus_em_partitioned(
+        [tuple(p) for p in parts],
+        [np.asarray(t, np.int32) for t in transcripts],
+        np.asarray(gdna_prior),
+        rna_prior_count=np.asarray(rna_prior),
+        intergenic_rate=20.0,
+    )
+
+
+def test_a_transcript_two_loci_hold_is_refused():
+    """Loci are disjoint: two naming one transcript would add into its output row from two workers at once."""
+    part = _locus([[0, 1]] * 3)
+    with pytest.raises(ValueError, match="names transcript 0, which locus 0 holds"):
+        _run_loci([part, part], [[0, 1], [0, 1]], [5.0, 5.0], [3.0, 3.0])
+
+
+def test_a_locus_naming_a_transcript_twice_is_refused():
+    with pytest.raises(ValueError, match="names transcript 0 twice"):
+        _run(_locus([[0, 1]] * 3), [0, 0, 1])
+
+
+@pytest.mark.parametrize("gdna, rna", [(-1.0, 3.0), (5.0, float("nan")), (float("inf"), 3.0)])
+def test_a_locus_prior_count_that_is_not_a_count_is_refused(gdna, rna):
+    """A prior count is a count of pseudo-fragments; one that is negative or not finite was read as 0 before."""
+    with pytest.raises(ValueError, match="prior count is negative or not finite"):
+        _run_loci([_locus([[0, 1]] * 3)], [[0, 1]], [gdna], [rna])

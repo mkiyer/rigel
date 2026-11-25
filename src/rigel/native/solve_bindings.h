@@ -35,16 +35,33 @@ A exact(H&& h) {
     return nb::cast<A>(std::forward<H>(h), false);
 }
 
+// The fitted gDNA arm's curve, (log_rho, logP): two (G,) arrays, G >= 1, the caller's own, since the kernel keeps
+// their data. `who` names the call in a refusal.
+inline void check_arm_curve(const Vec& log_rho, const Vec& logP, const char* who) {
+    if (log_rho.shape(0) < 1 || logP.shape(0) != log_rho.shape(0))
+        throw std::invalid_argument(std::string(who) + ": the gDNA arm's curve is not two (G,) arrays");
+}
+
+// A gDNA arm as a call receives it, None or a tuple of `n` arrays, the curve first; its arrays, or none.
+inline std::vector<Vec> arm_tuple(nb::object gdna, size_t n, const char* who) {
+    if (gdna.is_none()) return {};
+    nb::tuple t = nb::cast<nb::tuple>(gdna);
+    if (nb::len(t) != n) throw std::invalid_argument(std::string(who) + ": the gDNA arm is not a " +
+                                                     std::to_string(n) + "-tuple of arrays");
+    std::vector<Vec> arrays;
+    for (size_t i = 0; i < n; ++i) arrays.push_back(exact<Vec>(t[i]));
+    check_arm_curve(arrays[0], arrays[1], who);
+    return arrays;
+}
+
 // The fitted gDNA arm's arrays as a call receives them: None, or (log_rho, logP, mass, eff).
 struct ArmArrays {
     Vec log_rho, logP, mass, eff;
     P::Arm arm;
     ArmArrays(nb::object gdna, int m) {
-        if (gdna.is_none()) return;
-        nb::tuple t = nb::cast<nb::tuple>(gdna);
-        log_rho = nb::cast<Vec>(t[0]); logP = nb::cast<Vec>(t[1]); mass = nb::cast<Vec>(t[2]); eff = nb::cast<Vec>(t[3]);
-        if (log_rho.shape(0) < 1 || logP.shape(0) != log_rho.shape(0))
-            throw std::invalid_argument("psi: the gDNA arm's curve is not two (G,) arrays");
+        const std::vector<Vec> a = arm_tuple(gdna, 4, "psi");
+        if (a.empty()) return;
+        log_rho = a[0]; logP = a[1]; mass = a[2]; eff = a[3];
         if (static_cast<int>(mass.shape(0)) != m || static_cast<int>(eff.shape(0)) != m)
             throw std::invalid_argument("psi: the gDNA arm's support is not one (mass, eff) per slot");
         arm = P::Arm{log_rho.data(), logP.data(), static_cast<int>(log_rho.shape(0)), mass.data(), eff.data()};

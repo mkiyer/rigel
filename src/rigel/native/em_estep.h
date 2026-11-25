@@ -218,7 +218,7 @@ inline void em_step_kernel(
             row[j] = val;
             if (val > max_val) max_val = val;
         }
-        if (max_val == -std::numeric_limits<double>::infinity()) continue;
+        if (max_val == NEG_INF) continue;
         const double row_sum = exp_shifted_sum(row, k, max_val);
         if (row_sum > 0.0 && std::isfinite(row_sum)) {
             const double scale = ec.row_units[i] / row_sum;
@@ -313,7 +313,7 @@ inline double marginal_data_loglik(const std::vector<EmEquivClass>& ec_data, con
                 double v = ll[i * k + j] + log_weights[cidx[j]];
                 if (v > mx) mx = v;
             }
-            if (!(mx > -std::numeric_limits<double>::infinity())) continue;  // no component can emit it
+            if (!(mx > NEG_INF)) continue;  // no component can emit it
             double s = 0.0;
             for (int j = 0; j < k; ++j) s += std::exp((ll[i * k + j] + log_weights[cidx[j]]) - mx);
             total += ec.row_units[i] * (mx + std::log(s));

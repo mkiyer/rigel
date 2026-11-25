@@ -65,12 +65,12 @@ inline void apply_grouped_prior_update(
     const bool weighted = rna_weight > EM_LOG_EPSILON;
 
     // The gDNA pseudocount needs a gDNA component to land on.
-    const double gdna_prior = has_gdna ? nonnegative_finite(aggregate_prior.gdna_prior_fragments) : 0.0;
+    const double gdna_prior = has_gdna ? aggregate_prior.gdna_prior_fragments : 0.0;
     // The RNA pseudocount lands on the RNA components, so it is not gated on a gDNA component (an all-spliced locus
     // has none). It is dropped only when nothing can receive it, tested on the denominator the chosen branch divides
     // by (the weight total, else the count, else the carried state): any other total could keep a live prior at a
     // locus with zero count but carried alpha (VBEM), multiply it by zero and move the gDNA:RNA split.
-    double rna_prior = nonnegative_finite(aggregate_prior.rna_prior_fragments);
+    double rna_prior = aggregate_prior.rna_prior_fragments;
     const double prior_recipients = weighted ? rna_weight : ((rna_count > EM_LOG_EPSILON) ? rna_count : rna_carried);
     if (prior_recipients <= EM_LOG_EPSILON) rna_prior = 0.0;
 

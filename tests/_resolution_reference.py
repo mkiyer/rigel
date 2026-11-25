@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from typing import NamedTuple
 
 from rigel._resolve_impl import testing as resolve_testing
+from rigel.config import BamScanConfig
 from rigel.types import Strand
 
 
@@ -62,7 +63,7 @@ def make_fragment(exons=(), introns=()):
 # ---------------------------------------------------------------------------
 
 
-def resolve_fragment(frag, index):
+def resolve_fragment(frag, index, *, intron_overhang_tolerance: int = 0):
     """Resolve a fragment to its compatible transcript set with the C++ resolver.
 
     Calls ``rigel._resolve_impl.testing.resolve_fragment`` on ``index.resolver``, which resolves it as the scan
@@ -71,4 +72,9 @@ def resolve_fragment(frag, index):
     """
     if not frag.exons:
         return None
-    return resolve_testing.resolve_fragment(index.resolver, frag)
+    return resolve_testing.resolve_fragment(
+        index.resolver,
+        frag,
+        max_fragment_length=BamScanConfig().max_frag_length,
+        intron_overhang_tolerance=intron_overhang_tolerance,
+    )

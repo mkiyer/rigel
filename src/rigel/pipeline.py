@@ -444,20 +444,26 @@ def _scan(
     )
 
 
+def resolver_policy(scan: "BamScanConfig") -> dict:
+    """The settings a pass resolves under, the scan's own, given to each native pass rather than set on the index's
+    shared resolver: the pair rule's fragment-length limit (no pair whose molecule is longer is one) and the
+    intron-overhang tolerance K (which pairs are one molecule, the candidates' lengths, calibration's tally and which
+    unspliced fragments become SPLICED_IMPLICIT)."""
+    return {
+        "max_fragment_length": int(scan.max_frag_length),
+        "intron_overhang_tolerance": int(scan.intron_overhang_tolerance),
+    }
+
+
 def _native_scanner(index: TranscriptIndex, scan: "BamScanConfig") -> _NativeBamScanner:
     """The native scanner over the index's resolver, the splice graph installed. The index installs what it knows
     (the transcript strands among it); the scan sets what is a setting."""
-    resolve_ctx = index.resolver
-    # The intron-overhang tolerance K (`BamScanConfig.intron_overhang_tolerance`): it decides which pairs are one
-    # molecule, the candidates' lengths, calibration's tally and which unspliced fragments become SPLICED_IMPLICIT
-    resolve_ctx.set_intron_overhang_tolerance(int(scan.intron_overhang_tolerance))
-    # The pair rule's fragment-length limit: no pair whose molecule is longer is one.
-    resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
     scanner = _NativeBamScanner(
-        resolve_ctx,
+        index.resolver,
         scan.sj_tag_spec,
         skip_duplicates=scan.skip_duplicates,
         include_multimap=scan.include_multimap,
+        **resolver_policy(scan),
     )
     # The splice graph's region partition, so the scan tallies per-region evidence
     _wire_calibration_regions(scanner, index, scan.max_frag_length)
@@ -1144,9 +1150,7 @@ def run_pipeline(
             annotations,
             index,
             stats=stats,
-            skip_duplicates=scan.skip_duplicates,
-            include_multimap=scan.include_multimap,
-            sj_spec=scan.sj_tag_spec,
+            scan=scan,
             locus_id_per_transcript=estimator.locus_id_per_transcript,
         )
     return result

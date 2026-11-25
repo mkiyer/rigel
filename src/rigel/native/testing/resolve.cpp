@@ -30,12 +30,13 @@ std::vector<Block> read_blocks(const FragmentResolver& resolver, nb::object bloc
 
 /// A fragment-like object (``exons``, ``introns``) resolved as the scan resolves a hit, its junctions sorted as the
 /// scan hands them over; None when it has no exon block.
-nb::object resolve_fragment(const FragmentResolver& resolver, nb::object frag) {
+nb::object resolve_fragment(const FragmentResolver& resolver, nb::object frag, int32_t max_fragment_length,
+                            int32_t intron_overhang_tolerance) {
     std::vector<ExonBlock> exons = read_blocks<ExonBlock>(resolver, frag.attr("exons"));
     if (exons.empty()) return nb::none();
     std::vector<IntronBlock> introns = read_blocks<IntronBlock>(resolver, frag.attr("introns"));
     sort_unique_junctions(introns);
-    ResolverScratch scratch(resolver.n_transcripts());
+    ResolverScratch scratch(resolver.n_transcripts(), ResolverPolicy(max_fragment_length, intron_overhang_tolerance));
     ResolvedFragment out;
     resolver.resolve(exons, introns, out, scratch);
     return nb::cast(std::move(out));
@@ -99,8 +100,10 @@ void bind_testing(nb::module_ m) {
         .def("finalize", &FragmentChunk::finalize,
              "Finalize to a dict of numpy arrays, leaving the accumulator empty.");
 
-    m.def("resolve_fragment", &resolve_fragment, nb::arg("resolver"), nb::arg("frag"),
-          "Resolve a Fragment object to its candidate transcript set (t_inds), as the scan resolves a hit.\n"
+    m.def("resolve_fragment", &resolve_fragment, nb::arg("resolver"), nb::arg("frag"), nb::arg("max_fragment_length"),
+          nb::arg("intron_overhang_tolerance"),
+          "Resolve a Fragment object to its candidate transcript set (t_inds), as the scan resolves a hit, under the\n"
+          "settings given (a pass's own).\n"
           "A candidate need not be compatible with the alignment: the merge falls\n"
           "back to a union when the per-block sets share no transcript.\n\n"
           "Returns a ResolvedFragment, or None when the fragment has no exon blocks.");

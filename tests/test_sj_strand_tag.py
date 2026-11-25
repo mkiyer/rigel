@@ -36,7 +36,7 @@ def test_the_native_readers_refuse_a_spec_they_cannot_read(spec):
 
     for reader in (BamScanner, BamAnnotationWriter):
         with pytest.raises(ValueError, match="sj_tag_spec must be"):
-            reader(FragmentResolver(), spec, True, True)
+            reader(FragmentResolver(), spec, True, True, 1000, 0)
 
 
 @pytest.mark.parametrize("spec", ["auto", "XS", "ts", "XS,ts", "ts,XS", "none", ""])
@@ -44,7 +44,7 @@ def test_the_native_readers_accept_every_spec_they_read(spec):
     from rigel.native import BamAnnotationWriter, BamScanner, FragmentResolver
 
     for reader in (BamScanner, BamAnnotationWriter):
-        reader(FragmentResolver(), spec, True, True)
+        reader(FragmentResolver(), spec, True, True, 1000, 0)
 
 
 @pytest.fixture(scope="module")

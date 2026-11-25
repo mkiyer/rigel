@@ -45,12 +45,31 @@ void PairLedger::export_to(nb::dict& out) const {
 
 namespace {
 
+/// One record's evidence as both passes read it: the index's reference and the BAM's, its leftmost position, its
+/// flags, its CIGAR, its junctions with their motif strands, its soft clips and the tags read (NM, NH, SA). Two passes
+/// over different alignments disagree here even where every counter agrees.
+uint64_t record_digest(const ParsedAlignment& r) {
+    size_t h = 0;
+    for (const int32_t v : {r.ref_id, r.tid, r.ref_start, static_cast<int32_t>(r.flag), r.nm, r.nh, r.clip_lead,
+                            r.clip_trail, static_cast<int32_t>(r.has_sa)})
+        hash_combine(h, v);
+    for (const uint32_t op : r.cigar) hash_combine(h, static_cast<int32_t>(op));
+    for (const SJCigarEntry& sj : r.sjs) {
+        hash_combine(h, sj.start);
+        hash_combine(h, sj.end);
+        hash_combine(h, sj.strand);
+    }
+    return static_cast<uint64_t>(h);
+}
+
 /// One read pair's part of the digest both passes fold their read pairs into: its frag_id, its name (``name_hash``),
-/// its records, its outcome (with an unpaired pair's reason) and its used records. Summed over the read pairs, so the
-/// order in which the workers take them does not matter.
-uint64_t pair_digest(int64_t frag_id, size_t name_hash, int64_t n_records, int32_t outcome, int32_t reason,
-                     int64_t n_used) {
+/// its records and their evidence, its outcome (with an unpaired pair's reason) and its used records. Summed over the
+/// read pairs, and the evidence over the records, so the order in which the workers take them does not matter.
+uint64_t pair_digest(int64_t frag_id, size_t name_hash, uint64_t evidence, int64_t n_records, int32_t outcome,
+                     int32_t reason, int64_t n_used) {
     size_t h = name_hash;
+    hash_combine(h, static_cast<int32_t>(evidence));
+    hash_combine(h, static_cast<int32_t>(evidence >> 32));
     hash_combine(h, static_cast<int32_t>(frag_id));
     hash_combine(h, static_cast<int32_t>(frag_id >> 32));
     hash_combine(h, static_cast<int32_t>(n_records));
@@ -334,6 +353,8 @@ TemplateJudgment judge_template(std::vector<ParsedAlignment>& records, int64_t f
                                 bool include_multimap, const FragmentResolver& resolver, ResolverScratch& scratch,
                                 JudgeScratch& js, PairLedger& ledger) {
     TemplateJudgment j;
+    uint64_t evidence = 0;
+    for (const ParsedAlignment& r : records) evidence += record_digest(r);
     j.hits = template_hits(records);
     js.verdicts.clear();
     for (const Hit& hit : j.hits.hits) js.verdicts.push_back(hit_verdict(hit, resolver, scratch, js.junctions));
@@ -345,7 +366,7 @@ TemplateJudgment judge_template(std::vector<ParsedAlignment>& records, int64_t f
         ledger.withheld[withheld]++;
         if (withheld == WITHHELD_UNPAIRED) ledger.unpaired_reason[reason]++;
         ledger.n_records_unplaced += n_records;
-        ledger.template_digest += pair_digest(frag_id, name_hash, n_records, withheld, reason, 0);
+        ledger.template_digest += pair_digest(frag_id, name_hash, evidence, n_records, withheld, reason, 0);
         j.outcome = withheld;
         return j;
     }
@@ -354,7 +375,7 @@ TemplateJudgment judge_template(std::vector<ParsedAlignment>& records, int64_t f
     if (!include_multimap && j.n_usable > 1) {
         ledger.n_excluded_by_option++;
         ledger.n_records_unplaced += n_records;
-        ledger.template_digest += pair_digest(frag_id, name_hash, n_records, PAIR_EXCLUDED_BY_OPTION, 0, 0);
+        ledger.template_digest += pair_digest(frag_id, name_hash, evidence, n_records, PAIR_EXCLUDED_BY_OPTION, 0, 0);
         j.outcome = PAIR_EXCLUDED_BY_OPTION;
         return j;
     }
@@ -364,7 +385,7 @@ TemplateJudgment judge_template(std::vector<ParsedAlignment>& records, int64_t f
     ++(j.n_usable == 1 ? ledger.n_placed_unique : ledger.n_placed_multimapping);
     ledger.n_records_used += n_used;
     ledger.n_records_unused += n_records - n_used;
-    ledger.template_digest += pair_digest(frag_id, name_hash, n_records, j.outcome, 0, n_used);
+    ledger.template_digest += pair_digest(frag_id, name_hash, evidence, n_records, j.outcome, 0, n_used);
     return j;
 }
 

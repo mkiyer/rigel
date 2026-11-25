@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <type_traits>
 #include <utility>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "constants.h"
@@ -53,6 +55,22 @@ struct OverlapQueryBuffer {
     ~OverlapQueryBuffer() { free(ptr); }
 };
 
+/// The settings one pass resolves under, its own (a run's setting, never the shared index's): the pair rule's
+/// fragment-length limit L (`BamScanConfig.max_frag_length`: no pair whose molecule is longer, along the genome and
+/// along every witness transcript, is one) and the intron-overhang tolerance K (bp: how many bases an aligned read end
+/// may lie inside an annotated intron, at the edge of an unsequenced gap or at a fragment's outer end; an annotated
+/// intron in an unaligned gap may overlap up to K aligned bases and is still cut whole, and only an intron holding more
+/// than K aligned bases contradicts a transcript). Refused unless L >= 1 (at 0 no pair is one) and K >= 0.
+struct ResolverPolicy {
+    int32_t max_fragment_length;
+    int32_t intron_overhang_tolerance;
+
+    ResolverPolicy(int32_t L, int32_t K) : max_fragment_length(L), intron_overhang_tolerance(K) {
+        if (L < 1) throw std::invalid_argument("max_fragment_length must be >= 1, got " + std::to_string(L));
+        if (K < 0) throw std::invalid_argument("intron_overhang_tolerance must be >= 0, got " + std::to_string(K));
+    }
+};
+
 struct ResolverScratch {
     // Each transcript's aligned bases on its exons, cleaned sparsely: only the touched transcripts are reset
     std::vector<int32_t> t_exon_bp;
@@ -87,9 +105,10 @@ struct ResolverScratch {
     std::vector<int32_t> pair_candidates;
     std::vector<int32_t> pair_tmp;
 
-    ResolverScratch() = default;
+    ResolverPolicy policy;  // the pass's settings, which every resolution under this scratch reads
 
-    explicit ResolverScratch(int32_t n_transcripts) : t_exon_bp(n_transcripts, 0), t_touched(n_transcripts, 0) {
+    ResolverScratch(int32_t n_transcripts, ResolverPolicy policy_)
+        : t_exon_bp(n_transcripts, 0), t_touched(n_transcripts, 0), policy(policy_) {
         touched.reserve(TOUCHED_TRANSCRIPTS_RESERVE);
     }
 

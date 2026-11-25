@@ -240,7 +240,7 @@ inline void claims(const Chain& c, RowsOut& own, Scratch& S) {
     for (int x = 0; x < c.n; ++x) {
         const bool single = c.fp[x] != c.fn[x];
         const double* r = (c.intron_row != nullptr && c.intron(x)) ? c.intron_row[x] : nullptr;
-        const bool abundance = r != nullptr && ptp(r, c.K) > FLAT_ROW_SPREAD;
+        const bool abundance = r != nullptr && !is_flat(r, c.K);
         const bool strand = single && c.has_own[x];
         if (!(strand || abundance)) continue;
         if (strand) {
@@ -390,7 +390,7 @@ inline void gdna_lane(const Chain& c, const RowsOut& own, const FacesOut& F, dou
         if (gene_edge) {
             poisson_level(u, c.K, c.n_u[x], c.a_g[x], rho_ref, S.a.data());
             L.own_level.set(x, S.a.data());
-        } else if (const double* o = own.get(x); o != nullptr && ptp(o, c.K) > FLAT_ROW_SPREAD) {
+        } else if (const double* o = own.get(x); o != nullptr && !is_flat(o, c.K)) {
             level_of_profile(o, c.lam, u, c.K, c.n_u[x], c.a_g[x], rho_ref, false, S, S.c.data());
             L.own_level.set(x, S.c.data());
         }
@@ -443,7 +443,7 @@ inline void rna_sources(const Chain& c, const RowsOut& own, int strand, double r
         const bool empty = empty_node(c.n_u[x], c.a_r[x]);
         const bool single = !(c.fp[x] && c.fn[x]);
         Intersection inter{S.d.data(), c.K};
-        if (const double* o = own.get(x); !empty && single && o != nullptr && ptp(o, c.K) > FLAT_ROW_SPREAD) {
+        if (const double* o = own.get(x); !empty && single && o != nullptr && !is_flat(o, c.K)) {
             level_of_profile(o, c.lam, c.lam, c.K, c.n_u[x], c.a_r[x], rho_ref, true, S, S.c.data());
             inter.add(S.c.data());
         }
@@ -648,7 +648,7 @@ inline const double* faces_apply(const FacesView& F, int i, int side, const doub
         const int r = F.row[at];
         if (r < 0) return nullptr;
         const double* row = F.map(r);
-        if (ptp(row, K) <= FLAT_ROW_SPREAD) return nullptr;
+        if (is_flat(row, K)) return nullptr;
         std::copy(row, row + K, out);
         return out;
     }
@@ -700,7 +700,7 @@ inline void pass_block(const double* lam, int K, const int64_t* seq, int n, cons
             const double* own_s = own_mask[s] ? own + static_cast<size_t>(s) * K : nullptr;
             const double* held = R.has_composition[s] ? R.comp(s) : nullptr;
             const double* r = faces_apply(F, i, side, own_s, held, lam, K, S, out.data());
-            if (r != nullptr && ptp(r, K) > FLAT_ROW_SPREAD) {
+            if (r != nullptr && !is_flat(r, K)) {
                 double* dest = R.comp(i);
                 std::copy(r, r + K, dest);
                 norm_inplace(dest, K);
@@ -789,8 +789,8 @@ struct BlockSolve {
         if (!inter.any()) return false;
         inter.finish();
         row_of_level(bound, lam, lam, K, L.total[i], L.a[i], L.rho_ref, true, S, row);
-        if (ptp(row, K) <= FLAT_ROW_SPREAD) return false;
-        if (ptp(r, K) > FLAT_ROW_SPREAD) { for (int j = 0; j < K; ++j) r[j] += row[j]; norm_inplace(r, K); }
+        if (is_flat(row, K)) return false;
+        if (!is_flat(r, K)) { for (int j = 0; j < K; ++j) r[j] += row[j]; norm_inplace(r, K); }
         else std::copy(row, row + K, r);
         return true;
     }

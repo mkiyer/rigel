@@ -241,9 +241,7 @@ def write_annotated_bam(
     index,
     *,
     stats,
-    skip_duplicates: bool,
-    include_multimap: bool,
-    sj_spec: str,
+    scan,
     locus_id_per_transcript: np.ndarray,
 ) -> dict:
     """The annotated-BAM pass: stamp every record with assignment tags.
@@ -265,13 +263,9 @@ def write_annotated_bam(
         The scan's counts. The pass re-reads the BAM and re-judges every read pair, and must see what the scan saw:
         every count in :data:`SAME_AS_THE_SCAN`, the digest of its read pairs among them, and every record written. On
         any difference the annotated BAM is deleted and the run stops.
-    skip_duplicates : bool
-        Must match the value used in Pass 1.
-    include_multimap : bool
-        Must match the value used in Pass 1.
-    sj_spec : str
-        The splice-junction tag spec Pass 1's scanner read with, resolved (``"XS"``, ``"ts"``,
-        ``"XS,ts"``, ``"ts,XS"`` or ``"none"``), never ``"auto"``.
+    scan : BamScanConfig
+        Pass 1's own scan settings, so this pass reads and judges as it did: the duplicate and multimapper rules,
+        the splice-junction tag spec, and the resolver's settings (:func:`rigel.pipeline.resolver_policy`).
     locus_id_per_transcript : np.ndarray
         int32 array mapping transcript index → locus_id, the ZL tag of a row the EM did not place in a locus
         (:func:`_fill_locus_ids`).
@@ -282,13 +276,15 @@ def write_annotated_bam(
         Summary statistics of the annotation pass.
     """
     from .native import BamAnnotationWriter
+    from .pipeline import resolver_policy
 
-    # the scan's own resolver
+    # the scan's own resolver tables, under the scan's own settings
     writer = BamAnnotationWriter(
         index.resolver,
-        sj_spec,
-        skip_duplicates,
-        include_multimap,
+        scan.sj_tag_spec,
+        scan.skip_duplicates,
+        scan.include_multimap,
+        **resolver_policy(scan),
     )
     n = annotations.size
     _fill_locus_ids(annotations, locus_id_per_transcript)
@@ -304,7 +300,6 @@ def write_annotated_bam(
         annotations.frag_class[:n],
         annotations.n_candidates[:n],
         annotations.locus_id[:n],
-        n,
         _tag_strings(index.t_df["t_id"].values),
         _tag_strings(index.g_df["g_id"].values),
         _tag_strings(index.g_df["g_name"].values),

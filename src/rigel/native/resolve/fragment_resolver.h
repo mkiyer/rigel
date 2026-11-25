@@ -63,19 +63,6 @@ public:
     /// each annotated candidate's span to the fragment's candidates.
     void set_nascent_parent_index(const std::vector<int32_t>& nascent_parent) { nascent_parent_ = nascent_parent; }
 
-    /// The library's fragment-length limit (`BamScanConfig.max_frag_length`): no pair whose molecule is longer, along
-    /// the genome and along every witness transcript, is one (`validate_pair`).
-    void set_max_fragment_length(int32_t L);
-
-    /// The intron-overhang tolerance K (bp): how many bases an aligned read end may lie inside an annotated intron, at
-    /// the edge of an unsequenced gap or at a fragment's outer end. An annotated intron in an unaligned gap may overlap
-    /// up to K aligned bases and is still cut whole, and only an intron holding more than K aligned bases contradicts a
-    /// transcript. 0 is the default; a negative K is refused.
-    void set_intron_overhang_tolerance(int32_t K) {
-        if (K < 0) throw std::invalid_argument("set_intron_overhang_tolerance: K must be >= 0, got " + std::to_string(K));
-        intron_overhang_tolerance_ = K;
-    }
-
     // ── what the scan reads ────────────────────────────────────────────────────────────────────────────────────
 
     /// The index's id of a reference name, or -1 for a reference outside the index.
@@ -183,9 +170,6 @@ private:
     std::vector<int32_t> exon_offsets_;
     std::vector<int32_t> exon_starts_;
     std::vector<int32_t> exon_ends_;
-
-    int32_t intron_overhang_tolerance_ = 0;
-    int32_t max_fragment_length_ = 0;
 
     std::unordered_map<std::string, int32_t> ref_to_id_;
     std::vector<std::string> id_to_ref_;

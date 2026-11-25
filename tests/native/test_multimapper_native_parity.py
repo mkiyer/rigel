@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 
 import numpy as np
+import pytest
 
 from rigel._bam_impl.testing import AccumulatorSet as NativeSet
 from rigel.types import Strand
@@ -331,3 +332,13 @@ def test_a_random_battery_is_byte_identical():
         and qc["dropped_too_long"] > 50
         and qc["dropped_strand_undefined"] > 10
     ), qc
+
+
+def test_an_unknown_reference_is_refused_on_one_placement_and_on_several():
+    """A placement on a reference the set does not hold is refused whatever else is offered with it: the
+    several-placement path booked it as empty while the one-placement path refused it."""
+    _, native = _pair()
+    with pytest.raises(IndexError, match="ref_id 5"):
+        native.offer([_pl(5, 100, 300)])
+    with pytest.raises(IndexError, match="ref_id 5"):
+        native.offer([_pl(0, 100, 300), _pl(5, 100, 300)])

@@ -26,7 +26,7 @@ namespace rigel {
 // a share, and `M` under VBEM, where it is a count. A locus with no intergenic place has no such component.
 struct IntergenicTerm {
     int    idx = -1;        // its component index, the last one; -1: the locus has none
-    double log_rate = -std::numeric_limits<double>::infinity();
+    double log_rate = NEG_INF;
     double n_all = 0.0;     // the locus's fragments: its units with a candidate and its deterministic ones
 };
 
@@ -50,7 +50,7 @@ inline void converged_log_weights(const double* theta, const double* log_eff_len
                                   const IntergenicTerm& ig, double data_count, double* out) {
     map_log_weights(theta, log_eff_len, n_locus, ig, data_count, out);
     for (int c = 0; c < n_locus; ++c)
-        if (c != ig.idx && !(theta[c] > 0.0)) out[c] = -std::numeric_limits<double>::infinity();
+        if (c != ig.idx && !(theta[c] > 0.0)) out[c] = NEG_INF;
 }
 
 // One locus's partition: its candidate CSR and per-unit arrays, and its transcripts.
@@ -112,7 +112,7 @@ inline int unit_candidates(const LocusSubProblem& sub, const PartitionView& pv, 
     const double gdna_ll = static_cast<double>(pv.gdna_log_liks[ui]);
     has_gdna = pv.is_spliced[ui] == 0 && std::isfinite(gdna_ll);
     const double ig_ll = sub.ig_idx >= 0 ? static_cast<double>(pv.intergenic_log_liks[ui])
-                                         : -std::numeric_limits<double>::infinity();
+                                         : NEG_INF;
     const bool has_ig = std::isfinite(ig_ll);
     buf.resize(static_cast<size_t>(p_end - p_start) + (has_gdna ? 1 : 0) + (has_ig ? 1 : 0));
     int k = 0;
@@ -202,12 +202,9 @@ inline void extract_locus_sub_problem(LocusSubProblem& sub, const PartitionView&
     sub.n_components = n_t + (any_intergenic ? 2 : 1);
     sub.has_gdna_candidate = false;
 
-    const int map_size = static_cast<int>(local_map.size());
+    // every transcript is one of the index's (read_partitions)
     auto map_transcripts = [&](bool to_local) {
-        for (int i = 0; i < n_t; ++i) {
-            const int32_t gt = pv.transcript_indices[i];
-            if (gt >= 0 && gt < map_size) local_map[gt] = to_local ? i : -1;
-        }
+        for (int i = 0; i < n_t; ++i) local_map[pv.transcript_indices[i]] = to_local ? i : -1;
     };
     map_transcripts(true);
     gather_candidates(sub, pv, local_map);

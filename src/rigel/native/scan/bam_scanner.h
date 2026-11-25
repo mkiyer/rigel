@@ -152,7 +152,7 @@ struct UnpairedRecordError : std::invalid_argument {
 class BamScanner {
 public:
     BamScanner(const FragmentResolver& resolver, const std::string& sj_tag_spec, bool skip_duplicates,
-               bool include_multimap);
+               bool include_multimap, int32_t max_fragment_length, int32_t intron_overhang_tolerance);
 
     /// Install the region partition the accumulator deposits onto, before scan(); `set_sj` follows, a separate call
     /// because this one refuses to run twice. ``ref_region_bound_offsets`` has n_refs + 1 entries; a reference with
@@ -188,6 +188,7 @@ private:
     SJTagMode sj_tag_mode_;
     bool skip_duplicates_;
     bool include_multimap_;
+    ResolverPolicy policy_;  // this scan's own settings, never the shared resolver's
 
     ScanPartition partition_;
     std::unique_ptr<accumulator::AccumulatorSet> acc_set_;  // the workers' sets merge here

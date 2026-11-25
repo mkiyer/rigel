@@ -8,7 +8,6 @@ overhang past either end and into an intron, mate gaps spanning one to three int
 negative-strand transcripts, and an enumeration of thousands of fragments against a base-by-base count.
 """
 
-import contextlib
 import textwrap
 
 import numpy as np
@@ -144,18 +143,6 @@ def short_intron_index(tmp_path_factory):
     )
 
 
-@contextlib.contextmanager
-def _tuned(index, K):
-    """The index's resolver with intron-overhang tolerance ``K``, restored to the session fixtures' default (0)
-    on exit."""
-    resolver = index.resolver
-    resolver.set_intron_overhang_tolerance(K)
-    try:
-        yield
-    finally:
-        resolver.set_intron_overhang_tolerance(0)
-
-
 # =====================================================================
 # Helper to extract FL for a specific transcript from resolve result
 # =====================================================================
@@ -200,8 +187,7 @@ class TestOneLengthRule:
     )
     def test_one_molecule_has_one_length(self, short_intron_index, blocks, on_t2, on_nascent):
         frag = make_fragment(exons=tuple(_exon("chr1", s, e) for s, e in blocks))
-        with _tuned(short_intron_index, K=3):
-            result = resolve_fragment(frag, short_intron_index)
+        result = resolve_fragment(frag, short_intron_index, intron_overhang_tolerance=3)
         assert result is not None
         assert _get_fl(result, short_intron_index, "T2") == on_t2
         assert result.frag_lengths.get(_nascent(short_intron_index, 1000, 1500)) == on_nascent
@@ -382,8 +368,7 @@ class TestIntronicOverhang:
             ),
             introns=(),
         )
-        with _tuned(basic_index, K=3):
-            result = resolve_fragment(frag, basic_index)
+        result = resolve_fragment(frag, basic_index, intron_overhang_tolerance=3)
         assert result is not None
         assert _get_fl(result, basic_index, "t_basic") == 3294
 
@@ -398,8 +383,7 @@ class TestIntronicOverhang:
             ),
             introns=(),
         )
-        with _tuned(basic_index, K=3):
-            result = resolve_fragment(frag, basic_index)
+        result = resolve_fragment(frag, basic_index, intron_overhang_tolerance=3)
         assert result is not None
         assert _get_fl(result, basic_index, "t_basic") == 299
 
@@ -939,13 +923,14 @@ def _fragments(index, seed):
             yield _merge([_mate(rng, points), _mate(rng, points)]), ()
 
 
-def _resolve_blocks(index, blocks, observed):
-    """The fragment with these blocks and observed junctions, resolved; ``None`` when there is no result."""
+def _resolve_blocks(index, blocks, observed, K):
+    """The fragment with these blocks and observed junctions, resolved under intron-overhang tolerance ``K``; ``None``
+    when there is no result."""
     frag = make_fragment(
         exons=tuple(_exon("chr1", s, e) for s, e in blocks),
         introns=tuple(GenomicInterval("chr1", a, b, Strand.POS) for a, b in observed),
     )
-    return resolve_fragment(frag, index)
+    return resolve_fragment(frag, index, intron_overhang_tolerance=K)
 
 
 def _gaps(blocks, observed):
@@ -994,30 +979,29 @@ class TestLengthRuleByEnumeration:
         for name in _ENUMERATED:
             index = request.getfixturevalue(name)
             exons = _all_exons(index)
-            with _tuned(index, K):
-                for blocks, observed in _fragments(index, seed=0):
-                    result = _resolve_blocks(index, blocks, observed)
-                    if result is None:
-                        continue
-                    gaps = _gaps(blocks, observed)
-                    for t in result.t_inds:
-                        ex = exons[int(t)]
-                        implied = _implied(ex, gaps, K)
-                        want = _path_length(blocks, observed, implied)
-                        got = result.frag_lengths.get(
-                            int(t), 0
-                        )  # a missing length is absent from the dict
-                        n_checked += 1
-                        n_spliced += bool(observed)
-                        n_covered += any(
-                            _overlap(i, x) > K
-                            for i in _introns(ex)
-                            if i not in observed
-                            for x in blocks
-                        )
-                        n_within_k += any(_overlap(i, x) > 0 for i in implied for x in blocks)
-                        if got != want:
-                            wrong.append((name, blocks, observed, int(t), got, want))
+            for blocks, observed in _fragments(index, seed=0):
+                result = _resolve_blocks(index, blocks, observed, K)
+                if result is None:
+                    continue
+                gaps = _gaps(blocks, observed)
+                for t in result.t_inds:
+                    ex = exons[int(t)]
+                    implied = _implied(ex, gaps, K)
+                    want = _path_length(blocks, observed, implied)
+                    got = result.frag_lengths.get(
+                        int(t), 0
+                    )  # a missing length is absent from the dict
+                    n_checked += 1
+                    n_spliced += bool(observed)
+                    n_covered += any(
+                        _overlap(i, x) > K
+                        for i in _introns(ex)
+                        if i not in observed
+                        for x in blocks
+                    )
+                    n_within_k += any(_overlap(i, x) > 0 for i in implied for x in blocks)
+                    if got != want:
+                        wrong.append((name, blocks, observed, int(t), got, want))
         # The enumeration must reach each case it exists for, or a pass means nothing: observed junctions,
         # introns the reads cover by more than K, and (K > 0) introns cut although a mate runs into them.
         assert n_spliced > 100, n_spliced
@@ -1043,26 +1027,25 @@ class TestLengthRuleByEnumeration:
                 max_length=_MAX_FRAG,
                 ref=0,
             )
-            with _tuned(index, K):
-                for blocks, observed in _fragments(index, seed=1):
-                    result = _resolve_blocks(index, blocks, observed)
-                    if result is None:
-                        continue
-                    start, end = blocks[0][0], blocks[-1][1]
-                    gaps = _gaps(blocks, observed)
-                    for t in result.t_inds:
-                        implied = _implied(exons[int(t)], gaps, K)
-                        want = accumulator.length_under(
-                            start=start,
-                            end=end,
-                            observed_introns=observed,
-                            hypotheses=(GapHypothesis(tuple(implied)),),
-                        )
-                        got = result.frag_lengths.get(int(t), 0)
-                        n_checked += 1
-                        n_clipped += any(a < start or b > end for a, b in implied)
-                        if got != want:
-                            wrong.append((name, blocks, observed, int(t), got, want))
+            for blocks, observed in _fragments(index, seed=1):
+                result = _resolve_blocks(index, blocks, observed, K)
+                if result is None:
+                    continue
+                start, end = blocks[0][0], blocks[-1][1]
+                gaps = _gaps(blocks, observed)
+                for t in result.t_inds:
+                    implied = _implied(exons[int(t)], gaps, K)
+                    want = accumulator.length_under(
+                        start=start,
+                        end=end,
+                        observed_introns=observed,
+                        hypotheses=(GapHypothesis(tuple(implied)),),
+                    )
+                    got = result.frag_lengths.get(int(t), 0)
+                    n_checked += 1
+                    n_clipped += any(a < start or b > end for a, b in implied)
+                    if got != want:
+                        wrong.append((name, blocks, observed, int(t), got, want))
         assert n_clipped > 10, n_clipped  # the cases a second formula gets wrong are reached
         assert not wrong, (
             f"{len(wrong)} of {n_checked} lengths wrong (index, blocks, observed, t, got, want): {wrong[:4]}"

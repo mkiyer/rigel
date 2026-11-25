@@ -324,8 +324,9 @@ void bind_held_bank(nb::module_& m) {
 void bind_scanner(nb::module_& m) {
     nb::exception<UnpairedRecordError>(m, "UnpairedRecordError", PyExc_ValueError);
     nb::class_<BamScanner>(m, "BamScanner")
-        .def(nb::init<const FragmentResolver&, const std::string&, bool, bool>(), nb::arg("ctx"),
+        .def(nb::init<const FragmentResolver&, const std::string&, bool, bool, int32_t, int32_t>(), nb::arg("ctx"),
              nb::arg("sj_tag_spec"), nb::arg("skip_duplicates"), nb::arg("include_multimap"),
+             nb::arg("max_fragment_length"), nb::arg("intron_overhang_tolerance"),
              "Create a BAM scanner.\n\n"
              "Parameters\n"
              "----------\n"
@@ -338,7 +339,9 @@ void bind_scanner(nb::module_& m) {
              "skip_duplicates : bool\n"
              "    Skip duplicate-flagged reads.\n"
              "include_multimap : bool\n"
-             "    Include multimapping reads.\n",
+             "    Include multimapping reads.\n"
+             "max_fragment_length, intron_overhang_tolerance : int\n"
+             "    This scan's own pair-rule length limit (>= 1) and intron-overhang tolerance (>= 0).\n",
              nb::keep_alive<1, 2>())  // the scanner keeps its resolver alive
         .def("scan", &BamScanner::scan, nb::arg("bam_path"), nb::arg("chunk_callback"), nb::arg("chunk_size"),
              nb::arg("n_workers"), nb::arg("n_decomp_threads"), nb::arg("qname_batch_size"),
@@ -403,8 +406,9 @@ void bind_scanner(nb::module_& m) {
 void bind_annotation_writer(nb::module_& m) {
     using Writer = BamAnnotationWriter;
     nb::class_<Writer>(m, "BamAnnotationWriter")
-        .def(nb::init<const FragmentResolver&, const std::string&, bool, bool>(), nb::arg("ctx"),
+        .def(nb::init<const FragmentResolver&, const std::string&, bool, bool, int32_t, int32_t>(), nb::arg("ctx"),
              nb::arg("sj_tag_spec"), nb::arg("skip_duplicates"), nb::arg("include_multimap"),
+             nb::arg("max_fragment_length"), nb::arg("intron_overhang_tolerance"),
              "Create a BAM annotation writer.\n\n"
              "Parameters\n"
              "----------\n"
@@ -415,22 +419,28 @@ void bind_annotation_writer(nb::module_& m) {
              "skip_duplicates : bool\n"
              "    Skip duplicate-flagged reads (must match pass 1).\n"
              "include_multimap : bool\n"
-             "    Include multimapping reads (must match pass 1).\n",
+             "    Include multimapping reads (must match pass 1).\n"
+             "max_fragment_length, intron_overhang_tolerance : int\n"
+             "    Pass 1's pair-rule length limit and intron-overhang tolerance.\n",
              nb::keep_alive<1, 2>())
         .def("write",
              [](const Writer& w, const std::string& bam_path, const std::string& output_path,
                 Array1<int64_t> frag_ids, Array1<int32_t> best_tid, Array1<int32_t> best_gid,
                 Array1<uint8_t> tx_flags, Array1<float> posterior,
                 Array1<int8_t> frag_class, Array1<int32_t> n_candidates,
-                Array1<int32_t> locus_id, int64_t size, const std::vector<std::string>& t_ids,
+                Array1<int32_t> locus_id, const std::vector<std::string>& t_ids,
                 const std::vector<std::string>& g_ids, const std::vector<std::string>& g_names) {
+                 const size_t n = frag_ids.shape(0);
+                 for (const size_t len : {best_tid.shape(0), best_gid.shape(0), tx_flags.shape(0), posterior.shape(0),
+                                          frag_class.shape(0), n_candidates.shape(0), locus_id.shape(0)})
+                     if (len != n) throw std::invalid_argument("write: the annotation arrays are not one length");
                  const Writer::Annotations annotations{frag_ids,   best_tid,     best_gid, tx_flags, posterior,
-                                                       frag_class, n_candidates, locus_id, size};
+                                                       frag_class, n_candidates, locus_id, static_cast<int64_t>(n)};
                  return w.write(bam_path, output_path, annotations, t_ids, g_ids, g_names);
              },
              nb::arg("bam_path"), nb::arg("output_path"), nb::arg("ann_frag_ids"), nb::arg("ann_best_tid"),
              nb::arg("ann_best_gid"), nb::arg("ann_tx_flags"), nb::arg("ann_posterior"), nb::arg("ann_frag_class"),
-             nb::arg("ann_n_candidates"), nb::arg("ann_locus_id"), nb::arg("ann_size"), nb::arg("t_ids"),
+             nb::arg("ann_n_candidates"), nb::arg("ann_locus_id"), nb::arg("t_ids"),
              nb::arg("g_ids"), nb::arg("g_names"),
              "Stamp annotation tags and write BAM.\n\n"
              "Parameters\n"
@@ -440,9 +450,7 @@ void bind_annotation_writer(nb::module_& m) {
              "output_path : str\n"
              "    Path for output annotated BAM.\n"
              "ann_frag_ids .. ann_locus_id : ndarray\n"
-             "    Annotation arrays (sliced to ann_size).\n"
-             "ann_size : int\n"
-             "    Number of annotation entries.\n"
+             "    Annotation arrays, one entry per fragment, all one length.\n"
              "t_ids, g_ids, g_names : list[str]\n"
              "    Transcript / gene ID / gene name lookup arrays.\n\n"
              "Returns\n"

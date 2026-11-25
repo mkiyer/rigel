@@ -50,9 +50,9 @@ inline std::vector<double> unit_posteriors(const LocusSubProblem& sub, const std
     std::vector<double> post(static_cast<size_t>(sub.offsets[sub.n_local_units]), 0.0);
     for (int ui = 0; ui < sub.n_local_units; ++ui) {
         const int64_t s = sub.offsets[ui], e = sub.offsets[ui + 1];
-        double max_val = -std::numeric_limits<double>::infinity();
+        double max_val = NEG_INF;
         for (int64_t k = s; k < e; ++k) max_val = std::max(max_val, sub.log_liks[k] + log_weights[sub.t_indices[k]]);
-        if (max_val == -std::numeric_limits<double>::infinity()) continue;
+        if (max_val == NEG_INF) continue;
         double sum_exp = 0.0;
         for (int64_t k = s; k < e; ++k) {
             post[k] = std::exp(sub.log_liks[k] + log_weights[sub.t_indices[k]] - max_val);
@@ -293,12 +293,13 @@ private:
 };
 
 // The accumulators every locus's assignment adds into: the per-transcript count matrix (n_transcripts, n_cols), the
-// posterior sums the confidence metrics read, the optional per-unit annotation and the optional per-unit class masses
-// (nullptr when not requested), with the per-transcript flag that sorts a transcript component into a class.
+// per-transcript posterior sums the confidence metric reads (Σp² and Σp over the units assigned to it), the optional
+// per-unit annotation and the optional per-unit class masses (nullptr when not requested), with the per-transcript flag
+// that sorts a transcript component into a class.
 struct AssignmentSinks {
     double* em_counts;
-    double* posterior_sum;
-    double* n_assigned;
+    double* posterior_sq_sum;
+    double* posterior_mass;
     int n_transcripts;
     int n_cols;
     int32_t* winner_tid;
@@ -310,8 +311,7 @@ struct AssignmentSinks {
 
 // Each unit's posterior mass by class (`EM_CLASS_*`), from the posterior the assignment keeps (FRACTIONAL) or draws
 // from (SAMPLE): a transcript component is annotated or nascent by its transcript's flag, then the locus's gDNA and
-// the intergenic term. A candidate the accumulators skip (a transcript outside the count matrix) is skipped here too,
-// so under FRACTIONAL the class columns add up to the pools.
+// the intergenic term. Under FRACTIONAL the class columns add up to the pools.
 inline void add_class_mass(const LocusSubProblem& sub, const IntergenicTerm& ig, const std::vector<double>& post,
                            const AssignmentSinks& out, int unit_offset) {
     for (int ui = 0; ui < sub.n_local_units; ++ui) {
@@ -394,8 +394,8 @@ inline LocusAssignment assign_posteriors(const LocusSubProblem& sub, const doubl
                 const uint8_t col = sub.count_cols[s + j];
                 out.em_counts[global_t * out.n_cols + col] += p;
                 res.rna += p;
-                out.posterior_sum[global_t] += posteriors[j] * posteriors[j];
-                out.n_assigned[global_t] += posteriors[j];
+                out.posterior_sq_sum[global_t] += posteriors[j] * posteriors[j];
+                out.posterior_mass[global_t] += posteriors[j];
             } else if (comp == ig.idx) {
                 res.intergenic += p;
             } else {

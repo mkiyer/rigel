@@ -25,19 +25,19 @@ inline int thread_budget(int n_threads) {
 
 class ThreadPool {
 public:
+    // A worker that fails to start stops and joins the ones already running before the failure propagates: a
+    // joinable thread destroyed in the unwinding would end the process.
     explicit ThreadPool(int n_threads) : n_workers_(n_threads - 1) {
         workers_.reserve(n_workers_);
-        for (int t = 0; t < n_workers_; ++t) workers_.emplace_back(&ThreadPool::worker_loop, this, t + 1);
+        try {
+            for (int t = 0; t < n_workers_; ++t) workers_.emplace_back(&ThreadPool::worker_loop, this, t + 1);
+        } catch (...) {
+            stop_and_join();
+            throw;
+        }
     }
 
-    ~ThreadPool() {
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            shutdown_ = true;
-        }
-        cv_work_.notify_all();
-        for (auto& w : workers_) w.join();
-    }
+    ~ThreadPool() { stop_and_join(); }
 
     ThreadPool(const ThreadPool&) = delete;
     ThreadPool& operator=(const ThreadPool&) = delete;
@@ -64,6 +64,16 @@ public:
     }
 
 private:
+    void stop_and_join() noexcept {
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            shutdown_ = true;
+        }
+        cv_work_.notify_all();
+        for (auto& w : workers_)
+            if (w.joinable()) w.join();
+    }
+
     void run_task(int tid) noexcept {
         try {
             task_(tid);

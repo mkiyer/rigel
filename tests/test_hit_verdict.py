@@ -147,6 +147,20 @@ def test_a_pair_facing_outward_is_withheld_not_intergenic(index, tmp_path):
     assert stats.n_withheld_unpaired == 1
 
 
+@pytest.mark.parametrize(
+    "f_cigar, r_cigar",
+    [("90M5S", "5S90M"), ("90M5S5H", "5H5S90M")],
+    ids=["soft-clipped", "soft-clipped-inside-a-hard-clip"],
+)
+def test_a_3_prime_soft_clip_is_read_past_a_hard_clip_outside_it(index, tmp_path, f_cigar, r_cigar):
+    """Each mate's 3' end is soft clipped five bases, once with a hard clip outside it: SAM puts H outermost, so both
+    pairs clip ten bases, which the routing's sequence likelihood reads (a hard clip there hid the soft one)."""
+    stats, clip = _scan_buffered(
+        tmp_path, index, _pair("clip3", 1010, f_cigar, 1100, r_cigar), "clip"
+    )
+    assert stats.n_fragments == 1 and clip == [10]
+
+
 def test_a_5_prime_soft_clip_is_walked_back(index, tmp_path):
     """F `10S90M` at 1020 and R at [1012,1112): on their aligned bases R starts before F's, but F's 5' end, its clip
     walked back, is at 1010, so the mates face inward over [1010,1112) and L is 102."""
