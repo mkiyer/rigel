@@ -134,22 +134,22 @@ but those marked closed:
 - annotation omission: unannotated unspliced RNA booked gDNA, and retained genes damaged ×1.4–3.0
   (issue #12).
 
-Every error is read per object (the owner, 2026-11-21; `SUCCESS.md`). Against 0.7.1 re-scored on the same reads
-(2026-11-21), at 5 % gDNA and above, on every in-scope row of the ladder on both inputs and of both fl-gap panels,
-HEAD's error is below 0.7.1's on transcripts (at most 0.72 of it) and genes (0.55), so bar 5 holds, and on each pool
-per locus (annotated 0.64, gDNA 0.74) but nascent at STAR's stranded capture-OFF 5 %, 9,711 against 9,709. The
-library nets that missed were 0.7.1's cancellation: at STAR's stranded capture-ON 50 %, its −1,380 is +16,265 over and
-−17,645 under across loci. Below 5 %, stranded capture ON at 0.1 % gDNA is worse than 0.7.1, with about 120,000
-nascent fragments read as annotated (genes 267,694 against 192,554), on the no-capture line too.
+Every error is read per object (the owner, 2026-11-21; `SUCCESS.md`). On the panels rebuilt 2026-11-25 from
+2ad72b98, against 0.7.1 re-scored on the same reads, at 5 % gDNA and above, on every in-scope row of the ladder on both
+inputs and of both fl-gap panels, HEAD's error is below 0.7.1's on transcripts (at most 0.71 of it) and genes (0.64),
+so bar 5 holds, and on each pool per locus (annotated 0.69, nascent 0.64, gDNA 0.70). A library net still misses where
+0.7.1's cancels: at STAR's stranded capture-ON 50 %, its annotated −10,319 is +9,564 over and −19,883 under across
+loci, against HEAD's +13,291 (+16,878, −3,587). Below 5 %, stranded capture ON at 0.1 % gDNA is worse than 0.7.1, with
+about 80,000 nascent fragments read as annotated (genes 203,765 against 176,340), on the no-capture line too.
 
-Calibration per object, Σ|P − O| less chance as a share of the library's gDNA: at 5 % gDNA 4.5 % unstranded capture
-OFF, 4.5 % stranded capture OFF and 9.5 % stranded capture ON, which fails bar 1; at 50 % and 98 %, and on both fl-gap
-panels, at most 3.0 %.
+Calibration per object, Σ|P − O| less chance as a share of the library's gDNA: at 5 % gDNA 4.6 % unstranded capture
+OFF, 4.6 % stranded capture OFF and 9.2 % stranded capture ON, which fails bar 1; at 50 % and 98 %, and on both fl-gap
+panels, at most 2.8 %.
 
 No preview ships (the owner's ruling, 2026-11-04): 0.8.0 waits for every `release-blocker` issue, in the order under
 Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_preview_validation/`, the re-score's in
-`$RIGEL_RUNS/prototypes/2026-11-21_regen/v071/`, and the per-object scores in `$RIGEL_RUNS/prototypes/2026-11-21_objects/`
-and `$RIGEL_RUNS/prototypes/2026-11-21_bars/`.
+`$RIGEL_RUNS/prototypes/2026-11-25_v071_rescore/`, and the per-object scores in
+`$RIGEL_RUNS/prototypes/2026-11-25_objects/` and `$RIGEL_RUNS/reports/ladder_inputs_2026-11-25/`.
 
 ## Claims that hold
 
