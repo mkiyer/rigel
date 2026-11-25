@@ -61,6 +61,7 @@ BROKEN = {
         "law_step_tolerance": 0.0,
         "law_newton_steps": 0,
         "law_newton_tolerance": 0.0,
+        "law_variance_block": 0,
         "min_effective_length": 0.0,
     },
     "scoring": {"strand_probability_floor": 0.5, "pruning_floor": 0.0},

@@ -447,6 +447,38 @@ def test_the_rna_laws_variance_is_its_normalised_delta_method():
     assert np.all(var[:lo] == 0.0) and np.all(var[hi:] == 0.0)
 
 
+def test_the_variance_solve_holds_a_block_of_lengths_not_the_support_squared(monkeypatch):
+    """The variance's right-hand side is dense, one column per length: solved whole, a 10,000-length support (a
+    configured ``max_frag_length``) would hold 800 MB. Each solve holds at most ``law_variance_block`` columns, and
+    the block moves no number: the lengths' solves are independent, so one length at a time, a few, and the default
+    give the same bits."""
+    import scipy.linalg
+
+    import rigel.calibration.fl as fl
+    from _constants import replaced
+    from rigel.config import CONSTANTS
+
+    widths = []
+    solve = scipy.linalg.solve_banded
+
+    def recording(l_and_u, ab, b, *args, **kwargs):
+        widths.append(np.shape(b)[1] if np.ndim(b) == 2 else 1)
+        return solve(l_and_u, ab, b, *args, **kwargs)
+
+    monkeypatch.setattr(scipy.linalg, "solve_banded", recording)
+    anchor = _gauss(250.0, 80.0)
+    raw = np.random.default_rng(3).poisson(2_000 * anchor).astype(np.float64)
+    _law, var, _ = fl.own_count_law(raw, None, anchor)
+    block = CONSTANTS.fragment_length.law_variance_block
+    assert np.count_nonzero(anchor > 0.0) > block
+    assert widths and max(widths) <= block
+    for other in (1, 7):
+        monkeypatch.setattr(
+            fl, "CONSTANTS", replaced(CONSTANTS, "fragment_length.law_variance_block", other)
+        )
+        np.testing.assert_array_equal(fl.own_count_law(raw, None, anchor)[1], var)
+
+
 def test_the_rna_laws_variance_predicts_what_replicate_libraries_show():
     """Repeated libraries at one law: the Hellinger noise the variance predicts, ``Σ Var f / 4 f``, against the replicate
     mean of ``H²(f̂, f)`` — what the length decision reads it for. At an exact null (RNA's law the anchor's, so the

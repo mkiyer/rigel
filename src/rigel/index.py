@@ -19,7 +19,9 @@ optional TSV mirrors, to an output directory:
 :class:`TranscriptIndex` builds the index (``build()``) and loads and queries it for quantification (``load()``).
 """
 
+import bisect
 import collections
+import itertools
 import json
 import logging
 import os
@@ -441,7 +443,8 @@ def _linked_components(points: list[tuple[int, int]], tolerance: int) -> list[in
 
     order = sorted(range(len(points)), key=lambda i: points[i])
     for a, i in enumerate(order):
-        for j in order[a + 1 :]:
+        for b in range(a + 1, len(order)):
+            j = order[b]
             if points[j][0] - points[i][0] > tolerance:
                 break
             if abs(points[j][1] - points[i][1]) <= tolerance:
@@ -512,24 +515,33 @@ def _merged_spans(
 
 def _containing_transcripts(transcripts: list[Transcript], spans) -> dict[tuple, Transcript]:
     """The single-exon transcript that contains each span whole, beyond the tolerance (the first, by start then
-    end, on the span's reference and strand): it carries the span too."""
-    by_place: dict[tuple[str, int], list[tuple[int, int, Transcript]]] = collections.defaultdict(
-        list
-    )
+    end, on the span's reference and strand): it carries the span too.
+
+    Per place, the candidates sorted by start then end, with each prefix's largest end: the ones starting at or
+    before the span's start are a prefix, and the first of them reaching its end is where that running maximum first
+    does, so a span costs two binary searches."""
+    by_place: dict[tuple[str, int], list[Transcript]] = collections.defaultdict(list)
     for t in transcripts:
         if len(t.exons) == 1:
-            by_place[(t.ref, int(t.strand))].append((t.start, t.end, t))
-    for candidates in by_place.values():
-        candidates.sort(key=lambda x: (x[0], x[1]))
+            by_place[(t.ref, int(t.strand))].append(t)
+    places = {}
+    for place, candidates in by_place.items():
+        candidates.sort(key=lambda t: (t.start, t.end))
+        places[place] = (
+            [t.start for t in candidates],
+            list(itertools.accumulate((t.end for t in candidates), max)),
+            candidates,
+        )
     containing: dict[tuple, Transcript] = {}
     for span_key in spans:
         ref, strand, m_start, m_end = span_key
-        for s_start, s_end, s_tx in by_place.get((ref, strand), []):
-            if s_start > m_start:
-                break  # sorted by start, no more can contain
-            if m_end <= s_end:
-                containing[span_key] = s_tx
-                break
+        if (ref, strand) not in places:
+            continue
+        starts, reach, candidates = places[(ref, strand)]
+        eligible = bisect.bisect_right(starts, m_start)
+        first = bisect.bisect_left(reach, m_end, 0, eligible)
+        if first < eligible:
+            containing[span_key] = candidates[first]
     return containing
 
 

@@ -8,6 +8,7 @@ to `FragmentBuffer.inject_chunk` — so these exercise the real native path rath
 that could diverge from it.
 """
 
+import collections
 import gc
 import threading
 import weakref
@@ -575,6 +576,78 @@ class TestDiskSpill:
             buf.cleanup()
         with pytest.raises(RuntimeError, match="Failed to spill buffer chunk"):
             _consume(buf)
+        assert _spill_dirs(tmp_path) == []
+
+    @pytest.mark.parametrize("budget", [0, 1], ids=["no-spill", "spill-every-chunk"])
+    def test_a_chunks_insertion_never_walks_the_earlier_chunks(self, mini_index, tmp_path, budget):
+        """A whole-genome scan hands over thousands of chunks: an insertion that walked the earlier ones (for a failed
+        spill, or for the oldest chunk still in memory) is quadratic in them. With spilling off and with every chunk
+        spilled, no insertion iterates the buffer's chunks; they come out in order and complete."""
+
+        class CountingDeque(collections.deque):
+            walks = 0
+
+            def __iter__(self):
+                CountingDeque.walks += 1
+                return super().__iter__()
+
+        buf = FragmentBuffer(max_memory_bytes=budget, spill_dir=tmp_path)
+        buf._chunks = CountingDeque()
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        try:
+            _inject(buf, [r] * 60, chunk_size=5, frag_ids=range(60))
+            assert CountingDeque.walks == 0
+            assert buf.n_spilled == (12 if budget else 0)
+            chunks = _consume(buf)
+            assert [int(i) for chunk in chunks for i in chunk.frag_id] == list(range(60))
+        finally:
+            buf.cleanup()
+        assert _spill_dirs(tmp_path) == []
+
+    def test_reading_between_insertions_keeps_the_spilled_chunks_in_front(
+        self, mini_index, tmp_path
+    ):
+        """The spilled chunks are the buffer's front entries, the ones in memory after them. A chunk read off the
+        front between two insertions is one fewer spilled chunk there, so the next spill still takes the oldest chunk
+        in memory, and everything comes out in order."""
+        buf = FragmentBuffer(max_memory_bytes=1, spill_dir=tmp_path)
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        try:
+            _inject(buf, [r] * 10, chunk_size=5, frag_ids=range(10))
+            reading = buf.iter_chunks_consuming()
+            first = [int(i) for i in next(reading).frag_id]
+            _inject(buf, [r] * 5, chunk_size=5, frag_ids=range(10, 15))
+            assert buf.n_spilled == 3 and buf.memory_bytes == 0
+            rest = [int(i) for chunk in reading for i in chunk.frag_id]
+            assert first + rest == list(range(15))
+        finally:
+            buf.cleanup()
+
+    def test_a_failed_spill_stops_the_next_insertion(self, mini_index, tmp_path, monkeypatch):
+        """A spill that fails is reported by the next chunk's insertion, not only when the buffer is read, so a scan
+        does not run on into a buffer it can no longer read back; the failed chunk's own error is the cause."""
+        written = []
+        original = buffer_mod.spill_chunk
+
+        def fail_second(chunk, path):
+            written.append(path)
+            if len(written) == 2:
+                raise OSError("synthetic spill failure")
+            original(chunk, path)
+
+        monkeypatch.setattr(buffer_mod, "spill_chunk", fail_second)
+        buf = FragmentBuffer(max_memory_bytes=1, spill_dir=tmp_path)
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        _inject(buf, [r] * 10, chunk_size=5)
+        spilled = [c for c in buf._chunks if isinstance(c, buffer_mod.PendingSpill)]
+        for pending in spilled:
+            pending.done.wait(timeout=5)
+        with pytest.raises(RuntimeError, match="Failed to spill buffer chunk") as raised:
+            _inject(buf, [r] * 5, chunk_size=5)
+        assert isinstance(raised.value.__cause__, OSError)
+        assert str(spilled[1].path) in str(raised.value)
+        with pytest.raises(RuntimeError, match="Failed to spill buffer chunk"):
+            buf.cleanup()
         assert _spill_dirs(tmp_path) == []
 
     def test_cleanup_waits_for_pending_spill(self, mini_index, tmp_path, monkeypatch):

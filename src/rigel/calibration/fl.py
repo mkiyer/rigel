@@ -480,12 +480,22 @@ def _law_and_variance(m: np.ndarray, d: np.ndarray, factor: np.ndarray):
     if width == 1:
         # one length holds probability one, whatever the factor: no variance (the solve below can read it as 0/0)
         return f, np.zeros(1)
-    # H = UᵀU with U the upper banded factor, so (e_l − f)ᵀ H⁻¹ (e_l − f) = |U⁻ᵀ (e_l − f)|², every l in one solve
+    # H = UᵀU with U the upper banded factor, so (e_l − f)ᵀ H⁻¹ (e_l − f) = |U⁻ᵀ (e_l − f)|², a block of lengths per
+    # solve: the right-hand side is dense, and the whole support at once would hold width² doubles. The expansion
+    # diag(H⁻¹) − 2 H⁻¹f + fᵀH⁻¹f is linear in the width but cancels where the law is near a point mass; the squared
+    # norm never goes negative.
     lower = np.zeros((2, width), dtype=np.float64)
     lower[0] = factor[1]
     lower[1, :-1] = factor[0, 1:]
-    whitened = solve_banded((1, 0), lower, np.eye(width) - f[:, None])
-    return f, f * f * np.einsum("ij,ij->j", whitened, whitened)
+    quadratic = np.empty(width, dtype=np.float64)
+    block = CONSTANTS.fragment_length.law_variance_block
+    for first in range(0, width, block):
+        last = min(width, first + block)
+        rhs = np.repeat(-f[:, None], last - first, axis=1)
+        rhs[np.arange(first, last), np.arange(last - first)] += 1.0
+        whitened = solve_banded((1, 0), lower, rhs)
+        quadratic[first:last] = np.einsum("ij,ij->j", whitened, whitened)
+    return f, f * f * quadratic
 
 
 def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):

@@ -247,6 +247,9 @@ class _SpillWriter:
         self._queue: queue.SimpleQueue[object] = queue.SimpleQueue()
         self._slots = threading.BoundedSemaphore(capacity)
         self._closed = False
+        #: The first chunk this writer failed to write, set by its thread before the chunk is reported done: the
+        #: buffer reads one slot, never its queue, to learn that a spill has failed.
+        self.failed: PendingSpill | None = None
         self._thread = threading.Thread(
             target=self._run,
             name="rigel-spill-writer",
@@ -294,6 +297,8 @@ class _SpillWriter:
                 logger.info("Finished spilled chunk -> %s", pending.path)
             except BaseException as exc:
                 pending.error = exc
+                if self.failed is None:
+                    self.failed = pending
                 logger.exception("Failed to write spilled chunk -> %s", pending.path)
             finally:
                 # Released before the chunk is reported written: kept while the writer blocks on its queue,
@@ -330,7 +335,10 @@ class FragmentBuffer:
         self.max_memory_bytes = max_memory_bytes
         self._spill_dir = spill_dir
 
+        # The chunks in order: the spilled ones first, then the ones in memory. A spill takes the oldest chunk in
+        # memory and a new one joins at the end, so the spilled chunks are always the front `_n_queued` entries.
         self._chunks: deque[FinalizedChunk | PendingSpill] = deque()
+        self._n_queued = 0
         self._total_size = 0
         self._memory_bytes = 0
         self._n_spilled = 0
@@ -369,31 +377,33 @@ class FragmentBuffer:
                     break
 
     def _spill_oldest(self) -> bool:
-        """Spill the oldest in-memory chunk to disk.  Return True if spilled."""
-        for i, chunk in enumerate(self._chunks):
-            if isinstance(chunk, FinalizedChunk):
-                writer = self._ensure_spill_writer()
-                path = writer.temp_dir / f"chunk_{self._n_spilled:04d}.arrow"
-                freed = chunk.memory_bytes
-                pending = PendingSpill(
-                    path=path,
-                    done=threading.Event(),
-                    memory_bytes=freed,
-                    size=chunk.size,
-                )
-                writer.submit(chunk, pending)
-                self._chunks[i] = pending
-                self._memory_bytes -= freed
-                self._n_spilled += 1
-                logger.info(
-                    "Queued spill for chunk %d (%s fragments, %.1f MB) -> %s",
-                    i,
-                    f"{chunk.size:,}",
-                    freed / 1024**2,
-                    path,
-                )
-                return True
-        return False
+        """Spill the oldest in-memory chunk to disk, the first after the spilled ones. Return True if spilled."""
+        i = self._n_queued
+        if i == len(self._chunks):
+            return False
+        chunk = self._chunks[i]
+        writer = self._ensure_spill_writer()
+        path = writer.temp_dir / f"chunk_{self._n_spilled:04d}.arrow"
+        freed = chunk.memory_bytes
+        pending = PendingSpill(
+            path=path,
+            done=threading.Event(),
+            memory_bytes=freed,
+            size=chunk.size,
+        )
+        writer.submit(chunk, pending)
+        self._chunks[i] = pending
+        self._n_queued += 1
+        self._memory_bytes -= freed
+        self._n_spilled += 1
+        logger.info(
+            "Queued spill for chunk %d (%s fragments, %.1f MB) -> %s",
+            i,
+            f"{chunk.size:,}",
+            freed / 1024**2,
+            path,
+        )
+        return True
 
     def _ensure_spill_writer(self) -> _SpillWriter:
         if self._spill_writer is None:
@@ -434,13 +444,9 @@ class FragmentBuffer:
             raise self._spill_error(failed) from failed.error
 
     def _raise_completed_spill_errors(self) -> None:
-        for chunk_ref in self._chunks:
-            if (
-                isinstance(chunk_ref, PendingSpill)
-                and chunk_ref.done.is_set()
-                and chunk_ref.error is not None
-            ):
-                raise self._spill_error(chunk_ref) from chunk_ref.error
+        failed = None if self._spill_writer is None else self._spill_writer.failed
+        if failed is not None:
+            raise self._spill_error(failed) from failed.error
 
     # -- Iteration ------------------------------------------------------------
 
@@ -450,6 +456,7 @@ class FragmentBuffer:
         while self._chunks:
             chunk_ref = self._chunks.popleft()
             if isinstance(chunk_ref, PendingSpill):
+                self._n_queued -= 1
                 path = self._wait_pending_spill(chunk_ref)
                 chunk = load_chunk(path)
                 path.unlink(missing_ok=True)

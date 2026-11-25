@@ -756,6 +756,11 @@ class FragmentLengthConstants:
     #: ... and stops when a step changes the penalised objective by less than this share of it.
     law_newton_tolerance: float = 1e-12
 
+    #: The law's per-length variance is solved this many lengths at a time, so the solve holds ``width × block``
+    #: doubles rather than ``width²`` (20 MB at a 10,000-length support, not 800 MB). The lengths' solves are
+    #: independent, so the block moves no number; 256 keeps the default 1,000-length support at four blocks.
+    law_variance_block: int = 256
+
     #: An effective length is floored here wherever it divides (a transcript's, a gene's, TPM's rate): a transcript
     #: shorter than its fragments has under one start position, and it reads one rather than a rate near 1/0. The
     #: convention of salmon and kallisto; a Poisson rate's denominator, where a span of 0 must add 0, takes no floor.
@@ -770,6 +775,7 @@ class FragmentLengthConstants:
             law_step_tolerance=self.law_step_tolerance > 0.0,
             law_newton_steps=self.law_newton_steps >= 1,
             law_newton_tolerance=0.0 < self.law_newton_tolerance < 1.0,
+            law_variance_block=self.law_variance_block >= 1,
             min_effective_length=self.min_effective_length > 0.0,
         )
 
