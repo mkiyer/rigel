@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, get_args
 
 if TYPE_CHECKING:
-    import numpy as np
+    pass
 
 
 def _check_integer(where: str, value, least: int) -> None:
@@ -206,8 +206,8 @@ class BamScanConfig:
     read_name_batch_size : int
         Read-name groups per native scanner input queue item (default 512).
     buffer_size_bytes : int
-        Memory for the buffered fragments before the oldest chunks spill to disk (default 2 GiB). It bounds the
-        buffer only: beside it each scan worker fills one chunk and the scanner's queue holds
+        Memory for the buffered fragments before the oldest chunks spill to disk (default 2 GiB); 0 disables
+        spilling, and the buffer then holds every chunk in memory. It bounds the buffer only: beside it each scan worker fills one chunk and the scanner's queue holds
         ``OUTPUT_CHUNKS_PER_WORKER`` finished ones per worker (the native ``constants.h``), and the spill writer up
         to ``CONSTANTS.resources.spill_queue_chunks``.
     spill_dir : Path, str, or None
@@ -1063,31 +1063,3 @@ def _check_ranges(section, **ok: bool) -> None:
 
 #: The constants the code reads.
 CONSTANTS = Constants()
-
-
-# ======================================================================
-# Pre-computed transcript geometry (not user-configurable)
-# ======================================================================
-
-
-@dataclass
-class TranscriptGeometry:
-    """The per-transcript effective lengths the EM reads, computed once at the start of
-    ``quant_from_buffer`` from ``TranscriptIndex`` and the RNA
-    :class:`~rigel.frag_length_model.FragmentLengthModel`. Not user-configurable.
-
-    That model is built by ``FragmentLengthModel.from_pmf`` from ``FLModels.rna_pmf``, which is derived
-    from the accumulator payload alone. The effective lengths here and the calibration divisors read the
-    same pmf, so a change to it reaches every transcript in the EM, not only calibration.
-
-    Parameters
-    ----------
-    effective_lengths : np.ndarray
-        float64[n_transcripts] — effective transcript lengths (the output lengths, TPM's).
-    effective_lengths_em : np.ndarray
-        float64[n_transcripts] — the EM's effective lengths, capture-contracted; equal to
-        ``effective_lengths`` off capture.
-    """
-
-    effective_lengths: np.ndarray
-    effective_lengths_em: np.ndarray

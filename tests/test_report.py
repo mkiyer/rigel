@@ -326,6 +326,11 @@ def test_genome_track_spec_bins_per_ref(monkeypatch):
     rt = reference_table(track)
     assert [r[0] for r in rt] == ["chr2", "chr1"]
     assert rt[0][1] == 2  # chr2 n_regions
+    # a region of no length is a broken track, refused rather than read at length 1
+    broken = track.copy()
+    broken.loc[broken.index[0], "end"] = broken.loc[broken.index[0], "start"]
+    with pytest.raises(SubstrateError, match="region of no length"):
+        reference_table(broken)
     # build_charts merges genome in when a track is present
     stub = SimpleNamespace(
         fragment_lengths=pd.DataFrame(),

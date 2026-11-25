@@ -10,11 +10,12 @@ and the per-locus prior is assembled in ``rigel.calibration.priors``.
 """
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-from .config import CONSTANTS, EMConfig, TranscriptGeometry
+from .config import CONSTANTS, EMConfig
 from .native import (
     ASSIGN_FRACTIONAL,
     ASSIGN_SAMPLE,
@@ -24,6 +25,31 @@ from .native import batch_locus_em_partitioned as _batch_locus_em_partitioned
 from .splice import NUM_SPLICE_STRAND_COLS, SPLICED_COLS
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TranscriptGeometry:
+    """The per-transcript effective lengths the estimator reads, a run's result and not a setting:
+    ``pipeline.transcript_geometry`` computes them in ``run_pipeline``, after calibration and before
+    ``quant_from_buffer``, from the index, the RNA length model, the calibration result, the region frame and the
+    length tables.
+
+    The RNA model is built by ``FragmentLengthModel.from_pmf`` from ``FLModels.rna_pmf``, which is derived from the
+    accumulator payload alone. The effective lengths here and the calibration divisors read the same pmf, so a change
+    to it reaches every transcript in the EM, not only calibration.
+
+    Parameters
+    ----------
+    effective_lengths : np.ndarray
+        float64[n_transcripts] — effective transcript lengths (the output lengths, TPM's).
+    effective_lengths_em : np.ndarray
+        float64[n_transcripts] — the EM's effective lengths, capture-contracted; equal to
+        ``effective_lengths`` off capture.
+    """
+
+    effective_lengths: np.ndarray
+    effective_lengths_em: np.ndarray
+
 
 #: ``EMConfig``'s mode names → the codes the native EM defines (it refuses any other code).
 ASSIGNMENT_MODE_CODES = {"fractional": ASSIGN_FRACTIONAL, "sample": ASSIGN_SAMPLE}
@@ -75,8 +101,13 @@ _STRAND_STR = np.array([".", "+", "-", "."])
 
 
 def _strand_glyph(strand_codes: np.ndarray) -> np.ndarray:
-    """Map an int strand-code array to ``+`` / ``-`` / ``.`` glyphs."""
-    return _STRAND_STR[np.clip(np.asarray(strand_codes), 0, 3)]
+    """Map an int strand-code array to ``+`` / ``-`` / ``.`` glyphs; a code that is no ``Strand`` is refused."""
+    codes = np.asarray(strand_codes)
+    if np.any((codes < 0) | (codes >= _STRAND_STR.size)):
+        raise ValueError(
+            f"a strand code outside 0..{_STRAND_STR.size - 1}: {sorted(set(codes.tolist()))}"
+        )
+    return _STRAND_STR[codes]
 
 
 def _tpm(
@@ -308,7 +339,7 @@ class AbundanceEstimator:
         if geometry is not None:
             self._t_eff_len_output = np.maximum(
                 np.asarray(geometry.effective_lengths, dtype=np.float64),
-                1.0,
+                CONSTANTS.fragment_length.min_effective_length,
             )
             # The EM's yields, unfloored: a yield of 0 is a component that cannot emit (the C++ reads it
             # so) and every positive yield enters as it is — the E-step decides on ratios within a locus.
@@ -703,7 +734,8 @@ class AbundanceEstimator:
         multi-exon transcripts whose merged span it is, and those transcripts name it in
         ``span_t_index``. A merged span that an annotated single-exon transcript covers gets no
         synthetic span: that transcript is annotated RNA, a row of the transcript table, and is no
-        row here. A synthetic span that no multi-exon transcript names is not a row either.
+        row here. Every synthetic span is made from the multi-exon transcripts that name it, so one that none names
+        is an inconsistent index, refused.
 
         Columns
         -------
@@ -723,15 +755,20 @@ class AbundanceEstimator:
             return pd.DataFrame(columns=list(_NASCENT_COLUMNS))
 
         t_total = self.t_counts.sum(axis=1)
-        # The span → named-by aggregation once (span_t_index is in the index schema), then the synthetic rows that at
-        # least one multi-exon transcript names
+        # The span → named-by aggregation once (span_t_index is in the index schema)
         n_annotated_per_span, count_annotated_per_span = _span_children_counts(
             t_df["span_t_index"].values,
             t_total,
             n_transcripts=len(t_df),
         )
         idx = np.where(is_synthetic)[0]
-        idx = idx[n_annotated_per_span[idx] > 0]
+        unnamed = idx[n_annotated_per_span[idx] == 0]
+        if unnamed.size:
+            raise ValueError(
+                f"the index holds {unnamed.size} synthetic span(s) no transcript names (first: "
+                f"{t_df['t_id'].iloc[int(unnamed[0])]!r}); a span is made from the transcripts that name it, so the "
+                "index is inconsistent: rebuild it"
+            )
         counts = t_total[idx]
         eff = self._t_eff_len_output[idx]
 

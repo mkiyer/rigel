@@ -396,7 +396,10 @@ def reference_table(track) -> list:
     count per bp (Σ gDNA count / Σ region length): a per-region median is 0 on most references.
     """
     qc = CONSTANTS.qc
-    length = (track["end"] - track["start"]).clip(lower=1)
+    length = track["end"] - track["start"]
+    if (length <= 0).any():
+        # the track's regions are the index's, each of positive length: a region of none is a broken file
+        raise SubstrateError("calibration_track.feather holds a region of no length")
     agg = (
         track.assign(_len=length)
         .groupby("ref", observed=True)

@@ -174,7 +174,7 @@ class FragmentLengthModel:
         """The finalized probability vector, shape ``(max_size + 1,)``; a raw-count model refuses."""
         if self._prob is None:
             raise ValueError(
-                "this FragmentLengthModel holds raw counts only; pmf() and the effective lengths need "
+                "this FragmentLengthModel holds raw counts only; its pmf and the effective lengths need "
                 "a model built by FragmentLengthModel.from_pmf"
             )
         return self._prob

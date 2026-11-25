@@ -164,9 +164,7 @@ def _overdispersion_axis(gdna: GDNASimConfig) -> list[tuple[str, float]]:
     labels = gdna.strand_overdispersion_labels
     axis: list[tuple[str, float]] = []
     for i, od in enumerate(values):
-        od = float(od)
-        if not (0.0 <= od < 1.0):
-            raise ValueError(f"gdna strand_overdispersion must be in [0, 1); got {od}")
+        od = float(od)  # in [0, 1): GDNASimConfig refuses any other
         if labels is not None and i < len(labels):
             label = labels[i]
         else:

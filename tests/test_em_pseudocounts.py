@@ -66,6 +66,14 @@ def test_a_gdna_count_above_the_fragment_count_is_refused_not_clipped():
         em_pseudocounts(np.array([1200.0]), np.array([1000.0]), np.array([600.0]))
 
 
+@pytest.mark.parametrize("gdna", [-1.0, float("nan"), float("inf")])
+def test_a_gdna_count_that_is_not_a_count_is_refused_not_clipped(gdna):
+    """Calibration's counts are finite and nonnegative; clipped to a share of 0, a broken one would read as a locus
+    with no gDNA."""
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        em_pseudocounts(np.array([gdna]), np.array([1000.0]), np.array([600.0]))
+
+
 def test_a_gdna_count_one_rounding_above_the_fragment_count_is_a_share_of_one():
     """A locus that is all gDNA has the two counts equal, and a count summed in another order (an oracle's) can sit
     a rounding above: a share of one, not a refusal and not a negative RNA pseudocount."""
@@ -191,7 +199,15 @@ def _run(ss: float, junction_len: int, mode: str, multimapper_every: int = 0):
     n_fragments = float(em.n_units + deterministic.sum())
     n_t = len(t_len)
     est = AbundanceEstimator(
-        n_t, em_config=EMConfig(seed=1, mode=mode, assignment_mode="fractional", n_threads=1)
+        n_t,
+        em_config=EMConfig(
+            seed=1,
+            mode=mode,
+            assignment_mode="fractional",
+            n_threads=1,
+            iterations=20000,
+            convergence_delta=1e-12,
+        ),
     )
     est._t_eff_len_em = t_len
     est.unambig_counts[:, int(SpliceStrandCol.SPLICED_ANNOT_SENSE)] = deterministic
@@ -213,7 +229,6 @@ def _run(ss: float, junction_len: int, mode: str, multimapper_every: int = 0):
         gdna_count=np.array([truth_gdna]),  # calibration exact, in both of its counts
         fragment_count=np.array([n_fragments]),
         gdna_eff_len=np.array([gdna_len]),
-        em_config=EMConfig(mode=mode, iterations=20000, convergence_delta=1e-12),
     )
     t = est.unambig_counts.sum(axis=1) + est.em_counts.sum(axis=1)
     return est.gdna_em_count, truth_gdna, t, truth_t

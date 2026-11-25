@@ -31,9 +31,8 @@ from .config import (
     PipelineConfig,
     BamScanConfig,
     FragmentScoringConfig,
-    TranscriptGeometry,
 )
-from .estimator import AbundanceEstimator
+from .estimator import AbundanceEstimator, TranscriptGeometry
 from .frag_length_model import FragmentLengthModel
 from .index import TranscriptIndex
 from .native import EM_WINNER_GDNA, EM_WINNER_INTERGENIC
@@ -822,6 +821,11 @@ def em_pseudocounts(
     gdna_count = np.asarray(gdna_count, dtype=np.float64)
     fragment_count = np.asarray(fragment_count, dtype=np.float64)
     n_gdna_eligible = np.asarray(n_gdna_eligible, dtype=np.float64)
+    if not (np.all(np.isfinite(gdna_count)) and np.all(gdna_count >= 0.0)):
+        # calibration's counts are finite and nonnegative; a clamp here would read a broken one as no gDNA
+        raise ValueError(
+            "a locus's gDNA count must be finite and nonnegative, as calibration's counts are"
+        )
     seen = fragment_count > 0
     share = np.divide(gdna_count, fragment_count, out=np.zeros_like(gdna_count), where=seen)
     if np.any(share > 1.0 + CONSTANTS.calibration.fraction_tolerance):
@@ -830,7 +834,7 @@ def em_pseudocounts(
             f"a locus's gDNA count ({float(gdna_count[i])!r}) exceeds its count of every fragment "
             f"({float(fragment_count[i])!r}); the two must be read over the same fragments."
         )
-    share = np.clip(share, 0.0, 1.0)
+    share = np.minimum(share, 1.0)  # within the tolerance above 1, never further
     strength = np.where(seen, n_gdna_eligible, 0.0)
     gdna_prior = strength * share
     return gdna_prior, strength - gdna_prior
@@ -845,7 +849,6 @@ def run_locus_em_partitioned(
     fragment_count: np.ndarray,
     gdna_eff_len: np.ndarray,
     *,
-    em_config: EMConfig,
     intergenic_rate: float = 0.0,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
@@ -1023,7 +1026,6 @@ def quant_from_buffer(
         priors.gdna_count,
         priors.fragment_count,
         priors.gdna_eff_len,
-        em_config=em_config,
         intergenic_rate=intergenic_gdna_rate(calibration, region_arrays),
         annotations=annotations,
         emit_locus_stats=emit_locus_stats,

@@ -18,8 +18,8 @@ from rigel.types import Strand
 from rigel.splice import (
     SpliceStrandCol,
 )
-from rigel.config import EMConfig, TranscriptGeometry
-from rigel.estimator import AbundanceEstimator
+from rigel.config import EMConfig
+from rigel.estimator import AbundanceEstimator, TranscriptGeometry
 from rigel.scored_fragments import ScoredFragments
 
 from _em_harness import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign, em_partition
@@ -714,6 +714,16 @@ class TestCountsOutput:
         assert nascent["nascent_id"].tolist() == ["t5"]
         row = nascent.iloc[0]
         assert (row["count"], row["n_annotated"], row["count_annotated"]) == (4.0, 2, 15.0)
+
+        # a synthetic span no transcript names is an inconsistent index: refused, not dropped from the table
+        index.t_df["span_t_index"] = [-1, 2, 2, -1, -1, -1]
+        with pytest.raises(ValueError, match="synthetic span"):
+            rc.get_nascent_quant_df(index)
+
+        # a strand code that is no Strand is refused, not clipped to a glyph
+        index.t_df["strand"] = [int(Strand.POS)] * 5 + [7]
+        with pytest.raises(ValueError, match="strand code"):
+            rc.get_counts_df(index)
 
 
 class TestPartitionedEffectiveLength:

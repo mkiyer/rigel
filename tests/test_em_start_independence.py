@@ -26,8 +26,8 @@ import pytest
 
 from _em_harness import em_partition
 
-from rigel.config import EMConfig, TranscriptGeometry
-from rigel.estimator import AbundanceEstimator
+from rigel.config import EMConfig
+from rigel.estimator import AbundanceEstimator, TranscriptGeometry
 
 FIXTURES = Path(__file__).parent / "data" / "em_start"
 PARTITION_KEYS = (

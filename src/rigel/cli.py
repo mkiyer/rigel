@@ -527,7 +527,13 @@ def _cli_to_config(val: object, transform: str) -> object:
     if transform == "gib_to_bytes":
         if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
             raise TypeError(f"a size in GiB must be a finite number; got {val!r}")
-        return int(val * 1024**3)  # GiB → bytes
+        size = int(val * 1024**3)  # GiB → bytes
+        if val < 0 or (val > 0 and size == 0):
+            # 0 is a setting of its own (no spilling); a size that rounds to it would switch spilling off unasked
+            raise ValueError(
+                f"a size in GiB must be 0 (no spilling) or at least one byte; got {val!r}"
+            )
+        return size
     raise ValueError(f"Unknown transform: {transform!r}")
 
 
@@ -895,8 +901,9 @@ def _add_quant_performance_options(grp, qd: dict) -> None:
         "--scan-buffer-size",
         type=float,
         help="Memory in GiB for the scanned fragments held for quantification before the oldest chunks "
-        f"spill to disk (default: {qd['scan_buffer_size']:g}). It bounds that buffer only, not the "
-        "chunks the scan workers hold in flight. Increase if you have ample RAM to reduce spill I/O.",
+        f"spill to disk (default: {qd['scan_buffer_size']:g}); 0 disables spilling, holding every chunk in "
+        "memory. It bounds that buffer only, not the chunks the scan workers hold in flight. Increase if you have "
+        "ample RAM to reduce spill I/O.",
     )
     grp.add_argument(
         "--tmpdir",
