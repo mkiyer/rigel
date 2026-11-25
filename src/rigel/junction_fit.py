@@ -22,8 +22,8 @@ def genuine_sense_fraction(n_sense, n_total) -> float:
     the reads the three-class mixture credits to RNA at its maximum (:func:`genuine_mixture`). Where every junction is
     genuine that is exactly ``(n_same + 1) / (n_obs + 2)``; it is never 0."""
     k, n, c, flip = _oriented_groups(n_sense, n_total)
-    _, _, minority, reads, _ = genuine_mixture(k, n, c)
-    return _sense_fraction(minority, reads, flip)
+    fit = genuine_mixture(k, n, c)
+    return _sense_fraction(fit.minority, fit.reads, flip)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,17 +41,14 @@ def junction_classes(n_sense, n_total) -> JunctionClasses:
     """:func:`genuine_sense_fraction`'s fit, with the class shares it maximises over: by junction, the shares
     themselves; by fragment, each class's expected reads at the maximum over all the junctions' reads."""
     k, n, c, flip = _oriented_groups(n_sense, n_total)
-    rate, shares, minority, reads, _ = genuine_mixture(k, n, c)
-    kappa = _sense_fraction(minority, reads, flip)
+    fit = genuine_mixture(k, n, c)
+    kappa = _sense_fraction(fit.minority, fit.reads, flip)
     if not float(c @ n) > 0.0:
         return JunctionClasses(kappa, None, None)
-    lp = _class_log_likelihoods(k, n, rate)
-    f = np.exp(lp - lp.max(axis=0))
-    resp = shares[:, None] * f / (shares @ f)
-    fragments = resp @ (c * n)
+    fragments = fit.responsibilities @ (c * n)
     return JunctionClasses(
         kappa,
-        tuple(float(x) for x in shares),
+        tuple(float(x) for x in fit.shares),
         tuple(float(x) for x in fragments / fragments.sum()),
     )
 
@@ -88,15 +85,26 @@ def _class_log_likelihoods(k: np.ndarray, n: np.ndarray, kappa: float) -> np.nda
     )
 
 
-def genuine_mixture(
-    k: np.ndarray, n: np.ndarray, c: np.ndarray
-) -> tuple[float, np.ndarray, float, float, float]:
+@dataclass(frozen=True, slots=True)
+class MixtureFit:
+    """The three-class mixture at its maximum (:func:`genuine_mixture`): the genuine class's minority rate κ, the class
+    shares, each junction group's class responsibilities ``(3, G)``, the RNA classes' expected minority reads and
+    reads, and the log-likelihood."""
+
+    kappa: float
+    shares: np.ndarray
+    responsibilities: np.ndarray
+    minority: float
+    reads: float
+    loglik: float
+
+
+def genuine_mixture(k: np.ndarray, n: np.ndarray, c: np.ndarray) -> MixtureFit:
     """The three-class binomial mixture's maximum likelihood. Junction group g (``c_g`` junctions with ``k_g`` of
     ``n_g`` reads on the minority side) is genuine RNA (rate κ), a splice artifact (½) or reversed (1 − κ). The class
     shares are solved exactly at each κ (:func:`_class_shares`), and κ maximises that profile by a scan over
     ``u = log(κ/(½ − κ))`` and Brent's method in its best cell: bounded work, where EM slows without bound as κ nears ½
-    (the classes merge) and can stop at a saddle. Returns ``(κ, shares, minority, reads, log-likelihood)``, ``minority``
-    and ``reads`` being the RNA classes' expected counts at the maximum."""
+    (the classes merge) and can stop at a saddle."""
     from scipy.optimize import minimize_scalar
 
     constants = CONSTANTS.junction_fit
@@ -126,7 +134,7 @@ def genuine_mixture(
         resp = shares[:, None] * f / (shares @ f)
     minority = float(c @ (resp[0] * k + resp[2] * (n - k)))
     reads = float(c @ ((resp[0] + resp[2]) * n))
-    return 0.5 / (1.0 + float(np.exp(-u))), shares, minority, reads, loglik
+    return MixtureFit(0.5 / (1.0 + float(np.exp(-u))), shares, resp, minority, reads, loglik)
 
 
 def _class_shares(f: np.ndarray, c: np.ndarray) -> tuple[float, np.ndarray]:

@@ -37,6 +37,7 @@ import numpy as np
 from scipy.special import betaln, gammaln
 
 from ..config import CONSTANTS
+from .numeric import bisect_to_adjacent
 
 __all__ = [
     "BackgroundLaw",
@@ -150,8 +151,8 @@ def one_sided_rate(counts, exposure, size: float = np.inf) -> GdnaDensityFit:
     because ``F(0+) < 0`` whenever any object has a count (the early return ensures one does), the lower end walks
     off zero on its own.
 
-    The loop ends when the bracket closes to adjacent floats: their midpoint rounds to one of them, so ``½(lo + hi)``
-    cannot move again, and no iteration budget is needed.
+    The bisection closes the bracket to adjacent floats (:func:`~.numeric.bisect_to_adjacent`), so no iteration
+    budget is needed.
     """
     n = np.asarray(counts, dtype=np.float64).ravel()
     e = np.asarray(exposure, dtype=np.float64).ravel()
@@ -174,14 +175,7 @@ def one_sided_rate(counts, exposure, size: float = np.inf) -> GdnaDensityFit:
     lo, hi = 0.0, CONSTANTS.calibration.bracket_headroom * pooled
     if not (f(lo) <= 0.0 <= f(hi)):
         return GdnaDensityFit(pooled, pooled, int(n.size), total_e, bracket_ok=False)
-    while True:
-        mid = 0.5 * (lo + hi)
-        if mid <= lo or mid >= hi:  # the bracket is closed to the last float
-            break
-        if f(mid) > 0.0:
-            hi = mid
-        else:
-            lo = mid
+    lo, hi = bisect_to_adjacent(lambda rho: not f(rho) > 0.0, lo, hi)
     return GdnaDensityFit(0.5 * (lo + hi), pooled, int(n.size), total_e, bracket_ok=True)
 
 

@@ -737,12 +737,8 @@ class AbundanceEstimator:
         counts = t_total[idx]
         eff = self._t_eff_len_output[idx]
 
-        # Total RNA TPM, normalized over the annotated + synthetic rpk pool so it is comparable to the transcript
-        # table's tpm_total_rna; inline, because the denominator is the full pool, not this array
-        floor = CONSTANTS.fragment_length.min_effective_length
-        rpk = counts / np.maximum(eff, floor)
-        total_rpk = float((t_total / np.maximum(self._t_eff_len_output, floor)).sum())
-        tpm_total_rna = (rpk / total_rpk * 1e6) if total_rpk > 0 else np.zeros_like(rpk)
+        # Total RNA TPM over the annotated + synthetic pool, so it is comparable to the transcript table's
+        tpm_total_rna = _tpm(t_total, self._t_eff_len_output)[idx]
 
         df = pd.DataFrame(
             {

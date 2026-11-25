@@ -390,7 +390,7 @@ class TestGenuineKappa:
         k, n, c = kn[:, 0], kn[:, 1], cnt.astype(float)
         if c @ k > 0.5 * (c @ n):
             k = n - k
-        fit_loglik = genuine_mixture(k, n, c)[4]
+        fit_loglik = genuine_mixture(k, n, c).loglik
 
         def classes(kappa):
             return np.stack(

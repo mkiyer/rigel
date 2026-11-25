@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .gdna_opportunity import contained_opportunity
+
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
 
@@ -39,24 +41,6 @@ __all__ = [
     "detilt_pool",
     "sj_opportunity",
 ]
-
-
-def _ramp_sum(lengths: np.ndarray, weights: np.ndarray, max_length: int) -> np.ndarray:
-    """``SUM_j weights_j * (lengths_j - w + 1)+`` for every ``w`` in ``[0, max_length]``.
-
-    ``(len - w + 1)+`` is the count of integers in ``[w, len]``, so the whole sum is
-    ``SUM_{v >= w} SUM_{j: len_j >= v} weights_j``: the reverse cumulative sum, applied twice, of the weighted
-    length histogram, with no loop over ``w``. The histogram must span both the longest object and ``max_length``: a
-    shorter span truncates the inner tail sum, and one that stops before ``max_length`` returns a short, misaligned
-    array.
-    """
-    lengths = np.asarray(lengths, dtype=np.int64)
-    span = max(int(lengths.max(initial=0)) + 2, max_length + 1)
-    hist = np.bincount(lengths, weights=np.asarray(weights, dtype=np.float64), minlength=span)
-    tail = np.cumsum(hist[::-1])[::-1]
-    out = np.cumsum(tail[::-1])[::-1][: max_length + 1]
-    assert out.size == max_length + 1, (out.size, max_length)
-    return out.copy()
 
 
 def sj_opportunity(
@@ -95,8 +79,10 @@ def sj_opportunity(
     prefix = np.concatenate([[0], np.cumsum(exon_lengths)])
     transcript_lengths = prefix[transcript_offsets[1:]] - prefix[transcript_offsets[:-1]]
 
-    total = _ramp_sum(transcript_lengths, theta, max_length)
-    inside_one_exon = _ramp_sum(exon_lengths, np.repeat(theta, n_exons), max_length)
+    total = contained_opportunity(transcript_lengths, max_length, weights=theta)
+    inside_one_exon = contained_opportunity(
+        exon_lengths, max_length, weights=np.repeat(theta, n_exons)
+    )
     crossing = total - inside_one_exon
 
     # Bin 0 is not a fragment length, and the complement identity is negative there: a zero-length window sits on an

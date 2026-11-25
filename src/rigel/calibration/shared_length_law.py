@@ -39,6 +39,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .numeric import bisect_to_adjacent
+
 __all__ = [
     "LengthDecision",
     "LengthTables",
@@ -120,15 +122,7 @@ def capture_mixture(g: np.ndarray, r: np.ndarray, kappa: float) -> tuple[np.ndar
         return g.copy(), 0.0
     if slope(kappa) >= 0.0:
         return size_biased(g, kappa), float(kappa)
-    lo, hi = 0.0, float(kappa)
-    while True:
-        mid = 0.5 * (lo + hi)
-        if not lo < mid < hi:
-            break
-        if slope(mid) > 0.0:
-            lo = mid
-        else:
-            hi = mid
+    lo, _ = bisect_to_adjacent(lambda c: slope(c) > 0.0, 0.0, float(kappa))
     return size_biased(g, lo), lo
 
 

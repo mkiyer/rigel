@@ -38,11 +38,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.special import betainc, betaincc
+
 from scipy.stats import binom, nbinom, poisson
 
 from ..config import CONSTANTS
 from .gdna_density import BackgroundLaw
+from .numeric import beta_span, bisect_to_adjacent
 
 __all__ = ["DepartureFit", "fit_departure_prior"]
 
@@ -85,12 +86,9 @@ def departure_evidence(sense, antisense, exposure, law: BackgroundLaw, kappa: fl
     # ∫ Binom(A; C, p) dp over [x1, x2] is (I_x2 − I_x1)(A + 1, C − A + 1)/(C + 1); over the span x2 − x1 it is the
     # uniform f's average. The upper tail goes through the complements, which keep their digits where both I near 1.
     x1, x2 = min(p_rna, p_gdna), max(p_rna, p_gdna)
-    ia, ib = a + 1.0, c - a + 1.0
-    lower = betainc(ia, ib, x2) - betainc(ia, ib, x1)
-    upper = betaincc(ia, ib, x1) - betaincc(ia, ib, x2)
-    mass = np.where(betainc(ia, ib, x1) > 0.5, upper, lower)
+    mass = beta_span(a + 1.0, c - a + 1.0, x1, x2)
     with np.errstate(divide="ignore"):
-        log_b = np.log(np.maximum(mass, 0.0)) - np.log(c + 1.0) - np.log(x2 - x1)
+        log_b = np.log(mass) - np.log(c + 1.0) - np.log(x2 - x1)
     return log_a, log_b
 
 
@@ -148,15 +146,7 @@ def fit_departure_prior(
     def slope(eps):
         return float(_score(d, eps).sum()) + 1.0 / eps - (n0 - 1.0) / (1.0 - eps)
 
-    lo, hi = 0.0, 1.0
-    while True:
-        mid = 0.5 * (lo + hi)
-        if mid <= lo or mid >= hi:  # the bracket is closed to adjacent floats
-            break
-        if slope(mid) > 0.0:
-            lo = mid
-        else:
-            hi = mid
+    lo, hi = bisect_to_adjacent(lambda eps: slope(eps) > 0.0, 0.0, 1.0)
     eps = 0.5 * (lo + hi)
     # The mode gains at least the likelihood the prior gives up by leaving m0, so the data's gain is not negative; a
     # rounding below 0 is 0.

@@ -31,8 +31,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         0,
         "vocabulary — no calibration deps",
         # The words everything else is written in: `signature` is the region bitmask, `region_chain` is
-        # the N E N E … N sequence, `errors` the exception types. Nothing here knows what a solve is.
-        ("errors", "signature", "region_chain", "_layers"),
+        # the N E N E … N sequence, `errors` the exception types, `numeric` the bisection and the beta span several
+        # layers share. Nothing here knows what a solve is.
+        ("errors", "signature", "region_chain", "numeric", "_layers"),
     ),
     (
         1,

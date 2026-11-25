@@ -58,6 +58,7 @@ from scipy.stats import binom
 
 from ..config import CONSTANTS
 from .intron_departure import _score
+from .numeric import beta_span, bisect_to_adjacent
 
 __all__ = ["LockFit", "fit_lock_departure"]
 
@@ -81,17 +82,9 @@ class LockFit:
     variance: np.ndarray
 
 
-def _span(a, b, x1: float, x2: float):
-    """``I_x2(a, b) − I_x1(a, b)``; the upper tail goes through the complements, which keep their digits where both
-    are near 1."""
-    lower = betainc(a, b, x2) - betainc(a, b, x1)
-    upper = betaincc(a, b, x1) - betaincc(a, b, x2)
-    return np.maximum(np.where(betainc(a, b, x1) > 0.5, upper, lower), 0.0)
-
-
 def _quantiles(a, b, x1: float, x2: float, level):
     """``(objects, nodes)``: the quantiles at ``level`` of a ``Beta(a, b)`` truncated to ``[x1, x2]``; through the
-    complements where the range sits in the upper tail, as :func:`_span` does."""
+    complements where the range sits in the upper tail, as :func:`~.numeric.beta_span` does."""
     lo, hi = betainc(a, b, x1)[:, None], betainc(a, b, x2)[:, None]
     c_lo, c_hi = betaincc(a, b, x1)[:, None], betaincc(a, b, x2)[:, None]
     lower = betaincinv(a[:, None], b[:, None], lo + level[None, :] * (hi - lo))
@@ -111,10 +104,10 @@ def _departed(plus, count, q: float):
     even levels are five parts in a hundred low."""
     x1, x2 = min(q, 0.5), max(q, 0.5)
     a, b = plus + 1.0, count - plus + 1.0
-    m0 = _span(a, b, x1, x2)
+    m0 = beta_span(a, b, x1, x2)
     live = m0 > 0.0
     mass = m0 / ((count + 1.0) * (x2 - x1))
-    p1 = a / (count + 2.0) * _span(a + 1.0, b, x1, x2) / np.where(live, m0, 1.0)
+    p1 = a / (count + 2.0) * beta_span(a + 1.0, b, x1, x2) / np.where(live, m0, 1.0)
     mean = np.where(live, np.clip((p1 - q) / (0.5 - q), 0.0, 1.0), 0.0)
     nodes = int(CONSTANTS.calibration.departure_quadrature_nodes)
     s = (np.arange(nodes) + 0.5) / nodes
@@ -140,15 +133,7 @@ def _departure(d) -> float:
         return 0.0
     if _slope(d, 1.0) >= 0.0:
         return 1.0
-    lo, hi = 0.0, 1.0
-    while True:
-        mid = 0.5 * (lo + hi)
-        if mid <= lo or mid >= hi:  # the bracket is closed to adjacent floats
-            break
-        if _slope(d, mid) > 0.0:
-            lo = mid
-        else:
-            hi = mid
+    lo, hi = bisect_to_adjacent(lambda eps: _slope(d, eps) > 0.0, 0.0, 1.0)
     return 0.5 * (lo + hi)
 
 

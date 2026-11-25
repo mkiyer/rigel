@@ -84,21 +84,30 @@ def _ramp(values: np.ndarray, max_width: int) -> np.ndarray:
     return out
 
 
-def contained_opportunity(region_lengths: np.ndarray, max_width: int) -> np.ndarray:
-    """``SUM_n (ell_n - w + 1)+``: the starts at which a length-``w`` fragment fits inside one region.
+def contained_opportunity(
+    region_lengths: np.ndarray, max_width: int, weights: np.ndarray | None = None
+) -> np.ndarray:
+    """``SUM_n weight_n (ell_n - w + 1)+``: the starts at which a length-``w`` fragment fits inside one region, each
+    region counted at its weight (once, with no weights).
 
     O(max_width + n): regions longer than ``max_width`` always contribute, so they reduce to
-    ``sum(ell) - (w - 1) * count``, and the rest come from a length histogram's reverse cumulative sums.
+    ``sum(weight·ell) - (w - 1) * sum(weight)``, and the rest come from a weighted length histogram's reverse
+    cumulative sums.
     """
     lengths = np.asarray(region_lengths, dtype=np.int64)
+    weight = (
+        np.ones(lengths.shape, dtype=np.float64)
+        if weights is None
+        else np.asarray(weights, dtype=np.float64)
+    )
     width = np.arange(max_width + 1, dtype=np.float64)
 
     long = lengths > max_width
-    out = float(lengths[long].sum()) - (width - 1.0) * float(long.sum())
+    out = float((weight * lengths)[long].sum()) - (width - 1.0) * float(weight[long].sum())
 
     short = lengths[~long]
     if short.size:
-        histogram = np.bincount(short, minlength=max_width + 2).astype(np.float64)
+        histogram = np.bincount(short, weights=weight[~long], minlength=max_width + 2)
         index = np.arange(len(histogram), dtype=np.float64)
         # Reverse cumulative sums over lengths >= w.
         count_above = np.cumsum(histogram[::-1])[::-1]

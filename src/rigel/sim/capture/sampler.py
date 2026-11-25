@@ -351,16 +351,9 @@ class CaptureSampler:
         seq_len: int,
         frag_len: int,
     ) -> float:
-        """Return the capture-aware effective length for one template."""
-        eff_len = int(seq_len) - int(frag_len) + 1
-        if eff_len <= 0:
+        """The capture-aware effective length for one template: :meth:`partition_array` for one key."""
+        if int(seq_len) - int(frag_len) + 1 <= 0:
             return 0.0
-
-        if not self.enabled or self.config.binding_per_base <= 0:
-            n = self.admissible_counts(space, [key], np.array([int(seq_len)]), frag_len)[0]
-            return float(self.config.off_target_weight * n)
-
-        # The batched path, even for one key: it covers only the merged probe neighbourhoods.
         lengths = np.array([int(seq_len)], dtype=np.int64)
         return float(self.partition_array(space, [key], lengths, frag_len)[0])
 
