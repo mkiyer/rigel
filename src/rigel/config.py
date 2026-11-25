@@ -900,6 +900,10 @@ class SimulatorConstants:
     #: candidates so the truncation usually fills the request in one pass.
     oversample_ratio: float = 1.5
     oversample_extra: int = 10
+    #: Below this share of the rounded normal inside the window, rejection would draw over a hundred candidates per
+    #: kept length (and none at all far in a tail), so the window's integer masses are drawn exactly instead. Chosen,
+    #: not derived; every panel's law sits far above it, so its draws are rejection's.
+    min_rejection_acceptance: float = 0.01
 
     #: A ``rigel sim`` scenario's defaults where neither its YAML nor the command line sets them (``sim.Scenario``):
     #: a genome length (bp) and a fragment count small enough that a scenario builds in seconds.
@@ -916,6 +920,7 @@ class SimulatorConstants:
             self,
             oversample_ratio=self.oversample_ratio >= 1.0,
             oversample_extra=self.oversample_extra >= 1,
+            min_rejection_acceptance=0.0 < self.min_rejection_acceptance < 1.0,
             scenario_genome_length=self.scenario_genome_length >= 1,
             scenario_fragments=self.scenario_fragments >= 1,
             seed=self.seed >= 0,

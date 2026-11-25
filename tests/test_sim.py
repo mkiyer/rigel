@@ -413,3 +413,27 @@ def test_a_failed_minimap2_raises_rather_than_leaving_a_bam():
     """The aligner's failure is the run's: a sorted BAM of whatever it wrote before it died is not the reads."""
     with pytest.raises(RuntimeError, match="minimap2 failed"):
         sim_scenario._minimap2_into_sort(["sh", "-c", "exit 3"], ["cat"])
+
+
+def test_an_aligner_that_writes_much_to_stderr_does_not_stall_the_pipe():
+    """Two megabytes of diagnostics before its first line: read from a pipe only after the sorter finished, the
+    aligner blocked on its full stderr and the sorter on its input, and the build hung."""
+    import sys
+    import threading
+
+    done = threading.Event()
+
+    def _run():
+        sim_scenario._minimap2_into_sort(
+            [sys.executable, "-c", "import sys; sys.stderr.write('x' * 2_000_000); print('ok')"],
+            ["cat"],
+        )
+        done.set()
+
+    threading.Thread(target=_run, daemon=True).start()
+    assert done.wait(timeout=60), "the aligner and the sorter waited on each other"
+
+
+def test_a_sorter_that_cannot_start_reaps_the_aligner():
+    with pytest.raises(OSError):
+        sim_scenario._minimap2_into_sort(["sh", "-c", "sleep 30"], ["/nonexistent/samtools"])

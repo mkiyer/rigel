@@ -40,6 +40,7 @@ __all__ = [
     "format_gdna_name",
     "format_rna_name",
     "parse_origin",
+    "reserved_transcript_id",
 ]
 
 
@@ -60,9 +61,16 @@ def format_rna_name(
     t_id: str, start: int, end: int, strand: str, index: int, *, nascent: bool
 ) -> str:
     """The read name of an RNA fragment over ``[start, end)`` of transcript ``t_id``'s sequence; ``nascent`` marks a
-    fragment of an nascent RNA entity's nascent row."""
+    fragment of a nascent RNA entity's nascent row."""
     lead = f"{NASCENT_PREFIX}{t_id}" if nascent else t_id
     return f"{lead}:{start}-{end}:{strand}:{index}"
+
+
+def reserved_transcript_id(t_id: str) -> bool:
+    """Whether an annotated transcript's read names would parse as another origin: an id that begins with the nascent
+    prefix, or whose first ``:`` field is the gDNA one. An id holding ``:`` elsewhere is fine: names parse from the
+    right."""
+    return t_id.startswith(NASCENT_PREFIX) or t_id.partition(":")[0] == GDNA_PREFIX
 
 
 def format_gdna_name(ref: str, start: int, end: int, strand: str, index: int) -> str:

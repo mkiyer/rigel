@@ -473,3 +473,44 @@ def test_a_transcript_at_position_zero_has_its_whole_genomic_span():
     t = Transcript(ref="chr1", exons=[Interval(0, 100), Interval(200, 300)], t_id="t1", g_id="g1")
     t.compute_length()
     assert _transcript_metadata(t)["genomic_span"] == 300
+
+
+@pytest.mark.parametrize(
+    "t_id, nascent",
+    [
+        ("tx1", False),
+        ("tx1", True),
+        ("ENST:1", False),
+        ("gene:tx:2", True),
+        ("RIGEL_NASCENT_chr1_1_10_99", True),
+    ],
+)
+def test_a_read_name_round_trips_its_origin(t_id, nascent):
+    """Every RNA origin a simulator writes parses back to itself, an id holding ``:`` included (names parse from the
+    right)."""
+    from rigel.sim.read_name import format_rna_name, parse_origin
+
+    origin = parse_origin(format_rna_name(t_id, 10, 250, STRAND_FORWARD, 7, nascent=nascent) + "/1")
+    assert (origin.kind, origin.transcript_id) == ("nascent" if nascent else "annotated", t_id)
+
+
+@pytest.mark.parametrize("t_id", ["nascent_alpha", "gdna:alpha"])
+def test_an_annotated_id_its_read_names_would_misread_is_refused(t_id):
+    """``nascent_alpha`` would read as nascent RNA of ``alpha``, ``gdna:alpha`` as gDNA on reference ``alpha``: the
+    simulator refuses such an id before writing a read, rather than file its reads under another origin."""
+    from rigel.sim.read_name import format_rna_name, parse_origin, reserved_transcript_id
+
+    assert (
+        parse_origin(format_rna_name(t_id, 10, 250, STRAND_FORWARD, 7, nascent=False)).kind
+        != "annotated"
+    )
+    assert reserved_transcript_id(t_id)
+
+
+def test_the_simulator_refuses_a_reserved_transcript_id(tmp_path):
+    from rigel.sim import ReadSimConfig, Scenario
+
+    sc = Scenario("reserved", genome_length=2000, seed=5, work_dir=tmp_path / "reserved")
+    sc.add_gene("g", "+", [{"t_id": "nascent_alpha", "exons": [(500, 900)], "abundance": 10}])
+    with pytest.raises(ValueError, match="would read as another origin"):
+        sc.build_oracle(n_rna_fragments=10, sim_config=ReadSimConfig(seed=3))

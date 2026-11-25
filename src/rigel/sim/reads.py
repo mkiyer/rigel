@@ -3,6 +3,8 @@ into the engine's ``SimulationParams`` / ``GDNASimConfig``."""
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from ..config import CONSTANTS
 
 __all__ = ["ReadSimConfig", "GDNAConfig"]
@@ -63,6 +65,10 @@ class GDNAConfig:
     strand_overdispersion: float = 0.0
 
     def __post_init__(self) -> None:
+        if not (np.isfinite(float(self.abundance)) and float(self.abundance) >= 0.0):
+            raise ValueError(
+                f"GDNAConfig.abundance must be finite and nonnegative; got {self.abundance!r}."
+            )
         if not (0.0 <= float(self.strand_overdispersion) < 1.0):
             raise ValueError(
                 "GDNAConfig.strand_overdispersion must be in [0, 1); "

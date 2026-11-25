@@ -142,6 +142,9 @@ def test_an_empty_fragment_length_window_is_refused_not_drawn_from_forever():
                 raise RuntimeError("the sampler kept drawing from an empty window")
             return self.rng.normal(*args)
 
+        def choice(self, *args, **kwargs):
+            return self.rng.choice(*args, **kwargs)
+
     with pytest.raises(ValueError, match=r"\[400, 300\] holds no length"):
         truncated_normal_frag_lengths(Bounded(), 5, 250.0, 50.0, 400, 300)
     assert truncated_normal_frag_lengths(Bounded(), 5, 250.0, 50.0, 250, 250).tolist() == [250] * 5
@@ -637,19 +640,22 @@ def test_a_condition_simulated_under_another_config_is_never_resumed(tiny_refere
 
 
 def test_a_condition_resumes_under_the_config_it_was_simulated_with(tiny_reference, tmp_path):
-    """The other side: the same config resumes, and a setting that only divides the work (the worker count) does not
-    block it."""
+    """The other side: the same config resumes. The worker count is part of the config: the serial writer and the
+    sharded one draw different reads, so another count would keep the old reads under a manifest naming the new one,
+    and is refused."""
     genome, gtf, index = tiny_reference
     outdir = tmp_path / "out"
     config = _tiny_config(tmp_path / "sim.yaml", genome, gtf, index, outdir)
     run_simulation(parse_yaml_config(config))
     bam = next(outdir.glob("gdna_*/sim_oracle.bam"))
     stamp = bam.stat().st_mtime_ns
+    run_simulation(parse_yaml_config(config))
+    assert bam.stat().st_mtime_ns == stamp, "the condition was simulated again"
     config.write_text(
         config.read_text().replace("  read_length: 50\n", "  read_length: 50\n  n_workers: 2\n")
     )
-    run_simulation(parse_yaml_config(config))
-    assert bam.stat().st_mtime_ns == stamp, "the condition was simulated again"
+    with pytest.raises(SystemExit, match="different config"):
+        run_simulation(parse_yaml_config(config))
 
 
 def test_a_run_that_died_before_its_manifest_resumes_from_each_conditions_record(

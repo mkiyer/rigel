@@ -119,3 +119,31 @@ def test_gdna_asked_of_a_reference_too_short_to_hold_a_fragment_is_refused(
             assert _origins(bam) == {"gdna": 50}
     finally:
         sim.close()
+
+
+def _short_transcript_scenario(tmp_path):
+    """One 200-base transcript with molecules, a fragment law centred past its length."""
+    sc = Scenario("short", genome_length=2000, seed=5, work_dir=tmp_path / "short")
+    sc.add_gene("g", "+", [{"t_id": "t", "exons": [(500, 700)], "abundance": 100}])
+    law = ReadSimConfig(
+        frag_mean=250, frag_std=50, frag_min=50, frag_max=500, read_length=40, seed=3
+    )
+    return sc, law
+
+
+def test_a_fixed_depth_split_reads_the_whole_length_law(tmp_path):
+    """A 200-base transcript under a law centred at 250 holds the shorter fragments that fit it: the fixed-depth
+    split weighs each template over the law, so all twelve fragments are drawn and reported. The split at the mean
+    alone gave it no opportunity and drew none of the twelve."""
+    sc, law = _short_transcript_scenario(tmp_path)
+    result = sc.build_oracle(n_fragments=12, sim_config=law)
+    assert sum(_origins(result.bam_path).values()) == 12 and result.n_simulated == 12
+
+
+def test_a_fixed_depth_no_template_can_hold_is_refused(tmp_path):
+    """Fragments asked of a library no template can hold, no transcript with molecules and no gDNA, are refused:
+    a library of no reads would agree with its own truth and hide the failure."""
+    sc = Scenario("empty", genome_length=2000, seed=5, work_dir=tmp_path / "empty")
+    sc.add_gene("g", "+", [{"t_id": "t", "exons": [(500, 700)], "abundance": 0}])
+    with pytest.raises(ValueError, match="no template can hold one"):
+        sc.build_oracle(n_fragments=12, sim_config=_SIM)

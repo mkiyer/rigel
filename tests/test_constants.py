@@ -89,6 +89,7 @@ BROKEN = {
     "simulator": {
         "oversample_ratio": 0.5,
         "oversample_extra": 0,
+        "min_rejection_acceptance": 1.0,
         "scenario_genome_length": 0,
         "scenario_fragments": 0,
         "seed": -1,

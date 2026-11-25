@@ -43,8 +43,16 @@ from rigel.sim.bam import (
 )
 from rigel.sim.capture import CaptureConfig, CaptureSampler
 from rigel.sim.genome import reverse_complement
-from rigel.sim.read_name import STRAND_FORWARD, STRAND_REVERSE, format_gdna_name, format_rna_name
-from rigel.sim.sampling import truncated_normal_frag_lengths
+from rigel.sim.read_name import (
+    GDNA_PREFIX,
+    NASCENT_PREFIX,
+    STRAND_FORWARD,
+    STRAND_REVERSE,
+    format_gdna_name,
+    format_rna_name,
+    reserved_transcript_id,
+)
+from rigel.sim.sampling import truncated_normal_frag_lengths, window_law
 from rigel.sim.wgs_config import GDNASimConfig, SimulationParams
 
 logger = logging.getLogger(__name__)
@@ -294,6 +302,15 @@ class WholeGenomeSimulator:
         # Nascent must live on single-exon entity rows: on a multi-exon row it would be drawn from a spliced
         # template.
         self._nascent_abund = np.array([t.nascent_abundance for t in transcripts])
+        # an annotated id its own read names would read as another origin: refused before a read is written
+        reserved = [
+            t.t_id for t in transcripts if not t.is_synthetic and reserved_transcript_id(t.t_id)
+        ]
+        if reserved:
+            raise ValueError(
+                f"{len(reserved)} transcript ids would read as another origin in their read names (e.g. "
+                f"{reserved[:3]}): an annotated id may not begin with {NASCENT_PREFIX!r} or {GDNA_PREFIX + ':'!r}"
+            )
         bad = [t.t_id for t in transcripts if t.nascent_abundance > 0 and len(t.exons) != 1]
         if bad:
             raise ValueError(
@@ -775,28 +792,53 @@ class WholeGenomeSimulator:
     # -- Abundance-weighted pool splits (single-condition / Scenario use) ----
 
     def _rna_weight(self) -> float:
-        """Σ over every RNA row of abundance × capture-aware effective length at the mean RNA fragment length."""
-        mean_frag = int(self.sim_params.frag_mean)
+        """Σ over every RNA row of abundance × capture-aware effective length, the length averaged over the RNA length
+        law the sampler draws: a template shorter than the mean still holds the shorter fragments that fit it."""
+        p = self.sim_params
+        lengths, pmf = window_law(p.frag_mean, p.frag_std, p.frag_min, self._frag_max)
         n = len(self.transcripts)
-        eff = self.capture.partition_array("transcript", range(n), self._t_lengths, mean_frag)
-        return float(np.sum((self._annotated_abund + self._nascent_abund) * eff))
+        abundance = self._annotated_abund + self._nascent_abund
+        return float(
+            sum(
+                prob
+                * np.sum(
+                    abundance
+                    * self.capture.partition_array("transcript", range(n), self._t_lengths, int(w))
+                )
+                for w, prob in zip(lengths, pmf)
+                if prob > 0.0
+            )
+        )
 
-    def rna_gdna_split(self, n_total: int, gdna_abundance: float) -> tuple[int, int]:
-        """Split ``n_total`` fragments into ``(n_rna, n_gdna)`` by abundance × effective length, gDNA weighing
-        ``gdna_abundance`` × the genomic references' effective length. The nascent share of ``n_rna`` is not
-        imposed."""
-        rna_w = self._rna_weight()
-        gdna_mean_frag = int(self.gdna_config.frag_mean)
+    def _gdna_weight(self, gdna_abundance: float) -> float:
+        """``gdna_abundance`` × the genomic references' capture-aware effective length, averaged over gDNA's length
+        law."""
+        g = self.gdna_config
+        lengths, pmf = window_law(g.frag_mean, g.frag_std, g.frag_min, g.frag_max)
         genome_eff = sum(
-            self.capture.partition("gdna", ref, length, gdna_mean_frag)
+            prob * self.capture.partition("gdna", ref, length, int(w))
+            for w, prob in zip(lengths, pmf)
+            if prob > 0.0
             for ref, length in zip(self.genomic_refs, self._gdna_ref_lengths)
         )
-        gdna_w = float(gdna_abundance) * genome_eff
+        return float(gdna_abundance) * genome_eff
+
+    def rna_gdna_split(self, n_total: int, gdna_abundance: float) -> tuple[int, int]:
+        """Split ``n_total`` fragments into ``(n_rna, n_gdna)`` by abundance × effective length over each side's length
+        law, gDNA weighing ``gdna_abundance`` × the genomic references' effective length. The nascent share of
+        ``n_rna`` is not imposed. Raises when fragments are asked for and no template can hold one."""
+        rna_w = self._rna_weight()
+        gdna_w = self._gdna_weight(gdna_abundance) if self.genomic_refs else 0.0
         total = rna_w + gdna_w
-        if total <= 0:
+        if n_total <= 0:
             return 0, 0
+        if not total > 0.0:
+            raise ValueError(
+                f"{n_total} fragments requested but no template can hold one: no transcript has an abundance with a "
+                "fragment length that fits it, and no genomic reference carries gDNA."
+            )
         n_gdna = int(round(n_total * gdna_w / total))
-        return max(0, n_total - n_gdna), n_gdna
+        return n_total - n_gdna, n_gdna
 
     # -- Main entry point ---------------------------------------------------
 

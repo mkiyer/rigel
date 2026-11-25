@@ -381,12 +381,12 @@ CONDITION_RECORD = "condition.json"
 #: A condition entry's fields that record what its simulation produced, not what it was asked to simulate.
 _OUTCOME_KEYS = frozenset({"oracle_bam", "n_annotated_observed", "n_nascent_observed", "n_gdna_observed"})
 
-#: Manifest fields that lay out the grid (which conditions exist; each entry records its own point on every axis) or
-#: divide the work, and so say nothing about what one condition is. `gtf` is a path: the index's record carries the
-#: GTF the transcriptome comes from by digest, and the run refuses a `gtf` that is not it.
+#: Manifest fields that lay out the grid (which conditions exist; each entry records its own point on every axis), and
+#: so say nothing about what one condition is. `gtf` is a path: the index's record carries the GTF the transcriptome
+#: comes from by digest, and the run refuses a `gtf` that is not it. The worker count is identity, not layout: the
+#: serial writer and the sharded one draw different reads.
 _NOT_IDENTITY = {
     "": frozenset({"conditions", "strand_specificities", "capture", "capture_configs", "gtf"}),
-    "simulation": frozenset({"n_workers"}),
     "gdna": frozenset(
         {"rates", "rate_labels", "strand_overdispersion", "strand_overdispersions", "strand_overdispersion_labels"}
     ),
