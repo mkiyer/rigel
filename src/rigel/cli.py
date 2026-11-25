@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
+from . import outputs
+
 if TYPE_CHECKING:
     from .config import PipelineConfig
 
@@ -108,7 +110,7 @@ def quant_command(args: argparse.Namespace) -> int:
     # run cannot read or an output directory it cannot make
     except (ValueError, TypeError, OSError) as exc:
         sys.exit(f"Error: {exc}")
-    _check_annotated_bam_target(pipeline_config.annotated_bam_path, bam_path)
+    _check_annotated_bam_target(pipeline_config.annotated_bam_path, bam_path, index_dir, output_dir)
 
     logging.info(f"[START] Loading index from {index_dir}")
     try:
@@ -153,10 +155,13 @@ def _quant_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     return bam_path, index_dir, Path(args.output_dir)
 
 
-def _check_annotated_bam_target(annotated, bam_path: Path) -> None:
-    """Refuse, before the run, an annotated BAM the second pass could not write, or one that is the input BAM: that
-    pass runs after the quantification, so the failure would otherwise come only at the end, and over the input it
-    would destroy it."""
+def _check_annotated_bam_target(
+    annotated, bam_path: Path, index_dir: Path, output_dir: Path
+) -> None:
+    """Refuse, before the run, an annotated BAM the second pass could not write, or one that names a file this run
+    reads or writes: the input BAM, a file of the index, or a product of the output directory (:mod:`rigel.outputs`),
+    by path or through a link. That pass runs after the quantification, so the failure would otherwise come only at
+    the end, and over any of those files it would destroy it."""
     from .pipeline import BamInputError, check_annotated_bam_path
 
     if annotated is None:
@@ -165,6 +170,14 @@ def _check_annotated_bam_target(annotated, bam_path: Path) -> None:
         check_annotated_bam_path(bam_path, annotated)
     except BamInputError as exc:
         sys.exit(f"Error: {exc}")
+    target = Path(annotated)
+    for path in (*outputs.managed_paths(output_dir), *sorted(Path(index_dir).iterdir())):
+        if target.resolve() == path.resolve() or (
+            target.exists() and path.exists() and target.samefile(path)
+        ):
+            sys.exit(
+                f"Error: --annotated-bam {annotated} is {path}, a file this run reads or writes: name another path"
+            )
     target_dir = Path(annotated).resolve().parent
     if not target_dir.is_dir() or not os.access(target_dir, os.W_OK):
         sys.exit(
@@ -201,12 +214,6 @@ def build_pipeline_config(args: argparse.Namespace) -> PipelineConfig:
 # rigel quant's outputs: the tables, summary.json and config.yaml
 # ---------------------------------------------------------------------------
 
-#: summary.json schema version, which a consumer should read before parsing. The fragment-length
-#: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
-#: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name;
-#: ``length_tables`` is the EM's two length tables and the decision behind them.
-SUMMARY_SCHEMA_VERSION = 11
-
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
 
@@ -223,9 +230,6 @@ SUMMARY_VARIANCE_DIGITS = 8
 
 #: The compression of every table a run writes (Feather, and Parquet on export).
 _TABLE_COMPRESSION = "zstd"
-
-#: The tables every run writes, each as ``<name>.feather`` with a TSV mirror under ``--tsv``, in the order written.
-_QUANT_TABLES = ("quant", "gene_quant", "nascent_quant", "loci")
 
 #: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. Named here, not derived from the
 #: enum, because they are an output contract: a rename in the enum must not rename a reported category.
@@ -250,12 +254,14 @@ _MASK_STORE_KEYS = (
 
 
 def write_quant_outputs(result, index, output_dir: Path, args: argparse.Namespace) -> None:
-    """Write everything ``rigel quant`` produces: the four quantification tables, ``locus_stats.feather`` when the
-    run collected it, ``summary.json``, ``fragment_lengths.feather``, the calibration track and ``config.yaml``."""
+    """Write everything ``rigel quant`` produces (:mod:`rigel.outputs`): the four quantification tables,
+    ``locus_stats.feather`` when the run collected it, ``fragment_lengths.feather``, the calibration track,
+    ``config.yaml``, and last ``summary.json``, the completion marker. The previous run's marker and products go first,
+    so an interrupted run leaves no directory a reader takes for a complete one."""
     import json
 
     estimator = result.estimator
-    _remove_stale_outputs(output_dir, args.tsv, bool(estimator.locus_stats))
+    outputs.begin_run(output_dir)
     for key, val in sorted(result.stats.to_dict().items()):
         if isinstance(val, (int, float)):
             logging.info(f"  {key}: {val:,}")
@@ -263,37 +269,32 @@ def write_quant_outputs(result, index, output_dir: Path, args: argparse.Namespac
     tables = _write_tables(estimator, index, output_dir, args.tsv)
     fl_summary, fl_histogram_df = fragment_length_report(result.fl_models)
 
-    summary_path = output_dir / "summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(_summary(result, index, output_dir, args, tables, fl_summary), f, indent=2)
-    logging.info(f"[DONE] Summary written to {summary_path}")
-
     # The raw fragment-length histograms, long form: one (category, length, count) row per 1-bp bin
-    fragment_lengths_path = output_dir / "fragment_lengths.feather"
+    fragment_lengths_path = outputs.table_path(output_dir, outputs.FRAGMENT_LENGTHS)
     _write_table(fl_histogram_df, fragment_lengths_path, args.tsv)
     logging.info(f"[DONE] Wrote {fragment_lengths_path} ({len(fl_histogram_df)} rows)")
 
     _write_calibration_track(result.calibration_track, output_dir)
-    write_config_yaml(output_dir / "config.yaml", args)
+    outputs.publish(output_dir / outputs.CONFIG, lambda path: write_config_yaml(path, args))
 
+    summary = _summary(result, index, output_dir, args, tables, fl_summary)
+    summary_path = output_dir / outputs.SUMMARY
 
-def _remove_stale_outputs(output_dir: Path, tsv: bool, locus_stats: bool) -> None:
-    """A reused output directory keeps no product this run does not write: a quant.tsv from an earlier --tsv run
-    beside this run's quant.feather would disagree with it silently."""
-    stale = []
-    if not tsv:
-        stale += [output_dir / f"{name}.tsv" for name in (*_QUANT_TABLES, "fragment_lengths")]
-    if not locus_stats:
-        stale.append(output_dir / "locus_stats.feather")
-    for path in stale:
-        path.unlink(missing_ok=True)
+    def _dump(path: Path) -> None:
+        with open(path, "w") as f:
+            json.dump(summary, f, indent=2)
+
+    outputs.publish(summary_path, _dump)
+    logging.info(f"[DONE] Summary written to {summary_path}")
 
 
 def _write_table(df, path: Path, tsv: bool) -> None:
-    """One output table: Feather v2 with zstd, and its TSV mirror under ``--tsv``."""
-    df.to_feather(str(path), compression=_TABLE_COMPRESSION)
+    """One output table: Feather v2 with zstd, and its TSV mirror under ``--tsv``, each published whole."""
+    outputs.publish(path, lambda p: df.to_feather(str(p), compression=_TABLE_COMPRESSION))
     if tsv:
-        df.to_csv(str(path.with_suffix(".tsv")), sep="\t", index=False)
+        outputs.publish(
+            path.with_suffix(".tsv"), lambda p: df.to_csv(str(p), sep="\t", index=False)
+        )
 
 
 def _write_tables(estimator, index, output_dir: Path, tsv: bool) -> dict:
@@ -307,15 +308,18 @@ def _write_tables(estimator, index, output_dir: Path, tsv: bool) -> dict:
         "nascent_quant": estimator.get_nascent_quant_df(index),
         "loci": estimator.get_loci_df(index),
     }
-    paths = [output_dir / f"{name}.feather" for name in _QUANT_TABLES]
-    for name, path in zip(_QUANT_TABLES, paths):
+    paths = [outputs.table_path(output_dir, name) for name in outputs.QUANT_TABLES]
+    for name, path in zip(outputs.QUANT_TABLES, paths):
         _write_table(tables[name], path, tsv)
     logging.info(f"[DONE] Wrote {', '.join(str(path) for path in paths)}")
 
     if estimator.locus_stats:
-        locus_stats_path = output_dir / "locus_stats.feather"
+        locus_stats_path = outputs.table_path(output_dir, outputs.LOCUS_STATS)
         locus_stats_df = pd.DataFrame(estimator.locus_stats)
-        locus_stats_df.to_feather(str(locus_stats_path), compression=_TABLE_COMPRESSION)
+        outputs.publish(
+            locus_stats_path,
+            lambda p: locus_stats_df.to_feather(str(p), compression=_TABLE_COMPRESSION),
+        )
         logging.info(f"[DONE] Wrote {locus_stats_path} ({len(locus_stats_df)} loci)")
     return tables
 
@@ -325,10 +329,10 @@ def _write_calibration_track(track, output_dir: Path) -> None:
     (for a genome browser)."""
     from .calibration.track import write_bedgraph
 
-    track_path = output_dir / "calibration_track.feather"
-    bedgraph_path = output_dir / "calibration_track.bedgraph"
-    track.to_feather(str(track_path), compression=_TABLE_COMPRESSION)
-    write_bedgraph(track, bedgraph_path)
+    track_path = outputs.table_path(output_dir, outputs.CALIBRATION_TRACK)
+    bedgraph_path = output_dir / outputs.BEDGRAPH
+    outputs.publish(track_path, lambda p: track.to_feather(str(p), compression=_TABLE_COMPRESSION))
+    outputs.publish(bedgraph_path, lambda p: write_bedgraph(track, p))
     logging.info(f"[DONE] Wrote {track_path} + {bedgraph_path.name} ({len(track)} regions)")
 
 
@@ -339,7 +343,7 @@ def _summary(result, index, output_dir: Path, args, tables: dict, fl_summary: di
 
     stats = result.stats
     return {
-        "schema_version": SUMMARY_SCHEMA_VERSION,
+        "schema_version": outputs.SUMMARY_SCHEMA_VERSION,
         "rigel_version": __version__,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "command": {
@@ -940,24 +944,32 @@ def sim_command(args: argparse.Namespace) -> int:
 
 
 def export_command(args: argparse.Namespace) -> int:
-    """Run the ``rigel export`` subcommand — convert feather outputs to TSV or Parquet."""
+    """Run the ``rigel export`` subcommand — convert a complete run's tables to TSV or Parquet. Only the run's own
+    products are converted (:mod:`rigel.outputs`), each published whole; the next ``rigel quant`` in the directory
+    removes them with its other products, so an export never outlives the run it was made from."""
     import pandas as pd
 
     output_dir = Path(args.output_dir)
     fmt = args.format
-    feather_files = sorted(output_dir.glob("*.feather"))
-    if not feather_files:
-        logging.error(f"No .feather files found in {output_dir}")
+    if not outputs.is_complete(output_dir):
+        logging.error(
+            f"{output_dir} holds no complete run (no {outputs.SUMMARY}): nothing to export"
+        )
         return 1
+    feather_files = [
+        p for p in (outputs.table_path(output_dir, n) for n in outputs.TABLES) if p.is_file()
+    ]
 
     for fpath in feather_files:
         df = pd.read_feather(str(fpath))
         if fmt == "tsv":
             out = fpath.with_suffix(".tsv")
-            df.to_csv(str(out), sep="\t", index=False)
+            outputs.publish(out, lambda p: df.to_csv(str(p), sep="\t", index=False))
         else:
             out = fpath.with_suffix(".parquet")
-            df.to_parquet(str(out), compression=_TABLE_COMPRESSION, index=False)
+            outputs.publish(
+                out, lambda p: df.to_parquet(str(p), compression=_TABLE_COMPRESSION, index=False)
+            )
         logging.info(f"  {fpath.name} -> {out.name}")
 
     logging.info(f"[DONE] Exported {len(feather_files)} file(s) to {fmt}")

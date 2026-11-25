@@ -137,8 +137,9 @@ _SRC = Path(__file__).resolve().parents[1] / "src" / "rigel"
 #: precision — defined with the format they name, not settings.
 FORMAT_MODULES = {
     "annotate.py",  # the ZF per-fragment bitfield
-    "cli.py",  # summary.json's schema version and precision
+    "cli.py",  # summary.json's precision
     "index.py",  # the index format version
+    "outputs.py",  # summary.json's schema version
     "scan_payload.py",  # pool codes and axis sizes
     "splice.py",  # splice-type codes
     "types.py",

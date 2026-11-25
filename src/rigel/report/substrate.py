@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .. import cli
+from .. import outputs
 
 #: Every ``summary.json`` key the report reads, by section: ``""`` is the top level and ``fragment_length.*`` each
 #: fragment-length category. Each must be in the summary; a missing one refuses the report.
@@ -70,7 +70,10 @@ SUMMARY_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 #: The tables ``rigel quant`` writes that the report draws.
-REPORT_TABLES = ("fragment_lengths.feather", "gene_quant.feather", "calibration_track.feather")
+REPORT_TABLES = tuple(
+    f"{name}.feather"
+    for name in (outputs.FRAGMENT_LENGTHS, "gene_quant", outputs.CALIBRATION_TRACK)
+)
 
 
 class SummaryReader:
@@ -160,10 +163,11 @@ def load_substrate(output_dir: str | Path) -> ReportSubstrate:
     if not output_dir.is_dir():
         raise SubstrateError(f"Not a directory: {output_dir}")
 
-    summary_path = output_dir / "summary.json"
-    if not summary_path.exists():
+    summary_path = output_dir / outputs.SUMMARY
+    if not outputs.is_complete(output_dir):
         raise SubstrateError(
-            f"No summary.json in {output_dir}. Point `rigel report` at a `rigel quant` output directory."
+            f"No {outputs.SUMMARY} in {output_dir}: it holds no complete run (a `rigel quant` writes its summary "
+            "last). Point `rigel report` at a completed `rigel quant` output directory."
         )
     try:
         summary = json.loads(summary_path.read_text())
@@ -173,10 +177,10 @@ def load_substrate(output_dir: str | Path) -> ReportSubstrate:
         raise SubstrateError(f"{summary_path} is not a summary: it holds no mapping")
 
     version = summary.get("schema_version")
-    if version != cli.SUMMARY_SCHEMA_VERSION:
+    if version != outputs.SUMMARY_SCHEMA_VERSION:
         raise SubstrateError(
             f"{summary_path} is summary schema {version}, and this rigel reads schema "
-            f"{cli.SUMMARY_SCHEMA_VERSION}: run this version's `rigel quant` to report on it."
+            f"{outputs.SUMMARY_SCHEMA_VERSION}: run this version's `rigel quant` to report on it."
         )
     # every listed key read once here, so a missing one refuses the report before it is built
     reader = SummaryReader(summary)

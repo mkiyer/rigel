@@ -15,6 +15,8 @@ from collections import defaultdict
 import numpy as np
 import pytest
 
+from _two_genes import three_pairs, two_gene_index
+
 from rigel.annotate import (
     AF_ANNOTATED,
     AF_ANNOTATED_BIT,
@@ -1078,46 +1080,6 @@ class TestAnnotatedBamWriterRobustness:
 # ── the second pass reads the alignments the first did ───────────────────────────────────────────────────────────
 
 
-def _two_gene_index(root):
-    """Genes A and B, one two-exon transcript each, identical layouts 1,000 bases apart."""
-    import pysam
-
-    from rigel.index import TranscriptIndex
-
-    fasta, gtf = root / "genome.fa", root / "genes.gtf"
-    fasta.write_text(">chr1\n" + "ACGT" * 625 + "\n")
-    pysam.faidx(str(fasta))
-    rows = [
-        f'chr1\tfixture\texon\t{s + off}\t{e + off}\t.\t+\t.\tgene_id "{g}"; transcript_id "{g}";\n'
-        for g, off in (("A", 0), ("B", 1000))
-        for s, e in ((101, 300), (501, 700))
-    ]
-    gtf.write_text("".join(rows))
-    TranscriptIndex.build(fasta, gtf, root / "index", write_tsv=False)
-    return TranscriptIndex.load(root / "index")
-
-
-def _three_pairs(path, offset):
-    """Three spliced pairs placed wholly at A (offset 0) or wholly at B (offset 1000): the same names, flags, record
-    counts and placement outcomes either way."""
-    import pysam
-
-    header = {"HD": {"VN": "1.6", "SO": "queryname"}, "SQ": [{"SN": "chr1", "LN": 2500}]}
-    mates = [(250, 99, "50M200N50M", 100, 555), (555, 147, "80M", 80, 250)]
-    with pysam.AlignmentFile(path, "wb", header=header) as out:
-        for pair in range(3):
-            for start, flag, cigar, length, mate in mates:
-                read = pysam.AlignedSegment(out.header)
-                read.query_name = f"pair{pair}"
-                read.reference_id = read.next_reference_id = 0
-                read.reference_start = start + offset
-                read.next_reference_start = mate + offset
-                read.mapping_quality, read.flag, read.cigarstring = 60, flag, cigar
-                read.query_sequence = "A" * length
-                read.set_tags([("NH", 1), ("NM", 0), ("XS", "+", "A")])
-                out.write(read)
-
-
 def test_a_bam_replaced_between_the_passes_by_one_at_another_gene_is_refused(tmp_path):
     """The second pass re-reads the BAM; replaced by one whose pairs sit at gene B with every counter the scan kept
     unchanged, it must not tag B's alignments with A's transcript. The digest both passes keep reads each record's
@@ -1125,10 +1087,10 @@ def test_a_bam_replaced_between_the_passes_by_one_at_another_gene_is_refused(tmp
     from rigel.config import BamScanConfig, CalibrationConfig, EMConfig, PipelineConfig
     from rigel.pipeline import run_pipeline
 
-    index = _two_gene_index(tmp_path)
+    index = two_gene_index(tmp_path)
     reads, moved, tagged = tmp_path / "reads.bam", tmp_path / "moved.bam", tmp_path / "tagged.bam"
-    _three_pairs(reads, 0)
-    _three_pairs(moved, 1000)
+    three_pairs(reads, 0)
+    three_pairs(moved, 1000)
     config = PipelineConfig(
         scan=BamScanConfig(total_threads=1),
         em=EMConfig(n_threads=1),
@@ -1146,9 +1108,9 @@ def test_the_same_bam_read_twice_passes_the_cross_check(tmp_path):
     from rigel.config import BamScanConfig, CalibrationConfig, EMConfig, PipelineConfig
     from rigel.pipeline import run_pipeline
 
-    index = _two_gene_index(tmp_path)
+    index = two_gene_index(tmp_path)
     reads, tagged = tmp_path / "reads.bam", tmp_path / "tagged.bam"
-    _three_pairs(reads, 0)
+    three_pairs(reads, 0)
     config = PipelineConfig(
         scan=BamScanConfig(total_threads=1),
         em=EMConfig(n_threads=1),
@@ -1167,9 +1129,9 @@ def test_a_pass_built_with_other_settings_inside_a_run_leaves_the_run_alone(tmp_
     from rigel.config import BamScanConfig, CalibrationConfig, EMConfig, PipelineConfig
     from rigel.pipeline import _native_scanner, run_pipeline
 
-    index = _two_gene_index(tmp_path)
+    index = two_gene_index(tmp_path)
     reads, tagged = tmp_path / "reads.bam", tmp_path / "tagged.bam"
-    _three_pairs(reads, 0)
+    three_pairs(reads, 0)
     config = PipelineConfig(
         scan=BamScanConfig(total_threads=1),
         em=EMConfig(n_threads=1),

@@ -302,9 +302,12 @@ genes:
 
 ### rigel export
 
-Converts every `.feather` output file in a results directory to TSV or
-Parquet. Useful as a post-processing step or when Parquet is preferred
-downstream.
+Converts a completed run's tables (its `.feather` products) to TSV or Parquet.
+Useful as a post-processing step or when Parquet is preferred downstream. A
+directory without `summary.json` holds no complete run and is refused; files
+`rigel quant` did not write are left alone. The next `rigel quant` into the
+directory removes these exports with the run's other products, so an export never
+outlives the run it was made from.
 
 ```bash
 rigel export results/sample/ --format tsv
@@ -313,7 +316,7 @@ rigel export results/sample/ --format parquet
 
 | Argument / flag | Default | Description |
 |-----------------|---------|-------------|
-| `output_dir` (positional) | required | Directory containing `.feather` files from `rigel quant` |
+| `output_dir` (positional) | required | A completed `rigel quant` output directory |
 | `-f`, `--format {tsv,parquet}` | `tsv` | Output format |
 
 ### rigel report
@@ -426,6 +429,14 @@ All outputs are written to `--output-dir`. Feather files (`.feather`) are
 readable with `pandas.read_feather()` or `pyarrow.feather.read_feather()`.
 Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 `rigel export`.
+
+`summary.json` marks a complete run. A run first removes the previous run's
+`summary.json`, then every product and export the previous run left, writes each
+file whole (to a hidden temporary name, then moved into place), and writes
+`summary.json` last. A directory without it holds no complete run, which `rigel
+report` and `rigel export` refuse; nothing of an earlier run survives beside a later
+one's. `--annotated-bam` may not name any file the run reads or writes (the input
+BAM, an index file, or one of these products), directly or through a link.
 
 `rigel quant` writes:
 
@@ -743,8 +754,10 @@ every qname in one contiguous run. Filtered records (QC-failed, unmapped or a sk
 through unchanged without annotation tags. Rigel's tags replace any tag of the same name the aligner wrote
 (HISAT2's `ZS:i`, for one). The quantification tables are written before this pass begins. The pass re-reads the
 BAM and re-judges every read pair as the scan did, and checks that it saw what the scan saw: its count of each
-outcome and status, and a digest of its read pairs. On any difference it deletes the annotated BAM and stops with
-an error, so the input BAM must not change between the two passes.
+outcome and status, and a digest of its read pairs and of every record's alignment (reference, position, flags,
+CIGAR, junctions, clips and the tags read). The BAM is written beside its path and moved into place only once the
+check passes; on any difference it is deleted and the run stops with an error, leaving an annotated BAM already at the
+path as it was. The input BAM must not change between the two passes.
 
 | Tag | Type | Description |
 |-----|------|-------------|

@@ -33,6 +33,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .outputs import publish
+
 logger = logging.getLogger(__name__)
 
 
@@ -288,8 +290,29 @@ def write_annotated_bam(
     )
     n = annotations.size
     _fill_locus_ids(annotations, locus_id_per_transcript)
-    # The writer takes strings; an unnamed gene (NaN in the index) is written `.`
-    summary = writer.write(
+    # Written to a temporary sibling and moved into place only once it agrees with the scan, so a pass that fails
+    # leaves a good annotated BAM already at the path as it was.
+    written: dict = {}
+
+    def _write(path) -> None:
+        # The writer takes strings; an unnamed gene (NaN in the index) is written `.`
+        written.update(_annotate(writer, bam_path, str(path), annotations, n, index))
+        _check_against_the_scan(written, stats, str(path))
+
+    publish(Path(output_path), _write)
+    summary = written
+    logger.info(
+        f"[ANNOTATE] Wrote {summary['n_records_written']:,} records to {output_path}: "
+        f"{summary['n_read_pairs']:,} read pairs, as the scan judged them"
+    )
+    return summary
+
+
+def _annotate(
+    writer, bam_path: str, output_path: str, annotations: AnnotationTable, n: int, index
+) -> dict:
+    """One pass of the native writer over the BAM, its summary returned."""
+    return writer.write(
         bam_path,
         output_path,
         annotations.frag_ids[:n],
@@ -304,12 +327,6 @@ def write_annotated_bam(
         _tag_strings(index.g_df["g_id"].values),
         _tag_strings(index.g_df["g_name"].values),
     )
-    _check_against_the_scan(summary, stats, output_path)
-    logger.info(
-        f"[ANNOTATE] Wrote {summary['n_records_written']:,} records to {output_path}: "
-        f"{summary['n_read_pairs']:,} read pairs, as the scan judged them"
-    )
-    return summary
 
 
 def _fill_locus_ids(annotations: AnnotationTable, locus_id_per_transcript: np.ndarray) -> None:

@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import pandas as pd
 
-from rigel import cli
+from rigel import cli, outputs
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
@@ -236,12 +236,12 @@ def test_the_schema_version_is_one_constant_the_writer_and_the_report_share(quan
     from rigel.report.substrate import SubstrateError, load_substrate
 
     pr, result, args, out, summary = quant_run
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 11
+    assert summary["schema_version"] == outputs.SUMMARY_SCHEMA_VERSION == 11
     load_substrate(out)
     bumped = tmp_path / "bumped"
     bumped.mkdir()
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
+        mp.setattr(outputs, "SUMMARY_SCHEMA_VERSION", outputs.SUMMARY_SCHEMA_VERSION + 1)
         cli.write_quant_outputs(pr, result.index, bumped, args)
         assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 12
         load_substrate(bumped)
