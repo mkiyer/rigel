@@ -17,7 +17,7 @@ namespace nb = nanobind;
 
 namespace {
 
-using Vec = nb::ndarray<const double, nb::ndim<1>, nb::c_contig>;
+using Vec = rigel::Array1<double>;
 
 // Below this many cuts per thread a thread costs more to start than it saves.
 constexpr size_t kMinCutsPerThread = 16384;

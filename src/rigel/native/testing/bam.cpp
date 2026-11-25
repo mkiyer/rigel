@@ -20,9 +20,6 @@ namespace {
 using accumulator::Accumulator;
 using accumulator::AccumulatorSet;
 
-template <class T>
-using InArray = nb::ndarray<const T, nb::ndim<1>, nb::c_contig>;
-
 /// The production Accumulator with what only the gates read: its counters, its census, its held bank in canonical
 /// order, its region lookup, and the per-worker merge.
 struct InspectedAccumulator : Accumulator {
@@ -32,7 +29,7 @@ struct InspectedAccumulator : Accumulator {
 void bind_inspected_accumulator(nb::module_& m) {
     nb::class_<InspectedAccumulator, Accumulator>(m, "Accumulator")
         .def("__init__",
-             [](InspectedAccumulator* self, InArray<int64_t> region_bounds, InArray<uint8_t> region_types,
+             [](InspectedAccumulator* self, Array1<int64_t> region_bounds, Array1<uint8_t> region_types,
                 int max_length, int32_t ref) {
                  new (self) InspectedAccumulator(
                      std::vector<int64_t>(region_bounds.data(), region_bounds.data() + region_bounds.shape(0)),
@@ -59,8 +56,8 @@ void bind_inspected_accumulator(nb::module_& m) {
 void bind_accumulator_set(nb::module_& m) {
     nb::class_<AccumulatorSet>(m, "AccumulatorSet")
         .def("__init__",
-             [](AccumulatorSet* self, InArray<int64_t> region_bounds, InArray<int64_t> ref_region_bound_offsets,
-                InArray<uint8_t> region_types, int max_length) {
+             [](AccumulatorSet* self, Array1<int64_t> region_bounds, Array1<int64_t> ref_region_bound_offsets,
+                Array1<uint8_t> region_types, int max_length) {
                  new (self) AccumulatorSet(region_bounds.data(), region_bounds.shape(0),
                                            ref_region_bound_offsets.data(), ref_region_bound_offsets.shape(0) - 1,
                                            region_types.data(), region_types.shape(0), max_length);
@@ -68,8 +65,8 @@ void bind_accumulator_set(nb::module_& m) {
              nb::arg("region_bounds"), nb::arg("ref_region_bound_offsets"), nb::arg("region_types"),
              nb::arg("max_length"))
         .def("set_sj",
-             [](AccumulatorSet& s, InArray<int64_t> offsets, InArray<int64_t> boundary_right,
-                InArray<int8_t> sj_strand, InArray<int64_t> ref_region_bound_offsets) {
+             [](AccumulatorSet& s, Array1<int64_t> offsets, Array1<int64_t> boundary_right,
+                Array1<int8_t> sj_strand, Array1<int64_t> ref_region_bound_offsets) {
                  s.set_sj(offsets.data(), offsets.shape(0), boundary_right.data(), sj_strand.data(),
                           sj_strand.shape(0), ref_region_bound_offsets.data());
              },

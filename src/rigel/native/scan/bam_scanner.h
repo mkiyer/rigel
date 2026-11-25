@@ -18,6 +18,7 @@
 #include "calibration/accumulator_set.h"
 #include "constants.h"
 #include "fragment_blocks.h"
+#include "ndarray_util.h"
 #include "resolve/fragment_resolver.h"
 #include "scan/bam_record.h"
 #include "scan/template_hits.h"
@@ -150,9 +151,6 @@ struct UnpairedRecordError : std::invalid_argument {
 
 class BamScanner {
 public:
-    template <class T>
-    using InArray = nanobind::ndarray<const T, nanobind::ndim<1>, nanobind::c_contig>;
-
     BamScanner(const FragmentResolver& resolver, const std::string& sj_tag_spec, bool skip_duplicates,
                bool include_multimap);
 
@@ -160,13 +158,13 @@ public:
     /// because this one refuses to run twice. ``ref_region_bound_offsets`` has n_refs + 1 entries; a reference with
     /// offsets[f+1] == offsets[f] has no partition and accepts no deposits. ``max_length`` is the fragment-length limit
     /// applied to L, and the pool-histogram width.
-    void set_regions(InArray<int64_t> region_bounds, InArray<int64_t> ref_region_bound_offsets, int32_t n_refs,
-                     InArray<uint8_t> region_types, int max_length);
+    void set_regions(Array1<int64_t> region_bounds, Array1<int64_t> ref_region_bound_offsets, int32_t n_refs,
+                     Array1<uint8_t> region_types, int max_length);
 
     /// Install the annotated junctions, the flat CSR `build_sj_arrays` emits, keyed by the flat region_bound index.
     /// Required even for an annotation with none (pass empty arrays): scan() refuses to run without it, because a
     /// missing table raises no error elsewhere and every observed intron would read as unannotated.
-    void set_sj(InArray<int64_t> offsets, InArray<int64_t> boundary_right, InArray<int8_t> sj_strand);
+    void set_sj(Array1<int64_t> offsets, Array1<int64_t> boundary_right, Array1<int8_t> sj_strand);
 
     /// Read the BAM at ``bam_path``, streaming each chunk of ``chunk_size`` fragments to ``chunk_callback``; the
     /// stats, the strand observations and the calibration payload when the whole BAM is read.

@@ -25,9 +25,6 @@ using accumulator::kNStrandColumns;
 
 namespace {
 
-template <class T>
-using InArray = nb::ndarray<const T, nb::ndim<1>, nb::c_contig>;
-
 /// A read-only numpy view of one field of a struct bank, owned by ``owner``: ``rows`` rows ``row_stride`` elements
 /// apart (a struct's size in the field's elements), ``cols`` values each.
 template <class T>
@@ -50,13 +47,13 @@ constexpr int64_t stride_of() {
 /// the `OfferedFragment` the per-record bindings marshal from the same record, so a batch over the bank answers as
 /// those calls would, one Python call per reference instead of one per placement and hypothesis.
 struct HeldBank {
-    InArray<int64_t> start, end, align_strand, sj_strand, observed_intron_offsets, observed_introns,
+    Array1<int64_t> start, end, align_strand, sj_strand, observed_intron_offsets, observed_introns,
         hypothesis_offsets, hypothesis_sj_strand, hypothesis_intron_offsets, hypothesis_introns;
 
-    HeldBank(InArray<int64_t> start, InArray<int64_t> end, InArray<int64_t> align_strand, InArray<int64_t> sj_strand,
-             InArray<int64_t> observed_intron_offsets, InArray<int64_t> observed_introns,
-             InArray<int64_t> hypothesis_offsets, InArray<int64_t> hypothesis_sj_strand,
-             InArray<int64_t> hypothesis_intron_offsets, InArray<int64_t> hypothesis_introns)
+    HeldBank(Array1<int64_t> start, Array1<int64_t> end, Array1<int64_t> align_strand, Array1<int64_t> sj_strand,
+             Array1<int64_t> observed_intron_offsets, Array1<int64_t> observed_introns,
+             Array1<int64_t> hypothesis_offsets, Array1<int64_t> hypothesis_sj_strand,
+             Array1<int64_t> hypothesis_intron_offsets, Array1<int64_t> hypothesis_introns)
         : start(start), end(end), align_strand(align_strand), sj_strand(sj_strand),
           observed_intron_offsets(observed_intron_offsets), observed_introns(observed_introns),
           hypothesis_offsets(hypothesis_offsets), hypothesis_sj_strand(hypothesis_sj_strand),
@@ -192,7 +189,7 @@ void bind_accumulator_banks(nb::class_<Accumulator>& c) {
 void bind_accumulator(nb::module_& m) {
     nb::class_<Accumulator> c(m, "Accumulator");
     c.def("__init__",
-          [](Accumulator* self, InArray<int64_t> region_bounds, InArray<uint8_t> region_types, int max_length,
+          [](Accumulator* self, Array1<int64_t> region_bounds, Array1<uint8_t> region_types, int max_length,
              int32_t ref) {
               new (self) Accumulator(
                   std::vector<int64_t>(region_bounds.data(), region_bounds.data() + region_bounds.shape(0)),
@@ -205,7 +202,7 @@ void bind_accumulator(nb::module_& m) {
           "reference this is — stamped into every deferred record, because the second\n"
           "pass replays those onto that reference's region_bound axis.")
         .def("set_sj",
-             [](Accumulator& a, InArray<int32_t> offsets, InArray<int32_t> boundary_right, InArray<int8_t> sj_strand) {
+             [](Accumulator& a, Array1<int32_t> offsets, Array1<int32_t> boundary_right, Array1<int8_t> sj_strand) {
                  a.set_sj(std::vector<int32_t>(offsets.data(), offsets.data() + offsets.shape(0)),
                           std::vector<int32_t>(boundary_right.data(), boundary_right.data() + boundary_right.shape(0)),
                           std::vector<int8_t>(sj_strand.data(), sj_strand.data() + sj_strand.shape(0)));
@@ -243,7 +240,7 @@ void bind_accumulator(nb::module_& m) {
         // `ref_sj_offsets`, so a caller on the payload's flat axis adds that base. -1 where the intron is not
         // annotated.
         .def("sj_edge_ids",
-             [](const Accumulator& a, InArray<int64_t> starts, InArray<int64_t> ends, InArray<int32_t> sj_strand) {
+             [](const Accumulator& a, Array1<int64_t> starts, Array1<int64_t> ends, Array1<int32_t> sj_strand) {
                  const size_t n = starts.shape(0);
                  if (ends.shape(0) != n || sj_strand.shape(0) != n)
                      throw std::invalid_argument("sj_edge_ids: starts, ends and sj_strand must be aligned per intron");
@@ -280,7 +277,7 @@ void bind_accumulator(nb::module_& m) {
         // observed path (`placement_masses`' kinds and ref-local ids, CSR over the batch). Returns
         // `(lengths, path_offsets, path_kinds, path_ids)`.
         .def("held_reads",
-             [](const Accumulator& a, InArray<int64_t> placements, HeldBank& bank) {
+             [](const Accumulator& a, Array1<int64_t> placements, HeldBank& bank) {
                  accumulator::DepositScratch& scratch = binding_scratch();
                  std::vector<int64_t> lengths, path_offsets{0}, path_ids;
                  std::vector<int8_t> path_kinds;
@@ -308,7 +305,7 @@ void bind_accumulator(nb::module_& m) {
         // `placements[i]` deposited with hypothesis `hypotheses[i]` (flat ids) alone, as `deposit` would. Returns
         // the count of each outcome by its key.
         .def("deposit_held",
-             [](Accumulator& a, InArray<int64_t> placements, InArray<int64_t> hypotheses, HeldBank& bank) {
+             [](Accumulator& a, Array1<int64_t> placements, Array1<int64_t> hypotheses, HeldBank& bank) {
                  if (hypotheses.shape(0) != placements.shape(0))
                      throw std::invalid_argument("deposit_held: one hypothesis per placement");
                  accumulator::DepositScratch& scratch = binding_scratch();
@@ -329,8 +326,8 @@ void bind_accumulator(nb::module_& m) {
 /// The held bank as the batch reads take it: built once from `DeferredFragments`' arrays, which it keeps alive.
 void bind_held_bank(nb::module_& m) {
     nb::class_<HeldBank>(m, "HeldBank")
-        .def(nb::init<InArray<int64_t>, InArray<int64_t>, InArray<int64_t>, InArray<int64_t>, InArray<int64_t>,
-                      InArray<int64_t>, InArray<int64_t>, InArray<int64_t>, InArray<int64_t>, InArray<int64_t>>(),
+        .def(nb::init<Array1<int64_t>, Array1<int64_t>, Array1<int64_t>, Array1<int64_t>, Array1<int64_t>,
+                      Array1<int64_t>, Array1<int64_t>, Array1<int64_t>, Array1<int64_t>, Array1<int64_t>>(),
              nb::arg("start"), nb::arg("end"), nb::arg("align_strand"), nb::arg("sj_strand"),
              nb::arg("observed_intron_offsets"), nb::arg("observed_introns"), nb::arg("hypothesis_offsets"),
              nb::arg("hypothesis_sj_strand"), nb::arg("hypothesis_intron_offsets"), nb::arg("hypothesis_introns"));
@@ -434,10 +431,10 @@ void bind_annotation_writer(nb::module_& m) {
              nb::keep_alive<1, 2>())
         .def("write",
              [](const Writer& w, const std::string& bam_path, const std::string& output_path,
-                Writer::InArray<int64_t> frag_ids, Writer::InArray<int32_t> best_tid, Writer::InArray<int32_t> best_gid,
-                Writer::InArray<uint8_t> tx_flags, Writer::InArray<float> posterior,
-                Writer::InArray<int8_t> frag_class, Writer::InArray<int32_t> n_candidates,
-                Writer::InArray<int32_t> locus_id, int64_t size, const std::vector<std::string>& t_ids,
+                Array1<int64_t> frag_ids, Array1<int32_t> best_tid, Array1<int32_t> best_gid,
+                Array1<uint8_t> tx_flags, Array1<float> posterior,
+                Array1<int8_t> frag_class, Array1<int32_t> n_candidates,
+                Array1<int32_t> locus_id, int64_t size, const std::vector<std::string>& t_ids,
                 const std::vector<std::string>& g_ids, const std::vector<std::string>& g_names) {
                  const Writer::Annotations annotations{frag_ids,   best_tid,     best_gid, tx_flags, posterior,
                                                        frag_class, n_candidates, locus_id, size};

@@ -33,26 +33,27 @@ struct EmEquivClass {
     int k;  // number of components per unit
 };
 
+// The 64-bit FNV-1a hash (Fowler–Noll–Vo): it starts at the offset basis and folds in one word per step.
+constexpr uint64_t FNV1A_OFFSET_BASIS = 14695981039346656037ULL;
+constexpr uint64_t FNV1A_PRIME = 1099511628211ULL;
+inline uint64_t fnv1a_step(uint64_t h, uint64_t word) noexcept { return (h ^ word) * FNV1A_PRIME; }
+
 // FNV-1a hash of a candidate component set.
 struct VecHash {
     size_t operator()(const std::vector<int32_t>& v) const noexcept {
-        size_t h = 14695981039346656037ULL;
-        for (int32_t val : v) {
-            h ^= static_cast<size_t>(static_cast<uint32_t>(val));
-            h *= 1099511628211ULL;
-        }
-        return h;
+        uint64_t h = FNV1A_OFFSET_BASIS;
+        for (int32_t val : v) h = fnv1a_step(h, static_cast<uint32_t>(val));
+        return static_cast<size_t>(h);
     }
 };
 
 // FNV-1a hash of a row of doubles, by their bit patterns.
 inline uint64_t row_hash(const double* row, int k) {
-    uint64_t h = 14695981039346656037ULL;
+    uint64_t h = FNV1A_OFFSET_BASIS;
     for (int j = 0; j < k; ++j) {
         uint64_t bits;
         std::memcpy(&bits, row + j, sizeof bits);
-        h ^= bits;
-        h *= 1099511628211ULL;
+        h = fnv1a_step(h, bits);
     }
     return h;
 }

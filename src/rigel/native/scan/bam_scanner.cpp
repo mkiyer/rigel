@@ -92,8 +92,8 @@ BamScanner::BamScanner(const FragmentResolver& resolver, const std::string& sj_t
       skip_duplicates_(skip_duplicates),
       include_multimap_(include_multimap) {}
 
-void BamScanner::set_regions(InArray<int64_t> region_bounds, InArray<int64_t> ref_region_bound_offsets,
-                             int32_t n_refs, InArray<uint8_t> region_types, int max_length) {
+void BamScanner::set_regions(Array1<int64_t> region_bounds, Array1<int64_t> ref_region_bound_offsets,
+                             int32_t n_refs, Array1<uint8_t> region_types, int max_length) {
     if (n_refs < 0) throw std::invalid_argument("set_regions: n_refs must be non-negative");
     const size_t n_off = ref_region_bound_offsets.shape(0);
     if (n_off != static_cast<size_t>(n_refs) + 1) {
@@ -117,7 +117,7 @@ void BamScanner::set_regions(InArray<int64_t> region_bounds, InArray<int64_t> re
     acc_set_ = partition_.make_set();
 }
 
-void BamScanner::set_sj(InArray<int64_t> offsets, InArray<int64_t> boundary_right, InArray<int8_t> sj_strand) {
+void BamScanner::set_sj(Array1<int64_t> offsets, Array1<int64_t> boundary_right, Array1<int8_t> sj_strand) {
     if (!acc_set_) {
         throw std::runtime_error(
             "set_sj: call set_regions first — the sj CSR is keyed by region_bound index, so "
