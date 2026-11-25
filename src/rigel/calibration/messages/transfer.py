@@ -59,7 +59,7 @@ class TransferPolicy:
     def library(self, view: ChainView) -> Library:
         is_exon = np.asarray(view.is_exon_region, bool)
         fp, fn = np.asarray(view.free_pos, bool), np.asarray(view.free_neg, bool)
-        n_u = np.asarray(view.n_slot, np.float64)
+        n_u = np.asarray(view.n_u, np.float64)
         a_g = np.asarray(view.eff_gdna, np.float64)
         a_r = np.asarray(view.eff_rna, np.float64)
         cnt = np.asarray(view.unspliced_count, np.float64)

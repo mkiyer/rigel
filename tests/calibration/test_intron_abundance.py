@@ -97,7 +97,7 @@ def _solve(parts, *, kappa, background, policy=None):
 
 
 def _law(parts, departure=EPS):
-    return CAL._background(parts.chain, parts.geometry, parts.region_arrays, departure)
+    return CAL._background(parts.chain, parts.statics, parts.geometry, departure)
 
 
 def _scattered_pool(rng, *, n, exposure, rate, alpha):

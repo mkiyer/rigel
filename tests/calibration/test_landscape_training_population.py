@@ -102,7 +102,9 @@ def _synthetic_population():
         RegionType.INTERGENIC,
         RegionType.INTRON,
     ]
-    region_arrays = SimpleNamespace(signature=sig)
+    from rigel.calibration.region_geometry import slot_signature
+
+    statics.region_type = coarse_type_array(slot_signature(chain, sig))
     mass = np.array([0.0, 5.0, 100.0, 5.0, 80.0, 5.0, 60.0])
     eff = np.full(7, 1000.0)
     belief = SimpleNamespace(
@@ -110,11 +112,11 @@ def _synthetic_population():
         var_gdna=np.array([np.inf, 1.0, 0.8, 1.0, 0.0, 1.0, 0.5]),
         has_composition=np.array([False, True, True, True, True, True, True]),
     )
-    return chain, belief, statics, region_arrays, mass, eff
+    return chain, belief, statics, mass, eff
 
 
 def _training_counts(monkeypatch, belief, parts):
-    chain, _, statics, region_arrays, mass, eff = parts
+    chain, _, statics, mass, eff = parts
     seen = {}
 
     def spy(count, mass_, eff_, var, *, anchor, domain=None, prev=None):
@@ -127,7 +129,7 @@ def _training_counts(monkeypatch, belief, parts):
     monkeypatch.setattr(
         CAL, "CONSTANTS", replaced(CONSTANTS, "calibration.min_training_regions", 1)
     )
-    CAL._fit_gdna_hyperprior(chain, belief, statics, region_arrays, mass, eff)
+    CAL._fit_gdna_hyperprior(chain, belief, statics, mass, eff)
     return seen
 
 
@@ -198,10 +200,10 @@ def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):
     none = SimpleNamespace(
         f_g=belief.f_g, var_gdna=belief.var_gdna, has_composition=np.zeros(7, bool)
     )
-    chain, _, statics, region_arrays, mass, eff = parts
+    chain, _, statics, mass, eff = parts
     calls = []
     monkeypatch.setattr(CAL, "fit_landscape", lambda *a, **k: calls.append(1))
-    CAL._fit_gdna_hyperprior(chain, none, statics, region_arrays, mass, eff)
+    CAL._fit_gdna_hyperprior(chain, none, statics, mass, eff)
     assert calls, "the refit was refused although the domain has enough substrate"
 
 

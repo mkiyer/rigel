@@ -158,8 +158,8 @@ class CalibrationResult:
     #: and the two RNA strand shares of its unspliced population, over
     #: ``{gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}``. ``count_gdna_*`` and ``count_rna_*`` are this answer with
     #: the two RNA strands summed. The three close by construction (ψ's ``compose``, ``native/psi_kernel.h``), a slot
-    #: the solve does not reach keeps its signature-binary belief, and they are published as solved, never
-    #: renormalised.
+    #: the solve does not reach keeps its initial belief (signature-binary, or its strands' share at a departed
+    #: lock), and they are published as solved, never renormalised.
     gdna_frac_region: np.ndarray
     rna_pos_frac_region: np.ndarray
     rna_neg_frac_region: np.ndarray
@@ -193,7 +193,7 @@ class CalibrationResult:
     #: the same unit and at the same weight. The ruler and the locus prior price every conserved boundary share at it,
     #: and the ruler prices a junction from the efficiencies beside it (`capture_eff_length`).
     gdna_capture_efficiency_boundary: np.ndarray
-    rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
+    rna_sense_frac: float  # in [0, 1], the RNA sense fraction κ the solve read the strands by
 
     # --- provenance: the three axis lengths, independent of each other ---
     n_regions: int

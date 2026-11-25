@@ -88,7 +88,7 @@ class ChainView:
         return int(self.unspliced_count.shape[0])
 
     @property
-    def n_slot(self) -> np.ndarray:
+    def n_u(self) -> np.ndarray:
         """The per-slot unspliced count over both strands: the density numerator and the Poisson n."""
         return self.unspliced_count.sum(axis=1)
 

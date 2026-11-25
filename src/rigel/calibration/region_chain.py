@@ -91,8 +91,8 @@ class RegionDeconv:
     # gDNA one.
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
-    # Var(log f_g), not Var(f_g), so not bounded by ¼; set by the per-slot solve, read by the landscape's training
-    # rule, None on the projections
+    # Var(log f_g), not Var(f_g), so not bounded by ¼; set by the per-slot solve (the sweep's final solve overwrites
+    # it at every solvable slot before anything reads it), None on the projections
     gdna_frac_var: "np.ndarray | None" = None  # float64[K]
 
 

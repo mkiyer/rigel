@@ -57,7 +57,7 @@ from scipy.special import betainc, betaincc, betainccinv, betaincinv
 from scipy.stats import binom
 
 from ..config import CONSTANTS
-from .intron_departure import _score
+from .intron_departure import mixture_score
 from .numeric import beta_span, bisect_to_adjacent
 
 __all__ = ["LockFit", "fit_lock_departure"]
@@ -124,7 +124,7 @@ def _slope(d, eps: float) -> float:
     """``d/dε Σ log L_j`` from each object's ``d = log b − log a``, the introns' score summed; ``±∞`` at an end where a
     term's likelihood vanishes."""
     with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
-        return float(_score(d, eps).sum())
+        return float(mixture_score(d, eps).sum())
 
 
 def _departure(d) -> float:

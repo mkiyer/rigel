@@ -163,16 +163,19 @@ def capture_efficiencies(
     crossing count on its crossing support, with the bulk density and the saturation level they are read against.
 
     The counts are the deconvolved gDNA masses, the supports the objects' own gDNA opportunities. Both must be
-    finite; a negative value (a deconvolution's rounding) reads as 0. ``n_threads`` is the reading's thread budget
-    (``0`` is every core); the reading is the same at every count.
+    finite and nonnegative: the counts are a share in [0, 1] of a count and the supports clamped opportunities, so a
+    negative is the caller's error. ``n_threads`` is the reading's thread budget (``0`` is every core); the reading is
+    the same at every count.
     """
     prior = _two_groups(landscape)
 
     def clean(values, name: str) -> np.ndarray:
         v = np.asarray(values, dtype=np.float64)
-        if v.ndim != 1 or not np.all(np.isfinite(v)):
-            raise ValueError(f"capture_efficiencies: {name} must be a finite 1-D array.")
-        return np.maximum(v, 0.0)
+        if v.ndim != 1 or not np.all(np.isfinite(v)) or np.any(v < 0.0):
+            raise ValueError(
+                f"capture_efficiencies: {name} must be a finite, nonnegative 1-D array."
+            )
+        return v
 
     k_r, s_r = clean(count_region, "count_region"), clean(eff_region, "eff_region")
     k_b, s_b = clean(count_boundary, "count_boundary"), clean(eff_boundary, "eff_boundary")

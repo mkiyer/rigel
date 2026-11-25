@@ -478,6 +478,9 @@ def test_one_probe_keeps_its_reading_in_a_library_whose_gdna_shows(landscape):
         dict(eff_region=np.array([np.inf, 1.0])),
         dict(count_boundary=np.array([1.0, -np.inf])),
         dict(eff_region=np.array([1.0, 2.0, 3.0])),
+        # a negative count or support is no rounding to read as 0: both are built nonnegative
+        dict(count_region=np.array([-1e-9, 1.0])),
+        dict(eff_boundary=np.array([50.0, -1.0])),
     ],
 )
 def test_a_non_finite_or_misshapen_input_is_refused(landscape, bad):

@@ -67,7 +67,8 @@ class CalibrationDiagnostics:
     axis and region frame it ran on, the final belief (after the refits), the last refit's landscape (``None`` when no
     refit fitted one), the library's RNA sense fraction, the intergenic background's law as the sweep read it (its
     departure prior the introns'), the fit of that departure prior, the locks' departure on the slot axis, and the last
-    sweep's :class:`SweepDiagnostics`, whose counts are the sweep's own: a locked slot's at its gDNA share."""
+    sweep's :class:`SweepDiagnostics`, whose counts are the sweep's own: a locked slot's at the part of it still a
+    lock (``lock.kept``)."""
 
     chain: RegionChain | None = None
     geometry: RegionGeometry | None = None

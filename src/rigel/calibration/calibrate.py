@@ -57,10 +57,9 @@ from .region_geometry import (
     g1_locked,
     init_beliefs,
     region_gdna_geometry,
-    slot_signature,
 )
 from .result import CalibrationResult
-from .signature import RegionType, coarse_type_array
+from .signature import RegionType
 from .strand_balance import StrandBalance, fit_strand_balance
 from .substrate import CalibrationSubstrate
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
@@ -77,9 +76,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _fit_gdna_hyperprior(
-    chain, belief, statics, region_arrays, mass_global, eff_global, *, prev=None
-):
+def _fit_gdna_hyperprior(chain, belief, statics, mass_global, eff_global, *, prev=None):
     """Select the training substrate from the chain and fit the :class:`DensityLandscape` on the deconvolved gDNA.
 
     The landscape is ψ's gDNA arm in the next refit; it changes the prior only, never the messages. Returns ``None``
@@ -99,7 +96,7 @@ def _fit_gdna_hyperprior(
     isr = np.asarray(chain.kind) == REGION
     fp = np.asarray(statics.free_pos, dtype=bool)
     fn = np.asarray(statics.free_neg, dtype=bool)
-    slot_type = coarse_type_array(slot_signature(chain, region_arrays.signature))
+    slot_type = statics.region_type
     constants = CONSTANTS.calibration
     expressed = (
         isr & (eff_global > constants.opportunity_floor) & (mass_global > constants.mass_floor)
@@ -212,10 +209,10 @@ def _sweep_inputs(
     # no strand measures. The introns' rows then read at the library's own rate where its strands measure one. The law
     # reads an intergenic region's gDNA count, so its share.
     background = _background(
-        chain, _locked_at(geometry, lock, lock.share), region_arrays, config.intron_departure_prior
+        chain, statics, _locked_at(geometry, lock, lock.share), config.intron_departure_prior
     )
     departure = _departure(
-        chain, statics, geometry, region_arrays, strand, background, config.intron_departure_prior
+        chain, statics, geometry, strand, background, config.intron_departure_prior
     )
     return _SweepInputs(
         chain=chain,
@@ -297,13 +294,13 @@ def _lock_belief(belief: RegionBelief, lock: LockFit) -> RegionBelief:
     )
 
 
-def _background(chain, geometry, region_arrays, departure: float) -> BackgroundLaw:
+def _background(chain, statics, geometry, departure: float) -> BackgroundLaw:
     """The intergenic regions' gDNA law (`gdna_density.background_law`): their unspliced count over their gDNA
     opportunity. An intergenic region admits no RNA strand, so it is the library's one structurally pure gDNA pool, and
     the intron abundance model reads every intron's count against its law; a region that departs from the law (it
     holds unannotated transcription, or sits in a copy-number change) does not set it. ``departure`` is the run's
     ``calibration.intron_departure_prior``."""
-    region_type = coarse_type_array(slot_signature(chain, region_arrays.signature))
+    region_type = statics.region_type
     eff = np.asarray(geometry.eff_gdna, np.float64)
     pool = (np.asarray(chain.kind) == REGION) & (region_type == RegionType.INTERGENIC)
     pool &= eff > CONSTANTS.calibration.opportunity_floor
@@ -325,7 +322,6 @@ def _departure(
     chain,
     statics,
     geometry,
-    region_arrays,
     strand: StrandBalance,
     law: BackgroundLaw,
     setting: float,
@@ -335,7 +331,7 @@ def _departure(
     gDNA evenly, so its count on the strand opposite its annotation, given its count, reads its gDNA against the law.
     An intron that admits both strands has no such reading. A dead strand channel (`strand_discriminability`) is read
     as κ = ½, as the solve reads it, so an unstranded library keeps the setting."""
-    region_type = coarse_type_array(slot_signature(chain, region_arrays.signature))
+    region_type = statics.region_type
     fp = np.asarray(statics.free_pos, dtype=bool)
     fn = np.asarray(statics.free_neg, dtype=bool)
     intron = (np.asarray(chain.kind) == REGION) & (region_type == RegionType.INTRON) & (fp ^ fn)
@@ -445,7 +441,6 @@ def _solve(s: _SweepInputs, diagnostics: SweepDiagnostics | None):
             s.chain,
             belief,
             s.statics,
-            s.region_arrays,
             s.mass_global,
             s.eff_global,
             prev=landscape,
@@ -489,11 +484,9 @@ def _result(
         count_rna_region=regions.rna_mass,
         count_gdna_boundary=boundaries.gdna_mass,
         count_rna_boundary=boundaries.rna_mass,
-        count_rna_spliced_boundary=np.asarray(
-            substrate.boundary_spliced.count, dtype=np.float64
-        ).sum(axis=1),
+        count_rna_spliced_boundary=substrate.boundary_spliced.total_count.astype(np.float64),
         boundary_mass_per_crossing=substrate.boundary_unspliced.mass_per_crossing,
-        count_rna_sj=np.asarray(substrate.sj.count, dtype=np.float64).sum(axis=1),
+        count_rna_sj=substrate.sj.total_count.astype(np.float64),
         boundary_spliced_mass_per_crossing=substrate.boundary_spliced.mass_per_crossing,
         sj_mass_per_crossing=substrate.sj.mass_per_crossing,
         sj_src_region=np.asarray(sj.src_region, dtype=np.int64),
@@ -624,14 +617,11 @@ def _log_summary(result: CalibrationResult, strand: StrandBalance, substrate, sj
             result.gdna_capture_weight,
             result.gdna_capture_saturation,
         )
+    # the pipeline logs the axes and the density; the junctions' own sense fraction is logged here, beside κ
     logger.debug(
-        "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f [sj sense_frac=%.3f]",
-        result.n_regions,
-        result.n_boundaries,
-        result.n_sj,
-        result.gdna_density_global,
-        strand.rna_sense_frac,
+        "calibration: sj sense_frac=%.3f (rna_sense_frac %.3f)",
         sj_sense_frac,
+        strand.rna_sense_frac,
     )
 
 

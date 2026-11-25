@@ -194,10 +194,8 @@ def _genes(rng, *, background, fold=1.0, rna=0.0, both=0, n_genes=1000, kappa=0.
 
 
 def _departure(parts, strand=LIVE):
-    law = CAL._background(parts.chain, parts.geometry, parts.region_arrays, M0)
-    fit = CAL._departure(
-        parts.chain, parts.statics, parts.geometry, parts.region_arrays, strand, law, M0
-    )
+    law = CAL._background(parts.chain, parts.statics, parts.geometry, M0)
+    fit = CAL._departure(parts.chain, parts.statics, parts.geometry, strand, law, M0)
     return fit, law
 
 
@@ -259,7 +257,7 @@ def test_the_introns_read_the_librarys_departure_and_the_pool_the_setting(monkey
     )
     assert diagnostics.departure is estimate
     assert diagnostics.background.departure == 0.37
-    pool = CAL._background(diagnostics.chain, diagnostics.geometry, diagnostics.region_arrays, M0)
+    pool = CAL._background(diagnostics.chain, diagnostics.statics, diagnostics.geometry, M0)
     assert dataclasses.replace(diagnostics.background, departure=M0) == pool
 
 

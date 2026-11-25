@@ -11,6 +11,7 @@ import pandas as pd
 
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS
+from rigel.calibration.substrate import PopulationView
 from rigel.scan_payload import (
     N_FRAGMENT_POOLS,
     AccumulatorPayload,
@@ -261,11 +262,14 @@ def make_chain_parts(
 
     region_counts = pair(region_pos, region_neg, n_regions)
     boundary_counts = pair(boundary_pos, boundary_neg, n_boundaries)
+    # the populations as the substrate holds them (`substrate.PopulationView`), counts only: no reader here takes a mass
     substrate = SimpleNamespace(
-        region_contained=SimpleNamespace(count=region_counts),
-        boundary_unspliced=SimpleNamespace(count=boundary_counts),
-        boundary_spliced=SimpleNamespace(count=pair(boundary_spliced, 0.0, n_boundaries)),
-        sj=SimpleNamespace(count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)),
+        region_contained=PopulationView("region_contained", region_counts),
+        boundary_unspliced=PopulationView("boundary_unspliced", boundary_counts),
+        boundary_spliced=PopulationView(
+            "boundary_spliced", pair(boundary_spliced, 0.0, n_boundaries)
+        ),
+        sj=PopulationView("sj", np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)),
     )
     # a real frame, nothing masked: each reference's regions tile it from 0, so every reader of the observable genome
     # (the slot divisors among them) reads the partition itself

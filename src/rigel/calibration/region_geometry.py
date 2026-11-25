@@ -22,7 +22,7 @@ from .effective_length import (
     observable_crossing_eff_length,
 )
 from .region_chain import BOUNDARY, REGION, RegionChain
-from .signature import rna_active_strands
+from .signature import coarse_type_array, rna_active_strands
 from .simplex_logodds import solve_regions_logodds
 
 __all__ = [
@@ -198,7 +198,7 @@ def _sj_factors(chain: RegionChain, substrate, sj, rna_fl_pmf: np.ndarray):
             "partition than the payload was scanned on."
         )
     # the sj's count summed over the genome-strand columns, filed under the sj's transcript strand
-    flux = np.asarray(substrate.sj.count, np.float64).sum(axis=1)
+    flux = substrate.sj.total_count.astype(np.float64)
     eff = crossing_eff_length(rna_fl_pmf, sj.reach_lo, sj.reach_hi)
     column = np.where(np.asarray(sj.strand) == np.int8(Strand.POS), 0, 1)
     live_route = eff > 0.0
@@ -218,7 +218,8 @@ def region_gdna_geometry(geometry: RegionGeometry):
     """Per-slot gDNA support ``(unspliced count, eff_gdna)``.
 
     ``calibrate`` fits the landscape prior on it and derives the λ bracket from it, and the sweep's diagnostics
-    capture publishes it as ``mass_global``. The kernel (``native/solve_kernel.cpp``) forms the same pair from the
+    publish it as ``mass_global`` over the geometry the sweep reads (a locked slot at the part still a lock, so it
+    differs from calibrate's at a departed lock). The kernel (``native/solve_kernel.cpp``) forms the same pair from the
     arrays :func:`sweep.solve_chain` hands it, so the two definitions must stay equal. The divisor is ``eff_gdna``,
     so ``rho_g = f_g·M/E_g`` and ``f_g`` is a count share, not a density share. A total density must never be formed
     as ``mass / eff_gdna``: that divides a total by one component's opportunity.
@@ -306,13 +307,18 @@ class RegionStatics:
     ``free_pos``/``free_neg`` are the strands on which RNA may be present at all: a region's own transcript bits,
     a boundary's strand continuity. ``boundary_flags`` carries the splice graph's 8 structural bits
     (``TSS_s``/``TES_s``/``DONOR_s``/``ACCEPTOR_s``) at each BOUNDARY slot and 0 on REGION slots. They stay raw bits,
-    because each consumer reads a different combination.
+    because each consumer reads a different combination. ``region_type`` is each slot's coarse
+    :class:`~rigel.calibration.signature.RegionType` from its signature; a BOUNDARY slot's signature is 0, so it reads
+    INTERGENIC, and a reader pairs it with the REGION kind.
     """
 
     n_slots: int
     free_pos: np.ndarray  # bool — RNA-active (transcript continuity); the RNA-crossing gate
     free_neg: np.ndarray  # bool
     boundary_flags: np.ndarray  # uint16 — graph structural bits; 0 on REGION slots
+    region_type: (
+        np.ndarray
+    )  # uint8 — RegionType from the slot's signature; INTERGENIC at a BOUNDARY slot
 
 
 def build_region_statics(
@@ -335,7 +341,8 @@ def build_region_statics(
     is_boundary = ~is_region
     n = int(chain.n_slots)
     flags = _check_boundary_flags(boundary_flags, int(chain.n_boundaries_total))
-    pos, neg = rna_active_strands(slot_signature(chain, region_arrays.signature))
+    signature = slot_signature(chain, region_arrays.signature)
+    pos, neg = rna_active_strands(signature)
     left = np.clip(np.asarray(chain.left), 0, max(n - 1, 0))
     right = np.clip(np.asarray(chain.right), 0, max(n - 1, 0))
     return RegionStatics(
@@ -347,6 +354,7 @@ def build_region_statics(
         boundary_flags=np.where(
             is_boundary, flags[np.clip(obj, 0, max(flags.shape[0] - 1, 0))], 0
         ).astype(np.uint16),
+        region_type=coarse_type_array(signature),
     )
 
 

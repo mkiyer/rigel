@@ -157,9 +157,9 @@ def _observable_parts(
     mask = np.asarray(mask, dtype=np.int64)
     if mask.shape[0] == 0 or t.size == 0:
         return t, piece, k, length, u
-    # the first masked run ending past each piece's start, on one ascending key: reference, then position (every
-    # position is below 2^40)
-    span = np.int64(1) << np.int64(40)
+    # the first masked run ending past each piece's start, on one ascending key: reference, then position, the span
+    # past every position either side holds
+    span = np.int64(max(int(mask[:, 2].max()), int(np.max(b))) + 1)
     first = np.searchsorted(mask[:, 0] * span + mask[:, 2], ref * span + a, side="right")
     at = np.minimum(first, mask.shape[0] - 1)
     hit = (first < mask.shape[0]) & (mask[at, 0] == ref) & (mask[at, 1] < b)
@@ -595,7 +595,7 @@ def fit_junction_cap(calibration: "CalibrationResult", frame: TranscriptFrame) -
     np.maximum.at(
         region_term, pair % n_regions, np.bincount(part_of, weights=piece_term[annotated])
     )
-    rna = np.maximum(np.asarray(calibration.count_rna_region, dtype=np.float64), 0.0)
+    rna = np.asarray(calibration.count_rna_region, dtype=np.float64)
     own_rna = np.zeros(n_sj)
     own_term = np.zeros(n_sj)
     for side in (src, dst):
@@ -910,7 +910,7 @@ def rna_captured_fraction(calibration: "CalibrationResult", region_arrays: "Regi
     if calibration.gdna_bulk_density is None:
         return 0.0
     c = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
-    n = np.clip(np.asarray(calibration.count_rna_region, dtype=np.float64), 0.0, None)
+    n = np.asarray(calibration.count_rna_region, dtype=np.float64)
     exon = coarse_type_array(region_arrays.signature) == int(RegionType.EXON)
     n = np.where(exon, n, 0.0)
     if n.sum() <= 0.0:

@@ -23,8 +23,9 @@ A terminal, a region that admits no RNA strand and so is structurally pure gDNA,
 terminal, so the chain splits into independent loci there (``region_chain.locus_blocks``).
 
 The solve gate (``solvable``): a slot is solved iff its signature admits at least one RNA strand and it has unspliced
-mass. A slot with no admissible RNA strand is a locked all-gDNA object that keeps its signature-binary init. The
-emission gate, which messages a slot sends, is the policy's.
+mass. A slot with no admissible RNA strand is a locked object that keeps its initial belief: signature-binary
+(all gDNA), or its strands' share at a departed lock. The emission gate, which messages a slot sends, is the
+policy's.
 
 Gate: ``tests/calibration/test_sweep_backbone.py``.
 """
@@ -310,7 +311,7 @@ def _record_sweep(diagnostics: SweepDiagnostics, view, out, buffers, res, blocks
     d.f_g = out["f_g"].copy()
     d.free_pos = np.asarray(view.free_pos, bool)
     d.free_neg = np.asarray(view.free_neg, bool)
-    d.solvable = (d.free_pos | d.free_neg) & (view.n_slot > 0.0)
+    d.solvable = (d.free_pos | d.free_neg) & (view.n_u > 0.0)
     d.count = np.asarray(view.unspliced_count, np.float64)
     d.mass_global, _ = region_gdna_geometry(geometry)
     d.lam_rows = buffers["lam_rows"] if np.asarray(res["rows_delivered"], bool).any() else None
@@ -364,7 +365,7 @@ def chain_region_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> 
     The RNA mass has no spliced term: the accumulator credits ``region_contained`` only when the fragment used no sj,
     so a contained fragment is unspliced by construction.
     """
-    count = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)
+    count = substrate.region_contained.total_count.astype(np.float64)
     f_g, f_pos, f_neg = (
         on_object_axis(chain, f, REGION, count.shape[0])
         for f in (belief.f_g, belief.f_pos, belief.f_neg)
@@ -389,8 +390,8 @@ def chain_boundary_deconv(chain: RegionChain, belief: RegionBelief, substrate) -
     depends on the ``free_*`` bits, never on the slot's kind), so a boundary carries a per-strand RNA split like a
     region.
     """
-    unspliced = np.asarray(substrate.boundary_unspliced.count, dtype=np.float64).sum(axis=1)
-    spliced = np.asarray(substrate.boundary_spliced.count, dtype=np.float64).sum(axis=1)
+    unspliced = substrate.boundary_unspliced.total_count.astype(np.float64)
+    spliced = substrate.boundary_spliced.total_count.astype(np.float64)
     f_g, f_pos, f_neg = (
         on_object_axis(chain, f, BOUNDARY, unspliced.shape[0])
         for f in (belief.f_g, belief.f_pos, belief.f_neg)

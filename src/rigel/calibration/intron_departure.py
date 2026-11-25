@@ -99,7 +99,7 @@ def _log_mix(d, eps):
     return np.where(d > 0.0, np.log(eps + (1.0 - eps) * e), np.log1p(-eps * (1.0 - e)))
 
 
-def _score(d, eps):
+def mixture_score(d, eps):
     """``d/dε log L_i``, from ``d = log b_i − log a_i``, stable at either extreme of ``d``."""
     ed = np.exp(-np.abs(d))
     return np.where(
@@ -144,7 +144,7 @@ def fit_departure_prior(
     # the log posterior's derivative, Σ score_i + (α − 1)/ε − (β − 1)/(1 − ε) with α − 1 = 1 and β − 1 = n0 − 1,
     # falls from +∞ to −∞ across (0, 1)
     def slope(eps):
-        return float(_score(d, eps).sum()) + 1.0 / eps - (n0 - 1.0) / (1.0 - eps)
+        return float(mixture_score(d, eps).sum()) + 1.0 / eps - (n0 - 1.0) / (1.0 - eps)
 
     lo, hi = bisect_to_adjacent(lambda eps: slope(eps) > 0.0, 0.0, 1.0)
     eps = 0.5 * (lo + hi)
