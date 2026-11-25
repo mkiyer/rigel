@@ -8,6 +8,8 @@ import numpy as np
 import pysam
 import pytest
 
+from _em_harness import em_partition
+
 from rigel.annotate import AnnotationTable
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.estimator import AbundanceEstimator
@@ -25,7 +27,7 @@ def test_the_em_counts_every_candidate_of_a_unit():
         num_transcripts=N_WIDE,
         em_config=EMConfig(assignment_mode="fractional", seed=0, n_threads=1),
     )
-    partition = (
+    partition = em_partition(
         np.array([0, N_WIDE], dtype=np.int64),
         np.arange(N_WIDE, dtype=np.int32),
         np.zeros(N_WIDE, dtype=np.float32),
@@ -36,7 +38,7 @@ def test_the_em_counts_every_candidate_of_a_unit():
         np.full(1, -np.inf, dtype=np.float32),
     )
     *_, n_candidates = est.run_batch_locus_em_partitioned(
-        partition_tuples=[partition],
+        partitions=[partition],
         locus_transcript_indices=[np.arange(N_WIDE, dtype=np.int32)],
         gdna_prior_count=np.zeros(1, dtype=np.float64),
         emit_assignments=True,

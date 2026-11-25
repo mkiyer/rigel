@@ -4,8 +4,12 @@ without a guard. Each refusal here was a silent skip or an out-of-range read bef
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
+
+from _em_harness import em_partition
 
 from rigel.config import EMConfig
 from rigel.estimator import AbundanceEstimator
@@ -32,7 +36,7 @@ def _locus(candidates: list[list[int]]) -> list[np.ndarray]:
 def _run(part: list[np.ndarray], transcripts: list[int]):
     est = AbundanceEstimator(4, em_config=EMConfig(n_threads=1, seed=7))
     return est.run_batch_locus_em_partitioned(
-        [tuple(part)],
+        [em_partition(*part)],
         [np.asarray(transcripts, np.int32)],
         np.array([5.0]),
         rna_prior_count=np.array([3.0]),
@@ -79,7 +83,7 @@ def test_a_candidate_csr_naming_a_transcript_past_the_index_is_refused():
 def _run_loci(parts: list, transcripts: list, gdna_prior: list[float], rna_prior: list[float]):
     est = AbundanceEstimator(4, em_config=EMConfig(n_threads=1, seed=7))
     return est.run_batch_locus_em_partitioned(
-        [tuple(p) for p in parts],
+        [em_partition(*p) for p in parts],
         [np.asarray(t, np.int32) for t in transcripts],
         np.asarray(gdna_prior),
         rna_prior_count=np.asarray(rna_prior),
@@ -104,3 +108,65 @@ def test_a_locus_prior_count_that_is_not_a_count_is_refused(gdna, rna):
     """A prior count is a count of pseudo-fragments; one that is negative or not finite was read as 0 before."""
     with pytest.raises(ValueError, match="prior count is negative or not finite"):
         _run_loci([_locus([[0, 1]] * 3)], [[0, 1]], [gdna], [rna])
+
+
+def _named(part: list[np.ndarray], **drop_or_rename) -> SimpleNamespace:
+    """``part`` as a named partition, with each ``old=new`` renaming a field (``new=None`` drops it)."""
+    fields = dict(vars(em_partition(*part)))
+    for old, new in drop_or_rename.items():
+        value = fields.pop(old)
+        if new is not None:
+            fields[new] = value
+    return SimpleNamespace(**fields)
+
+
+def test_the_em_reads_each_array_by_its_name_not_its_position():
+    """Four float arrays cross the boundary, two per candidate and two per unit, and the same-typed ones are
+    interchangeable by shape and dtype: read by position, a reordering passes every check and swaps their meanings.
+    Read by name, the order a partition lists its fields in is not read at all, and the field names are the contract."""
+    part = _locus([[0, 1]] * 3)
+    part[3] = np.array(
+        [1.0, 30.0, 1.0, 30.0, 1.0, 30.0], np.float32
+    )  # coverage weights unlike the log-likelihoods
+    part[7] = np.full(3, -2.0, np.float32)  # an intergenic reading unlike the gDNA one
+    reference = _run_named(_named(part))
+    shuffled = SimpleNamespace(**dict(reversed(list(vars(_named(part)).items()))))
+    for got, want in zip(_run_named(shuffled), reference):
+        np.testing.assert_array_equal(got, want)
+
+
+@pytest.mark.parametrize(
+    "rename, said",
+    [
+        ({"gdna_excluded": None}, "has no array gdna_excluded"),
+        ({"gdna_excluded": "is_spliced"}, "has no array gdna_excluded"),
+        ({"intergenic_log_liks": None}, "has no array intergenic_log_liks"),
+    ],
+)
+def test_a_partition_missing_a_named_array_is_refused(rename, said):
+    with pytest.raises(ValueError, match=said):
+        _run_named(_named(_locus([[0, 1]] * 3), **rename))
+
+
+def test_a_positional_partition_is_refused():
+    """A tuple carries no names, so nothing in it says which array is which."""
+    with pytest.raises(ValueError, match="has no array offsets"):
+        _run_named(tuple(_locus([[0, 1]] * 3)))
+
+
+def _run_named(partition):
+    est = AbundanceEstimator(4, em_config=EMConfig(n_threads=1, seed=7))
+    total, rna, gdna = est.run_batch_locus_em_partitioned(
+        [partition],
+        [np.asarray([0, 1], np.int32)],
+        np.array([5.0]),
+        rna_prior_count=np.array([3.0]),
+        intergenic_rate=20.0,
+    )
+    return (
+        np.asarray(total),
+        rna,
+        gdna,
+        est.em_counts.copy(),
+        np.asarray(est.gdna_intergenic_em_count),
+    )

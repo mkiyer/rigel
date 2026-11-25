@@ -424,7 +424,7 @@ private:
         std::vector<int64_t> offsets{0};
         int64_t cand_cur = 0;
         // Per unit
-        std::vector<int8_t>  is_spliced;
+        std::vector<int8_t>  gdna_excluded;
         std::vector<float>   gdna_ll, ig_ll;
         std::vector<int64_t> fid;
         std::vector<int8_t>  fclass;
@@ -611,14 +611,15 @@ private:
     }
 
     // Closes the unit whose candidates were just written: its CSR offset, identity, class and splice type, and its two
-    // gDNA terms, -inf where gDNA is no candidate. "Spliced" means gDNA is no candidate anywhere: certified RNA.
+    // gDNA terms, -inf where gDNA is no candidate. A unit gDNA is no candidate of anywhere is excluded from gDNA: a
+    // spliced unit, or an unspliced one whose gDNA terms the pruning bound dropped; its splice type stays its own.
     static void close_unit(FillState& st, int64_t fid, int fclass, int stype, bool has_gdna, double gdna_ll,
                            double ig_ll) {
         st.offsets.push_back(st.cand_cur);
         st.fid.push_back(fid);
         st.fclass.push_back(static_cast<int8_t>(fclass));
         st.stype.push_back(static_cast<uint8_t>(stype));
-        st.is_spliced.push_back((has_gdna || ig_ll > NEG_INF) ? 0 : 1);
+        st.gdna_excluded.push_back((has_gdna || ig_ll > NEG_INF) ? 0 : 1);
         st.gdna_ll.push_back(static_cast<float>(has_gdna ? gdna_ll : NEG_INF));
         st.ig_ll.push_back(static_cast<float>(ig_ll));
     }
@@ -774,21 +775,40 @@ public:
         scorer_.score_chunk_impl(cp, st_);
     }
 
-    // The CSR arrays, the per-unit arrays and the routing counts, handed to numpy without a copy.
-    nb::tuple finish() {
+    // Everything the pass produced, each by its name (`routing._Routed`'s fields), handed to numpy without a copy.
+    nb::dict finish() {
         if (finished_) throw std::runtime_error("StreamingScorer: finish called twice");
         finished_ = true;
         scorer_.flush_mm_group(st_);
         NativeFragmentScorer::FillState& s = st_;
         const auto& n = s.stats;
-        return nb::make_tuple(
-            vec_to_ndarray(std::move(s.offsets)), vec_to_ndarray(std::move(s.ti)), vec_to_ndarray(std::move(s.ll)),
-            vec_to_ndarray(std::move(s.ct)), vec_to_ndarray(std::move(s.cw)), vec_to_ndarray(std::move(s.is_spliced)),
-            vec_to_ndarray(std::move(s.gdna_ll)), vec_to_ndarray(std::move(s.fid)), vec_to_ndarray(std::move(s.fclass)),
-            vec_to_ndarray(std::move(s.stype)), vec_to_ndarray(std::move(s.det_ti)),
-            vec_to_ndarray(std::move(s.det_fid)), vec_to_ndarray(std::move(s.gated_fid)),
-            vec_to_ndarray(std::move(s.gated_fclass)), n.deterministic, n.em_unambig, n.em_ambig_same, n.em_ambig_opp,
-            n.gated, n.multimapper, vec_to_ndarray(std::move(s.ig_ll)), vec_to_ndarray(std::move(s.intergenic_fid)));
+        nb::dict out;
+        // the EM units: their candidates (CSR), then one entry per unit
+        out["offsets"] = vec_to_ndarray(std::move(s.offsets));
+        out["t_indices"] = vec_to_ndarray(std::move(s.ti));
+        out["log_liks"] = vec_to_ndarray(std::move(s.ll));
+        out["count_cols"] = vec_to_ndarray(std::move(s.ct));
+        out["coverage_weights"] = vec_to_ndarray(std::move(s.cw));
+        out["gdna_excluded"] = vec_to_ndarray(std::move(s.gdna_excluded));
+        out["gdna_log_liks"] = vec_to_ndarray(std::move(s.gdna_ll));
+        out["intergenic_log_liks"] = vec_to_ndarray(std::move(s.ig_ll));
+        out["frag_ids"] = vec_to_ndarray(std::move(s.fid));
+        out["frag_classes"] = vec_to_ndarray(std::move(s.fclass));
+        out["splice_types"] = vec_to_ndarray(std::move(s.stype));
+        // the fragments routed without the EM: deterministic, gated, and the multimappers left only intergenic places
+        out["det_tids"] = vec_to_ndarray(std::move(s.det_ti));
+        out["det_fids"] = vec_to_ndarray(std::move(s.det_fid));
+        out["gated_fids"] = vec_to_ndarray(std::move(s.gated_fid));
+        out["gated_classes"] = vec_to_ndarray(std::move(s.gated_fclass));
+        out["intergenic_fids"] = vec_to_ndarray(std::move(s.intergenic_fid));
+        // the routing counts
+        out["n_deterministic"] = n.deterministic;
+        out["n_em_unambig"] = n.em_unambig;
+        out["n_em_ambig_same_strand"] = n.em_ambig_same;
+        out["n_em_ambig_opp_strand"] = n.em_ambig_opp;
+        out["n_gated"] = n.gated;
+        out["n_em_multimapper"] = n.multimapper;
+        return out;
     }
 };
 

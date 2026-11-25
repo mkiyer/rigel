@@ -847,8 +847,8 @@ def run_locus_em_partitioned(
 ) -> None:
     """Run the per-locus batch EM and record lean per-locus results.
 
-    Packs each ``LocusPartition`` into the C++ 8-tuple, runs the whole batch in one
-    ``run_batch_locus_em_partitioned`` call (the solver runs its own threads), and appends a per-locus dict to
+    Hands every ``LocusPartition`` to the native EM, which reads each array by its name, and runs the whole batch in
+    one ``run_batch_locus_em_partitioned`` call (the solver runs its own threads), and appends a per-locus dict to
     ``estimator.locus_results`` for ``get_loci_df``. Calibration enters as its per-locus gDNA count, which
     :func:`em_pseudocounts` reads against its count of every fragment it deposited on the locus. The loci table's
     ``has_gdna`` is structural: some unspliced unit carries a finite gDNA log-likelihood.
@@ -859,7 +859,7 @@ def run_locus_em_partitioned(
     parts = [partitions[loc.multi_locus_id] for loc in multi_loci]
     ids = [loc.multi_locus_id for loc in multi_loci]
     n_gdna_eligible = np.array(
-        [np.count_nonzero((p.is_spliced == 0) & np.isfinite(p.gdna_log_liks)) for p in parts],
+        [np.count_nonzero((p.gdna_excluded == 0) & np.isfinite(p.gdna_log_liks)) for p in parts],
         dtype=np.float64,
     )
     gdna_prior, rna_prior = em_pseudocounts(
@@ -871,7 +871,7 @@ def run_locus_em_partitioned(
     rna_prior = np.ascontiguousarray(rna_prior)
 
     em_result = estimator.run_batch_locus_em_partitioned(
-        [_partition_tuple(p) for p in parts],
+        parts,
         [loc.transcript_indices for loc in multi_loci],
         gdna_prior,
         rna_prior_count=rna_prior,
@@ -902,20 +902,6 @@ def run_locus_em_partitioned(
         len(multi_loci),
         n_units,
         total_gdna_em,
-    )
-
-
-def _partition_tuple(p) -> tuple:
-    """A ``LocusPartition`` as the 8-tuple the native batch EM reads."""
-    return (
-        p.offsets,
-        p.t_indices,
-        p.log_liks,
-        p.coverage_weights,
-        p.count_cols,
-        p.is_spliced,
-        p.gdna_log_liks,
-        p.intergenic_log_liks,
     )
 
 

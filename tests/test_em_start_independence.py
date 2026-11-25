@@ -24,6 +24,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from _em_harness import em_partition
+
 from rigel.config import EMConfig, TranscriptGeometry
 from rigel.estimator import AbundanceEstimator
 
@@ -34,7 +36,7 @@ PARTITION_KEYS = (
     "log_liks",
     "coverage_weights",
     "count_cols",
-    "is_spliced",
+    "gdna_excluded",
     "gdna_log_liks",
 )
 LOCI = ("locus303", "locus751", "locus803")
@@ -89,10 +91,10 @@ def _solve(locus: str, mode: str, lean=None):
     rc.unambig_counts[:] = fx["unambig"]
     gdna, _, _ = rc.run_batch_locus_em_partitioned(
         [
-            (
-                *(fx[k] for k in PARTITION_KEYS),
+            em_partition(
+                **{k: fx[k] for k in PARTITION_KEYS},
                 # no unit of a fixture locus has an intergenic place
-                np.full(len(fx["offsets"]) - 1, -np.inf, dtype=np.float32),
+                intergenic_log_liks=np.full(len(fx["offsets"]) - 1, -np.inf, dtype=np.float32),
             )
         ],
         [np.arange(n_t, dtype=np.int32)],

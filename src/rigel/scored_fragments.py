@@ -29,7 +29,7 @@ class ScoredFragments:
         uint8[n_candidates] — ``SpliceStrandCol`` index per candidate (0–5).
     coverage_weights : np.ndarray
         float32[n_candidates] — coverage weight per candidate.
-    is_spliced : np.ndarray
+    gdna_excluded : np.ndarray
         bool[n_units] — True when the unit has no gDNA reading, at its locus or intergenic: gDNA can explain
         none of its alignments (each carries a sequenced junction; the scorer's ``gdna_can_explain``), or
         its locus gDNA term fell outside the pruning bound of the unit's best RNA candidate
@@ -59,7 +59,7 @@ class ScoredFragments:
     log_liks: np.ndarray
     count_cols: np.ndarray
     coverage_weights: np.ndarray
-    is_spliced: np.ndarray
+    gdna_excluded: np.ndarray
     gdna_log_liks: np.ndarray
     frag_ids: np.ndarray
     frag_class: np.ndarray
@@ -89,7 +89,7 @@ class LocusPartition:
     coverage_weights: np.ndarray  # float32
 
     # Per-unit arrays
-    is_spliced: np.ndarray  # uint8 (bool viewed as uint8 for C++)
+    gdna_excluded: np.ndarray  # uint8 (bool viewed as uint8 for C++)
     gdna_log_liks: np.ndarray  # float32
 
     # Per-unit annotation metadata (not passed to C++ EM)

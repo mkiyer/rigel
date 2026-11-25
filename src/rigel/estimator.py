@@ -380,7 +380,7 @@ class AbundanceEstimator:
 
     def run_batch_locus_em_partitioned(
         self,
-        partition_tuples: list,
+        partitions: list,
         locus_transcript_indices: list,
         gdna_prior_count: np.ndarray,
         *,
@@ -396,8 +396,10 @@ class AbundanceEstimator:
 
         Parameters
         ----------
-        partition_tuples : list[tuple]
-            List of 8-tuples, one per locus, containing partition arrays.
+        partitions : list[LocusPartition]
+            One per locus: its candidates' CSR and its units' arrays, each read by its name (``offsets``,
+            ``t_indices``, ``log_liks``, ``coverage_weights``, ``count_cols``, ``gdna_excluded``, ``gdna_log_liks``,
+            ``intergenic_log_liks``).
         locus_transcript_indices : list[np.ndarray]
             List of int32 transcript index arrays, one per locus.
         gdna_prior_count : np.ndarray
@@ -437,7 +439,7 @@ class AbundanceEstimator:
             transcripts plus synthetic nascent RNA spans) and its gDNA count.
         """
         n_transcripts = self.num_transcripts
-        n_loci = len(partition_tuples)
+        n_loci = len(partitions)
         gdna_eff_len = _per_locus(gdna_eff_len, n_loci, "gdna_eff_len", fill=1.0)
         rna_prior_count = _per_locus(rna_prior_count, n_loci, "rna_prior_count", fill=0.0)
         t_rna_prior_weight = _rna_prior_shares(rna_prior_weight, n_transcripts)
@@ -463,7 +465,7 @@ class AbundanceEstimator:
             total_intergenic_em,
             class_mass,
         ) = _batch_locus_em_partitioned(
-            partition_tuples,
+            partitions,
             locus_transcript_indices,
             np.ascontiguousarray(gdna_prior_count, dtype=np.float64),
             rna_prior_count,

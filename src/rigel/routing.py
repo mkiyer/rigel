@@ -21,15 +21,16 @@ logger = logging.getLogger(__name__)
 
 
 class _Routed(NamedTuple):
-    """What ``StreamingScorer.finish`` returns, in its order: the EM units' CSR and per-unit arrays, the
-    deterministic fragments, the gated ones, the routing counts and the intergenic multimappers."""
+    """What ``StreamingScorer.finish`` returns, each by its name (a name either side lacks is refused): the EM units'
+    CSR and per-unit arrays, the deterministic fragments, the gated ones, the routing counts and the intergenic
+    multimappers."""
 
     offsets: np.ndarray
     t_indices: np.ndarray
     log_liks: np.ndarray
     count_cols: np.ndarray
     coverage_weights: np.ndarray
-    is_spliced: np.ndarray
+    gdna_excluded: np.ndarray
     gdna_log_liks: np.ndarray
     frag_ids: np.ndarray
     frag_classes: np.ndarray
@@ -107,7 +108,7 @@ class FragmentRouter:
                 logger.debug(f"  Routed: {n_processed:,} / {n_total:,}")
             del chunk
 
-        routed = _Routed(*scorer.finish())
+        routed = _Routed(**scorer.finish())
         self._count(routed)
         if self.annotations is not None:
             self._annotate(routed)
@@ -117,7 +118,7 @@ class FragmentRouter:
             log_liks=routed.log_liks,
             count_cols=routed.count_cols,
             coverage_weights=routed.coverage_weights,
-            is_spliced=np.asarray(routed.is_spliced, dtype=np.int8).astype(bool),
+            gdna_excluded=np.asarray(routed.gdna_excluded, dtype=np.int8).astype(bool),
             gdna_log_liks=routed.gdna_log_liks,
             intergenic_log_liks=routed.intergenic_log_liks,
             frag_ids=routed.frag_ids,

@@ -114,18 +114,19 @@ struct LocusScratch {
     explicit LocusScratch(int n_transcripts) : local_map(static_cast<size_t>(n_transcripts), -1) {}
 };
 
-// The loci's partitions (8-tuples of per-locus arrays) and transcript lists, as views, each checked here once so the
+// The loci's partitions (each a `LocusPartition`, its arrays read by name) and transcript lists, as views, each
+// checked here once so the
 // EM reads every candidate unguarded: it holds a unit; its offsets start at 0 and never fall; its candidate and unit
 // arrays are as long as its offsets say; its transcripts are among the `n_transcripts_total`; every candidate is one
 // of its transcripts; and every count column is one of the `n_cols`. Every array must be of its exact dtype: the views
 // outlive the casts that checked them.
-std::vector<PartitionView> read_partitions(nb::list partition_tuples, nb::list locus_transcript_indices,
+std::vector<PartitionView> read_partitions(nb::list partitions, nb::list locus_transcript_indices,
                                            int n_transcripts_total, int n_cols) {
     using i64 = Array1<int64_t>;
     using i32 = Array1<int32_t>;
     using f32 = Array1<float>;
     using u8 = Array1<uint8_t>;
-    std::vector<PartitionView> views(nb::len(partition_tuples));
+    std::vector<PartitionView> views(nb::len(partitions));
     if (nb::len(locus_transcript_indices) != views.size())
         throw std::invalid_argument("batch_locus_em_partitioned: one transcript list per locus partition");
     // the locus that holds each transcript: loci are disjoint, and a candidate is checked against its own locus's list
@@ -134,16 +135,21 @@ std::vector<PartitionView> read_partitions(nb::list partition_tuples, nb::list l
         const auto refuse = [i](const std::string& what) {
             throw std::invalid_argument("batch_locus_em_partitioned: locus " + std::to_string(i) + " " + what);
         };
-        nb::tuple tup = nb::cast<nb::tuple>(partition_tuples[i]);
-        if (nb::len(tup) != 8) refuse("is not an 8-tuple");
-        const auto offsets = nb::cast<i64>(tup[0], false);
-        const auto t_indices = nb::cast<i32>(tup[1], false);
-        const auto log_liks = nb::cast<f32>(tup[2], false);
-        const auto coverage_wts = nb::cast<f32>(tup[3], false);
-        const auto count_cols = nb::cast<u8>(tup[4], false);
-        const auto is_spliced = nb::cast<u8>(tup[5], false);
-        const auto gdna_log_liks = nb::cast<f32>(tup[6], false);
-        const auto intergenic_log_liks = nb::cast<f32>(tup[7], false);
+        // by name: the four float arrays are two pairs of one shape and dtype, which a position would not tell apart
+        const nb::object partition = partitions[i];
+        const auto field = [&](const char* name) {
+            nb::object value = nb::getattr(partition, name, nb::none());
+            if (value.is_none()) refuse(std::string("has no array ") + name);
+            return value;
+        };
+        const auto offsets = nb::cast<i64>(field("offsets"), false);
+        const auto t_indices = nb::cast<i32>(field("t_indices"), false);
+        const auto log_liks = nb::cast<f32>(field("log_liks"), false);
+        const auto coverage_wts = nb::cast<f32>(field("coverage_weights"), false);
+        const auto count_cols = nb::cast<u8>(field("count_cols"), false);
+        const auto gdna_excluded = nb::cast<u8>(field("gdna_excluded"), false);
+        const auto gdna_log_liks = nb::cast<f32>(field("gdna_log_liks"), false);
+        const auto intergenic_log_liks = nb::cast<f32>(field("intergenic_log_liks"), false);
         const auto transcripts = nb::cast<i32>(locus_transcript_indices[i], false);
         const int64_t n_units = static_cast<int64_t>(offsets.shape(0)) - 1;
         if (n_units < 1) refuse("holds no unit");
@@ -156,7 +162,7 @@ std::vector<PartitionView> read_partitions(nb::list partition_tuples, nb::list l
             coverage_wts.shape(0) != n_candidates || count_cols.shape(0) != n_candidates)
             refuse("has a candidate array whose length is not its offsets' last");
         const size_t units = static_cast<size_t>(n_units);
-        if (is_spliced.shape(0) != units || gdna_log_liks.shape(0) != units || intergenic_log_liks.shape(0) != units)
+        if (gdna_excluded.shape(0) != units || gdna_log_liks.shape(0) != units || intergenic_log_liks.shape(0) != units)
             refuse("has a unit array whose length is not its unit count");
         for (size_t k = 0; k < transcripts.shape(0); ++k) {
             const int32_t t = transcripts.data()[k];
@@ -182,7 +188,7 @@ std::vector<PartitionView> read_partitions(nb::list partition_tuples, nb::list l
         v.log_liks = log_liks.data();
         v.coverage_wts = coverage_wts.data();
         v.count_cols = count_cols.data();
-        v.is_spliced = is_spliced.data();
+        v.gdna_excluded = gdna_excluded.data();
         v.gdna_log_liks = gdna_log_liks.data();
         v.intergenic_log_liks = intergenic_log_liks.data();
         v.n_units = static_cast<int>(n_units);
@@ -360,7 +366,7 @@ nb::object annotation(std::vector<T>& v) {
 }
 
 nb::tuple batch_locus_em_partitioned(
-    nb::list partition_tuples,          // per locus, an 8-tuple of partition arrays
+    nb::list partitions,                // per locus, its partition (`LocusPartition`), its arrays read by name
     nb::list locus_transcript_indices,  // per locus, int32 transcript indices
     f64_1d locus_gdna_prior_count,      // per locus, the grouped calibration prior's pseudo-fragments
     f64_1d locus_rna_prior_count,
@@ -399,7 +405,7 @@ nb::tuple batch_locus_em_partitioned(
     if (static_cast<int>(em_counts_out.shape(1)) != n_cols)
         throw std::invalid_argument("batch_locus_em_partitioned: em_counts_out's columns are not unambig_counts'");
     const std::vector<PartitionView> views =
-        read_partitions(partition_tuples, locus_transcript_indices, n_transcripts_total, n_cols);
+        read_partitions(partitions, locus_transcript_indices, n_transcripts_total, n_cols);
     const size_t n_loci = views.size();
     check_length(locus_gdna_eff_lens, n_loci, "locus_gdna_eff_lens");
     check_length(locus_gdna_prior_count, n_loci, "locus_gdna_prior_count");
@@ -505,7 +511,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_loci"), "Scatter per-unit int64 array into per-locus arrays.");
 
     m.def("batch_locus_em_partitioned", &batch_locus_em_partitioned,
-          nb::arg("partition_tuples"),
+          nb::arg("partitions"),
           nb::arg("locus_transcript_indices"),
           nb::arg("locus_gdna_prior_count"),
           nb::arg("locus_rna_prior_count"),
@@ -527,7 +533,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("intergenic_rate") = 0.0,
           nb::arg("t_is_synthetic"),
           "Run locus EM from per-locus partition data.\n\n"
-          "Accepts a list of 8-tuples (one per locus) of partition arrays.\n"
+          "Accepts one partition per locus (a LocusPartition), each array read by its name.\n"
           "Returns (total_gdna_em, locus_rna, locus_gdna, locus_stats,\n"
           " out_winner_tid, out_winner_post, out_n_candidates, total_intergenic_em, class_masses).\n"
           "\n"

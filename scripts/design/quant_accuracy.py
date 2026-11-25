@@ -644,11 +644,11 @@ def install_truth_weights(weights: np.ndarray):
     inner = AbundanceEstimator.run_batch_locus_em_partitioned
     fired = {"n": 0}
 
-    def wrapper(self, partition_tuples, locus_transcript_indices, *args, **kw):
+    def wrapper(self, partitions, locus_transcript_indices, *args, **kw):
         solved = np.concatenate([np.asarray(t, dtype=np.int64) for t in locus_transcript_indices])
         if float(weights[solved].sum()) > 0.0:
             fired["n"] += 1
-        return inner(self, partition_tuples, locus_transcript_indices, *args, rna_prior_weight=weights, **kw)
+        return inner(self, partitions, locus_transcript_indices, *args, rna_prior_weight=weights, **kw)
 
     AbundanceEstimator.run_batch_locus_em_partitioned = wrapper
 

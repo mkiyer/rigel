@@ -60,7 +60,7 @@ struct PartitionView {
     const float*   log_liks;
     const float*   coverage_wts;
     const uint8_t* count_cols;
-    const uint8_t* is_spliced;
+    const uint8_t* gdna_excluded;
     const float*   gdna_log_liks;
     const float*   intergenic_log_liks;  // per unit; -inf where a unit has no intergenic place
     int     n_units;
@@ -110,7 +110,7 @@ inline int unit_candidates(const LocusSubProblem& sub, const PartitionView& pv, 
                            const std::vector<int32_t>& local_map, std::vector<LocalCandidate>& buf, bool& has_gdna) {
     const int64_t p_start = pv.offsets[ui], p_end = pv.offsets[ui + 1];
     const double gdna_ll = static_cast<double>(pv.gdna_log_liks[ui]);
-    has_gdna = pv.is_spliced[ui] == 0 && std::isfinite(gdna_ll);
+    has_gdna = pv.gdna_excluded[ui] == 0 && std::isfinite(gdna_ll);
     const double ig_ll = sub.ig_idx >= 0 ? static_cast<double>(pv.intergenic_log_liks[ui])
                                          : NEG_INF;
     const bool has_ig = std::isfinite(ig_ll);

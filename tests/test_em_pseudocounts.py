@@ -127,7 +127,7 @@ def _toy_locus(ss: float, junction_len: int):
     """Exact expected counts: returns (ScoredFragments, deterministic per transcript, lengths, truth)."""
     bins = _bins(junction_len)
     n_t = len(_SUPPORT)
-    offsets, cand_t, cand_ll, is_spliced, gdna_ll = [0], [], [], [], []
+    offsets, cand_t, cand_ll, gdna_excluded, gdna_ll = [0], [], [], [], []
     deterministic = np.zeros(n_t)
     truth_gdna = 0.0
 
@@ -135,7 +135,7 @@ def _toy_locus(ss: float, junction_len: int):
         cand_t.extend(cands)
         cand_ll.extend([ll] * len(cands))
         offsets.append(len(cand_t))
-        is_spliced.append(spliced)
+        gdna_excluded.append(spliced)
         gdna_ll.append(g)
 
     for b, nb in bins.items():
@@ -161,14 +161,14 @@ def _toy_locus(ss: float, junction_len: int):
                 for _k in range(int(round(n))):
                     unit(cands, np.log(ss if sense else 1 - ss), False, np.log(0.5))
 
-    n_units, n_cand = len(is_spliced), len(cand_t)
+    n_units, n_cand = len(gdna_excluded), len(cand_t)
     em = ScoredFragments(
         offsets=np.array(offsets, np.int64),
         t_indices=np.array(cand_t, np.int32),
         log_liks=np.array(cand_ll, np.float32),
         count_cols=np.zeros(n_cand, np.uint8),
         coverage_weights=np.ones(n_cand, np.float32),
-        is_spliced=np.array(is_spliced, bool),
+        gdna_excluded=np.array(gdna_excluded, bool),
         gdna_log_liks=np.array(gdna_ll, np.float32),
         frag_ids=np.arange(n_units, dtype=np.int64),
         frag_class=np.zeros(n_units, np.int8),

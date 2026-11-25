@@ -819,7 +819,7 @@ def _live_fl():
 
 def test_a_sequenced_junction_is_rna_only():
     em, _ = _one_unit([_hit(SpliceType.SPLICED_ANNOT, 300)], [FRAG_AMBIG_SAME_STRAND], [1])
-    assert em.is_spliced[0]
+    assert em.gdna_excluded[0]
     assert em.gdna_log_liks[0] == -np.inf
 
 
@@ -831,7 +831,7 @@ def test_a_multimapper_with_one_unspliced_alignment_is_a_gdna_candidate():
         [FRAG_MULTIMAPPER] * 2,
         [7, 7],
     )
-    assert not em.is_spliced[0]
+    assert not em.gdna_excluded[0]
     assert float(em.gdna_log_liks[0]) == _unspliced_term(250)
 
 
@@ -841,7 +841,7 @@ def test_a_multimapper_of_implicit_and_unspliced_alignments_is_a_gdna_candidate(
         [FRAG_MULTIMAPPER] * 2,
         [8, 8],
     )
-    assert not em.is_spliced[0]
+    assert not em.gdna_excluded[0]
     # two places gDNA can explain, at one term each: the sum is twice one place's
     assert float(em.gdna_log_liks[0]) == pytest.approx(_unspliced_term(400) + math.log(2), abs=1e-5)
 
@@ -903,13 +903,15 @@ def test_gdna_is_pruned_exactly_as_an_rna_candidate_is(splice_type):
         best_rna = float(np.max(em.log_liks))
         gdna_term = fl._log_prob[footprint] + math.log(0.5)
         competes = best_rna - gdna_term <= delta
-        assert bool(em.is_spliced[0]) == (not competes), footprint
+        assert bool(em.gdna_excluded[0]) == (not competes), footprint
         if competes:
             kept += 1
             assert float(em.gdna_log_liks[0]) == pytest.approx(gdna_term, abs=1e-5)
         else:
             pruned += 1
             assert em.gdna_log_liks[0] == -np.inf
+            # excluded from gDNA and still its own splice type: the exclusion is not a splice
+            assert int(em.splice_type[0]) == int(splice_type)
     assert kept and pruned
 
 
@@ -917,7 +919,7 @@ def test_an_implicit_splice_whose_footprint_the_law_cannot_produce_is_pruned():
     """Its footprint spans the annotated intron its mate gap may hold; at 5,000 bp the law has no mass, so gDNA does
     not compete."""
     em, _ = _one_unit([_hit(SpliceType.SPLICED_IMPLICIT, 5000)], [FRAG_UNAMBIG], [1], fl=_live_fl())
-    assert em.is_spliced[0]
+    assert em.gdna_excluded[0]
     assert em.gdna_log_liks[0] == -np.inf
 
 
@@ -949,7 +951,7 @@ def test_a_multimapper_is_rna_only_if_no_alignment_can_be_gdna_or_its_gdna_is_pr
         fl=fl,
     )
     for em in (certified, pruned):
-        assert em.is_spliced[0]
+        assert em.gdna_excluded[0]
         assert em.gdna_log_liks[0] == -np.inf
 
 

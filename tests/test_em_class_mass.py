@@ -10,8 +10,12 @@ and units with an intergenic place, and one of two annotated transcripts.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
+
+from _em_harness import em_partition
 
 from rigel.config import EMConfig
 from rigel.estimator import AbundanceEstimator
@@ -35,7 +39,7 @@ def _locus(rows):
     t_idx = np.concatenate([np.asarray(c, np.int32) for c, *_ in rows])
     ll = np.concatenate([np.asarray(lk, np.float32) for _, lk, *_ in rows])
     n_cand = len(t_idx)
-    return (
+    return em_partition(
         offsets,
         t_idx,
         ll,
@@ -173,10 +177,12 @@ def test_units_with_identical_rows_share_one_row_of_the_e_step():
     entries, merged = _stats_and_counts(parts)
     assert entries == 16
     nudged = []
-    for offsets, t_idx, ll, *rest in parts:
-        ll = ll.copy()
-        ll[offsets[:-1]] += np.arange(len(offsets) - 1, dtype=np.float32) * np.float32(2e-7)
-        nudged.append((offsets, t_idx, ll, *rest))
+    for part in parts:
+        ll = part.log_liks.copy()
+        ll[part.offsets[:-1]] += np.arange(len(part.offsets) - 1, dtype=np.float32) * np.float32(
+            2e-7
+        )
+        nudged.append(SimpleNamespace(**{**vars(part), "log_liks": ll}))
     entries_distinct, distinct = _stats_and_counts(nudged)
     assert entries_distinct == 228
     np.testing.assert_allclose(merged, distinct, rtol=1e-3, atol=1e-3)

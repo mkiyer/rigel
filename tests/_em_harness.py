@@ -1,7 +1,8 @@
 """The locus-EM harness the estimator tests drive.
 
 `_make_locus_em_data` builds the per-locus arrays the native EM consumes from a compact description of
-units and their count columns; `_run_and_assign` runs one EM and returns the totals it assigned. A plain harness
+units and their count columns; `_run_and_assign` runs one EM and returns the totals it assigned; `em_partition` is
+one locus's partition as the EM reads it, its arrays by name. A plain harness
 rather than a fixture, so a test composes it with whatever index and priors it needs, and a module of its own,
 because importing `conftest` by name is ambiguous once a sub-directory has one.
 """
@@ -9,6 +10,7 @@ because importing `conftest` by name is ambiguous once a sub-directory has one.
 from __future__ import annotations
 
 import dataclasses
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -18,6 +20,30 @@ from rigel.splice import SpliceStrandCol
 
 # Default column for UNSPLICED_SENSE
 _UNSPLICED_SENSE = int(SpliceStrandCol.UNSPLICED_SENSE)
+
+
+def em_partition(
+    offsets,
+    t_indices,
+    log_liks,
+    coverage_weights,
+    count_cols,
+    gdna_excluded,
+    gdna_log_liks,
+    intergenic_log_liks,
+):
+    """One locus's partition as ``run_batch_locus_em_partitioned`` reads it: each array by its name, as a
+    ``LocusPartition`` carries them (the candidates' CSR, then the units')."""
+    return SimpleNamespace(
+        offsets=offsets,
+        t_indices=t_indices,
+        log_liks=log_liks,
+        coverage_weights=coverage_weights,
+        count_cols=count_cols,
+        gdna_excluded=gdna_excluded,
+        gdna_log_liks=gdna_log_liks,
+        intergenic_log_liks=intergenic_log_liks,
+    )
 
 
 def _make_locus_em_data(
@@ -44,7 +70,7 @@ def _make_locus_em_data(
     rc : AbundanceEstimator or None
         If provided, used for unambig_counts.
     include_nascent : bool
-        If True, units are marked as unspliced (``is_spliced=False``).
+        If True, units are marked as unspliced (``gdna_excluded=False``).
         Nothing is appended for nascent RNA: synthetic spans are ordinary
         transcripts, listed among a unit's candidates like any other.
     include_gdna : bool
@@ -74,12 +100,12 @@ def _make_locus_em_data(
 
     n_candidates = len(flat_t)
 
-    # is_spliced: True (spliced) → no gDNA candidate.
+    # gdna_excluded: True (spliced) → no gDNA candidate.
     # For include_nascent or include_gdna, set False (unspliced).
     if include_nascent or include_gdna:
-        is_spliced = np.zeros(n_units, dtype=bool)
+        gdna_excluded = np.zeros(n_units, dtype=bool)
     else:
-        is_spliced = np.ones(n_units, dtype=bool)
+        gdna_excluded = np.ones(n_units, dtype=bool)
 
     # gDNA log-likelihoods per unit
     if include_gdna:
@@ -93,7 +119,7 @@ def _make_locus_em_data(
         log_liks=np.array(flat_lk, dtype=np.float32),
         count_cols=np.array(flat_cc, dtype=np.uint8),
         coverage_weights=np.ones(n_candidates, dtype=np.float32),
-        is_spliced=is_spliced,
+        gdna_excluded=gdna_excluded,
         gdna_log_liks=gdna_log_liks,
         frag_ids=np.arange(n_units, dtype=np.int64),
         frag_class=np.zeros(n_units, dtype=np.int8),
@@ -135,25 +161,11 @@ def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterati
     # Partition ScoredFragments into per-locus LocusPartition objects
     partitions = partition_and_free(em_data, loci)
 
-    # Build the 8-tuples and transcript index lists expected by C++
-    partition_tuples = [
-        (
-            p.offsets,
-            p.t_indices,
-            p.log_liks,
-            p.coverage_weights,
-            p.count_cols,
-            p.is_spliced,
-            p.gdna_log_liks,
-            p.intergenic_log_liks,
-        )
-        for p in [partitions[i] for i in range(len(loci))]
-    ]
     locus_t_lists = [loc.transcript_indices for loc in loci]
 
     rc.em_config = dataclasses.replace(rc.em_config, iterations=em_iterations)
     total_gdna, _locus_rna, _locus_gdna = rc.run_batch_locus_em_partitioned(
-        partition_tuples, locus_t_lists, gdna_prior_count
+        [partitions[i] for i in range(len(loci))], locus_t_lists, gdna_prior_count
     )
     rc._gdna_em_total += total_gdna
 

@@ -68,7 +68,7 @@ def partition_and_free(
     UNIT_ARRAYS = [
         ("gdna_log_liks", scatter_units_f32),
         ("intergenic_log_liks", scatter_units_f32),
-        ("is_spliced", scatter_units_u8),
+        ("gdna_excluded", scatter_units_u8),
         ("frag_ids", scatter_units_i64),
         ("frag_class", scatter_units_u8),
         ("splice_type", scatter_units_u8),
@@ -94,7 +94,7 @@ def partition_and_free(
             log_liks=cand_results["log_liks"][li],
             count_cols=cand_results["count_cols"][li],
             coverage_weights=cand_results["coverage_weights"][li],
-            is_spliced=unit_results["is_spliced"][li],
+            gdna_excluded=unit_results["gdna_excluded"][li],
             gdna_log_liks=unit_results["gdna_log_liks"][li],
             intergenic_log_liks=unit_results["intergenic_log_liks"][li],
             frag_ids=unit_results["frag_ids"][li],

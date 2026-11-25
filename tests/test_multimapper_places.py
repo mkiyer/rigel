@@ -36,6 +36,7 @@ import numpy as np
 import pysam
 import pytest
 from _bam_builder import R1_FWD, R2_REV, SECONDARY, record, write_bam
+from _em_harness import em_partition
 from _index_builder import build_index
 
 from rigel.buffer import FRAG_MULTIMAPPER, FRAG_UNAMBIG
@@ -417,7 +418,7 @@ def test_in_a_library_with_no_mismatch_the_gdna_term_is_the_same_in_every_hit_or
     hits = [Hit((0,), nm=2), Hit((1,), nm=3), Hit((2,), nm=0)]
     gate = -math.inf
     em = _route([[hits[i] for i in order]], mismatch_log_penalty=gate)
-    assert not em.is_spliced[0]
+    assert not em.gdna_excluded[0]
     assert float(em.gdna_log_liks[0]) == pytest.approx(
         _term(250, nm=0, mismatch_log_penalty=gate), abs=1e-5
     )
@@ -436,7 +437,7 @@ def test_a_case5_unit_with_a_spliced_genic_place_competes_and_is_not_certified()
     em = _route([[Hit((0,), SpliceType.SPLICED_ANNOT, footprint=400), Hit((), footprint=300)]])
     assert em.gdna_log_liks[0] == -np.inf
     assert float(_intergenic(em)[0]) == pytest.approx(_term(300), abs=1e-5)
-    assert not em.is_spliced[0]
+    assert not em.gdna_excluded[0]
 
 
 def test_a_unit_with_no_intergenic_place_has_no_intergenic_term():
@@ -468,7 +469,7 @@ def test_the_intergenic_term_is_kept_wherever_its_place_survives():
             0.5
         )  # the place's term itself: a unique one's is pruned beyond
         assert float(_intergenic(em)[0]) == pytest.approx(term, abs=1e-5), footprint
-        assert not em.is_spliced[0]
+        assert not em.gdna_excluded[0]
         beyond += float(np.max(em.log_liks)) - term > delta
     assert beyond
 
@@ -585,7 +586,7 @@ def test_a_unique_fragment_is_untouched_by_a_place_weight():
     for hit_kw, fclass in ((dict(t=(0, 1)), FRAG_UNAMBIG), (dict(t=(0,)), FRAG_UNAMBIG)):
         plain = _route([[Hit(**hit_kw)]], [fclass])
         weighted = _route([[Hit(**hit_kw, log_weight=math.log(5.0))]], [fclass])
-        for name in ("log_liks", "gdna_log_liks", "is_spliced", "t_indices", "offsets"):
+        for name in ("log_liks", "gdna_log_liks", "gdna_excluded", "t_indices", "offsets"):
             assert np.array_equal(getattr(plain, name), getattr(weighted, name)), name
 
 
@@ -627,7 +628,7 @@ def test_a_places_gdna_is_judged_against_its_own_rna_not_another_places():
         [[Hit((0,), SpliceType.SPLICED_ANNOT, start=1000), Hit((1,), start=5000, log_weight=-15.0)]]
     )
     assert sorted(em.t_indices.tolist()) == [0, 1]
-    assert not em.is_spliced[0]
+    assert not em.gdna_excluded[0]
     assert float(em.gdna_log_liks[0]) == pytest.approx(_term(250) - 15.0, abs=1e-5)
 
 
@@ -643,7 +644,7 @@ def test_a_place_with_no_rna_keeps_its_gdna():
         ]
     )
     assert em.t_indices.tolist() == [0]
-    assert not em.is_spliced[0]
+    assert not em.gdna_excluded[0]
     assert float(em.gdna_log_liks[0]) == pytest.approx(_term(250) - 15.0, abs=1e-5)
 
 
@@ -842,7 +843,7 @@ def _locus(n_units, *, gdna_ll, intergenic_ll, deterministic, mode="map", assign
     negligible RNA reading, a locus gDNA reading and an intergenic one."""
     em = AbundanceEstimator(1, em_config=EMConfig(mode=mode, assignment_mode=assignment, seed=1))
     em.unambig_counts[0, int(SpliceStrandCol.SPLICED_ANNOT_SENSE)] = deterministic
-    part = (
+    part = em_partition(
         np.arange(n_units + 1, dtype=np.int64),
         np.zeros(n_units, dtype=np.int32),
         np.full(n_units, -1000.0, dtype=np.float32),
@@ -970,13 +971,13 @@ def test_scaling_a_places_weight_and_its_transcripts_length_together_changes_not
             em_config=EMConfig(mode="map", assignment_mode="fractional", seed=1, n_threads=1),
         )
         em.unambig_counts[0, int(SpliceStrandCol.SPLICED_ANNOT_SENSE)] = 100
-        part = (
+        part = em_partition(
             np.arange(n_units + 1, dtype=np.int64),
             np.zeros(n_units, dtype=np.int32),
             np.full(n_units, scored.log_liks[0], dtype=np.float32),
             np.ones(n_units, dtype=np.float32),
             np.full(n_units, int(SpliceStrandCol.SPLICED_ANNOT_SENSE), dtype=np.uint8),
-            np.full(n_units, scored.is_spliced[0], dtype=np.uint8),
+            np.full(n_units, scored.gdna_excluded[0], dtype=np.uint8),
             np.full(n_units, scored.gdna_log_liks[0], dtype=np.float32),
             np.full(n_units, scored.intergenic_log_liks[0], dtype=np.float32),
         )
@@ -1087,7 +1088,7 @@ def _native(p, *, mode, gdna_prior, rna_prior):
     em.unambig_counts[:, int(SpliceStrandCol.SPLICED_ANNOT_SENSE)] = p.deterministic
     cand = [np.flatnonzero(np.isfinite(p.rna[u])) for u in range(n_u)]
     n_cand = sum(c.size for c in cand)
-    part = (
+    part = em_partition(
         np.concatenate([[0], np.cumsum([c.size for c in cand])]).astype(np.int64),
         np.concatenate(cand).astype(np.int32),
         np.concatenate([p.rna[u, c] for u, c in enumerate(cand)]),

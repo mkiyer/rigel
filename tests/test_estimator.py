@@ -22,7 +22,7 @@ from rigel.config import EMConfig, TranscriptGeometry
 from rigel.estimator import AbundanceEstimator
 from rigel.scored_fragments import ScoredFragments
 
-from _em_harness import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign
+from _em_harness import _UNSPLICED_SENSE, _make_locus_em_data, _run_and_assign, em_partition
 
 # =====================================================================
 # Helpers — lightweight mock index + fixtures
@@ -134,7 +134,7 @@ def _make_em_data(t_indices_per_unit):
         log_liks=np.zeros(n_candidates, dtype=np.float32),
         count_cols=np.full(n_candidates, _UNSPLICED_SENSE, dtype=np.uint8),
         coverage_weights=np.ones(n_candidates, dtype=np.float32),
-        is_spliced=np.zeros(n_units, dtype=bool),
+        gdna_excluded=np.zeros(n_units, dtype=bool),
         gdna_log_liks=np.full(n_units, -np.inf, dtype=np.float32),
         frag_ids=np.arange(n_units, dtype=np.int64),
         frag_class=np.zeros(n_units, dtype=np.int8),
@@ -173,7 +173,7 @@ class TestScoredFragments:
     def test_the_locus_em_fields_are_populated(self):
         """The locus-EM fields are populated."""
         em = _make_em_data([[0, 1]])
-        assert em.is_spliced.shape == (1,)
+        assert em.gdna_excluded.shape == (1,)
         assert em.gdna_log_liks.shape == (1,)
         assert em.gdna_log_liks[0] == -np.inf  # default unspliced
 
@@ -842,20 +842,8 @@ def _one_locus(units, *, mode, seed=0, unambig=(), n_t=3, include_gdna=False, lo
         units, log_liks_per_unit=log_liks, num_transcripts=n_t, rc=rc, include_gdna=include_gdna
     )
     part = partition_and_free(em_data, loci)[0]
-    tuples = [
-        (
-            part.offsets,
-            part.t_indices,
-            part.log_liks,
-            part.coverage_weights,
-            part.count_cols,
-            part.is_spliced,
-            part.gdna_log_liks,
-            part.intergenic_log_liks,
-        )
-    ]
     out = rc.run_batch_locus_em_partitioned(
-        tuples,
+        [part],
         [loci[0].transcript_indices],
         gdna_prior,
         emit_locus_stats=True,
@@ -1063,17 +1051,17 @@ def _partition(
     n_units: int,
     log_liks: tuple[float, ...],
     gdna_log_lik: float = -np.inf,
-    is_spliced: bool = False,
+    gdna_excluded: bool = False,
 ):
     n_t = len(log_liks)
     offsets = np.arange(n_units + 1, dtype=np.int64) * n_t
-    return (
+    return em_partition(
         offsets,
         np.tile(np.arange(n_t, dtype=np.int32), n_units),
         np.tile(np.asarray(log_liks, dtype=np.float32), n_units),
         np.ones(n_units * n_t, dtype=np.float32),
         np.zeros(n_units * n_t, dtype=np.uint8),
-        np.full(n_units, 1 if is_spliced else 0, dtype=np.uint8),
+        np.full(n_units, 1 if gdna_excluded else 0, dtype=np.uint8),
         np.full(n_units, gdna_log_lik, dtype=np.float32),
         np.full(n_units, -np.inf, dtype=np.float32),  # no unit has an intergenic place
     )
@@ -1097,7 +1085,7 @@ def test_equal_rna_likelihoods_split_evenly():
     n_units = 100
     est = _estimator(2, mode="map")
     total_gdna, locus_rna, locus_gdna = est.run_batch_locus_em_partitioned(
-        partition_tuples=[_partition(n_units=n_units, log_liks=(0.0, 0.0))],
+        partitions=[_partition(n_units=n_units, log_liks=(0.0, 0.0))],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
     )
@@ -1112,7 +1100,7 @@ def test_enabled_gdna_component_absorbs_likelihood_mass_without_prior_count():
     n_units = 80
     est = _estimator(2, mode="map")
     total_gdna, locus_rna, locus_gdna = est.run_batch_locus_em_partitioned(
-        partition_tuples=[_partition(n_units=n_units, log_liks=(-1.0, -1.0), gdna_log_lik=0.0)],
+        partitions=[_partition(n_units=n_units, log_liks=(-1.0, -1.0), gdna_log_lik=0.0)],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
     )
@@ -1128,7 +1116,7 @@ def test_gdna_effective_length_downweights_gdna_component():
 
     est_short = _estimator(1, mode="map")
     _total_short, _rna_short, gdna_short = est_short.run_batch_locus_em_partitioned(
-        partition_tuples=[partition],
+        partitions=[partition],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         gdna_eff_len=np.array([1.0], dtype=np.float64),
@@ -1136,7 +1124,7 @@ def test_gdna_effective_length_downweights_gdna_component():
 
     est_long = _estimator(1, mode="map")
     _total_long, _rna_long, gdna_long = est_long.run_batch_locus_em_partitioned(
-        partition_tuples=[partition],
+        partitions=[partition],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         gdna_eff_len=np.array([100.0], dtype=np.float64),
@@ -1151,7 +1139,7 @@ def test_aggregate_rna_prior_reduces_gdna_share_without_isoform_floor():
 
     est_unprior = _estimator(1, mode="map")
     _total_unprior, _rna_unprior, gdna_unprior = est_unprior.run_batch_locus_em_partitioned(
-        partition_tuples=[partition],
+        partitions=[partition],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         rna_prior_count=np.array([0.0], dtype=np.float64),
@@ -1160,7 +1148,7 @@ def test_aggregate_rna_prior_reduces_gdna_share_without_isoform_floor():
 
     est_rna = _estimator(1, mode="map")
     _total_rna, _rna_rna, gdna_rna = est_rna.run_batch_locus_em_partitioned(
-        partition_tuples=[partition],
+        partitions=[partition],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         rna_prior_count=np.array([10.0], dtype=np.float64),
@@ -1174,8 +1162,8 @@ def test_grouped_priors_inactive_without_structural_gdna_candidate():
     n_units = 40
     est = _estimator(1, mode="map")
     total_gdna, locus_rna, locus_gdna = est.run_batch_locus_em_partitioned(
-        partition_tuples=[
-            _partition(n_units=n_units, log_liks=(0.0,), gdna_log_lik=0.0, is_spliced=True)
+        partitions=[
+            _partition(n_units=n_units, log_liks=(0.0,), gdna_log_lik=0.0, gdna_excluded=True)
         ],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([100.0], dtype=np.float64),
@@ -1191,7 +1179,7 @@ def test_assignment_outputs_follow_partition_units():
     n_units = 5
     est = _estimator(2, mode="map")
     result = est.run_batch_locus_em_partitioned(
-        partition_tuples=[_partition(n_units=n_units, log_liks=(0.0, -4.0))],
+        partitions=[_partition(n_units=n_units, log_liks=(0.0, -4.0))],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         emit_assignments=True,
@@ -1218,15 +1206,15 @@ def test_gdna_candidates_are_derived_from_the_partition():
 
     # All-spliced partition ⇒ no per-unit gDNA candidate.
     spliced_part = _partition(
-        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-0.5, is_spliced=True
+        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-0.5, gdna_excluded=True
     )
     # Unspliced partition with finite gDNA log-liks ⇒ candidates.
     unspliced_part = _partition(
-        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-0.5, is_spliced=False
+        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-0.5, gdna_excluded=False
     )
     # Unspliced but non-finite gDNA log-lik ⇒ no candidate.
     nogdna_part = _partition(
-        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-np.inf, is_spliced=False
+        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-np.inf, gdna_excluded=False
     )
 
     # All three with gdna_prior_count=0: only the unspliced+finite case produces gDNA assignments.
@@ -1258,7 +1246,7 @@ def test_positive_gdna_prior_produces_finite_outputs():
     n_units = 30
     est = _estimator(2, mode="map")
     total_gdna, locus_rna, locus_gdna = est.run_batch_locus_em_partitioned(
-        partition_tuples=[_partition(n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-1.0)],
+        partitions=[_partition(n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-1.0)],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([5.0], dtype=np.float64),
     )
@@ -1285,7 +1273,7 @@ def test_positive_gdna_prior_produces_finite_outputs():
 
 def _run(est, partition, t_idx, *, rna_prior=0.0, gdna_prior=0.0):
     return est.run_batch_locus_em_partitioned(
-        partition_tuples=[partition],
+        partitions=[partition],
         locus_transcript_indices=[np.asarray(t_idx, dtype=np.int32)],
         gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
         rna_prior_count=np.array([rna_prior], dtype=np.float64),
@@ -1300,7 +1288,7 @@ def _mixed_partition(unique: tuple[int, ...], shared: int, gdna_log_lik: float =
     offsets = np.cumsum([0] + [len(c) for c in cands]).astype(np.int64)
     flat = np.concatenate([np.asarray(c, dtype=np.int32) for c in cands])
     n_units, n_cand = len(cands), flat.shape[0]
-    return (
+    return em_partition(
         offsets,
         flat,
         np.zeros(n_cand, dtype=np.float32),
@@ -1347,7 +1335,7 @@ def test_a_transcript_with_no_start_position_cannot_emit(mode):
     fragment no component can emit is left unassigned, and nothing is NaN."""
     est = _yield_estimator([0.0, 1000.0], mode=mode)
     est.run_batch_locus_em_partitioned(
-        partition_tuples=[_mixed_partition((100, 0), 200)],
+        partitions=[_mixed_partition((100, 0), 200)],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         rna_prior_count=np.array([0.0], dtype=np.float64),
@@ -1360,7 +1348,7 @@ def test_a_transcript_with_no_start_position_cannot_emit(mode):
 
     est = _yield_estimator([0.0], mode=mode)
     _t, rna, gdna = est.run_batch_locus_em_partitioned(
-        partition_tuples=[_mixed_partition((0,), 100, gdna_log_lik=0.0)],
+        partitions=[_mixed_partition((0,), 100, gdna_log_lik=0.0)],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         gdna_eff_len=np.array([100.0], dtype=np.float64),
@@ -1536,7 +1524,7 @@ def _warm_start_partition(
     every unit's coverage weight per transcript (1 each by default)."""
     n_t = len(log_liks)
     offsets = np.arange(n_units + 1, dtype=np.int64) * n_t
-    return (
+    return em_partition(
         offsets,
         np.tile(np.arange(n_t, dtype=np.int32), n_units),
         np.tile(np.asarray(log_liks, dtype=np.float32), n_units),
@@ -1574,7 +1562,7 @@ def _warm_start_run(
 ):
     est.em_config = dataclasses.replace(est.em_config, iterations=iterations)
     est.run_batch_locus_em_partitioned(
-        partition_tuples=[partition],
+        partitions=[partition],
         locus_transcript_indices=[np.asarray(t_idx, dtype=np.int32)],
         gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
         rna_prior_count=np.array([rna_prior], dtype=np.float64),
@@ -1737,7 +1725,7 @@ def _synthetic_span_locus(n_sense: int, n_anti: int, ss: float = 0.99):
             ll += [-np.inf, float(np.log(p_rna))]
             gll.append(float(np.log(0.5)))
     n_units = int(n_sense + n_anti)
-    return (
+    return em_partition(
         np.arange(n_units + 1, dtype=np.int64) * 2,
         np.asarray(ti, dtype=np.int32),
         np.asarray(ll, dtype=np.float32),
@@ -1765,7 +1753,7 @@ def _synthetic_span_share(ratio: float, *, n: int = 20_000, gdna_prior: float = 
         geometry=_lengths([L_n * 10.0, L_n]),
     )
     est.run_batch_locus_em_partitioned(
-        partition_tuples=[_synthetic_span_locus(n // 2, n // 2)],
+        partitions=[_synthetic_span_locus(n // 2, n // 2)],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
         gdna_eff_len=np.array([L_n * ratio], dtype=np.float64),

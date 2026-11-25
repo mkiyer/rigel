@@ -161,7 +161,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The baseline: 0 failed / 3,916 passed / 0 skipped, 3,916 collected** (re-derived 2026-11-25, the review's
+**The baseline: 0 failed / 3,921 passed / 0 skipped, 3,921 collected** (re-derived 2026-11-25, the review's
 stage F). Any failure is a regression.
 - Re-derive the count; never edit it by hand. Only adding or removing a test moves it.
 - A golden update (`--update-golden`) is where a regression gets laundered into "intended". Read the diff and check the
