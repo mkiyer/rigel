@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import os
 import sys
 import time
@@ -1068,10 +1069,14 @@ def _config_to_cli(val: object, transform: str) -> object:
 
 
 def _cli_to_config(val: object, transform: str) -> object:
-    """Transform a CLI-space value to config-space."""
+    """Transform a CLI-space value to config-space. A value a transform would read as another kind is refused, since a
+    YAML value reaches here without the parser's types: ``not "false"`` is a valid ``False``, and a GiB count that is
+    a string or a bool would multiply."""
     if transform == "direct":
         return val
     if transform == "invert_bool":
+        if not isinstance(val, bool):
+            raise TypeError(f"a switch must be true or false; got {val!r}")
         return not val
     if transform == "sj_tag":
         if isinstance(val, str):
@@ -1080,6 +1085,8 @@ def _cli_to_config(val: object, transform: str) -> object:
     if transform == "path_or_none":
         return Path(val) if val else None
     if transform == "gib_to_bytes":
+        if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
+            raise TypeError(f"a size in GiB must be a finite number; got {val!r}")
         return int(val * 1024**3)  # GiB → bytes
     raise ValueError(f"Unknown transform: {transform!r}")
 

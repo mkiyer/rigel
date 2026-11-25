@@ -298,10 +298,10 @@ def _check_bam_header(bam_path: str, index: TranscriptIndex) -> None:
     try:
         with pysam.AlignmentFile(bam_path, "r", check_sq=False) as f:
             header = f.header.to_dict()
-    except (
-        OSError
-    ) as exc:  # pysam refuses a BAM missing its BGZF end-of-file marker: a truncated file
-        raise BamInputError(f"{bam_path} cannot be read: {exc}") from exc
+    # pysam refuses a truncated BAM (no BGZF end-of-file marker) with an OSError, and a file that is no SAM or BAM at all
+    # with a ValueError
+    except (OSError, ValueError) as exc:
+        raise BamInputError(f"{bam_path} cannot be read as a BAM: {exc}") from exc
     if header.get("HD", {}).get("SO") == "coordinate":
         raise BamInputError(
             f"{bam_path} is sorted by coordinate (@HD SO:coordinate), so a pair's mates are not adjacent and each "

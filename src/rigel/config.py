@@ -15,6 +15,7 @@ constants the native kernels share with Python, defined in C++ and exported by :
 from __future__ import annotations
 
 import math
+import numbers
 import operator
 import os
 from dataclasses import dataclass, field, fields
@@ -111,6 +112,8 @@ class EMConfig:
             raise ValueError(
                 f"EMConfig.convergence_delta must be a finite number >= 0; got {delta!r}."
             )
+        # the backstop: a setting of the wrong kind none of the checks above reads
+        _check_field_types(self)
 
 
 # ======================================================================
@@ -284,6 +287,8 @@ class BamScanConfig:
                 "BamScanConfig.sj_strand_tag must be auto, none, XS, ts, or XS and ts in either order; "
                 f"got {tags!r}."
             )
+        # the backstop: a setting of the wrong kind none of the checks above reads
+        _check_field_types(self)
 
     @property
     def sj_tag_spec(self) -> str:
@@ -411,6 +416,8 @@ class CalibrationConfig:
                 "CalibrationConfig.sweep_logodds_step must be > 0 and no wider than the window "
                 f"(2L = {2.0 * float(self.sweep_logodds_window)}); got {self.sweep_logodds_step}."
             )
+        # the backstop: a setting of the wrong kind none of the checks above reads
+        _check_field_types(self)
 
 
 # ======================================================================
@@ -453,6 +460,8 @@ class IndexConfig:
             raise ValueError(f"Unknown GTF parse mode: {self.gtf_parse_mode!r}")
         if self.end_tolerance < 0:
             raise ValueError(f"IndexConfig.end_tolerance must be >= 0; got {self.end_tolerance}.")
+        # the backstop: a setting of the wrong kind none of the checks above reads
+        _check_field_types(self)
 
 
 # ======================================================================
@@ -1008,6 +1017,35 @@ class Constants:
     qc: QcConstants = field(default_factory=QcConstants)
     simulator: SimulatorConstants = field(default_factory=SimulatorConstants)
     resources: ResourceConstants = field(default_factory=ResourceConstants)
+
+
+def _check_field_types(section) -> None:
+    """Refuse a run setting of the wrong kind before anything reads it: a ``bool`` field must hold a bool, an ``int``
+    a whole number that is no bool, a ``float`` a number that is no bool (an optional one may be ``None``), each a
+    ``TypeError``; a ``float`` that is not finite is out of range, a ``ValueError``. A YAML string ``"false"`` read as a
+    true switch, a count of 1.5 truncated downstream and an infinite window all got through before."""
+    wrong_kind, not_finite = [], []
+    for f in fields(section):
+        annotation = str(f.type)
+        kind = annotation.removesuffix(" | None")
+        value = getattr(section, f.name)
+        if kind not in ("bool", "int", "float") or (
+            value is None and annotation.endswith(" | None")
+        ):
+            continue
+        name = f"{type(section).__name__}.{f.name}"
+        if kind == "bool" and not isinstance(value, bool):
+            wrong_kind.append(f"{name} must be true or false; got {value!r}")
+        elif kind == "int" and (isinstance(value, bool) or not isinstance(value, numbers.Integral)):
+            wrong_kind.append(f"{name} must be an integer; got {value!r}")
+        elif kind == "float" and (isinstance(value, bool) or not isinstance(value, numbers.Real)):
+            wrong_kind.append(f"{name} must be a number; got {value!r}")
+        elif kind == "float" and not math.isfinite(value):
+            not_finite.append(f"{name} must be finite; got {value!r}")
+    if wrong_kind:
+        raise TypeError("; ".join(wrong_kind))
+    if not_finite:
+        raise ValueError("; ".join(not_finite))
 
 
 def _check_ranges(section, **ok: bool) -> None:

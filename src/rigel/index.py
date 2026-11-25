@@ -142,8 +142,18 @@ def load_manifest(index_dir: str | Path) -> dict | None:
     path = Path(index_dir) / MANIFEST_JSON
     if not path.exists():
         return None
-    with open(path) as fh:
-        return json.load(fh)
+    try:
+        with open(path) as fh:
+            manifest = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise IndexLoadError(
+            f"{path} is not a readable JSON manifest ({exc}). Rebuild the index."
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise IndexLoadError(
+            f"{path} holds no mapping, so it is not an index manifest. Rebuild the index."
+        )
+    return manifest
 
 
 def load_ref_lengths(path: str | Path) -> dict[str, int]:
@@ -1400,8 +1410,20 @@ class TranscriptIndex:
     def load(cls, index_dir: str | Path) -> "TranscriptIndex":
         """Load an index from the Feather files in *index_dir*: the version gate, the references and the mask, the
         transcript and gene tables, the splice graph, and the native resolver built from the intervals and junctions.
-        """
-        index_dir = str(index_dir)
+        A file that cannot be read or decoded is refused as an :class:`IndexLoadError` naming the index and its
+        rebuild, never a raw parser error."""
+        try:
+            return cls._load(str(index_dir))
+        except IndexLoadError:
+            raise
+        except (OSError, ValueError, KeyError) as exc:
+            raise IndexLoadError(
+                f"Index at {index_dir} could not be read: {exc}. Rebuild the index "
+                f"(rigel index --fasta ... --gtf ... -o {index_dir})."
+            ) from exc
+
+    @classmethod
+    def _load(cls, index_dir: str) -> "TranscriptIndex":
         self = cls()
         self.index_dir = index_dir
         _checked_manifest(index_dir)
