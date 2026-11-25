@@ -443,7 +443,7 @@ class IndexConfig:
     #: transcript, its own nascent RNA) whose start and end sites each lie within this many bp are one entity,
     #: transitively: one synthetic span, or the single-exon transcript. A fragment can tell such ends apart only by the
     #: few that start or end in those bases, where fragmentation and priming bias the ends and the model does not follow
-    #: them (``index.create_nrna_transcripts``).
+    #: them (``index.create_nascent_spans``).
     end_tolerance: int = 20
 
     def __post_init__(self) -> None:

@@ -288,7 +288,7 @@ def test_ambiguous_multiexon_candidate_snapshot(tmp_path_factory):
         "t5",
         "t6",
         "t7",
-        "RIGEL_NRNA_chr1_1_99_657",
+        "RIGEL_NASCENT_chr1_1_99_657",
     }
     assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
     assert result.read_length == 120

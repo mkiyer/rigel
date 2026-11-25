@@ -31,7 +31,7 @@ NB_MODULE(_resolve_impl, m) {
              "Set the transcript count, which sizes each scan worker's scratch.")
         .def("set_transcript_strands", &FragmentResolver::set_transcript_strands, nb::arg("t_strand"),
              "Set per-transcript strand array (direct lookup, no gene indirection).")
-        .def("set_nrna_parent_index", &FragmentResolver::set_nrna_parent_index, nb::arg("nrna_parent"),
+        .def("set_nascent_parent_index", &FragmentResolver::set_nascent_parent_index, nb::arg("nascent_parent"),
              "Set each transcript's synthetic nascent span (int32; -1 = none).\n"
              "Nascent-span candidates are derived from annotated-transcript hits\n"
              "during resolution; synthetics are not in cgranges.")

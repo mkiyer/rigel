@@ -171,7 +171,7 @@ On one reference and strand, nascent entities (each multi-exon transcript's exte
 whose start and end sites each lie within `IndexConfig.end_tolerance` bp are one entity, transitively, and so are
 entities whose envelopes are (the owner, 2026-11-23: the anchored clusters this replaces left 1,776 span entities
 within the tolerance of another on GRCh38). A span is its multi-exon contributors' envelope
-(`index.create_nrna_transcripts`). A single-exon transcript is its own nascent RNA, so no span is made equal to one:
+(`index.create_nascent_spans`). A single-exon transcript is its own nascent RNA, so no span is made equal to one:
 a span within the tolerance of a single-exon transcript, or contained by one, takes it as its entity; every other is
 one synthetic transcript, a gene-neutral row of `index.t_df` flagged `is_synthetic`, named by its contributors'
 `span_t_index`. `is_single_exon` is the structural fact (true of every synthetic span), never "manufactured"; the

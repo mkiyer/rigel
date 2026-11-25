@@ -61,7 +61,7 @@ public:
 
     /// Each transcript's synthetic nascent span (-1 = none). The spans stay out of the overlap index: `resolve` adds
     /// each annotated candidate's span to the fragment's candidates.
-    void set_nrna_parent_index(const std::vector<int32_t>& nrna_parent) { nrna_parent_ = nrna_parent; }
+    void set_nascent_parent_index(const std::vector<int32_t>& nascent_parent) { nascent_parent_ = nascent_parent; }
 
     /// The library's fragment-length limit (`BamScanConfig.max_frag_length`): no pair whose molecule is longer, along
     /// the genome and along every witness transcript, is one (`validate_pair`).
@@ -177,7 +177,7 @@ private:
 
     int32_t n_transcripts_ = 0;
     std::vector<int32_t> t_strand_arr_;
-    std::vector<int32_t> nrna_parent_;
+    std::vector<int32_t> nascent_parent_;
 
     // Each transcript's exons, CSR: [n_transcripts + 1] offsets into the genomic starts and ends
     std::vector<int32_t> exon_offsets_;

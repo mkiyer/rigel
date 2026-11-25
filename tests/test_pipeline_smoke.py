@@ -149,7 +149,7 @@ class TestPipelineSmoke:
 
     def test_transcript_df_rows(self):
         df = self.pr.estimator.get_counts_df(self.index)
-        n_annotated = sum(1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_"))
+        n_annotated = sum(1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NASCENT_"))
         assert n_annotated == 3, f"Expected 3 annotated transcripts, got {n_annotated}"
 
     def test_transcript_counts_positive(self):

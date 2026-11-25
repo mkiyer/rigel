@@ -67,7 +67,7 @@ struct ResolverScratch {
     std::vector<std::vector<int32_t>> transcript_t_sets;
     std::vector<int32_t> sj_holders;
     std::vector<int32_t> all_overlap_t;
-    std::vector<int32_t> nrna_t;
+    std::vector<int32_t> nascent_t;
 
     // The gap-hypothesis enumeration: the blocks in order, the unsequenced gaps, one candidate's path and its
     // normalised introns and segments (`path_length`), and the blocks as the hold test reads them
@@ -117,7 +117,7 @@ struct ResolverScratch {
         for (auto& v : transcript_t_sets) v.clear();
         sj_holders.clear();
         all_overlap_t.clear();
-        nrna_t.clear();
+        nascent_t.clear();
         implicit_blocks.clear();
         implicit_gaps.clear();
     }

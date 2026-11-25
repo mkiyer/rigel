@@ -20,7 +20,7 @@ import pandas as pd
 import pytest
 
 from rigel.index import (
-    BOUNDARIES_FEATHER,
+    EDGES_FEATHER,
     INTERVALS_FEATHER,
     REF_LENGTHS_FEATHER,
     REGIONS_FEATHER,
@@ -84,14 +84,14 @@ class TestTranscriptTable:
         assert t_ids[:3] == ["t1", "t2", "t3"]
         # 2 synthetic spans appended
         assert len(t_ids) == 5
-        assert all(tid.startswith("RIGEL_NRNA_") for tid in t_ids[3:])
+        assert all(tid.startswith("RIGEL_NASCENT_") for tid in t_ids[3:])
 
     def test_gene_ids(self, mini_index):
         g_ids = mini_index.t_df["g_id"].tolist()
         assert g_ids[:3] == ["g1", "g1", "g2"]
         # Synthetic spans are gene-neutral: their g_id equals
-        # their own t_id (``RIGEL_NRNA_...``).
-        assert all(gid.startswith("RIGEL_NRNA_") for gid in g_ids[3:])
+        # their own t_id (``RIGEL_NASCENT_...``).
+        assert all(gid.startswith("RIGEL_NASCENT_") for gid in g_ids[3:])
         assert g_ids[3:] == mini_index.t_df["t_id"].tolist()[3:]
 
     def test_t_to_g_arr(self, mini_index):
@@ -452,7 +452,7 @@ class TestLargerIndex:
             t_idx = row["t_index"]
             t_id = row["t_id"]
             exons = complex_index.get_exon_intervals(t_idx)
-            if t_id.startswith("RIGEL_NRNA_"):
+            if t_id.startswith("RIGEL_NASCENT_"):
                 # synthetic spans are single-exon
                 assert exons.shape[0] == 1, (
                     f"{t_id} (t_idx={t_idx}): synthetic nRNA should have "
@@ -556,7 +556,7 @@ def test_load_refuses_a_gene_index_with_a_gap(tmp_path: Path):
         TRANSCRIPTS_FEATHER,
         INTERVALS_FEATHER,
         REGIONS_FEATHER,
-        BOUNDARIES_FEATHER,
+        EDGES_FEATHER,
         SJ_FEATHER,
     ],
 )
@@ -870,7 +870,7 @@ def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_
     """The nascent entity a single-exon transcript stands for holds every multi-exon transcript of every span it
     covers: one span of one transcript and one of two, three in all. An overwrite would keep only the last span's
     two."""
-    from rigel.index import create_nrna_transcripts
+    from rigel.index import create_nascent_spans
 
     def tx(t_index, t_id, exons):
         return Transcript(
@@ -890,7 +890,7 @@ def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_
         tx(2, "T2", [(1000, 1100), (1200, 1300)]),
         tx(3, "T3", [(1000, 1100), (1250, 1300)]),
     ]
-    synthetics, _t_to_span_key, carriers = create_nrna_transcripts(transcripts, tolerance=20)
+    synthetics, _t_to_span_key, carriers = create_nascent_spans(transcripts, tolerance=20)
     assert synthetics == [] and len(carriers) == 2
     assert all(entity is covering for entity in carriers.values())
     assert covering.span_n_contributors == 3
@@ -898,9 +898,9 @@ def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_
 
 def _span_entities(transcripts, tolerance=20):
     """The nascent entities' extents: the synthetics' and the carrying single-exon transcripts', and the carriers."""
-    from rigel.index import create_nrna_transcripts
+    from rigel.index import create_nascent_spans
 
-    synthetics, _t_to_span_key, carriers = create_nrna_transcripts(transcripts, tolerance=tolerance)
+    synthetics, _t_to_span_key, carriers = create_nascent_spans(transcripts, tolerance=tolerance)
     extents = {(s.start, s.end) for s in synthetics} | {(t.start, t.end) for t in carriers.values()}
     return sorted(extents), carriers
 

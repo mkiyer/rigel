@@ -20,7 +20,7 @@ import pytest
 from rigel.index import IndexLoadError, TranscriptIndex
 
 from rigel.calibration.splice_graph import (
-    BOUNDARY_COLUMNS,
+    EDGE_COLUMNS,
     EDGE_KIND_CONTIGUOUS,
     EDGE_KIND_SJ,
     FLAG_ACCEPTOR_NEG,
@@ -44,7 +44,7 @@ from _index_builder import build_test_index
 from native._accumulator_reference import Partition
 
 #: The boundary table's four reach columns.
-REACH_COLUMNS = tuple(c for c in BOUNDARY_COLUMNS if c.startswith("reach_"))
+REACH_COLUMNS = tuple(c for c in EDGE_COLUMNS if c.startswith("reach_"))
 
 
 REF = {"chr1": 2000}

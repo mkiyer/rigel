@@ -407,18 +407,18 @@ void FragmentResolver::query_blocks(const std::vector<ExonBlock>& exons, Resolve
 /// The synthetic nascent spans of every annotated transcript the blocks overlap: each span the fragment has bases in
 /// joins every block's exon set (so the merge's intersection surfaces it across blocks), with those bases as exonic.
 void FragmentResolver::add_nascent_spans(const std::vector<ExonBlock>& exons, ResolverScratch& scratch) const {
-    if (nrna_parent_.empty()) return;
+    if (nascent_parent_.empty()) return;
     const auto add_parent = [&](int32_t t) {
-        if (t < 0 || t >= static_cast<int32_t>(nrna_parent_.size())) return;
-        if (nrna_parent_[t] >= 0) scratch.nrna_t.push_back(nrna_parent_[t]);
+        if (t < 0 || t >= static_cast<int32_t>(nascent_parent_.size())) return;
+        if (nascent_parent_[t] >= 0) scratch.nascent_t.push_back(nascent_parent_[t]);
     };
     for (const auto& s : scratch.exon_t_sets)
         for (int32_t t : s) add_parent(t);
     for (const auto& s : scratch.transcript_t_sets)
         for (int32_t t : s) add_parent(t);
-    sort_unique(scratch.nrna_t);
+    sort_unique(scratch.nascent_t);
 
-    for (int32_t span : scratch.nrna_t) {
+    for (int32_t span : scratch.nascent_t) {
         // A synthetic span has one exon by construction.
         const int32_t ns = exon_starts_[exon_offsets_[span]];
         const int32_t ne = exon_ends_[exon_offsets_[span]];

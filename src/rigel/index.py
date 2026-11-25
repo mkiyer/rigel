@@ -55,8 +55,8 @@ INTERVALS_TSV = "intervals.tsv"
 REGIONS_FEATHER = "regions.feather"
 REGIONS_TSV = "regions.tsv"
 
-BOUNDARIES_FEATHER = "edges.feather"
-BOUNDARIES_TSV = "boundaries.tsv"
+EDGES_FEATHER = "edges.feather"
+EDGES_TSV = "edges.tsv"
 
 SJ_FEATHER = "sj.feather"
 SJ_TSV = "sj.tsv"
@@ -74,7 +74,7 @@ MANIFEST_JSON = "manifest.json"
 
 #: On-disk index format version, bumped whenever the schema or the meaning of any persisted column changes;
 #: :meth:`TranscriptIndex.load` refuses any other.
-INDEX_FORMAT_VERSION = 11
+INDEX_FORMAT_VERSION = 13
 
 
 def _rigel_version() -> str:
@@ -415,7 +415,7 @@ def transcripts_to_dataframe(transcripts: list[Transcript]) -> pd.DataFrame:
     return pd.DataFrame(t.to_dict() for t in transcripts)
 
 
-# -- Synthetic nRNA spans: one entity per extent within a tolerance at both ends ---
+# -- Synthetic nascent spans: one entity per extent within a tolerance at both ends ---
 
 
 def _linked_components(points: list[tuple[int, int]], tolerance: int) -> list[int]:
@@ -523,11 +523,15 @@ def _containing_transcripts(transcripts: list[Transcript], spans) -> dict[tuple,
     return containing
 
 
+#: Leads every synthetic nascent span's ``t_id``, followed by ``{ref}_{strand}_{start}_{end}``.
+NASCENT_SPAN_PREFIX = "RIGEL_NASCENT_"
+
+
 def _synthetic_span(span_key: tuple, n_contributors: int) -> Transcript:
     """The synthetic single-exon transcript over a merged span. It is gene-neutral: its sentinel ``g_id`` is its own
     ``t_id``, which keeps the ``g_id`` column non-null, and the index builder gives it a ``g_index`` of its own."""
     ref, strand, start, end = span_key
-    t_id = f"RIGEL_NRNA_{ref}_{strand}_{start}_{end}"
+    t_id = f"{NASCENT_SPAN_PREFIX}{ref}_{strand}_{start}_{end}"
     return Transcript(
         ref=ref,
         strand=Strand(strand),
@@ -543,11 +547,11 @@ def _synthetic_span(span_key: tuple, n_contributors: int) -> Transcript:
     )
 
 
-def create_nrna_transcripts(
+def create_nascent_spans(
     transcripts: list[Transcript],
     tolerance: int = IndexConfig.end_tolerance,
 ) -> tuple[list[Transcript], dict[int, tuple], dict[tuple, Transcript]]:
-    """Create synthetic nRNA transcripts and detect their annotated equivalents.
+    """Create the synthetic nascent spans and detect their annotated equivalents.
 
     1. Each multi-exon transcript's extent and each single-exon transcript, on one reference and strand, are one
        entity with every other within *tolerance* bp at both ends, transitively (:func:`_merged_spans`); a span is
@@ -580,7 +584,7 @@ def create_nrna_transcripts(
         if span_key not in carriers
     ]
     logger.info(
-        f"nRNA: {len(contributors)} merged spans "
+        f"Nascent: {len(contributors)} merged spans "
         f"({len(carriers)} annotated equiv, "
         f"{len(synthetics)} synthetic)"
     )
@@ -588,11 +592,11 @@ def create_nrna_transcripts(
 
 
 def _add_nascent_spans(transcripts: list[Transcript], tolerance: int) -> None:
-    """Append the synthetic spans that model the transcripts' nascent RNA (:func:`create_nrna_transcripts`) and set
+    """Append the synthetic spans that model the transcripts' nascent RNA (:func:`create_nascent_spans`) and set
     every span entity's ``span_t_index``. Each synthetic gets a ``g_index`` of its own (they are gene-neutral), which
     keeps ``t.g_index == row in g_df`` and keeps synthetics out of annotated genes' summaries."""
-    logger.info("[START] Creating synthetic nRNA transcripts")
-    synthetics, t_to_span_key, carriers = create_nrna_transcripts(transcripts, tolerance=tolerance)
+    logger.info("[START] Creating synthetic nascent spans")
+    synthetics, t_to_span_key, carriers = create_nascent_spans(transcripts, tolerance=tolerance)
     next_g_index = max((t.g_index for t in transcripts), default=-1) + 1
     span_entity_t_index: dict[tuple, int] = {}
     for i, syn in enumerate(synthetics):
@@ -920,7 +924,7 @@ def _write_annotation_tables(
     )
     write(iv_df, INTERVALS_FEATHER, INTERVALS_TSV)
     write(regions_df, REGIONS_FEATHER, REGIONS_TSV)
-    write(edges_df, BOUNDARIES_FEATHER, BOUNDARIES_TSV)
+    write(edges_df, EDGES_FEATHER, EDGES_TSV)
 
 
 def _write_genome_tables(write: _TableWriter, genome: _GenomeInputs) -> None:
@@ -967,7 +971,7 @@ _REQUIRED_FILES = (
     REF_LENGTHS_FEATHER,
     TRANSCRIPTS_FEATHER,
     REGIONS_FEATHER,
-    BOUNDARIES_FEATHER,
+    EDGES_FEATHER,
     INTERVALS_FEATHER,
     SJ_FEATHER,
     UNOBSERVABLE_FEATHER,
@@ -1151,7 +1155,7 @@ def _sj_csr(sj_df: pd.DataFrame) -> tuple[list, list, list, list, list, list]:
     )
 
 
-def _nrna_parents(t_df: pd.DataFrame) -> np.ndarray:
+def _nascent_parents(t_df: pd.DataFrame) -> np.ndarray:
     """Each transcript's synthetic span, by ``t_index``, -1 where its span entity is no synthetic. Synthetics are absent
     from the interval table (:func:`iter_reference_layout` filters them out), so the resolver derives each synthetic
     candidate from the annotated transcripts a fragment hits, through this index."""
@@ -1199,7 +1203,7 @@ class TranscriptIndex:
 
     @property
     def num_genes(self) -> int:
-        """Rows in ``g_df``, annotated genes and synthetic nRNA placeholders, so ``g_index == row``.
+        """Rows in ``g_df``, annotated genes and synthetic nascent spans, so ``g_index == row``.
 
         User-facing summaries use :attr:`num_annotated_genes`.
         """
@@ -1429,11 +1433,11 @@ class TranscriptIndex:
         # The splice graph, the calibration partition. Load checks only that the graph is internally consistent and
         # complete; the checks against the transcripts run at build, so a `signature` or `flags` column that has
         # drifted from the annotation loads clean
-        from .calibration.splice_graph import load_boundaries, load_regions, validate_graph
+        from .calibration.splice_graph import load_edges, load_regions, validate_graph
 
         logger.debug("Reading splice graph")
         self.regions_df = load_regions(os.path.join(index_dir, REGIONS_FEATHER))
-        self.edges_df = load_boundaries(os.path.join(index_dir, BOUNDARIES_FEATHER))
+        self.edges_df = load_edges(os.path.join(index_dir, EDGES_FEATHER))
         validate_graph(self.regions_df, self.edges_df, self.ref_lengths)
 
         logger.debug("Reading intervals")
@@ -1475,7 +1479,7 @@ class TranscriptIndex:
         # strand), the strand each gap hypothesis infers from the transcripts that imply it, and the truth label of
         # the all-exonic diagnostic strand model.
         resolver.set_transcript_strands(self.t_to_strand_arr.tolist())
-        resolver.set_nrna_parent_index(_nrna_parents(self.t_df).tolist())
+        resolver.set_nascent_parent_index(_nascent_parents(self.t_df).tolist())
         return resolver
 
     def get_exon_intervals(self, t_idx: int) -> np.ndarray:

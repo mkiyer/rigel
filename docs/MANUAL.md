@@ -189,8 +189,8 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 transcript `--collapse-duplicate-transcripts` folded into an identical one; empty otherwise),
 `unobservable` (the unobservable genome's runs, see Mappability below), `manifest.json`, and the two
 calibration partitions — `regions.feather` (the genome partition into intergenic / intron / exon
-pieces) and `edges.feather` (its TSV mirror is `boundaries.tsv`: the contiguous and splice-junction
-boundaries between those pieces). The on-disk format is version 11;
+pieces) and `edges` (the contiguous and splice-junction boundaries between those pieces). The on-disk
+format is version 13;
 `rigel quant` refuses an index of any other version, so an index built by an earlier rigel is
 rebuilt with `rigel index`.
 
@@ -521,7 +521,7 @@ models it, and its RNA is annotated, a row of `quant.feather`.
 
 | Column | Description |
 |--------|-------------|
-| `nascent_id` | Span ID |
+| `nascent_id` | Span ID: `RIGEL_NASCENT_`, then the span's reference, strand, start and end |
 | `effective_length` | Effective length after fragment-length correction (the length TPM divides by) |
 | `em_effective_length` | The effective length the EM reads (capture-aware) |
 | `locus_id` | Locus containing this span |

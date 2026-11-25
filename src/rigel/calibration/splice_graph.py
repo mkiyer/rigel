@@ -42,8 +42,8 @@ from .signature import (
 __all__ = [
     "REGION_COLUMNS",
     "REGION_COLUMN_DTYPES",
-    "BOUNDARY_COLUMNS",
-    "BOUNDARY_COLUMN_DTYPES",
+    "EDGE_COLUMNS",
+    "EDGE_COLUMN_DTYPES",
     "EDGE_KIND_CONTIGUOUS",
     "EDGE_KIND_SJ",
     "FLAG_TSS_POS",
@@ -65,7 +65,7 @@ __all__ = [
     "SpliceJunctionGeometry",
     "validate_graph",
     "load_regions",
-    "load_boundaries",
+    "load_edges",
 ]
 
 REGION_COLUMNS = ["region_id", "ref_name", "start", "end", "length", "signature"]
@@ -82,7 +82,7 @@ EMPTY_I64 = np.zeros(0, np.int64)
 EDGE_KIND_CONTIGUOUS = 0
 EDGE_KIND_SJ = 1
 
-BOUNDARY_COLUMNS = [
+EDGE_COLUMNS = [
     "edge_id",
     "src",
     "dst",
@@ -94,7 +94,7 @@ BOUNDARY_COLUMNS = [
     "reach_lo_neg",
     "reach_hi_neg",
 ]
-BOUNDARY_COLUMN_DTYPES: dict[str, type | np.dtype] = {
+EDGE_COLUMN_DTYPES: dict[str, type | np.dtype] = {
     "edge_id": np.int64,
     "src": np.int64,
     "dst": np.int64,
@@ -321,7 +321,7 @@ def _assemble(region_parts, edge_parts) -> tuple[pd.DataFrame, pd.DataFrame]:
     edges_df = (
         pd.concat(edge_parts, ignore_index=True)
         if edge_parts
-        else pd.DataFrame(columns=BOUNDARY_COLUMNS[1:])
+        else pd.DataFrame(columns=EDGE_COLUMNS[1:])
     )
     if len(edges_df):
         # Strand completes the order: two strand-coincident sj share (src, kind, dst). It only refines the order, so a
@@ -331,7 +331,7 @@ def _assemble(region_parts, edge_parts) -> tuple[pd.DataFrame, pd.DataFrame]:
         ).reset_index(drop=True)
     edges_df.insert(0, "edge_id", np.arange(len(edges_df), dtype=np.int64))
     return _coerce(regions_df, REGION_COLUMNS, REGION_COLUMN_DTYPES), _coerce(
-        edges_df, BOUNDARY_COLUMNS, BOUNDARY_COLUMN_DTYPES
+        edges_df, EDGE_COLUMNS, EDGE_COLUMN_DTYPES
     )
 
 
@@ -1001,11 +1001,11 @@ def load_regions(path) -> pd.DataFrame:
     return _coerce(df, REGION_COLUMNS, REGION_COLUMN_DTYPES)
 
 
-def load_boundaries(path) -> pd.DataFrame:
+def load_edges(path) -> pd.DataFrame:
     df = pd.read_feather(str(path))
-    missing = set(BOUNDARY_COLUMNS) - set(df.columns)
+    missing = set(EDGE_COLUMNS) - set(df.columns)
     if missing:
         raise ValueError(
             f"edges.feather at {path} is missing {sorted(missing)}. Rebuild the index."
         )
-    return _coerce(df, BOUNDARY_COLUMNS, BOUNDARY_COLUMN_DTYPES)
+    return _coerce(df, EDGE_COLUMNS, EDGE_COLUMN_DTYPES)

@@ -209,7 +209,7 @@ infers nothing (`TRAPS: annotated-is-not-genomic`). The lengths, 206 ± 98, are 
 capture selects for length (`f_post(w) ∝ f_pre(w) · total_eff(w)`), so ⛔ score against `truth_fragment_lengths.tsv`.
 
 `rigel sim` builds (or is given, `index:`) a rigel index and simulates its transcript list, so what is simulated is
-what `rigel quant` reads: the annotated transcripts plus the synthetic spans `index.create_nrna_transcripts` makes.
+what `rigel quant` reads: the annotated transcripts plus the synthetic spans `index.create_nascent_spans` makes.
 
 | | |
 |---|---|
