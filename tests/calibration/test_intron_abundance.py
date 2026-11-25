@@ -27,6 +27,7 @@ from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.messages.transfer import TransferPolicy
 from rigel.calibration.region_geometry import init_beliefs
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
+from rigel.calibration.strand_balance import StrandBalance
 from rigel.calibration.sweep import solve_chain
 from rigel.config import CalibrationConfig
 
@@ -85,8 +86,7 @@ def _solve(parts, *, kappa, background, policy=None):
         parts.geometry,
         belief,
         parts.region_arrays,
-        rna_sense_frac=kappa,
-        n_rna_obs=10_000.0,
+        strand=StrandBalance(kappa, 10_000, False),
         n_grid=101,
         logodds_window=10.0,
         background=background,

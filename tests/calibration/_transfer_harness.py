@@ -25,7 +25,7 @@ from rigel.calibration.messages import ChainView, view_fields
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
 from rigel.calibration.simplex_logodds import CubeRows
-from rigel.calibration.strand_balance import strand_discriminability
+
 from rigel._solve_impl.testing import (
     RULE_CODES,
     outside_flank,
@@ -592,19 +592,18 @@ def _ctx_of(si) -> BlockContext:
     kw = si["kw"]
     cap = SweepDiagnostics()
     SW.solve_chain(*si["args"], **kw, policy=SilentPolicy(), diagnostics=cap)
-    disc = strand_discriminability(float(kw["rna_sense_frac"]), float(kw.get("n_rna_obs", 0.0)))
     structure = SW.slot_structure(chain, ra)
     return BlockContext(
         **view_fields(chain, statics, geometry, structure),
         n_grid=int(kw["n_grid"]),
         logodds_window=float(kw["logodds_window"]),
-        strand_live=disc > 0.0,
+        strand_live=kw["strand"].live,
         has_own_composition=np.asarray(cap.tau_lam, np.float64) > 0.0,
     )
 
 
 def _kappa_of(si):
-    return float(si["kw"]["rna_sense_frac"])
+    return float(si["kw"]["strand"].rna_sense_frac)
 
 
 def _intron_mask(ctx):

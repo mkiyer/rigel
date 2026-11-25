@@ -20,6 +20,7 @@ from rigel.types import Strand
 
 from rigel.calibration.diagnostics import SweepDiagnostics
 from rigel.calibration.messages.silent import SilentPolicy
+from rigel.calibration.strand_balance import StrandBalance
 from rigel.calibration.sweep import solve_chain
 
 from rigel.calibration.effective_length import (
@@ -193,7 +194,7 @@ def _factor1_uniform_rho():
         parts.geometry,
         belief,
         parts.region_arrays,
-        rna_sense_frac=0.7,
+        strand=StrandBalance(0.7, 0, True),
         n_grid=40,
     )
     # gDNA density = f_g x count / E_gdna (the formula the sweep inlines).
@@ -260,8 +261,8 @@ def test_a_zero_gdna_chain_reads_rna_at_every_strand_decisive_slot():
         geom,
         belief,
         region_arrays,
-        rna_sense_frac=0.95,
-        n_rna_obs=10000.0,  # the spliced sample behind κ: the stranded (κ=0.95) channel reads live
+        # the spliced sample behind κ: the stranded (κ=0.95) channel reads live
+        strand=StrandBalance(0.95, 10_000, False),
         n_grid=40,
     )
     # Slots 0 and 4 are the single-strand introns, 1 and 3 the boundaries beside the AMBIG region, each tilted 95:5 or
@@ -387,7 +388,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
 
-def _sweep(args, kappa=0.95, n_rna_obs=10000.0):
+def _sweep(args, kappa=0.95):
     chain, st, geom, belief, ra = args
     cap = SweepDiagnostics()
     final = region_sweep(
@@ -396,10 +397,9 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0):
         geom,
         belief,
         ra,
-        rna_sense_frac=kappa,
-        # The strand channel is live iff the protocol decision on (κ, N_rna) says so; with the default N = 0 there is no
-        # decision and the channel is dead, so the fixture supplies the spliced sample behind its κ = 0.95.
-        n_rna_obs=n_rna_obs,
+        # The strand channel is live iff the protocol decision on (κ, N_rna) says so, so the fixture supplies the
+        # spliced sample behind its κ.
+        strand=StrandBalance(kappa, 10_000, False),
         n_grid=60,
         diagnostics=cap,
     )

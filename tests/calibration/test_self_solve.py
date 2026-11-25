@@ -24,7 +24,7 @@ from rigel.calibration.signature import (
     BIT_EXON_POS,
     BIT_INTRON_POS,
 )
-from rigel.calibration.strand_balance import strand_discriminability
+from rigel.calibration.strand_balance import StrandBalance, strand_discriminability
 from rigel.calibration.sweep import solve_chain
 from rigel._solve_impl import testing as R
 
@@ -83,8 +83,7 @@ def _init(kappa=0.9):
         geometry,
         belief,
         ra,
-        rna_sense_frac=kappa,
-        n_rna_obs=85.0,
+        strand=StrandBalance(kappa, 85, False),
         n_grid=60,
         logodds_window=10.0,
         policy=SilentPolicy(),

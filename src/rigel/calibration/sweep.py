@@ -45,7 +45,7 @@ from .region_geometry import (
     region_gdna_geometry,
     slot_signature,
 )
-from .strand_balance import strand_discriminability
+from .strand_balance import StrandBalance, strand_discriminability
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, RegionType, coarse_type_array
 from .simplex_logodds import TILT_NODES, CubeRows, logodds_grid
 from .region_chain import (
@@ -123,8 +123,7 @@ def solve_chain(
     belief: RegionBelief,
     region_arrays,
     *,
-    rna_sense_frac: float,
-    n_rna_obs: float = 0.0,
+    strand: StrandBalance,
     n_grid: int,
     logodds_window: float,
     gdna_prior=None,
@@ -160,11 +159,14 @@ def solve_chain(
     law's departure prior, joins ψ, its precision joins the intron's own composition evidence, and under the transfer
     policy it is the intron's own claim, beside its strand claim where it has one.
 
+    ``strand`` is the library's strand balance (:class:`~.strand_balance.StrandBalance`): κ, and the spliced
+    observations behind it, whose Bayes factor decides whether the strand channel is live.
+
     ``diagnostics``, a record instruments and tests pass, asks the kernel for its diagnostic arrays and is filled with
     them (:class:`~.diagnostics.SweepDiagnostics`); production passes none.
     """
-    kappa = float(rna_sense_frac)
-    disc = strand_discriminability(kappa, n_rna_obs)
+    kappa = float(strand.rna_sense_frac)
+    disc = strand_discriminability(kappa, float(strand.n_observations))
     # the library: the policy's reductions over the whole chain, from observations and geometry alone; the only
     # information a message may carry across a locus boundary
     view = ChainView(
