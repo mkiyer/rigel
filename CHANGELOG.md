@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The calibration stage — how a library's unspliced fragments are separated into genomic DNA and RNA
 before the transcript EM sees them — was rebuilt from its foundations. Indexes built by earlier
-versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
+versions must be rebuilt (`rigel index`; the on-disk format is now version 13).
 
 ### Added
 
@@ -17,7 +17,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   exon endpoint; the 0-bp cuts between regions are boundaries and the splice junctions are their own
   axis. The scanner tallies each fragment once on that partition under one specified deposit rule,
   with an executable specification the native code is held to byte for byte. Nascent RNA is one
-  synthetic single-exon entity per merged span (start and end sites clustered within `--nascent-tolerance`),
+  synthetic single-exon entity per merged span (start and end sites clustered within `--end-tolerance`),
   shared by every transcript in it.
 - **Calibration on three populations.** Each region's and boundary's unspliced mass is solved into
   gDNA, sense RNA and antisense RNA on a log-odds grid, against a gDNA-density prior fitted from the
@@ -108,9 +108,17 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   alignments reads `ZC` `unused_alignment`, each placement carries its own splice type in `ZS`, and a read pair
   excluded by `--no-include-multimap` reads `ZF` 0x80. The annotation pass is checked against the scan, read pair by
   read pair: if it saw anything else, the BAM is deleted and the run stops.
-- **Renamed options (breaking).** `rigel index --nascent-tolerance` (was `--nrna-tolerance`) and `rigel quant
+- **Renamed options (breaking).** `rigel index --end-tolerance` (was `--nrna-tolerance`) and `rigel quant
   --intron-overhang-tolerance` (was `--splicing-anchor-tolerance`); their `config.yaml` keys follow. The index
-  format is version 10, so every index is rebuilt.
+  format is version 13, so every index is rebuilt.
+- **Index and summary names (breaking).** A synthetic span's id is `RIGEL_NASCENT_…` (was `RIGEL_NRNA_…`), and the
+  index's edges table is `edges.feather` with its mirror `edges.tsv` (was `boundaries.tsv`). `summary.json` is
+  schema 11: the `input` block and `strand_model.protocol` are gone (`command.arguments` and `read1_sense` hold
+  them), and the length tables' captured fraction is `rna_captured_fraction` (was a second `kappa`). `rigel report`
+  reads schema 11 only and refuses a summary or a table that lacks what it shows.
+- **The simulator's names.** A read name's nascent prefix is `nascent_` (was `nrna_`); the truth tables, the
+  scenario YAML (`nascent_abundance`) and the panel configs (`nascent:`) say annotated and nascent, never mrna and
+  nrna.
 - The package declares `Development Status :: 4 - Beta`.
 - Builds from source are portable by default: no `-march=native`, so a build runs on every machine of its
   architecture; `-DRIGEL_PORTABLE=OFF` (for example `CMAKE_ARGS="-DRIGEL_PORTABLE=OFF" pip install ...`) tunes one to
