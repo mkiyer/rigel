@@ -380,7 +380,7 @@ inline void alternative_splice_site(const Chain& c, FacesOut& F, Scratch& S) {
 inline void gdna_lane(const Chain& c, const RowsOut& own, const FacesOut& F, double rho_ref, LaneOut& L, Scratch& S) {
     const double* u = c.lam;
     for (int64_t x = 0; x < c.n; ++x) {
-        const bool empty = !(c.n_u[x] > 0.0) || !(c.a_g[x] > 0.0);
+        const bool empty = empty_node(c.n_u[x], c.a_g[x]);
         if (empty || c.intergenic(x)) continue;
         bool gene_edge = false;
         if (c.is_bnd[x]) {
@@ -391,7 +391,7 @@ inline void gdna_lane(const Chain& c, const RowsOut& own, const FacesOut& F, dou
             poisson_level(u, c.K, c.n_u[x], c.a_g[x], rho_ref, S.a.data());
             L.own_level.set(x, S.a.data());
         } else if (const double* o = own.get(x); o != nullptr && ptp(o, c.K) > FLAT_ROW_SPREAD) {
-            level_of_profile(o, c.lam, u, c.K, c.n_u[x], c.a_g[x], rho_ref, S, S.c.data());
+            level_of_profile(o, c.lam, u, c.K, c.n_u[x], c.a_g[x], rho_ref, false, S, S.c.data());
             L.own_level.set(x, S.c.data());
         }
     }
@@ -440,11 +440,11 @@ inline void rna_sources(const Chain& c, const RowsOut& own, int strand, double r
     const double kappa_read = std::max(c.kappa, 1.0 - c.kappa);
     for (int64_t x = 0; x < c.n; ++x) {
         if (!free[x]) continue;
-        const bool empty = !(c.n_u[x] > 0.0) || !(c.a_r[x] > 0.0);
+        const bool empty = empty_node(c.n_u[x], c.a_r[x]);
         const bool single = !(c.fp[x] && c.fn[x]);
         Intersection inter{S.d.data(), c.K};
         if (const double* o = own.get(x); !empty && single && o != nullptr && ptp(o, c.K) > FLAT_ROW_SPREAD) {
-            rna_level_of_profile(o, c.lam, c.lam, c.K, c.n_u[x], c.a_r[x], rho_ref, S, S.c.data());
+            level_of_profile(o, c.lam, c.lam, c.K, c.n_u[x], c.a_r[x], rho_ref, true, S, S.c.data());
             inter.add(S.c.data());
         }
         double c_sum = 0.0, a_sum = 0.0;
@@ -763,7 +763,7 @@ struct BlockSolve {
         for (int side = 0; side < 2; ++side) {
             const LevelsView& L = sides[side].lanes[G.field];
             if (!L.present[i]) continue;
-            profile_of_level(L.row(i), lam, lam, K, G.total[i], G.a[i], G.rho_ref, S, row);
+            row_of_level(L.row(i), lam, lam, K, G.total[i], G.a[i], G.rho_ref, false, S, row);
             inter.add(row);
         }
         if (!inter.any()) return fused;
@@ -788,7 +788,7 @@ struct BlockSolve {
         }
         if (!inter.any()) return false;
         inter.finish();
-        rna_row_of_level(bound, lam, lam, K, L.total[i], L.a[i], L.rho_ref, S, row);
+        row_of_level(bound, lam, lam, K, L.total[i], L.a[i], L.rho_ref, true, S, row);
         if (ptp(row, K) <= FLAT_ROW_SPREAD) return false;
         if (ptp(r, K) > FLAT_ROW_SPREAD) { for (int j = 0; j < K; ++j) r[j] += row[j]; norm_inplace(r, K); }
         else std::copy(row, row + K, r);

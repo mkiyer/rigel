@@ -94,6 +94,9 @@ inline double vmin(const double* r, int K) {
 }
 inline double ptp(const double* r, int K) { return vmax(r, K) - vmin(r, K); }
 
+// empty_node(n_u, a): a node with no unspliced count, or no opportunity in a lane, holds no level of its own there.
+inline bool empty_node(double n_u, double a) { return !(n_u > 0.0) || !(a > 0.0); }
+
 // A row whose variance under the normalised row is at most this carries no composition evidence. Chosen at ARM_EPS's
 // value, not derived.
 constexpr double ROW_VARIANCE_FLOOR = 1.0e-12;
@@ -370,53 +373,30 @@ inline double total_tail(double c, double n) {
     return c >= n ? n * std::log(std::max(c, LOG_FLOOR) / n) - (c - n) : 0.0;
 }
 
-// level_of_profile(row, lam, u, n, a, rho_ref): a composition profile read as a gDNA level.
+// level_of_profile(row, lam, u, n, a, rho_ref, rna): a composition profile read as a level — the gDNA level, or with
+// `rna` a single-strand profile's RNA level, whose share of the total is the complement of gDNA's.
 inline void level_of_profile(const double* row, const double* lam, const double* u, int K, double n, double a,
-                             double rho_ref, Scratch& S, double* out) {
+                             double rho_ref, bool rna, Scratch& S, double* out) {
     const double m = vmax(row, K);
     for (int j = 0; j < K; ++j) S.a[j] = row[j] - m;
     for (int j = 0; j < K; ++j) {
         const double c = rho_ref * std::exp(u[j]) * a;
         S.level_count[j] = c;
         const double f = std::clamp(c / n, FRACTION_EDGE, 1.0 - FRACTION_EDGE);
-        S.b[j] = std::log(f / (1.0 - f));
+        S.b[j] = rna ? std::log((1.0 - f) / f) : std::log(f / (1.0 - f));
     }
     interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], out);
     for (int j = 0; j < K; ++j) out[j] += total_tail(S.level_count[j], n);
     norm_inplace(out, K);
 }
 
-// rna_level_of_profile(row, lam, u, n, a_r, rho_ref): a single-strand profile read as its RNA level.
-inline void rna_level_of_profile(const double* row, const double* lam, const double* u, int K, double n,
-                                 double a_r, double rho_ref, Scratch& S, double* out) {
-    const double m = vmax(row, K);
-    for (int j = 0; j < K; ++j) S.a[j] = row[j] - m;
-    for (int j = 0; j < K; ++j) {
-        const double c = rho_ref * std::exp(u[j]) * a_r;
-        S.level_count[j] = c;
-        const double f_r = std::clamp(c / n, FRACTION_EDGE, 1.0 - FRACTION_EDGE);
-        S.b[j] = std::log((1.0 - f_r) / f_r);
-    }
-    interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], out);
-    for (int j = 0; j < K; ++j) out[j] += total_tail(S.level_count[j], n);
-    norm_inplace(out, K);
-}
-
-// profile_of_level(profile, u, lam, n, a, rho_ref): a held gDNA level read as this node's composition row
-// through its own total — a pure coordinate change, u(lam) = log(sigma(lam) n / (a rho_ref)).
-inline void profile_of_level(const double* p, const double* u, const double* lam, int K, double n, double a,
-                             double rho_ref, Scratch& S, double* out) {
-    for (int j = 0; j < K; ++j) S.a[j] = std::log(sigmoid(lam[j]) * n / (a * rho_ref));
-    interp(S.a.data(), K, u, p, K, p[0], p[K - 1], out);
-    norm_inplace(out, K);
-}
-
-// rna_row_of_level(profile, u, lam, n, a_r, rho_ref): a held RNA level read as a single-strand node's
-// composition row — u_s(lam) = log((1 − sigma(lam)) n / (a_r rho_ref)); a lower-only level (non-decreasing
-// in u) is non-increasing in lam: "at least this much RNA" is "at most this much gDNA".
-inline void rna_row_of_level(const double* p, const double* u, const double* lam, int K, double n, double a_r,
-                             double rho_ref, Scratch& S, double* out) {
-    for (int j = 0; j < K; ++j) S.a[j] = std::log(1.0 / (1.0 + std::exp(lam[j])) * n / (a_r * rho_ref));
+// row_of_level(profile, u, lam, n, a, rho_ref, rna): a held level read as this node's composition row through its own
+// total, a pure coordinate change — u(lam) = log(sigma(lam) n / (a rho_ref)) for gDNA's, and with `rna` a single-strand
+// node's RNA level at u_s(lam) = log((1 − sigma(lam)) n / (a_r rho_ref)), where a lower-only level (non-decreasing in
+// u) is non-increasing in lam: "at least this much RNA" is "at most this much gDNA".
+inline void row_of_level(const double* p, const double* u, const double* lam, int K, double n, double a,
+                         double rho_ref, bool rna, Scratch& S, double* out) {
+    for (int j = 0; j < K; ++j) S.a[j] = std::log(sigmoid(rna ? -lam[j] : lam[j]) * n / (a * rho_ref));
     interp(S.a.data(), K, u, p, K, p[0], p[K - 1], out);
     norm_inplace(out, K);
 }

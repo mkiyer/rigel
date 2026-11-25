@@ -369,22 +369,22 @@ void bind_rows(nb::module_& t) {
     }, nb::arg("u"), nb::arg("n"), nb::arg("a"), nb::arg("rho_ref"));
     t.def("level_of_profile", [](Vec row, Vec lam, Vec u, double n, double a, double rho_ref) {
         return row_of(K_of(lam), [&](Scratch& S, double* out) {
-            level_of_profile(row.data(), lam.data(), u.data(), K_of(lam), n, a, rho_ref, S, out);
+            level_of_profile(row.data(), lam.data(), u.data(), K_of(lam), n, a, rho_ref, false, S, out);
         });
     }, nb::arg("row"), nb::arg("lam"), nb::arg("u"), nb::arg("n"), nb::arg("a"), nb::arg("rho_ref"));
     t.def("rna_level_of_profile", [](Vec row, Vec lam, Vec u, double n, double a_r, double rho_ref) {
         return row_of(K_of(lam), [&](Scratch& S, double* out) {
-            rna_level_of_profile(row.data(), lam.data(), u.data(), K_of(lam), n, a_r, rho_ref, S, out);
+            level_of_profile(row.data(), lam.data(), u.data(), K_of(lam), n, a_r, rho_ref, true, S, out);
         });
     }, nb::arg("row"), nb::arg("lam"), nb::arg("u"), nb::arg("n"), nb::arg("a_r"), nb::arg("rho_ref"));
-    t.def("profile_of_level", [](Vec p, Vec u, Vec lam, double n, double a, double rho_ref) {
+    t.def("row_of_level", [](Vec p, Vec u, Vec lam, double n, double a, double rho_ref) {
         return row_of(K_of(lam), [&](Scratch& S, double* out) {
-            profile_of_level(p.data(), u.data(), lam.data(), K_of(lam), n, a, rho_ref, S, out);
+            row_of_level(p.data(), u.data(), lam.data(), K_of(lam), n, a, rho_ref, false, S, out);
         });
     }, nb::arg("profile"), nb::arg("u"), nb::arg("lam"), nb::arg("n"), nb::arg("a"), nb::arg("rho_ref"));
     t.def("rna_row_of_level", [](Vec p, Vec u, Vec lam, double n, double a_r, double rho_ref) {
         return row_of(K_of(lam), [&](Scratch& S, double* out) {
-            rna_row_of_level(p.data(), u.data(), lam.data(), K_of(lam), n, a_r, rho_ref, S, out);
+            row_of_level(p.data(), u.data(), lam.data(), K_of(lam), n, a_r, rho_ref, true, S, out);
         });
     }, nb::arg("profile"), nb::arg("u"), nb::arg("lam"), nb::arg("n"), nb::arg("a_r"), nb::arg("rho_ref"));
     t.def("flux_level", [](Vec u, double count, double rate, double rho_ref, double v) -> nb::object {

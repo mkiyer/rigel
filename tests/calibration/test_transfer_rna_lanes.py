@@ -506,7 +506,7 @@ def test_the_bracket_theorem_three_lower_bounds_and_the_strand_equation_bracket_
             )
         if "g" not in drop:
             lvl = floor(np.log(truth["g"] * n / a_g / rho["g"]))
-            psi += R.profile_of_level(lvl, u, lam, n, a_g, rho["g"])[:, None]
+            psi += R.row_of_level(lvl, u, lam, n, a_g, rho["g"])[:, None]
         post = np.exp(psi - psi.max()).sum(axis=1)
         cdf = np.cumsum(post / post.sum())
         return float(fg[np.searchsorted(cdf, 0.05)]), float(

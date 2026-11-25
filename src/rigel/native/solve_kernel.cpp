@@ -348,8 +348,8 @@ std::pair<bool, int> message_layer(const Sweep& W, const Block& b, Arena& A) {
     c.intron_row = A.intron_ptr.data();
     A.builders.build(c, W.rho_gdna, W.rho_rna, S);
     for (int i = 0; i < n; ++i) {
-        as_bool(A.empty_g)[i] = !(A.sums.n_u[i] > 0.0) || !(b.obs.a_g[i] > 0.0);
-        as_bool(A.empty_r)[i] = !(A.sums.n_u[i] > 0.0) || !(b.obs.a_r[i] > 0.0);
+        as_bool(A.empty_g)[i] = empty_node(A.sums.n_u[i], b.obs.a_g[i]);
+        as_bool(A.empty_r)[i] = empty_node(A.sums.n_u[i], b.obs.a_r[i]);
     }
     const std::vector<LaneView> lanes = pass_lanes(W, b, A);
     const FacesView faces = A.builders.faces();

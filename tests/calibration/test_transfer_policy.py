@@ -166,7 +166,7 @@ def _reference_rows(prepared, ctx):
                 lv = level_into(s, i) if s >= 0 else None
                 if lv is not None:
                     bounds.append(
-                        R.profile_of_level(
+                        R.row_of_level(
                             lv[0], lane.u, lane.lam, lane.total[i], lane.a[i], lane.rho_ref
                         )
                     )
@@ -413,7 +413,7 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
                 parts.append(t.composition[i])
             if t.level_gdna.present[i] and not gd.empty[i]:
                 bounds.append(
-                    R.profile_of_level(
+                    R.row_of_level(
                         t.level_gdna.profile[i], gd.u, gd.lam, gd.total[i], gd.a[i], gd.rho_ref
                     )
                 )
@@ -473,7 +473,7 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
 
 
 def test_the_level_coordinates_round_trip_through_a_node_total():
-    """`level_of_profile` and `profile_of_level` are one map read both ways: a composition profile taken to a level at
+    """`level_of_profile` and `row_of_level` are one map read both ways: a composition profile taken to a level at
     (n, a) and back at the same (n, a) is itself wherever the level lies below the node's total; the same level read at
     a node with a larger total is a smaller gDNA share (the level is kept, the share is not)."""
 
@@ -482,10 +482,10 @@ def test_the_level_coordinates_round_trip_through_a_node_total():
     rho_ref, n, a = 0.05, 400.0, 1000.0
     row = -0.5 * ((lam - np.log(0.3 / 0.7)) / 1.0) ** 2  # a share near 0.3 → 120 gDNA of 400
     level = R.level_of_profile(row, lam, u, n, a, rho_ref)
-    back = R.profile_of_level(level, u, lam, n, a, rho_ref)
+    back = R.row_of_level(level, u, lam, n, a, rho_ref)
     core = np.abs(lam - np.log(0.3 / 0.7)) < 2.0
     np.testing.assert_allclose(back[core], (row - row.max())[core], atol=0.05)
-    bigger = R.profile_of_level(level, u, lam, 4.0 * n, a, rho_ref)
+    bigger = R.row_of_level(level, u, lam, 4.0 * n, a, rho_ref)
     assert lam[np.argmax(bigger)] < lam[np.argmax(back)], "a larger total must read a smaller share"
 
 
