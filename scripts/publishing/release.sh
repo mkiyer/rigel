@@ -12,7 +12,8 @@
 #        - appends the `[X.Y.Z]: ...compare/vPREV...vX.Y.Z` link at the bottom
 #   3. Bumps the version string in pyproject.toml and conda/meta.yaml.
 #   4. Shows a diff and asks for confirmation.
-#   5. Commits ("Release vX.Y.Z"), tags `vX.Y.Z`, and pushes both to origin.
+#   5. Commits ("Release vX.Y.Z"), tags `vX.Y.Z`, and pushes both to origin in one atomic push; --force
+#      replaces an existing tag only after the confirmation, and PyPI must answer "not found" for the version.
 #
 # Pushing the tag triggers .github/workflows/publish.yml, which builds sdist +
 # wheels and uploads to PyPI via OIDC; the tag push is the only trigger.
@@ -52,7 +53,7 @@ POSITIONAL=()
 for arg in "$@"; do
     case "$arg" in
         -f|--force) FORCE=1 ;;
-        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,/^$/p' "$0"; exit 0 ;;
         -*) die "Unknown flag: $arg" ;;
         *) POSITIONAL+=("$arg") ;;
     esac
@@ -76,30 +77,26 @@ BRANCH=$(git branch --show-current)
 git diff --quiet && git diff --cached --quiet || \
     die "Tracked files have uncommitted changes. Commit or stash them before releasing."
 
-# PyPI refuses re-uploads, so we never reuse a version that PyPI already has.
-if PYPI_JSON=$(curl -sf "https://pypi.org/pypi/rigel-rnaseq/${VERSION}/json" 2>/dev/null); then
-    if echo "$PYPI_JSON" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("urls") else 1)' 2>/dev/null; then
-        die "PyPI already has rigel-rnaseq==${VERSION}. Pick a new version (PyPI forbids re-uploads)."
-    fi
-fi
+# PyPI refuses re-uploads, even of a deleted file, so a version PyPI knows is never reused. Only PyPI's own "not
+# found" clears the version: any other answer, or none, stops the release.
+PYPI_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/rigel-rnaseq/${VERSION}/json") || PYPI_STATUS="no answer"
+case "$PYPI_STATUS" in
+    404) info "PyPI has no rigel-rnaseq==${VERSION}" ;;
+    200) die "PyPI already has rigel-rnaseq==${VERSION}. Pick a new version (PyPI forbids re-uploads)." ;;
+    *)   die "Could not ask PyPI whether rigel-rnaseq==${VERSION} exists (HTTP ${PYPI_STATUS}). Retry when it answers." ;;
+esac
 
-# Handle pre-existing tag.
+# A pre-existing tag. Nothing is deleted here: a --force release replaces the tag only after the confirmation below,
+# and the remote one only if it still points where it pointed now.
 TAG_EXISTS_LOCAL=0
-TAG_EXISTS_REMOTE=0
 git tag -l "$TAG" | grep -q . && TAG_EXISTS_LOCAL=1
-if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-    TAG_EXISTS_REMOTE=1
-fi
+REMOTE_REFS=$(git ls-remote origin "refs/tags/$TAG") || die "Could not read origin's tags"
+REMOTE_TAG_SHA=$(awk -v ref="refs/tags/$TAG" '$2 == ref {print $1}' <<< "$REMOTE_REFS")
 
-if [[ $TAG_EXISTS_LOCAL -eq 1 || $TAG_EXISTS_REMOTE -eq 1 ]]; then
-    if [[ $FORCE -eq 0 ]]; then
-        die "Tag $TAG already exists (local=$TAG_EXISTS_LOCAL remote=$TAG_EXISTS_REMOTE).
-Re-run with --force to delete and recreate it (only safe if PyPI upload didn't succeed)."
-    fi
-    warn "Deleting existing tag $TAG (--force)"
-    [[ $TAG_EXISTS_LOCAL -eq 1 ]] && git tag -d "$TAG" >/dev/null
-    [[ $TAG_EXISTS_REMOTE -eq 1 ]] && git push origin --delete "$TAG" >/dev/null
-    info "Removed pre-existing $TAG"
+if [[ $TAG_EXISTS_LOCAL -eq 1 || -n "$REMOTE_TAG_SHA" ]]; then
+    [[ $FORCE -eq 1 ]] || die "Tag $TAG already exists (local=$TAG_EXISTS_LOCAL remote=${REMOTE_TAG_SHA:-none}).
+Re-run with --force to replace it (PyPI has no ${VERSION}, checked above)."
+    warn "Tag $TAG exists (local=$TAG_EXISTS_LOCAL remote=${REMOTE_TAG_SHA:-none}); it will be replaced on confirmation (--force)"
 fi
 
 # Previous version = latest v-tag that isn't the one we're about to (re)create.
@@ -195,11 +192,15 @@ else
     info "Committed"
 fi
 
+[[ $TAG_EXISTS_LOCAL -eq 1 ]] && git tag -d "$TAG" >/dev/null
 git tag -a "$TAG" -m "Release ${TAG}"
 info "Tagged ${TAG}"
 
-git push origin main
-git push origin "$TAG"
+# main and the tag land together or not at all. A replaced remote tag is overwritten only if it still points where it
+# did when this script read it.
+PUSH_ARGS=(--atomic)
+[[ -n "$REMOTE_TAG_SHA" ]] && PUSH_ARGS+=("--force-with-lease=refs/tags/${TAG}:${REMOTE_TAG_SHA}")
+git push "${PUSH_ARGS[@]}" origin main "refs/tags/${TAG}"
 info "Pushed main + ${TAG} to origin"
 
 # ── Done ─────────────────────────────────────────────────────────────────

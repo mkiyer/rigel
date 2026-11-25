@@ -13,8 +13,17 @@ import pathlib
 import re
 import subprocess
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEV = ROOT / "docs" / "dev"
+
+#: The repository-governance checks read the git checkout (its sandbox, its CLAUDE.md, `git ls-files`), which a
+#: source distribution is not: there they are skipped, never failed. In a checkout every one runs.
+checkout_only = pytest.mark.skipif(
+    not (ROOT / ".git").exists(),
+    reason="a repository-governance check: it reads the git checkout, which a source distribution is not",
+)
 
 #: anything that points into the sandbox — `docs/dev/x.md`, `dev/x.md`, or a bare sibling filename cited
 #: from outside. The first two are what a real citation looks like.
@@ -60,6 +69,7 @@ def test_nothing_outside_the_sandbox_cites_into_it():
     )
 
 
+@checkout_only
 def test_every_allowlisted_file_actually_names_the_sandbox():
     """Each allowlisted file is exempt because its job is to describe the sandbox, so each one must
     actually name it; a file that does not belongs back under the gate above. Unlike a skip, this fails
@@ -77,6 +87,7 @@ def test_every_allowlisted_file_actually_names_the_sandbox():
         )
 
 
+@checkout_only
 def test_the_sandbox_exists_and_says_what_it_is_for():
     """An empty unexplained directory is an invitation to guess at the rules."""
     assert DEV.is_dir(), "docs/dev/ is the sanctioned sandbox and should exist"
@@ -202,6 +213,7 @@ def test_the_trap_names_are_unique():
 _CITES_THE_ISSUE_LOG = re.compile(r"\bISSUES:[\s#*/]*`?[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
+@checkout_only
 def test_no_issue_log_citations():
     """The issue log moved to GitHub Issues on 2026-11-16: cite `issue #N`, not a backlog name."""
     tracked = subprocess.run(

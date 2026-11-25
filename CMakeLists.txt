@@ -58,9 +58,17 @@ option(RIGEL_PORTABLE "Build for every machine of the architecture (no -march=na
 # installed modules too unless told not to: -C cmake.define.RIGEL_PROFILE_NATIVE=ON -C install.strip=false.
 option(RIGEL_PROFILE_NATIVE "Build with debug symbols and frame pointers, and without LTO, for a profiler" OFF)
 
-# The flags are GCC's and Clang's; another compiler builds with its defaults.
+# The flags are GCC's and Clang's; another compiler builds with its defaults. A Debug build keeps its own flags: no
+# optimisation, assertions on, no link-time optimisation.
+set(RIGEL_DEBUG_BUILD OFF)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(RIGEL_DEBUG_BUILD ON)
+endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-  set(RIGEL_OPT_FLAGS -O3 -DNDEBUG)
+  set(RIGEL_OPT_FLAGS "")
+  if(NOT RIGEL_DEBUG_BUILD)
+    list(APPEND RIGEL_OPT_FLAGS -O3 -DNDEBUG)
+  endif()
   if(NOT RIGEL_PORTABLE)
     list(APPEND RIGEL_OPT_FLAGS -march=native)
   endif()
@@ -87,7 +95,7 @@ function(rigel_extension name)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/native
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rigel/cgranges)
   target_compile_options(${name} PRIVATE ${RIGEL_OPT_FLAGS})
-  if(RIGEL_IPO_SUPPORTED AND NOT RIGEL_PROFILE_NATIVE)
+  if(RIGEL_IPO_SUPPORTED AND NOT RIGEL_PROFILE_NATIVE AND NOT RIGEL_DEBUG_BUILD)
     set_property(TARGET ${name} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   endif()
   install(TARGETS ${name} LIBRARY DESTINATION rigel)
