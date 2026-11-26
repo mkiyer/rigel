@@ -157,7 +157,7 @@ Next. The validation's receipts are in `$RIGEL_RUNS/prototypes/2026-11-02_previe
 |---|---|
 | HEAD beats 0.7.1 on transcripts and genes on the ladder's three in-scope strata, on both inputs | `quant_accuracy.py` per stratum, pinned and fractional, `--bam` for the STAR rung, beside the tag |
 | HEAD's source probabilities beat 0.7.1's by the proper score on identical reads, and most of the exchange is compatible with approximately calibrated source uncertainty at the resolution tested | the validation's `paired.py`, outside the tree (issue #36) |
-| Scarce gDNA at 1/10 and 1/100 depth shows no blow-up, and dense probe panels hold | `quant_accuracy.py` on the test chromosome's depth and probe panels |
+| At 1/10 depth every row of the test chromosome's depth panels holds its gDNA, and dense probe panels hold. At 1/100 depth stranded capture ON at 1 % and 5 % gDNA does not (issue #23) | `quant_accuracy.py` on the test chromosome's depth and probe panels |
 | Calibration's library gDNA is near truth on the in-scope strata; its per-locus count errs both ways, mostly its own error rather than the pooled share | `calibration_vs_oracle.py`, `prior_vs_oracle.py` |
 | Under capture the capture reader carries most of the accuracy, and at STAR g00 most of the error | `quant_accuracy.py --bam` beside `--arm no_capture`, `ruler_vs_truth.py` |
 | The transfer policy wins on unstranded × capture ON and the contaminated stranded rows, and loses to silent on unstranded × capture OFF | `policy_benchmark.py --panel ladder` |
@@ -171,19 +171,20 @@ The `0.8.0` milestone (https://github.com/mkiyer/rigel/milestone/1) is what the 
 - the performance pass (issue #84) and the code review (issue #85), closed 2026-11-25;
 - the rebuild of the indexes and panels with the one rule, and the re-score of 0.7.1 on the same reads;
 - issues #9 and #76, closed 2026-11-25;
-- issue #1, which ships stated (the owner, 2026-11-25).
+- issues #1 and #23, which ship stated (the owner, 2026-11-25). At 1 % of the VCaP mix's depth HEAD reads less of the
+  DNA as gDNA than 0.7.1 did (54 % against 67 %): calibration's landscape collapses where gDNA is sparse. The repairs
+  for 0.8.1 are on the issue, in order.
 
 The MANUAL's Known limitations state the milestone's open issues, and issue #89 is new among them. CI (`ci.yml`,
 dispatch only) passed on 00cfd50b: Ubuntu and macOS, Python 3.12 and 3.13, all 3,929 tests in each. What is left, in
 order:
 
-1. **A shallow real library** (issue #23): the VCaP mix's P/O at 1 % and 10 % depth on HEAD. The MANUAL quotes an
-   earlier version's collapse; if HEAD still collapses, the owner decides.
-2. **The cluster:** build and run on the Slurm cluster, and read timing and memory there. Linux has never been timed.
-3. **The release** (issue #11): a last read of the CHANGELOG's unreleased section, then `release.sh 0.8.0`, the
+1. **The cluster:** build and run on the Slurm cluster, and read timing and memory there. Linux has never been timed.
+2. **The release** (issue #11): a last read of the CHANGELOG's unreleased section, then `release.sh 0.8.0`, the
    publish workflow, `post_release.sh` and the bioconda recipe (`PUBLISHING.md`).
 
 After 0.8.0:
 1. Real data through the production pipeline, whole-transcriptome simulations on the cluster, and in-silico DNA/RNA
-   mixes. Their fixes make 0.8.1, and issue #1's repair upstream of the reader is the first candidate.
+   mixes. Their fixes make 0.8.1. The first candidates are issue #1's repair upstream of the reader and issue #23's
+   pooled strand reading.
 2. The open issues outside the milestone, in issue order.

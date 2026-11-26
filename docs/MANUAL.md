@@ -1048,12 +1048,6 @@ STAR's alignments, multimapping reads link loci into one that held 61–78 % of 
 gDNA rate per locus, so inside that locus calibration's local gDNA estimates enter only through their sum. That
 locus is also the one that most often reaches the iteration cap. What this costs has not been measured.
 
-**Shallow libraries** ([issue #23](https://github.com/mkiyer/rigel/issues/23)). Calibration learns the library's
-gDNA density from the regions that hold gDNA fragments, and in a very shallow library few regions do. On real
-libraries, an earlier version's gDNA estimate fell with depth: subsampled to 1 % of its reads, a captured cfRNA
-library's gDNA per fragment fell to about an eighth of its full-depth value. Simulated libraries at a tenth and a
-hundredth of the ladder's depth show no collapse in this release. Real data has not been re-measured with it.
-
 ### Libraries without capture
 
 **A STAR-aligned library with little gDNA can read capture it does not have**
@@ -1107,6 +1101,27 @@ read, and Rigel then treats the library as uncaptured. It books part of the nasc
 third of it in simulated stranded captured libraries with no gDNA or 0.1 % gDNA, about 0.8 % of the library. At 1 %
 gDNA most of this error goes. At 0.1 % gDNA the gene error is 1.16 times 0.7.1's, the one place in these tests where
 this release's gene error is above 0.7.1's.
+
+**Shallow captured libraries lose gDNA to RNA** ([issue #23](https://github.com/mkiyer/rigel/issues/23)). In a
+shallow library most genomic DNA sits in regions that hold one or two fragments, and a region that small says almost
+nothing about its own composition. Calibration reads those regions against a gDNA density it learns from the library.
+In the shallow captured libraries tested, that density collapsed toward no gDNA, so calibration booked much of the
+shallow gDNA as RNA. The EM weighs calibration's count as heavily as its own data and follows it part of the way. Most
+of the gDNA it loses goes to nascent RNA and some to annotated RNA. On the one real shallow library tested, this
+release reads worse than 0.7.1 did.
+
+That library was an exome-captured DNA library mixed into a stranded RNA library, with a quarter of its fragments DNA.
+It was subsampled by read name and scored by each read's source:
+
+| depth (read pairs) | gDNA fraction (truth 0.25) | DNA called gDNA / nascent RNA / annotated RNA | 0.7.1 |
+|---|---:|---|---|
+| 1 % (187,000) | 0.15 | 54 % / 30 % / 13 % | 0.19; 67 % / 21 % / 10 % |
+| 10 % (1.87 million) | 0.21 | 71 % / 20 % / 6 % | 0.25; 88 % / 3 % / 6 % |
+| full (18.7 million) | 0.26 | 87 % / 5 % / 5 % | 0.26 |
+
+Simulated stranded captured libraries show the same collapse at 11,700 fragments: 44 % of the gDNA is read at 5 %
+gDNA, and 32 % at 1 %. At 117,000 fragments they hold. Simulated libraries without capture hold at both depths, and no
+real library without capture has been measured shallow.
 
 **Where gDNA is sparse under capture, the isoform split is noisy**
 ([issue #83](https://github.com/mkiyer/rigel/issues/83)). Rigel reads each region's capture from its own gDNA. At 5 %
