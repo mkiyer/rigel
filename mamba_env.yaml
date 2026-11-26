@@ -16,7 +16,11 @@ dependencies:
   - minimap2>=2.30
   - salmon
   - kallisto
-  # Build dependencies for C/C++ extensions (nanobind); with --no-build-isolation pip installs no CMake
+  # Build dependencies for C/C++ extensions (nanobind); with --no-build-isolation pip installs no CMake.
+  # The compilers are conda-forge's, so a cluster whose system compiler is too old still builds.
+  - c-compiler
+  - cxx-compiler
+  - pkg-config
   - cmake>=3.15
   - scikit-build-core
   - nanobind>=2.1

@@ -60,7 +60,6 @@ leaves undone is stated, with its measured size, under Known limitations in `doc
 - **Index provenance**: the manifest records the build's sources and flags, and a transcript that
   `--collapse-duplicate-transcripts` folds into an identical one is listed in `transcript_aliases.feather`
   beside the transcript kept for it.
-- The splice blacklist keeps the alignable count behind each junction beside its anchors.
 - For development, a scan cache (`scripts/design/build_scan_cache.py`) keyed by the index, the graph, the
   boundary reaches and the scan settings (never a thread count), so a stale cache is refused rather than reused.
 
@@ -180,6 +179,10 @@ leaves undone is stated, with its measured size, under Known limitations in `doc
   faster.
 
 - `--mismatch-alpha` and its hard gate: the mismatch price is the library's own (see Added).
+- The splice blacklist. The index no longer builds `splice_blacklist.feather` from the alignable store, and the scan
+  reads every junction the aligner reports. Aligned with the recommended STAR settings (`--sjdbScore 0
+  --outFilterMultimapScoreRange 2`), a genomic fragment's contiguous alignment is reported beside its spliced one,
+  which is the protection the blacklist gave. `summary.json` no longer reports `sj_blacklist_loaded`.
 
 ### Fixed
 
@@ -293,15 +296,14 @@ leaves undone is stated, with its measured size, under Known limitations in `doc
   record: two that disagree read as ambiguous and train no strand, and an unreadable value reads as absent. What the
   tags gave is logged and counted in `summary.json` (`alignment_stats.sj_strand_tag`). An unknown `--sj-strand-tag`
   is refused, and a library whose spliced reads carry no tag warns that it is quantified as unstranded.
-- An index whose splice blacklist is not applied warns when it loads: a manifest that names an alignable store whose
-  blacklist file is missing, or a blacklist file with no store in the manifest. 0.7.1 reported a missing blacklist
-  only through `summary.json`'s `sj_blacklist_loaded`.
+- `mamba_env.yaml` installs conda-forge's C and C++ compilers and pkg-config, as the README said it did, so a source
+  build no longer depends on the system's compiler.
 - The conda package was compiled for its build host's CPU (`-march=native`): on a CPU without that host's
   instructions (AVX2 and FMA for 0.7.1's linux-64 build) it died with an illegal instruction. Conda builds are portable.
 - The HTML report escapes sample names, paths, gene names and reference names before they become markup.
 - Refusals come before the work and as errors, not tracebacks: an `--annotated-bam` directory that cannot be written,
   an index that cannot be loaded, a config file that is not a mapping, and, at index build, an alignable store that
-  cannot be read or whose blacklist names references the FASTA lacks. The store is read before the first write, so a
+  cannot be read, is unfinished, or does not match the FASTA's references. The store is read before the first write, so a
   failed rebuild over a working index leaves it loadable. A rerun into an output directory removes the optional files
   it does not write (the TSV mirrors, `locus_stats.feather`).
 - A BAM the scan would read wrong is refused before its records are trusted: one sorted by coordinate (each mate was
