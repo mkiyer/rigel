@@ -87,7 +87,10 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
 - **Name-sorted or collated** — a BAM whose header says `SO:coordinate` is refused, since its mates are not
   adjacent. One sorted by coordinate whose header does not say so, or one whose mates were removed record by record,
   shows as read pairs lacking a mate their records call mapped (FLAG 0x8 unset): `rigel quant` warns with their
-  count, and reads each such pair without its mate
+  count, and reads each such pair without its mate. STAR's unsorted output is grouped by read name with one
+  exception: a multimapping read pair that STAR writes as chimeric within the BAM (`--chimOutType WithinBAM` with
+  `--chimMultimapNmax`) can have its alignments written far apart, and Rigel then reads it as two read pairs. It is
+  rare (one read pair in the 160 million of our simulated benchmark), but collate STAR's output first (`samtools collate`)
 - **Aligned to the index's genome** — references are matched by name: a BAM none of whose references is in the
   index, or one holding a reference at another length, is refused; references beyond the index (decoys,
   alternates, spike-ins) are named in a warning, and an alignment there is dropped, since Rigel can place nothing
@@ -103,7 +106,8 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
   a chimera
 - **Multimappers from the alignments present** — a read pair's multiplicity is its usable alignments, whatever its
   `NH` says, and `NH` is read only to find a truncated output: a read pair whose `NH` exceeds the records reported for
-  a mate was truncated by the aligner (counted, and warned of: STAR reports every alignment with `--outSAMmultNmax -1`)
+  a mate was truncated by the aligner, or written in two places in an output that is not collated (counted, and
+  warned of: STAR reports every alignment with `--outSAMmultNmax -1`)
 - **An `NM` tag on every record**, its edit distance (STAR writes it with `--outSAMattributes NH HI AS nM NM`). A
   multimapper's alignments are told apart by their sequence: each mismatch and each soft-clipped base priced at the
   library's own mismatch rate, which Rigel reads on its unique unspliced alignments (`summary.json`'s
@@ -925,7 +929,7 @@ tpm_matrix   = gene_quant.pivot(index="gene_id", columns="sample", values="tpm")
 
 | Aligner | SJ strand tag | Notes |
 |---------|--------------|-------|
-| STAR | `XS` | Written only with `--outSAMstrandField intronMotif`; name-grouped output by default |
+| STAR | `XS` | Written only with `--outSAMstrandField intronMotif`; collate its unsorted output first ([Name-sorted or collated](#bam)) |
 | HISAT2 | `XS` | Standard RNA-seq workflow |
 | minimap2 | `ts` | Short-read splice mode (`-ax splice:sr`) |
 
@@ -943,11 +947,14 @@ warns.
 
 ### STAR-aligned BAM
 
-STAR produces name-grouped BAMs, and writes the `XS` tag only when run with `--outSAMstrandField intronMotif`:
+STAR writes the `XS` tag only when run with `--outSAMstrandField intronMotif`. Its unsorted output is grouped by read
+name except for chimeric multimappers written within the BAM, so collate it first:
 
 ```bash
+samtools collate -@ 8 -o STAR_out/Aligned.collated.bam STAR_out/Aligned.out.bam
+
 rigel quant \
-    --bam     STAR_out/Aligned.out.bam \
+    --bam     STAR_out/Aligned.collated.bam \
     --index   index/ \
     -o        results/ \
     --sj-strand-tag XS \
@@ -1181,7 +1188,7 @@ package are all `rigel`.
 
 **What sort order does the BAM need?**
 Name-sorted or collated — not coordinate-sorted.
-Use `samtools sort -n -o out.bam in.bam` or `samtools collate`.
+Use `samtools sort -n -o out.bam in.bam` or `samtools collate`, STAR's unsorted `Aligned.out.bam` included.
 
 **What is the difference between annotated transcripts and nascent RNA?**
 An annotated transcript's `count` is the RNA assigned to that reference transcript, spliced fragments
